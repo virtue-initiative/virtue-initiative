@@ -55,6 +55,7 @@ public sealed partial class MainWindow : Window
     private static readonly SolidColorBrush ForestBrush = HexBrush("#1E3A2E");
     private static readonly SolidColorBrush Forest2Brush = HexBrush("#163026");
     private static readonly SolidColorBrush Forest3Brush = HexBrush("#2C4D3E");
+    private static readonly SolidColorBrush LinkBrush = HexBrush("#B34300");
     private static readonly SolidColorBrush SuccessBrush = HexBrush("#4F7A5A");
     private static readonly SolidColorBrush WarningBrush = HexBrush("#9C6B2E");
     private static readonly SolidColorBrush DangerBrush = HexBrush("#8B3A2A");
@@ -236,11 +237,11 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = MonoFont,
-            Foreground = ForestBrush,
+            Foreground = LinkBrush,
         };
-        websiteLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
-        websiteLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
-        websiteLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        websiteLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        websiteLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        websiteLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
         websiteLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
         textStack.Children.Add(websiteLink);
 
@@ -369,11 +370,11 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(0),
             FontFamily = BodyFont,
-            Foreground = ForestBrush,
+            Foreground = LinkBrush,
         };
-        signUpLink.Resources["HyperlinkButtonForeground"] = ForestBrush;
-        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = Forest3Brush;
-        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = Forest2Brush;
+        signUpLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        signUpLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        signUpLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
         signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
         _loginPanel.Children.Add(signUpLink);
 

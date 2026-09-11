@@ -4,3 +4,4 @@ node_modules
 
 # Per-worktree overrides layered on top of ~/.config/virtue-dev.env — see AGENTS.md.
 /.env
+/.dev.vars

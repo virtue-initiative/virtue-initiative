@@ -4,8 +4,13 @@
 }
 
 .logs-gallery-item {
+  position: relative;
   min-width: 0;
   overflow: hidden;
+  /* The row layout gives every tile an explicit width and height, so a tile can
+     act as a size container — that's what lets a card drop its optional parts
+     when the row is short (see `.logs-gallery-card` below). */
+  container-type: size;
 
   & .logs-thumb-button,
   & .logs-thumb-image {
@@ -14,9 +19,28 @@
   }
 }
 
-.logs-gallery-item--unverified {
+.logs-gallery-item--unverified,
+.logs-gallery-item--risk-alert,
+.logs-gallery-item--risk-high {
   outline: 2px solid var(--danger);
   outline-offset: -2px;
+}
+
+.logs-gallery-item--risk-medium {
+  outline: 2px solid var(--warning);
+  outline-offset: -2px;
+}
+
+/* A thumbnail has no room for the list view's row of badges, so the concern
+   level rides in the corner of the tile itself. */
+.logs-gallery-risk-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  font-size: 0.65rem;
+  padding: 0.05rem 0.35rem;
+  pointer-events: none;
 }
 
 .logs-thumb-button {
@@ -39,4 +63,71 @@
   height: 100%;
   object-fit: contain;
   background: var(--bg-subtle);
+}
+
+/* Non-image logs get a tile in the same justified rows as the screenshots. */
+.logs-gallery-card {
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.4rem;
+  text-align: center;
+  color: var(--text);
+}
+
+.logs-gallery-card-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--text-muted);
+  display: flex;
+  flex: none;
+}
+
+.logs-gallery-card-type {
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex: none;
+}
+
+.logs-gallery-card-message {
+  font-size: 0.7rem;
+  line-height: 1.25;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  flex: none;
+}
+
+.logs-gallery-card-time {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* Rows are as short as 0.6 × the target height, which isn't enough for all four
+   parts — the card is centred and clipped at both ends, so anything that
+   overflows takes the message with it. Shed the optional parts instead, keeping
+   the category and the message visible at every row height. */
+@container (max-height: 125px) {
+  .logs-gallery-card-time {
+    display: none;
+  }
+}
+
+@container (max-height: 100px) {
+  .logs-gallery-card-icon {
+    display: none;
+  }
 }

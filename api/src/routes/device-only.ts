@@ -11,9 +11,13 @@ import {
   createSessionRecord,
   deleteDeviceSessionsByDeviceId,
   findDeviceById,
+  findUserById,
+  listAcceptedNotificationTargetsForUser,
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
 } from '../lib/db';
+import { sendEmail } from '../lib/email';
+import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
 import { encodeBase64 } from '../lib/encoding';
 import { jsonField } from '../lib/form-validation';
@@ -176,10 +180,16 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
  *
  * Clears the device's hash-chain state as a best-effort cleanup; batches/screenshots
  * and the device row itself are untouched (that's the manual hard-delete flow).
+ *
+ * A logout takes the device out of monitoring, so the owner and their accepted
+ * watchers are emailed about it (API-037). Both the hash reset and the emails are
+ * best-effort: the logout itself is already committed.
  */
 deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
   const deviceId = c.get('sub');
   const now = Date.now();
+
+  const device = await findDeviceById(c.env.DB, deviceId);
 
   await deleteDeviceSessionsByDeviceId(c.env.DB, deviceId);
   await markDeviceDeleted(c.env.DB, deviceId, now);
@@ -190,8 +200,76 @@ deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
     // Non-fatal — logout/soft-delete already committed; hash state is best-effort.
   }
 
+  if (device) {
+    try {
+      await notifyAboutDeviceLogout(c, device);
+    } catch {
+      // Best-effort — the logout itself already committed successfully.
+    }
+  }
+
   return c.body(null, 204);
 });
+
+async function notifyAboutDeviceLogout(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  device: { id: string; owner: string; name: string; platform: string },
+) {
+  const owner = await findUserById(c.env.DB, device.owner);
+
+  if (owner) {
+    const email = renderDeviceLoggedOutTemplate({
+      appName: c.env.APP_NAME,
+      appUrl: c.env.APP_URL,
+      recipientName: owner.name,
+      deviceName: device.name,
+      devicePlatform: device.platform,
+    });
+    await sendEmail({
+      env: c.env,
+      db: c.env.DB,
+      kind: 'device_logout',
+      recipient: owner.email,
+      allowUnverified: true,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      related_user_id: owner.id,
+      metadata: { deviceId: device.id, deviceName: device.name },
+    });
+  }
+
+  const targets = await listAcceptedNotificationTargetsForUser(c.env.DB, device.owner);
+  for (const target of targets) {
+    if (target.settings.email_frequency === 'none') {
+      continue;
+    }
+
+    const email = renderDeviceLoggedOutTemplate({
+      appName: c.env.APP_NAME,
+      appUrl: c.env.APP_URL,
+      recipientName: target.watcher_name,
+      deviceName: device.name,
+      devicePlatform: device.platform,
+      ownerName: owner?.name,
+      ownerEmail: owner?.email,
+      forPartner: true,
+    });
+    await sendEmail({
+      env: c.env,
+      db: c.env.DB,
+      kind: 'device_logout',
+      recipient: target.watcher_email,
+      allowUnverified: true,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      related_user_id: device.owner,
+      related_partnership_id: target.partnership_id,
+      metadata: { deviceId: device.id, deviceName: device.name, forPartner: true },
+    });
+  }
+}
 
 /**
  * POST /d/batch - Upload an encrypted batch blob for the authenticated device.

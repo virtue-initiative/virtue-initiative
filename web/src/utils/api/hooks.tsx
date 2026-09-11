@@ -3,7 +3,7 @@ import { useCallback, useContext, useEffect, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { APIClient } from './client';
 import { Session } from './session';
-import { Device, User, WatcherPartner, WatchingPartner } from './api';
+import { Device, LockedPassword, User, WatcherPartner, WatchingPartner } from './api';
 
 const APIContext = createContext<APIClient | null>(null);
 const SetClientContext = createContext<(client: APIClient | null) => void>(() => {});
@@ -152,4 +152,31 @@ export function useDevices(): { devices: Device[]; loaded: boolean } {
   }, [api]);
 
   return { devices, loaded };
+}
+
+export function usePasswords(): { passwords: LockedPassword[]; loaded: boolean } {
+  const api = useAPIContext();
+  const [passwords, setPasswords] = useState<LockedPassword[]>(() => api?.listPasswords() ?? []);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!api) {
+      setPasswords([]);
+      setLoaded(false);
+      return;
+    }
+    const {
+      passwords: initial,
+      loaded: initialLoaded,
+      unsubscribe,
+    } = api.subscribePasswords((p) => {
+      setPasswords(p);
+      setLoaded(true);
+    });
+    setPasswords(initial);
+    if (initialLoaded) setLoaded(true);
+    return unsubscribe;
+  }, [api]);
+
+  return { passwords, loaded };
 }

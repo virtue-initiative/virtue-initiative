@@ -79,7 +79,7 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.text)
                     Link("virtueinitiative.org", destination: URL(string: "https://virtueinitiative.org")!)
                         .font(.subheadline)
-                        .foregroundStyle(VirtueBrand.accent)
+                        .foregroundStyle(VirtueBrand.link)
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
                         .foregroundStyle(VirtueBrand.textMuted)
@@ -198,7 +198,7 @@ struct ContentView: View {
                             destination: URL(string: "https://app.virtueinitiative.org/signup")!
                         )
                         .font(.subheadline)
-                        .foregroundStyle(VirtueBrand.accent)
+                        .foregroundStyle(VirtueBrand.link)
 
                         if let error = coordinator.loginError {
                             Text(error)
@@ -480,6 +480,8 @@ enum VirtueBrand {
         green: 58.0 / 255.0,
         blue: 46.0 / 255.0
     )
+    // Link color — matches --link in shared-web/tokens.css
+    static let link = Color(red: 179.0 / 255.0, green: 67.0 / 255.0, blue: 0.0 / 255.0)
     // Warm ochre — matches --ochre in shared-web/tokens.css
     static let ochre = Color(
         red: 166.0 / 255.0,

@@ -34,6 +34,10 @@ export const helpSidebar: HelpNavItem[] = [
         label: 'Disable the browser',
         href: '/help/removing-access/disable-browser',
       },
+      {
+        label: 'Block app installs (iPhone)',
+        href: '/help/removing-access/block-app-installs-ios',
+      },
     ],
   },
   {
@@ -48,6 +52,8 @@ export const helpSidebar: HelpNavItem[] = [
       { label: 'Log types', href: '/help/web/log-types' },
       { label: 'Decryption errors', href: '/help/web/decryption-errors' },
       { label: 'Concern scores', href: '/help/web/concern-scores' },
+      { label: 'Device status', href: '/help/web/device-status' },
+      { label: 'Locked passwords', href: '/help/web/locked-passwords' },
     ],
   },
   {

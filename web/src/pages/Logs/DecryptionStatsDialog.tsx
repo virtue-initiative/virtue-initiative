@@ -2,6 +2,7 @@ import { useRef, useState } from 'preact/hooks';
 import { Alert, Dialog, DialogHeader } from '@virtueinitiative/shared-web';
 import { cacheClient, type DecryptionStats } from '../../utils/cache/client';
 import { InfoIcon } from '../../components/icons';
+import { ClearCacheButton } from '../../components/ClearCacheButton';
 import { LANDING_URL } from '../../utils/landing-url';
 
 const DECRYPTION_ERRORS_HELP_URL = `${LANDING_URL}/help/web/decryption-errors`;
@@ -119,6 +120,12 @@ export function DecryptionStatsButton({
           <>
             <StatsSection title="All time, all devices" stats={globalStats} />
             <StatsSection title="Current filter" stats={filteredStats} />
+            <div class="logs-stats-footer">
+              <p class="logs-stats-footer-hint">
+                Clear the cache to decrypt these logs again from scratch.
+              </p>
+              <ClearCacheButton />
+            </div>
           </>
         )}
       </Dialog>

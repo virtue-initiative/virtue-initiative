@@ -27,6 +27,12 @@
   color: var(--text);
 }
 
+.page-heading-after {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .page-heading-actions {
   margin-left: auto;
   flex-shrink: 0;

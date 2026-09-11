@@ -133,6 +133,103 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   });
 
+  it('rejects a password shorter than 12 characters', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox')).toBeEnabled();
+    });
+
+    await user.click(screen.getByRole('checkbox'));
+    await user.type(screen.getByPlaceholderText('Choose a password'), 'short');
+    await user.type(screen.getByPlaceholderText('Retype your password'), 'short');
+
+    expect(screen.getAllByText('Use at least 12 characters.').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert');
+      expect(alerts.some((a) => a.textContent?.includes('Use at least 12 characters.'))).toBe(true);
+    });
+
+    window.history.pushState({}, '', '/');
+  });
+
+  it('creates the account when the password is long enough', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox')).toBeEnabled();
+    });
+
+    let signupCalls = 0;
+    server.use(
+      http.post(`${BASE}/signup`, () => {
+        signupCalls += 1;
+        return HttpResponse.json({
+          user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
+        });
+      }),
+    );
+
+    await user.click(screen.getByRole('checkbox'));
+    await user.type(screen.getByPlaceholderText('Choose a password'), 'a-long-enough-password');
+    await user.type(screen.getByPlaceholderText('Retype your password'), 'a-long-enough-password');
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupCalls).toBe(1), { timeout: 10000 });
+    expect(
+      screen
+        .queryAllByRole('alert')
+        .some((a) => a.textContent?.includes('Use at least 12 characters.')),
+    ).toBe(false);
+
+    window.history.pushState({}, '', '/');
+    // The real argon2id derivation runs here, so allow past the default timeout.
+  }, 15000);
+
+  it('warns about a breached password without blocking submission', async () => {
+    const password = 'password123456';
+    const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password));
+    const hash = Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+      .toUpperCase();
+    server.use(
+      http.get('https://api.pwnedpasswords.com/range/:prefix', () =>
+        HttpResponse.text(`${hash.slice(5)}:12345`),
+      ),
+    );
+
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(screen.getByRole('checkbox')).toBeEnabled();
+    });
+
+    await user.click(screen.getByRole('checkbox'));
+    await user.type(screen.getByPlaceholderText('Choose a password'), password);
+    await user.type(screen.getByPlaceholderText('Retype your password'), password);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/appeared in 12,345 known data breaches/i)).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    expect(screen.getByRole('button', { name: /create account/i })).toBeEnabled();
+
+    window.history.pushState({}, '', '/');
+  });
+
   it('links to the Terms of Use and Privacy Policy', async () => {
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');

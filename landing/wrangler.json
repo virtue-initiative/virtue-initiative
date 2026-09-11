@@ -4,7 +4,8 @@
   "compatibility_date": "2026-02-23",
   "workers_dev": false,
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    "not_found_handling": "404-page"
   },
   "env": {
     "prod": {

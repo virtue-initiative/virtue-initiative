@@ -31,7 +31,9 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 | `index.ts`              | Public re-exports: `login`, `requestSignup`, `finishSignup` convenience wrappers + everything from hooks                                                                                                                 |
 | `crypto.ts`             | `derivePasswordMaterial` (argon2id+HKDF), `encryptData`/`decryptBatch` (AES-256-GCM), `generateUserKeyPair`/`importUserPrivateKey`/`unwrapBatchKey`/`encryptForPublicKey` (HPKE X25519), `decompressGzip`, `verifyBatch` |
 | `batch-materializer.ts` | `decryptAndFlattenBatch` — fetch URL → unwrap key → AES-GCM decrypt → gzip decompress → msgpack decode → `verifyBatch` → return `FeedLog[]`                                                                              |
-| `data-cache.ts`         | Dexie IndexedDB schema (`feeds`, `decryptedEvents`, `eventImages`); `mergeDataPageIntoCache`, `writeMaterializedEvents`, `queryDecryptedEvents`, `loadEventImage`, `pruneDecryptedEventsBefore`                          |
+| `../cache/client.ts`    | `cacheClient` — leader-elected wrapper around the cache worker (BroadcastChannel fan-out); `cacheQuery`, `refetch`, `clearCache` (hard reset, with a direct-OPFS-wipe fallback), `getDecryptionStats`                    |
+| `../cache/worker.ts`    | Worker owning the OPFS-backed SQLite cache (`/cache.db`, `opfs-sahpool` VFS): opens and drift-checks the DB, fetches `/data`, decrypts batches, serves queries as streamed chunks                                        |
+| `../cache/schema.ts`    | Declared cache tables, `CACHE_SCHEMA_VERSION`, `findSchemaDrift` — a version or column mismatch rebuilds the cache instead of failing every query with `no such column`                                                  |
 
 ### Pages (`src/pages/`)
 

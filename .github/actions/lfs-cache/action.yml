@@ -1,0 +1,43 @@
+name: Restore LFS objects
+description: >-
+  Restores .git/lfs/objects from the Actions cache, keyed on the LFS object
+  OIDs, then runs `git lfs pull` to materialize the working tree. Must run
+  after actions/checkout, which should NOT be given `lfs: true` — the pointer
+  files it leaves behind are what makes the OID key computable.
+
+runs:
+  using: composite
+  steps:
+    # Derived from the LFS object OIDs, so the key changes exactly when a tracked
+    # binary changes, and needs no editing when LFS paths are added or removed.
+    # Hashing .gitattributes instead would miss a change to a file's contents.
+    - name: Compute LFS cache key
+      id: key
+      shell: bash
+      run: echo "key=$(git lfs ls-files -l | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    # No restore-keys on purpose: .git/lfs/objects is content-addressed, so a
+    # partial restore from an older key would carry objects no longer referenced
+    # by the current tree and re-save them under the new key forever. Exact-key-only
+    # means each entry holds exactly the current object set; the cost is one full
+    # re-download after a model change, which is rare.
+    #
+    # The key also omits runner.os deliberately: the object store is byte-identical
+    # across platforms, so the macOS and Windows jobs reuse the entry Linux saved.
+    # The key alone isn't enough for Windows, though — actions/cache derives an
+    # internal cache *version* from the path plus compression method, and Windows's
+    # differs, so it would silently save a second entry under the same key.
+    # enableCrossOsArchive forces the portable archive format that lets it share.
+    # Safe here: .git/lfs/objects is plain files, no symlinks or meaningful modes.
+    - name: Cache LFS objects
+      uses: actions/cache@v4
+      with:
+        path: .git/lfs/objects
+        key: lfs-v1-${{ steps.key.outputs.key }}
+        enableCrossOsArchive: true
+
+    # No network traffic on a cache hit. This also replaces the pointer files in
+    # the working tree with the real objects.
+    - name: Pull LFS objects
+      shell: bash
+      run: git lfs pull

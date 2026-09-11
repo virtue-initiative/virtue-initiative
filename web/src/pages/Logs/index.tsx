@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { LogQueryResult, useAPIContext, useDevices, usePartners } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { LogsIcon } from '../../components/icons';
 import { LogsGallery } from './LogsGallery';
 import { LogsList } from './LogsList';
@@ -10,7 +11,14 @@ import { getRiskRating, type RiskRating } from '@virtueinitiative/shared-web/ris
 import { FeedLog, formatDayLabel, getLogCategory, LOG_CATEGORIES } from './shared';
 import './style.css';
 import { useUrlState } from '../../hooks/useUrlState';
-import { Button, Checkbox, Dialog, DialogHeader, Field, Select } from '@virtueinitiative/shared-web';
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogHeader,
+  Field,
+  Select,
+} from '@virtueinitiative/shared-web';
 import { cacheClient } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
 
@@ -44,7 +52,7 @@ const SKIPPED_SCREENSHOTS_CATEGORY = 'Screenshot Skipped';
 export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
-  const { path } = useLocation();
+  const { path, url } = useLocation();
   const { devices, loaded: devicesLoaded } = useDevices();
   const { watchings: watching, loaded: partnersLoaded } = usePartners();
 
@@ -192,10 +200,14 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         ? `${groupLabel(routeUserId)}'s logs`
         : 'My logs';
   const title = selectedDevice ? `${baseTitle} — ${deviceName(selectedDevice)}` : baseTitle;
-  const isGallery = path.endsWith('/gallery');
+  // Gallery is the default view; `/logs/gallery` stays valid so old links work.
+  const isGallery = !path.endsWith('/list');
   const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
 
   const logsBasePath = routeUserId ? `/logs/${routeUserId}` : '/logs';
+  // Derived from the router's URL rather than `window.location` so the switcher
+  // links can never disagree with what the router thinks the query string is.
+  const search = url.includes('?') ? url.slice(url.indexOf('?')) : '';
 
   const items = useMemo(
     () =>
@@ -224,34 +236,22 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
       }),
     [logs, riskFilter, typeFilter, weekStart, weekEnd, showSkippedScreenshots],
   );
-  const galleryItems = useMemo(
-    () =>
-      (logs ?? []).filter((item) => {
-        if (item.ts < weekStart || item.ts > weekEnd) return false;
-        if (item.image_w === undefined) return false;
-        if (riskFilter !== 'all') {
-          const rating = getRiskRating(item.risk);
-          if (riskFilter === 'alert' && rating !== 'alert') return false;
-          if (riskFilter === 'high' && rating !== 'high' && rating !== 'alert') return false;
-          if (
-            riskFilter === 'moderate' &&
-            rating !== 'moderate' &&
-            rating !== 'high' &&
-            rating !== 'alert'
-          )
-            return false;
-        }
-        return true;
-      }),
-    [logs, riskFilter, weekStart, weekEnd],
-  );
 
   return (
     <div class="logs-page">
       <div class="logs-layout">
         <section class="logs-main">
           <div class="logs-header">
-            <PageHeading icon={<LogsIcon />}>{title}</PageHeading>
+            <PageHeading
+              icon={<LogsIcon />}
+              after={
+                selectedDeviceInfo?.status === 'logged_out' ? (
+                  <DeviceStatusBadge status={selectedDeviceInfo.status} />
+                ) : undefined
+              }
+            >
+              {title}
+            </PageHeading>
             <div class="logs-header-actions">
               <div class="logs-filter-section">
                 <div class="logs-inline-filters">
@@ -302,40 +302,34 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                       <option value="moderate">Medium</option>
                     </Select>
                   </Field>
-                  {!isGallery && (
-                    <Field label="Type" class="logs-filter-field">
-                      <Select
-                        size="md"
-                        class="logs-filter-select"
-                        value={typeFilter ?? ''}
-                        onChange={(e) =>
-                          setTypeFilter((e.target as HTMLSelectElement).value || null)
-                        }
-                      >
-                        <option value="">All</option>
-                        {LOG_CATEGORIES.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                  )}
-                  {!isGallery && (
-                    <div class="logs-filter-field logs-filter-checkbox-field">
-                      <Checkbox
-                        id="show-skipped-screenshots"
-                        label="Show skipped screenshots"
-                        checked={showSkippedScreenshots}
-                        onChange={(e) =>
-                          setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
-                        }
-                      />
-                    </div>
-                  )}
+                  <Field label="Type" class="logs-filter-field">
+                    <Select
+                      size="md"
+                      class="logs-filter-select"
+                      value={typeFilter ?? ''}
+                      onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
+                    >
+                      <option value="">All</option>
+                      {LOG_CATEGORIES.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <div class="logs-filter-field logs-filter-checkbox-field">
+                    <Checkbox
+                      id="show-skipped-screenshots"
+                      label="Show skipped screenshots"
+                      checked={showSkippedScreenshots}
+                      onChange={(e) =>
+                        setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                      }
+                    />
+                  </div>
                 </div>
                 <Button
-                  variant="ghost"
+                  variant="primary"
                   size="md"
                   class="logs-filter-toggle"
                   type="button"
@@ -348,13 +342,13 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                 <div class="vi-segmented-control logs-view-switcher">
                   <a
                     class={`vi-segmented-control__item${!isGallery ? ' is-active' : ''}`}
-                    href={`${logsBasePath}${window.location.search}`}
+                    href={`${logsBasePath}/list${search}`}
                   >
                     List
                   </a>
                   <a
                     class={`vi-segmented-control__item${isGallery ? ' is-active' : ''}`}
-                    href={`${logsBasePath}/gallery${window.location.search}`}
+                    href={`${logsBasePath}${search}`}
                   >
                     Gallery
                   </a>
@@ -392,7 +386,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
 
           {isGallery ? (
             <LogsGallery
-              items={galleryItems}
+              items={items}
               loading={logsLoading}
               hasMore={false}
               onLoadMore={() => {}}
@@ -462,35 +456,31 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   <option value="moderate">Medium</option>
                 </Select>
               </Field>
-              {!isGallery && (
-                <Field label="Type" class="logs-filter-field">
-                  <Select
-                    size="md"
-                    class="logs-filter-select"
-                    value={typeFilter ?? ''}
-                    onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
-                  >
-                    <option value="">All</option>
-                    {LOG_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {cat}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              )}
-              {!isGallery && (
-                <div class="logs-filter-field logs-filter-checkbox-field">
-                  <Checkbox
-                    id="show-skipped-screenshots-dialog"
-                    label="Show skipped screenshots"
-                    checked={showSkippedScreenshots}
-                    onChange={(e) =>
-                      setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
-                    }
-                  />
-                </div>
-              )}
+              <Field label="Type" class="logs-filter-field">
+                <Select
+                  size="md"
+                  class="logs-filter-select"
+                  value={typeFilter ?? ''}
+                  onChange={(e) => setTypeFilter((e.target as HTMLSelectElement).value || null)}
+                >
+                  <option value="">All</option>
+                  {LOG_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div class="logs-filter-field logs-filter-checkbox-field">
+                <Checkbox
+                  id="show-skipped-screenshots-dialog"
+                  label="Show skipped screenshots"
+                  checked={showSkippedScreenshots}
+                  onChange={(e) =>
+                    setShowSkippedScreenshots((e.target as HTMLInputElement).checked)
+                  }
+                />
+              </div>
             </div>
           </Dialog>
         </section>

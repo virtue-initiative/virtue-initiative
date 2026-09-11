@@ -15,6 +15,14 @@
     align-self: center;
   }
 
+  /* Images inside list items aren't direct flex children of `.help-doc`, so
+     the `p:has(img)` rule above can't center them. Force them onto their own
+     line and center them under the step text instead. */
+  & li img {
+    display: block;
+    margin: 0.6rem auto 0;
+  }
+
   & svg {
     max-width: 100%;
     height: auto;

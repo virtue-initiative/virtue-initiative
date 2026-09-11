@@ -62,54 +62,170 @@
   margin-bottom: var(--space-4);
 }
 
-.partner-device-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: var(--space-3);
+/* Watching cards list the account's devices, so they get a wider column than
+   the default 260px card grid: a 350px floor, then the tracks share out
+   whatever width is left. `min()` keeps the track from overflowing a phone;
+   below that the device names ellipsise.
+
+   Chained with .vi-card-grid so this always outranks the shared 260px default,
+   whichever order the two stylesheets land in the bundle. */
+.vi-card-grid.partners-grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr));
 }
 
-.partner-device-chip {
-  display: inline-flex;
+/* Cards list different numbers of devices, so hold every card in the panel to
+   one height and push the buttons to the bottom edge, where they line up. */
+.partners-panel .vi-card-grid {
+  grid-auto-rows: 1fr;
+}
+
+.partners-panel .vi-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.partners-panel .vi-card-actions {
+  margin-top: auto;
+}
+
+.partner-devices {
+  margin-top: var(--space-4);
+}
+
+.partner-devices-heading {
+  margin: 0 0 var(--space-2);
+}
+
+.partner-devices-empty {
+  margin: 0;
+  padding: var(--space-2) 0;
+  text-align: center;
+}
+
+/* A table again — one shared set of columns so name, last-seen and status line
+   up down the list — but content-sized, so the columns keep their relative
+   widths instead of being split evenly. */
+.partner-device-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  row-gap: var(--space-1);
+}
+
+.partner-device-row {
+  position: relative;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  padding: 0.2rem 0.55rem;
+  column-gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  /* Pull the hover well out to the card's padding edge. */
+  margin-inline: calc(-1 * var(--space-2));
+  width: calc(100% + 2 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
+  text-align: left;
   cursor: pointer;
   transition:
     background-color 0.15s ease,
-    border-color 0.15s ease,
     color 0.15s ease;
 
   &:hover {
     background: var(--bg-subtle);
-    border-color: var(--control-border-hover);
     color: var(--text);
   }
 }
 
+@supports not (grid-template-columns: subgrid) {
+  .partner-device-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .partner-device-row {
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
+  }
+}
+
+/* The name is the only part that gives: it shrinks and ellipsises so the time
+   and status tag stay on the line, however long the device is named. */
+.partner-device-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.partner-device-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Stretch the name button's hit area over the whole row, so clicking anywhere
+   but the status link opens the device's logs. */
+.partner-device-open::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* Above the stretched hit area, so the status tag keeps its own link. */
 .partner-device-status {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: var(--radius-full);
+  position: relative;
 }
 
-.partner-device-status-online {
-  background: var(--success);
+.partner-device-activity {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
-.partner-device-status-offline {
-  background: var(--text-muted);
+/* More air before the status tag than between name and time: --space-3 on top
+   of the row's own --space-2 gap. */
+.partner-device-row .vi-badge {
+  margin-inline-start: var(--space-3);
 }
 
 .partner-device-more {
-  margin: 0;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) var(--space-2);
+  margin-inline-start: calc(-1 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-muted);
   font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-subtle);
+    color: var(--text);
+  }
+}
+
+/* The full list in the dialog can outgrow the viewport. Rows here sit in the
+   dialog's own padding box, so drop the negative margin that pulls the hover
+   well out to a card's edge. */
+.partner-device-list--dialog {
+  max-height: min(60vh, 30rem);
+  overflow-y: auto;
+}
+
+.partner-device-list--dialog .partner-device-row {
+  margin-inline: 0;
+  width: 100%;
 }
 
 .partner-card-compact {

@@ -20,7 +20,7 @@ This project uses [Bun](https://bun.sh) as its package manager and runtime.
 
 ### First-time setup
 
-The NSFW screenshot model (`client/core/models/*.onnx`) is stored with
+The NSFW screenshot model (`client/core/models/*.nnef.tar`) is stored with
 [Git LFS](https://git-lfs.com). Install and pull it before building any client,
 or the risk classifier silently reports `0` for every screenshot (the client
 build now fails loudly if the model is still an unresolved LFS pointer):

@@ -141,6 +141,20 @@ export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: Buffer
   return importAesKey(rawKey, ['decrypt']);
 }
 
+// Same envelope as unwrapBatchKey, but returns the opened plaintext bytes
+// directly instead of importing them as an AES key -- used for locked
+// passwords, which are sealed once for the owner's own pub_key rather than
+// wrapping a symmetric batch key.
+export async function decryptForOwnKey(
+  privateKey: CryptoKey,
+  wrapped: BufferSource,
+): Promise<Uint8Array> {
+  const envelope = toUint8Array(wrapped);
+  const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
+  const ct = envelope.slice(HPKE_SUITE.kem.encSize);
+  return new Uint8Array(await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct));
+}
+
 export async function encryptForPublicKey(
   publicKeyBytes: BufferSource,
   data: BufferSource,

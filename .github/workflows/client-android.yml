@@ -25,8 +25,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          lfs: true
+
+      - name: Restore LFS objects
+        uses: ./.github/actions/lfs-cache
 
       - name: Setup Java
         uses: actions/setup-java@v4

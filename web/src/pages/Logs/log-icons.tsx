@@ -155,3 +155,19 @@ export function InformationCircleIcon() {
     </Icon>
   );
 }
+
+export function ChevronLeftIcon() {
+  return (
+    <Icon>
+      <path {...cap} d="M15.75 19.5 8.25 12l7.5-7.5" />
+    </Icon>
+  );
+}
+
+export function ChevronRightIcon() {
+  return (
+    <Icon>
+      <path {...cap} d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+    </Icon>
+  );
+}

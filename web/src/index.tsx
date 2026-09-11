@@ -1,3 +1,6 @@
+// Installs the Uint8Array base64/hex methods where the browser lacks them.
+// Must come before any module that converts a Uint8Array.
+import './utils/uint8array-base64';
 import * as preact from 'preact';
 import {
   LocationProvider,
@@ -13,6 +16,7 @@ import { APIProvider, useAPIContext } from './utils/api';
 import { Sidebar } from './components/Sidebar';
 import { Devices } from './pages/Devices/index';
 import { Partners } from './pages/Partners/index';
+import { Passwords } from './pages/Passwords/index';
 import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { InviteAccept } from './pages/InviteAccept/index';
@@ -128,9 +132,12 @@ function AppShell() {
               <Route path="/forgot-password" component={RedirectToDashboard} />
               <Route path="/" component={Devices} />
               <Route path="/partners" component={Partners} />
+              <Route path="/passwords" component={Passwords} />
               <Route path="/logs" component={Logs} />
+              <Route path="/logs/list" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
               <Route path="/logs/:userId" component={Logs} />
+              <Route path="/logs/:userId/list" component={Logs} />
               <Route path="/logs/:userId/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
               <Route path="/verify-email" component={VerifyEmail} />
