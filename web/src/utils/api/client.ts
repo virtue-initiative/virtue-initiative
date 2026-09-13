@@ -17,8 +17,6 @@ export interface UserSettings {
   email?: string;
   name?: string;
   settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
-  pub_key?: string;
-  encrypted_priv_key?: string;
 }
 
 export interface UpdateSettingsResult {
@@ -122,6 +120,14 @@ export class APIClient {
       email_verification_required: result.email_verification_required,
       pending_email: result.pending_email,
     };
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const user = this.userCache ?? (await api.getUser());
+    const hadPrivateKey = this.session.privateKey != null;
+    await this.session.changePassword(user.email, currentPassword, newPassword);
+    // The key pair is unchanged, so the cache only needs the key if it never had one.
+    if (!hadPrivateKey) cacheClient?.setSession(this.session.userId, this.session.privateKey);
   }
 
   async deleteUser(confirmEmail: string): Promise<void> {

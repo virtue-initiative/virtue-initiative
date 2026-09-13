@@ -164,6 +164,21 @@ export async function encryptForPublicKey(
   return concatBytes(new Uint8Array(enc), new Uint8Array(ct));
 }
 
+// True when `privateKey` opens envelopes sealed to `publicKeyBytes`. Used before re-wrapping
+// the private key (API-050) so a mismatched key pair is never written back.
+export async function privateKeyMatchesPublicKey(
+  privateKey: CryptoKey,
+  publicKeyBytes: BufferSource,
+): Promise<boolean> {
+  try {
+    const probe = await encryptForPublicKey(publicKeyBytes, generateRandomKeyBytes());
+    await unwrapBatchKey(privateKey, probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Decompresses gzip using native DecompressionStream
 export async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream('gzip');

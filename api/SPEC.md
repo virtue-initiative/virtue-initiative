@@ -293,6 +293,8 @@ The server MUST respond **HTTP 401** if the token is invalid or not found.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
+Because the client cannot recover the old private key without the old password, a reset replaces the user's key pair, and the user loses the ability to decrypt batches wrapped for the old `pub_key`. A client SHOULD warn the user of this before finalizing and SHOULD point a user who still knows their password to `POST /user/password` (see API-050) instead.
+
 ### API-015 `GET /user/login-material`
 
 The client MAY send an email as a query param `?email=[email]`.
@@ -389,11 +391,11 @@ The client MUST provide a request in this shape.
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
-  "pub_key": Base64 | undefined,
-  "encrypted_priv_key": Base64 | undefined
+  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined
 }
 ```
+
+The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
 
 The server SHOULD NOT change the email, instead it should send an `email_change` token to the new email address. If the email address is being used by an existing account, it MUST return the same response, but send a "Email already in use." email to the new email.
 
@@ -416,6 +418,37 @@ The client MUST be authenticated with a **Web Token**.
 The client MUST send the user's email in the query. The server SHOULD respond with **HTTP 400** if the email does not match.
 
 If the email matches, the server SHOULD permanently delete the account. The server SHOULD delete all devices, batches, sessions, and tokens. The server SHOULD NOT delete the batch data in R2, instead it should be deleted by the normal 30 day cycle.
+
+### API-050 `POST /user/password`
+
+The client MUST authenticate with a **Web Token** and send
+
+```js
+{
+  "current_password_auth": Base64,
+  "password_auth": Base64,
+  "password_salt": Base64,
+  "encrypted_priv_key": Base64
+}
+```
+
+`current_password_auth` MUST be derived from the current password and the user's current salt, as for `POST /login`. `password_auth` and `encrypted_priv_key` MUST be derived from the new password and the new `password_salt`, using the current `HashParams`.
+
+The client MUST keep the user's existing key pair: `encrypted_priv_key` MUST be the user's current private key, re-encrypted under the new wrapping key. This keeps batches wrapped for the user's `pub_key` readable. The client SHOULD confirm that the current password decrypts the stored `encrypted_priv_key` and that the result matches `pub_key` before sending.
+
+The server MUST return **HTTP 403** if `current_password_auth` does not match. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session. The server SHOULD validate `password_auth`, `password_salt` and `encrypted_priv_key` in the same way as `/signup`. The server MUST NOT change `pub_key`.
+
+On success, the server MUST:
+
+- update the password hash, salt, hash params version and `encrypted_priv_key` together;
+- revoke every other web session of the user, keeping the session that made the request;
+- invalidate any outstanding password-reset tokens for the user.
+
+The server MUST NOT revoke device sessions.
+
+The server SHOULD email the user that their password changed. Email delivery MUST be best-effort: a failure to send MUST NOT fail the request.
+
+The server MUST respond **HTTP 204**.
 
 ## API-022 Partners
 

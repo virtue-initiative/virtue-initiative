@@ -7,6 +7,7 @@ import {
   generateRandomKeyBytes,
   generateUserKeyPair,
   importUserPrivateKey,
+  privateKeyMatchesPublicKey,
 } from './crypto';
 
 const WRAPPING_KEY_STORAGE = 'virtue_wrapping_key';
@@ -122,6 +123,53 @@ export class Session {
   async logout(): Promise<void> {
     await api.logout().catch(() => {});
     await this.invalidate();
+  }
+
+  /**
+   * API-050: changes the password but keeps the key pair, re-encrypting the existing
+   * private key under the new password so batches already sealed to it stay readable.
+   */
+  async changePassword(email: string, currentPassword: string, newPassword: string) {
+    const [material, user] = await Promise.all([api.getLoginMaterial(email), api.getUser()]);
+    if (!user.encrypted_priv_key || !user.pub_key) {
+      throw new Error('Your account has no encryption key to keep. Reset your password instead.');
+    }
+
+    const current = await derivePasswordMaterial(
+      currentPassword,
+      Uint8Array.fromBase64(material.password_salt),
+      material.params,
+    );
+    let rawPrivateKey: Uint8Array<ArrayBuffer>;
+    try {
+      rawPrivateKey = await decryptBatch(
+        current.wrappingKey,
+        Uint8Array.fromBase64(user.encrypted_priv_key),
+      );
+    } catch {
+      throw new Error('Current password is incorrect.');
+    }
+    const privateKey = await importUserPrivateKey(rawPrivateKey);
+    if (!(await privateKeyMatchesPublicKey(privateKey, Uint8Array.fromBase64(user.pub_key)))) {
+      throw new Error(
+        "Your encryption key doesn't match your account. Your password was not changed.",
+      );
+    }
+
+    const passwordSalt = generateRandomKeyBytes(material.params.salt_length);
+    const next = await derivePasswordMaterial(newPassword, passwordSalt, material.params);
+    const encryptedPrivateKey = await encryptData(next.wrappingKey, rawPrivateKey);
+
+    await api.changePassword({
+      current_password_auth: current.passwordAuth.toBase64(),
+      password_auth: next.passwordAuth.toBase64(),
+      password_salt: passwordSalt.toBase64(),
+      encrypted_priv_key: encryptedPrivateKey.toBase64(),
+    });
+
+    await saveWrappingKey(next.wrappingKey);
+    this.wrappingKey = next.wrappingKey;
+    this.privateKey = privateKey;
   }
 
   async unwrapPrivateKey(encryptedPrivKey: string): Promise<void> {

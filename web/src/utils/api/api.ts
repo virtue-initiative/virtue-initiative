@@ -20,6 +20,7 @@ import type {
   SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
+  ChangePasswordPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
@@ -47,6 +48,7 @@ export type {
   SignupValidation,
   EmailVerifyResponse,
   UpdateUserPayload,
+  ChangePasswordPayload,
   UpdateUserResponse,
   CreatePartnerResponse,
   BugReportPayload,
@@ -252,6 +254,12 @@ export const api = {
     req<PasswordResetValidation>('/password-reset/validate', {
       method: 'POST',
       body: JSON.stringify({ token }),
+    }),
+
+  changePassword: (payload: ChangePasswordPayload) =>
+    req<void>('/user/password', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
 
   resetPassword: (

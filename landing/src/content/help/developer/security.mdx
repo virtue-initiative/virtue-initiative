@@ -90,7 +90,10 @@ the browser for decrypting screenshot batch decryption keys.
 On login, the browser downloads the encrypted key from the server and decrypts
 it with the user's password key, and it is stored in the browser.
 
-This key is recreated on a password reset.
+This key is recreated on a password reset. Changing the password from Settings
+keeps the key. The browser decrypts it with the current password key, then
+encrypts it again with the new one, so batches encrypted before the change stay
+readable.
 
 See the **Passwords** section for more information.
 

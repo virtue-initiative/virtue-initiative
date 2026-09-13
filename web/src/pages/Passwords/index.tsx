@@ -9,7 +9,7 @@ import {
 import { decryptForOwnKey, encryptForPublicKey } from '../../utils/api/crypto';
 import { PageHeading } from '../../components/PageHeading';
 import { DocumentDuplicateIcon, LockIcon } from '../../components/icons';
-import { PasswordField } from '../Auth/PasswordField';
+import { PasswordField } from '../../components/PasswordField';
 import {
   Badge,
   Button,
