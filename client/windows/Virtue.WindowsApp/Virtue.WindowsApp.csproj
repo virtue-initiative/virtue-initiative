@@ -9,6 +9,12 @@
     <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
     <Platforms>x64</Platforms>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Bundle the .NET runtime: the Store rejects undisclosed dependencies on the
+         .NET Desktop Runtime, and a framework-dependent build fails to launch
+         silently on machines without it. The Windows App SDK stays framework-
+         dependent below, since the Store resolves that framework package itself. -->
+    <SelfContained>true</SelfContained>
     <UseWinUI>true</UseWinUI>
     <EnableMsixTooling Condition="'$(VirtueWindowsPackageType)' == 'MSIX'">true</EnableMsixTooling>
     <WindowsPackageType>$(VirtueWindowsPackageType)</WindowsPackageType>
