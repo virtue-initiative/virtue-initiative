@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
-import { TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
+import { TEST_DEVICES, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Partners } from './index';
 
@@ -48,6 +48,75 @@ describe('Partners — sections', () => {
       expect(screen.getByText('No one can monitor you yet.')).toBeInTheDocument();
       expect(screen.getByText('You cannot monitor anyone yet.')).toBeInTheDocument();
     });
+  });
+});
+
+describe('Partners — monitored device list', () => {
+  it("lists a watched account's devices with their status", async () => {
+    server.use(
+      http.get(`${BASE}/device`, () =>
+        HttpResponse.json([
+          { ...TEST_DEVICES[1], owner: TEST_WATCHING.user.id },
+          { ...TEST_DEVICES[0], owner: TEST_WATCHING.user.id, status: 'logged_out' },
+        ]),
+      ),
+    );
+    renderWithClient(<Partners />);
+
+    expect(
+      await screen.findByRole('heading', { name: /^devices \(last seen\)$/i }),
+    ).toBeInTheDocument();
+
+    const rowOf = async (name: string) =>
+      (await screen.findByRole('button', { name: new RegExp(name, 'i') })).closest(
+        '.partner-device-row',
+      )!;
+
+    const row = await rowOf(TEST_DEVICES[0].name);
+    expect(row).toHaveTextContent('Deactivated');
+    // last_hash_at is seconds old in the fixtures, so it renders in the compact form.
+    expect(row).toHaveTextContent('(now)');
+    expect(await rowOf(TEST_DEVICES[1].name)).toHaveTextContent('Online');
+
+    // Each status tag links to the section of the help page explaining it.
+    expect(row.querySelector('a.device-status-badge')).toHaveAttribute(
+      'href',
+      expect.stringContaining('/help/web/device-status#deactivated'),
+    );
+  });
+});
+
+describe('Partners — monitored account with no devices', () => {
+  it('says "No devices" under the heading', async () => {
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json([])));
+    renderWithClient(<Partners />);
+
+    expect(await screen.findByText('No devices')).toBeInTheDocument();
+  });
+});
+
+describe('Partners — more devices dialog', () => {
+  it('opens a dialog listing every device when "+N more" is clicked', async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      ...TEST_DEVICES[0],
+      id: `many-device-${i}`,
+      name: `Device ${i}`,
+      owner: TEST_WATCHING.user.id,
+    }));
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json(many)));
+    renderWithClient(<Partners />);
+
+    const moreBtn = await screen.findByRole('button', { name: /\+2 more devices/i });
+    // The card itself lists only the first four.
+    expect(screen.queryByRole('button', { name: /Device 5/ })).not.toBeInTheDocument();
+
+    await user.click(moreBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Device 5/ })).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0);
   });
 });
 

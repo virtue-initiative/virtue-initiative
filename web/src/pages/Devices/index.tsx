@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
+import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { DevicesIcon } from '../../components/icons';
 import {
   Badge,
@@ -184,13 +185,7 @@ function DeviceCard({
     <Card>
       <CardHeader>
         <span class="vi-card__name">{device.name}</span>
-        <Badge variant={device.status === 'online' ? 'green' : 'gray'}>
-          {device.status === 'online'
-            ? 'Online'
-            : device.status === 'logged_out'
-              ? 'Deactivated'
-              : 'Offline'}
-        </Badge>
+        <DeviceStatusBadge status={device.status} />
       </CardHeader>
       <dl class="vi-card__meta">
         <dt>Platform</dt>

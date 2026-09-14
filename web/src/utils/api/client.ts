@@ -2,7 +2,9 @@ import {
   api,
   Batch,
   Device,
+  LockedPassword,
   PartnerRelationships,
+  RevealLockedPasswordResponse,
   User,
   WatcherPartner,
   WatchingPartner,
@@ -15,8 +17,6 @@ export interface UserSettings {
   email?: string;
   name?: string;
   settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
-  pub_key?: string;
-  encrypted_priv_key?: string;
 }
 
 export interface UpdateSettingsResult {
@@ -78,6 +78,10 @@ export class APIClient {
   private devicesSubscribers = new Set<Subscriber<Device[]>>();
   private devicesFetchInFlight: Promise<Device[] | null> | null = null;
 
+  private passwordsCache: LockedPassword[] | null = null;
+  private passwordsSubscribers = new Set<Subscriber<LockedPassword[]>>();
+  private passwordsFetchInFlight: Promise<LockedPassword[] | null> | null = null;
+
   private logoutSubscribers = new Set<() => void>();
   private loggedOut = false;
 
@@ -116,6 +120,14 @@ export class APIClient {
       email_verification_required: result.email_verification_required,
       pending_email: result.pending_email,
     };
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const user = this.userCache ?? (await api.getUser());
+    const hadPrivateKey = this.session.privateKey != null;
+    await this.session.changePassword(user.email, currentPassword, newPassword);
+    // The key pair is unchanged, so the cache only needs the key if it never had one.
+    if (!hadPrivateKey) cacheClient?.setSession(this.session.userId, this.session.privateKey);
   }
 
   async deleteUser(confirmEmail: string): Promise<void> {
@@ -317,6 +329,75 @@ export class APIClient {
       }
     })();
     this.devicesFetchInFlight = p;
+    return p;
+  }
+
+  // ── Locked passwords ────────────────────────────────────────────────────
+  listPasswords(): LockedPassword[] {
+    if (this.passwordsCache === null) {
+      void this.fetchPasswords();
+    }
+    return this.passwordsCache ?? [];
+  }
+
+  subscribePasswords(cb: Subscriber<LockedPassword[]>): {
+    passwords: LockedPassword[];
+    loaded: boolean;
+    unsubscribe: () => void;
+  } {
+    if (this.passwordsCache === null) {
+      void this.fetchPasswords();
+    }
+    this.passwordsSubscribers.add(cb);
+    return {
+      passwords: this.passwordsCache ?? [],
+      loaded: this.passwordsCache !== null,
+      unsubscribe: () => this.passwordsSubscribers.delete(cb),
+    };
+  }
+
+  async createPassword(label: string, wrappedValue: string): Promise<void> {
+    await api.createLockedPassword({ label, wrapped_value: wrappedValue });
+    await this.fetchPasswords(true);
+  }
+
+  async revealPassword(id: string): Promise<RevealLockedPasswordResponse> {
+    const result = await api.revealLockedPassword(id);
+    await this.fetchPasswords(true);
+    return result;
+  }
+
+  async removePassword(id: string): Promise<void> {
+    await api.deleteLockedPassword(id);
+    await this.fetchPasswords(true);
+  }
+
+  async restorePassword(id: string): Promise<void> {
+    await api.restoreLockedPassword(id);
+    await this.fetchPasswords(true);
+  }
+
+  async permanentlyDeletePassword(id: string): Promise<void> {
+    await api.permanentlyDeleteLockedPassword(id);
+    await this.fetchPasswords(true);
+  }
+
+  private async fetchPasswords(force = false): Promise<LockedPassword[] | null> {
+    if (this.passwordsFetchInFlight && !force) return this.passwordsFetchInFlight;
+    const p = (async () => {
+      try {
+        const passwords = await api.getLockedPasswords();
+        this.passwordsCache = passwords;
+        notify(this.passwordsSubscribers, passwords);
+        return passwords;
+      } catch (err) {
+        console.warn('[api-client] failed to fetch locked passwords', err);
+        return null;
+      } finally {
+        this.passwordsFetchInFlight = null;
+      }
+    })();
+    this.passwordsFetchInFlight = p;
     return p;
   }
 

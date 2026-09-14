@@ -261,6 +261,7 @@ export async function clearDB(): Promise<void> {
   await env.DB.prepare('DELETE FROM user_sessions').run();
   await env.DB.prepare('DELETE FROM device_sessions').run();
   await env.DB.prepare('DELETE FROM batches').run();
+  await env.DB.prepare('DELETE FROM locked_passwords').run();
   await env.DB.prepare('DELETE FROM partners').run();
   await env.DB.prepare('DELETE FROM devices').run();
   await env.DB.prepare('DELETE FROM users').run();

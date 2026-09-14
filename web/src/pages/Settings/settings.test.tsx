@@ -2,13 +2,31 @@ import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_USER } from '../../mocks/fixtures';
-import { renderWithClient } from '../../test-utils';
+import { makeFakeSession, renderWithClient } from '../../test-utils';
 import { Settings } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
+
+const resetCache = vi.fn(() => Promise.resolve());
+
+vi.mock('../../utils/cache/client', () => ({
+  cacheClient: {
+    setSession: vi.fn(),
+    cacheQuery: vi.fn(),
+    refetch: vi.fn(),
+    clearCache: vi.fn(() => Promise.resolve()),
+    resetCache: () => resetCache(),
+    deleteDeviceData: vi.fn(() => Promise.resolve()),
+    getEventImage: vi.fn(() => Promise.resolve(null)),
+    getDeviceBatchEndTimes: vi.fn(() => Promise.resolve([])),
+    getDecryptionStats: vi.fn(),
+  },
+  logCacheQuery: vi.fn(),
+  triggerRefetch: vi.fn(),
+}));
 
 describe('Settings — page renders', () => {
   it('shows the user display name', async () => {
@@ -142,5 +160,88 @@ describe('Settings — delete account', () => {
     await waitFor(() => {
       expect(deleteCalled).toBe(true);
     });
+  });
+});
+
+describe('Settings — clear cache', () => {
+  it('clears the cache and reloads the page', async () => {
+    const reload = vi.fn();
+    const originalReload = window.location.reload;
+    Object.defineProperty(window.location, 'reload', { configurable: true, value: reload });
+
+    try {
+      const user = userEvent.setup();
+      renderWithClient(<Settings />);
+
+      const button = await screen.findByRole('button', { name: /^clear cache$/i });
+      await user.click(button);
+
+      await waitFor(() => {
+        expect(resetCache).toHaveBeenCalled();
+        expect(reload).toHaveBeenCalled();
+      });
+    } finally {
+      Object.defineProperty(window.location, 'reload', {
+        configurable: true,
+        value: originalReload,
+      });
+    }
+  });
+});
+
+describe('Settings — change password', () => {
+  async function fillPasswordForm(current: string, next: string, confirm: string) {
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Current password'), current);
+    await user.type(screen.getByLabelText('New password'), next);
+    await user.type(screen.getByLabelText('Confirm new password'), confirm);
+    await user.click(screen.getByRole('button', { name: /change password/i }));
+  }
+
+  it('changes the password through the session and clears the form', async () => {
+    const session = makeFakeSession();
+    renderWithClient(<Settings />, undefined, session);
+
+    await fillPasswordForm('current-pass-1', 'brand-new-pass-1', 'brand-new-pass-1');
+
+    await screen.findByText('Your password was changed.');
+    expect(session.changePassword).toHaveBeenCalledWith(
+      TEST_USER.email,
+      'current-pass-1',
+      'brand-new-pass-1',
+    );
+    expect(screen.getByLabelText('Current password')).toHaveValue('');
+    expect(screen.getByLabelText('New password')).toHaveValue('');
+  });
+
+  it('does not submit when the new passwords do not match', async () => {
+    const session = makeFakeSession();
+    renderWithClient(<Settings />, undefined, session);
+
+    await fillPasswordForm('current-pass-1', 'brand-new-pass-1', 'brand-new-pass-2');
+
+    expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument();
+    expect(session.changePassword).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a new password shorter than the minimum', async () => {
+    const session = makeFakeSession();
+    renderWithClient(<Settings />, undefined, session);
+
+    await fillPasswordForm('current-pass-1', 'short', 'short');
+
+    expect(session.changePassword).not.toHaveBeenCalled();
+    expect(screen.getAllByText(/at least 12 characters/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows the error when the current password is wrong', async () => {
+    const session = makeFakeSession({
+      changePassword: vi.fn().mockRejectedValue(new Error('Current password is incorrect.')),
+    });
+    renderWithClient(<Settings />, undefined, session);
+
+    await fillPasswordForm('wrong-pass-123', 'brand-new-pass-1', 'brand-new-pass-1');
+
+    expect(await screen.findByText('Current password is incorrect.')).toBeInTheDocument();
   });
 });

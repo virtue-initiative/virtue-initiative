@@ -141,6 +141,20 @@ export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: Buffer
   return importAesKey(rawKey, ['decrypt']);
 }
 
+// Same envelope as unwrapBatchKey, but returns the opened plaintext bytes
+// directly instead of importing them as an AES key -- used for locked
+// passwords, which are sealed once for the owner's own pub_key rather than
+// wrapping a symmetric batch key.
+export async function decryptForOwnKey(
+  privateKey: CryptoKey,
+  wrapped: BufferSource,
+): Promise<Uint8Array> {
+  const envelope = toUint8Array(wrapped);
+  const enc = envelope.slice(0, HPKE_SUITE.kem.encSize);
+  const ct = envelope.slice(HPKE_SUITE.kem.encSize);
+  return new Uint8Array(await HPKE_SUITE.open({ recipientKey: privateKey, enc }, ct));
+}
+
 export async function encryptForPublicKey(
   publicKeyBytes: BufferSource,
   data: BufferSource,
@@ -148,6 +162,21 @@ export async function encryptForPublicKey(
   const recipientPublicKey = await HPKE_SUITE.kem.deserializePublicKey(publicKeyBytes);
   const { enc, ct } = await HPKE_SUITE.seal({ recipientPublicKey }, toUint8Array(data));
   return concatBytes(new Uint8Array(enc), new Uint8Array(ct));
+}
+
+// True when `privateKey` opens envelopes sealed to `publicKeyBytes`. Used before re-wrapping
+// the private key (API-050) so a mismatched key pair is never written back.
+export async function privateKeyMatchesPublicKey(
+  privateKey: CryptoKey,
+  publicKeyBytes: BufferSource,
+): Promise<boolean> {
+  try {
+    const probe = await encryptForPublicKey(publicKeyBytes, generateRandomKeyBytes());
+    await unwrapBatchKey(privateKey, probe);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Decompresses gzip using native DecompressionStream

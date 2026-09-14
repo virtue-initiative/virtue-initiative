@@ -5,8 +5,25 @@ import {
   observeElementOffset,
   elementScroll,
 } from '@tanstack/react-virtual';
-import { EventImage, FeedLog, formatDayAndTime, LogDetailDialog } from './shared';
+import { formatRelativeTimestamp } from '../../utils/time';
+import {
+  EventImage,
+  FeedLog,
+  formatDayAndTime,
+  getLogCategory,
+  getLogMessage,
+  LogDetailDialog,
+  LogIcon,
+} from './shared';
 import { buildGalleryRows } from './gallery-layout';
+import { getRiskLevel } from '@virtueinitiative/shared-web/risk';
+
+/** Badge text per concern level, matching the list view's row badges. */
+const RISK_BADGES = {
+  alert: '⚠ Alert',
+  high: '⚠ High',
+  medium: 'Med',
+} as const;
 
 const TARGET_ROW_HEIGHT = 140;
 const GAP = 8;
@@ -30,7 +47,9 @@ export function LogsGallery({
   viewerId: string;
 }) {
   const [wrapperEl, setWrapperEl] = useState<HTMLDivElement | null>(null);
-  const [selectedItem, setSelectedItem] = useState<FeedLog | null>(null);
+  // Logs stream in while the dialog is open, so an id survives where a stored
+  // index or object wouldn't.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const wrapperRef = useCallback((el: HTMLDivElement | null) => setWrapperEl(el), []);
   const [containerWidth, setContainerWidth] = useState(0);
   const rafRef = useRef<number | null>(null);
@@ -98,8 +117,10 @@ export function LogsGallery({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
+  const selectedIndex = selectedId === null ? -1 : items.findIndex((i) => i.id === selectedId);
+
   if (items.length === 0 && !loading) {
-    return <p class="empty">No screenshots found.</p>;
+    return <p class="empty">No logs found.</p>;
   }
 
   return (
@@ -130,21 +151,52 @@ export function LogsGallery({
             >
               {rowItems.map((item, k) => {
                 const cellWidth = row.widths[k];
+                const riskLevel = getRiskLevel(item.risk);
                 return (
                   <div
                     key={item.id}
-                    class={`logs-gallery-item${item.batch_status === 'failed' ? ' logs-gallery-item--unverified' : ''}`}
+                    class={`logs-gallery-item${item.batch_status === 'failed' ? ' logs-gallery-item--unverified' : ''}${riskLevel === 'low' ? '' : ` logs-gallery-item--risk-${riskLevel}`}`}
                     style={{
                       width: `${cellWidth}px`,
                       height: `${row.height}px`,
                       flexShrink: 0,
                     }}
                   >
-                    <EventImage
-                      eventId={item.id}
-                      viewerId={viewerId}
-                      onClick={() => setSelectedItem(item)}
-                    />
+                    {/* Only the image tiles need the badge — a card already
+                        spells out its category and message in text. */}
+                    {riskLevel !== 'low' && item.image_w !== undefined && (
+                      <span
+                        class={`logs-verify-badge logs-gallery-risk-badge logs-verify-badge--${
+                          riskLevel === 'medium' ? 'moderate' : 'failed'
+                        }`}
+                      >
+                        {RISK_BADGES[riskLevel]}
+                      </span>
+                    )}
+                    {item.image_w !== undefined ? (
+                      <EventImage
+                        eventId={item.id}
+                        viewerId={viewerId}
+                        onClick={() => setSelectedId(item.id)}
+                      />
+                    ) : (
+                      <button
+                        class="logs-gallery-card"
+                        type="button"
+                        onClick={() => setSelectedId(item.id)}
+                      >
+                        <span class="logs-gallery-card-icon">
+                          <LogIcon log={item} />
+                        </span>
+                        <span class="logs-gallery-card-type">{getLogCategory(item)}</span>
+                        <span class="logs-gallery-card-message">
+                          {getLogMessage(item, deviceName(item.device_id))}
+                        </span>
+                        <span class="logs-gallery-card-time">
+                          {formatRelativeTimestamp(item.ts)}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -153,12 +205,18 @@ export function LogsGallery({
         })}
       </div>
       {loading && <p class="logs-loading">Loading…</p>}
-      {selectedItem && (
+      {selectedIndex !== -1 && (
         <LogDetailDialog
-          item={selectedItem}
+          item={items[selectedIndex]}
           deviceName={deviceName}
-          onClose={() => setSelectedItem(null)}
+          onClose={() => setSelectedId(null)}
           viewerId={viewerId}
+          onPrev={selectedIndex > 0 ? () => setSelectedId(items[selectedIndex - 1].id) : undefined}
+          onNext={
+            selectedIndex < items.length - 1
+              ? () => setSelectedId(items[selectedIndex + 1].id)
+              : undefined
+          }
         />
       )}
     </div>

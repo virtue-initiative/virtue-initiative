@@ -9,6 +9,8 @@ import {
   ActivityIcon,
   BellAlertIcon,
   CameraIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ClockIcon,
   DocumentDuplicateIcon,
   ExclamationCircleIcon,
@@ -353,15 +355,23 @@ export function LogDetailDialog({
   deviceName,
   onClose,
   viewerId,
+  onPrev,
+  onNext,
 }: {
   item: FeedLog;
   deviceName: (id: string) => string;
   onClose: () => void;
   viewerId: string;
+  /** Step to the previous log in the surrounding view; omitted at the start. */
+  onPrev?: () => void;
+  /** Step to the next log in the surrounding view; omitted at the end. */
+  onNext?: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const advancedRef = useRef<HTMLDialogElement>(null);
   const [imgSrc, setImgSrc] = useState<string | null>(null);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
+  /** Object URL currently held by `imgSrc`, revoked only once it's replaced. */
+  const imgUrlRef = useRef<string | null>(null);
   const metadata = getLogMetadata(item);
   const riskLabel = describeRiskLevel(item.risk) ?? 'Concern unavailable';
   const riskBadge =
@@ -384,33 +394,94 @@ export function LogDetailDialog({
   }, []);
 
   useEffect(() => {
-    // Prefer inline image bytes (freshly decrypted, not yet persisted to IDB),
-    // fall back to async IDB load for events already stored without inline image.
-    const inlineBytes = getLogImage(item);
-    let url: string | null = null;
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+      // The Advanced dialog sits on top; let it have Escape and the arrows.
+      if (advancedRef.current?.open) return;
+      if (e.key === 'ArrowLeft' && onPrev) {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === 'ArrowRight' && onNext) {
+        e.preventDefault();
+        onNext();
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onPrev, onNext]);
+
+  /** The step buttons live in the header, so they hold one spot regardless of
+   * the log's type — they're rendered even at the ends of the list, disabled,
+   * rather than disappearing and shifting the row. */
+  const stepButtons = (
+    <div class="logs-detail-step">
+      <button
+        class="logs-detail-step-button"
+        type="button"
+        aria-label="Previous log"
+        disabled={!onPrev}
+        onClick={() => onPrev?.()}
+      >
+        <ChevronLeftIcon />
+      </button>
+      <button
+        class="logs-detail-step-button"
+        type="button"
+        aria-label="Next log"
+        disabled={!onNext}
+        onClick={() => onNext?.()}
+      >
+        <ChevronRightIcon />
+      </button>
+    </div>
+  );
+
+  useEffect(
+    () => () => {
+      if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
     let cancelled = false;
 
-    const setUrl = (bytes: Uint8Array) => {
+    // Stepping with the arrows swaps `item` in place. The previous picture stays
+    // up until the new one has decoded — clearing it first flashes an empty
+    // dialog, and collapses its height, on every step.
+    const show = (bytes: Uint8Array) => {
       if (cancelled) return;
-      url = URL.createObjectURL(
+      const url = URL.createObjectURL(
         new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'image/webp' }),
       );
+      if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current);
+      imgUrlRef.current = url;
       setImgSrc(url);
     };
 
+    const clear = () => {
+      if (cancelled) return;
+      if (imgUrlRef.current) URL.revokeObjectURL(imgUrlRef.current);
+      imgUrlRef.current = null;
+      setImgSrc(null);
+    };
+
+    // Prefer inline image bytes (freshly decrypted, not yet persisted to IDB),
+    // fall back to async IDB load for events already stored without inline image.
+    const inlineBytes = getLogImage(item);
     if (inlineBytes) {
-      setUrl(inlineBytes);
+      show(inlineBytes);
     } else if (item.image_w !== undefined) {
       loadEventImage(viewerId, item.id)
-        .then((bytes) => {
-          if (bytes) setUrl(bytes);
-        })
-        .catch(() => {});
+        .then((bytes) => (bytes ? show(bytes) : clear()))
+        .catch(clear);
+    } else {
+      clear();
     }
 
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
     };
   }, [item.id, viewerId]);
 
@@ -419,6 +490,7 @@ export function LogDetailDialog({
       <DialogHeader
         actions={
           <>
+            {stepButtons}
             {riskBadge}
             {item.batch_status === 'failed' && (
               <span class="logs-verify-badge logs-verify-badge--failed">⚠ Unverified</span>
@@ -436,57 +508,59 @@ export function LogDetailDialog({
           </>
         }
       >
-        {getLogCategory(item)}
+        <span class="logs-detail-title">
+          <span class="logs-detail-title-icon">
+            <LogIcon log={item} />
+          </span>
+          {getLogCategory(item)}
+        </span>
       </DialogHeader>
-      <p class="logs-detail-subtitle">
-        On {deviceName(item.device_id)} at {formatDate(item.ts)} {formatTime(item.ts)}
-      </p>
-      <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
-      {!imgSrc && item.type !== 'screenshot' && (
-        <div class="logs-detail-icon">
-          <LogIcon log={item} />
+
+      <div class="logs-detail-body">
+        <div class="logs-detail-summary">
+          <p class="logs-detail-message">{getLogMessage(item, deviceName(item.device_id))}</p>
+          <p class="logs-detail-time">
+            {formatDate(item.ts)} at {formatTime(item.ts)}
+          </p>
         </div>
-      )}
-      {imgSrc && (
-        <button
-          class="logs-detail-image-button"
-          type="button"
-          onClick={() => setLightboxOpen(true)}
-          aria-label="Open image fullscreen"
-        >
-          <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
-        </button>
-      )}
-      {metadata.length > 0 && (
-        <details class="logs-detail-more">
-          <summary>More details</summary>
-          <dl class="logs-meta logs-detail-meta">
-            {metadata.map(([key, value], i) => (
-              <>
-                <dt key={`k-${i}`}>{key}</dt>
-                <dd key={`v-${i}`}>{value}</dd>
-              </>
-            ))}
-          </dl>
-        </details>
-      )}
-      <div class="logs-detail-learn-more">
+        <div class="logs-detail-media">
+          {imgSrc ? (
+            <img class="logs-detail-image" src={imgSrc} alt="screenshot" />
+          ) : (
+            /* A log with no picture gets an enlarged echo of its gallery tile,
+               so the media area holds the same object you clicked. */
+            <div class="logs-detail-preview">
+              <span class="logs-detail-preview-icon">
+                <LogIcon log={item} />
+              </span>
+              <span class="logs-detail-preview-type">{getLogCategory(item)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div class="logs-detail-footer">
+        {metadata.length > 0 && (
+          <Button variant="ghost" type="button" onClick={() => advancedRef.current?.showModal()}>
+            Advanced
+          </Button>
+        )}
         <Button variant="ghost" href={getLogHelpUrl(item)} target="_blank" rel="noreferrer">
-          Learn more about this event
+          Learn more
         </Button>
       </div>
-      {lightboxOpen && (
-        <div class="logs-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
-          <div class="logs-lightbox-frame">
-            <img
-              class="logs-lightbox-image"
-              src={imgSrc!}
-              alt="screenshot"
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        </div>
-      )}
+
+      <Dialog dialogRef={advancedRef} size="md" class="logs-advanced-dialog">
+        <DialogHeader>Advanced</DialogHeader>
+        <dl class="logs-meta logs-detail-meta">
+          {metadata.map(([key, value], i) => (
+            <>
+              <dt key={`k-${i}`}>{key}</dt>
+              <dd key={`v-${i}`}>{value}</dd>
+            </>
+          ))}
+        </dl>
+      </Dialog>
     </Dialog>
   );
 }

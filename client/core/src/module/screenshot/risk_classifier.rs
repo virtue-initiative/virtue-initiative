@@ -48,9 +48,11 @@ pub struct RiskClassifier {
 }
 
 impl RiskClassifier {
-    /// `model_bytes` is an NNEF tar (not ONNX) — pre-converted offline via
-    /// `examples/onnx_to_nnef.rs` (see that file for how to regenerate it from the source ONNX
-    /// model, and why it's *not* pre-optimized). Building the model (NNEF parse + optimize) is
+    /// `model_bytes` is an NNEF tar (not ONNX) — pre-converted offline from the source ONNX
+    /// model (see `models/README.md` for how to regenerate it). The conversion deliberately
+    /// stops at `into_typed()` rather than `into_optimized()`: the optimizer fuses ops (e.g.
+    /// `OptMulByScalar`) that NNEF's serializer has no writer for, so optimization happens
+    /// here at load time instead, on the NNEF-loaded model. Building the model (NNEF parse + optimize) is
     /// deferred to the first [`classify`](Self::classify_image) call that actually needs it, and
     /// the built model is dropped again as soon as that call returns — measured at ~40MB on iOS
     /// — rather than being cached for the process's lifetime. The cheap skin-tone gate below

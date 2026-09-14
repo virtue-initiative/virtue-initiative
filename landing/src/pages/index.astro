@@ -46,11 +46,11 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       <ol class="steps-grid">
         <li class="step-card">
           <span class="step-number">1.</span>
-          <span>Create an account</span>
+          <a href={`${APP_URL}/signup`}>Create an account</a>
         </li>
         <li class="step-card">
           <span class="step-number">2.</span>
-          <span>Install the app on your devices</span>
+          <a href="/download">Install the app on your devices</a>
         </li>
         <li class="step-card">
           <span class="step-number">3.</span>
@@ -307,6 +307,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       <p>Create your account and set up your accountability partner.</p>
       <div class="section-actions">
         <Button href={`${APP_URL}/signup`} variant="primary" size="lg">Get started</Button>
+        <Button href="/download" size="lg">Download</Button>
       </div>
     </section>
   </div>

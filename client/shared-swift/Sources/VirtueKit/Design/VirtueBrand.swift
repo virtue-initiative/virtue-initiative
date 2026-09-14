@@ -4,6 +4,8 @@ import SwiftUI
 public enum VirtueBrand {
     /// Forest green — matches --accent / --forest.
     public static let accent = Color(red: 30.0 / 255.0, green: 58.0 / 255.0, blue: 46.0 / 255.0)
+    /// Link color — matches --link.
+    public static let link = Color(red: 179.0 / 255.0, green: 67.0 / 255.0, blue: 0.0 / 255.0)
     /// Warm ochre — matches --ochre.
     public static let ochre = Color(red: 166.0 / 255.0, green: 127.0 / 255.0, blue: 61.0 / 255.0)
     /// Page background — matches --bg (#f4efe3).

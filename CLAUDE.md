@@ -120,6 +120,20 @@ Read these before touching crypto, batch, or auth code:
 - The JWT token `type` claim values (`"device"`, `"server"`)
 - The hash chain input encoding rules (LE integers, sorted keys)
 
+## Copy style
+
+Checklist for user-facing text (website, help docs, app UI copy):
+
+- [ ] No em dashes — reasonable comma clause or a new sentence instead
+- [ ] Every line ends with terminal punctuation
+- [ ] No sentence opens on a dangling fragment before a colon
+- [ ] No rhetorical questions used as scene-setting
+- [ ] No "which of those..." style callbacks — say the answer plainly
+- [ ] Long compound sentences split where each half stands alone
+- [ ] No sentence that only restates what the next sentence already implies
+- [ ] Instructions phrased as direct commands ("Update...", "Delete...")
+- [ ] User-facing terms match what's in the UI, not internal jargon
+
 ## Pull requests
 
 When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.

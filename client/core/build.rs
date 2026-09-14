@@ -97,9 +97,8 @@ fn load_dotenv_file(path: &PathBuf) {
 
 /// The NSFW model is tracked by Git LFS and embedded into the binary via `include_bytes!`
 /// (`src/module/screenshot.rs`) — as an NNEF tar pre-converted offline from the source ONNX
-/// model (see `examples/onnx_to_nnef.rs`; both files are LFS-tracked, but only the NNEF one is
-/// actually compiled in). If LFS objects aren't materialized at build time, the file on disk is
-/// a ~130-byte text *pointer*, which gets baked into the binary instead of the model. The
+/// model (see `models/README.md`). If LFS objects aren't materialized at build time, the file on
+/// disk is a ~130-byte text *pointer*, which gets baked into the binary instead of the model. The
 /// classifier then fails to load and every screenshot risk is silently 0. Catch that here at
 /// build time — loudly — instead of shipping a broken detector.
 fn assert_model_resolved() {

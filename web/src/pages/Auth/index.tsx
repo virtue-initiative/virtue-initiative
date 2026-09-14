@@ -27,7 +27,9 @@ import {
   SegmentedControl,
 } from '@virtueinitiative/shared-web';
 import { LANDING_URL } from '../../utils/landing-url';
-import { PasswordField } from './PasswordField';
+import { MIN_PASSWORD_LENGTH, passwordLengthError } from '../../utils/password-policy';
+import { PasswordField, PwnedPasswordWarning } from '../../components/PasswordField';
+import { usePwnedPasswordCount } from '../../hooks/usePwnedPasswordCount';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
 
@@ -68,6 +70,9 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   // account is actually created, and the emailed link may be opened on a
   // different device than the one that requested it.
   const requiresTermsAcceptance = authMode === 'finish-signup';
+  // The two flows where the user picks a password. Login only checks an
+  // existing one, so the policy must not apply there.
+  const isNewPassword = authMode === 'finish-signup' || authMode === 'reset';
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
@@ -79,6 +84,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
+  const pwnedCount = usePwnedPasswordCount(password, isNewPassword);
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -149,6 +155,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         if (password !== confirm) {
           throw new Error('Passwords do not match');
         }
+        const lengthError = passwordLengthError(password);
+        if (lengthError) {
+          throw new Error(lengthError);
+        }
         const client = await finishSignup(signupToken, name.trim() || undefined, password);
         setClient(client);
         setName('');
@@ -167,6 +177,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         }
         if (password !== confirm) {
           throw new Error('Passwords do not match');
+        }
+        const lengthError = passwordLengthError(password);
+        if (lengthError) {
+          throw new Error(lengthError);
         }
         const rotatedKeys = await buildResetKeyMaterial(password);
         await api.resetPassword(resetToken, rotatedKeys.payload);
@@ -245,7 +259,11 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         )}
 
         {authMode === 'forgot' && (
-          <p class="hint-text auth-flow-hint">Enter your email to receive a password reset link.</p>
+          <p class="hint-text auth-flow-hint">
+            Enter your email to receive a password reset link. A reset makes the logs uploaded
+            before it unreadable to you. If you still know your password, log in and change it in
+            Settings instead.
+          </p>
         )}
         {authMode === 'reset' && (
           <>
@@ -255,7 +273,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             <Alert variant="warning" class="auth-flow-hint">
               Resetting your password will generate a new encryption keypair for this account.
               Previously uploaded batches will remain inaccessible, and you should sign back in on
-              your Virtue clients so future uploads use the new keys.
+              your Virtue clients so future uploads use the new keys. If you still know your
+              password, log in and change it in Settings instead to keep your existing logs.
             </Alert>
           </>
         )}
@@ -321,8 +340,18 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                 (authMode === 'reset' && !resetTokenValid) ||
                 (authMode === 'finish-signup' && !signupTokenValid)
               }
+              helpText={
+                isNewPassword ? `Use at least ${MIN_PASSWORD_LENGTH} characters.` : undefined
+              }
+              error={
+                isNewPassword && password.length > 0 && password.length < MIN_PASSWORD_LENGTH
+                  ? (passwordLengthError(password) ?? undefined)
+                  : undefined
+              }
             />
           )}
+
+          <PwnedPasswordWarning count={pwnedCount} class="auth-flow-hint" linkClass="auth-link" />
 
           {(authMode === 'reset' || authMode === 'finish-signup') && (
             <PasswordField

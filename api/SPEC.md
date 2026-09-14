@@ -293,6 +293,8 @@ The server MUST respond **HTTP 401** if the token is invalid or not found.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
+Because the client cannot recover the old private key without the old password, a reset replaces the user's key pair, and the user loses the ability to decrypt batches wrapped for the old `pub_key`. A client SHOULD warn the user of this before finalizing and SHOULD point a user who still knows their password to `POST /user/password` (see API-050) instead.
+
 ### API-015 `GET /user/login-material`
 
 The client MAY send an email as a query param `?email=[email]`.
@@ -389,11 +391,11 @@ The client MUST provide a request in this shape.
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
-  "pub_key": Base64 | undefined,
-  "encrypted_priv_key": Base64 | undefined
+  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined
 }
 ```
+
+The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
 
 The server SHOULD NOT change the email, instead it should send an `email_change` token to the new email address. If the email address is being used by an existing account, it MUST return the same response, but send a "Email already in use." email to the new email.
 
@@ -416,6 +418,37 @@ The client MUST be authenticated with a **Web Token**.
 The client MUST send the user's email in the query. The server SHOULD respond with **HTTP 400** if the email does not match.
 
 If the email matches, the server SHOULD permanently delete the account. The server SHOULD delete all devices, batches, sessions, and tokens. The server SHOULD NOT delete the batch data in R2, instead it should be deleted by the normal 30 day cycle.
+
+### API-050 `POST /user/password`
+
+The client MUST authenticate with a **Web Token** and send
+
+```js
+{
+  "current_password_auth": Base64,
+  "password_auth": Base64,
+  "password_salt": Base64,
+  "encrypted_priv_key": Base64
+}
+```
+
+`current_password_auth` MUST be derived from the current password and the user's current salt, as for `POST /login`. `password_auth` and `encrypted_priv_key` MUST be derived from the new password and the new `password_salt`, using the current `HashParams`.
+
+The client MUST keep the user's existing key pair: `encrypted_priv_key` MUST be the user's current private key, re-encrypted under the new wrapping key. This keeps batches wrapped for the user's `pub_key` readable. The client SHOULD confirm that the current password decrypts the stored `encrypted_priv_key` and that the result matches `pub_key` before sending.
+
+The server MUST return **HTTP 403** if `current_password_auth` does not match. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session. The server SHOULD validate `password_auth`, `password_salt` and `encrypted_priv_key` in the same way as `/signup`. The server MUST NOT change `pub_key`.
+
+On success, the server MUST:
+
+- update the password hash, salt, hash params version and `encrypted_priv_key` together;
+- revoke every other web session of the user, keeping the session that made the request;
+- invalidate any outstanding password-reset tokens for the user.
+
+The server MUST NOT revoke device sessions.
+
+The server SHOULD email the user that their password changed. Email delivery MUST be best-effort: a failure to send MUST NOT fail the request.
+
+The server MUST respond **HTTP 204**.
 
 ## API-022 Partners
 
@@ -506,6 +539,85 @@ The id MUST be a valid partnership ID.
 The server MUST delete the partnership and notify the other user.
 
 The server MUST respond **HTTP 204**.
+
+## API-043 Locked passwords
+
+A locked password lets a user (the owner) store a secret they don't want easy access to themselves, e.g. a Screen Time passcode. Reading it is treated as a red flag: the entry is permanently marked accessed and every accepted watcher is emailed immediately, without exposing the value to them. Watchers otherwise have no visibility into it at all.
+
+The value MUST be end-to-end encrypted the same way batch keys are (see `access_keys`), sealed with HPKE for the owner's own `pub_key`.
+
+This is for short secrets, not file storage. The server MUST reject `label` over 100 characters and `wrapped_value` over 1024 Base64 characters (roughly 720 plaintext bytes once HPKE overhead is subtracted) with **HTTP 400**.
+
+### API-044 `POST /locked-password`
+
+The client MUST authenticate with a **Web Token**.
+
+The client MUST send:
+
+```js
+{
+  "label": "Screen Time passcode",
+  "wrapped_value": Base64 // HPKE-sealed for the caller's own pub_key
+}
+```
+
+The server MUST store the entry against the caller as owner and respond **HTTP 200**:
+
+```js
+{
+  "id": UUID
+}
+```
+
+### API-045 `GET /locked-password`
+
+The client MUST authenticate with a **Web Token**.
+
+The server MUST return every entry the caller owns, including soft-deleted ones (the client decides how to display them). The server MUST NOT include `wrapped_value` in this list.
+
+```js
+// array of:
+{
+  "id": UUID,
+  "label": "Screen Time passcode",
+  "created_at": DateTime,
+  "accessed_at": DateTime | null,
+  "deleted_at": DateTime | null
+}
+```
+
+### API-046 `POST /locked-password/:id/reveal`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST respond **HTTP 200**:
+
+```js
+{
+  "wrapped_value": Base64,
+  "accessed_at": DateTime | null
+}
+```
+
+If `accessed_at` was previously null, the server MUST permanently set it to now (no endpoint may clear it) and MUST immediately email every accepted watcher that this password was accessed, naming it by its `label` but never including its value, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`).
+
+### API-047 `DELETE /locked-password/:id`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST soft-delete the entry by setting `deleted_at` to now and respond **HTTP 204**. The server SHOULD hard-delete any entry whose `deleted_at` is more than 7 days old.
+
+### API-048 `POST /locked-password/:id/restore`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST null out `deleted_at` and respond **HTTP 204**.
+
+### API-049 `DELETE /locked-password/:id/permanent`
+
+The client MUST authenticate with a **Web Token**. The caller MUST be the entry's owner, else **HTTP 404**.
+
+The server MUST hard-delete the entry regardless of its current `deleted_at` and respond **HTTP 204**.
 
 ## API-028 Device Management
 
@@ -609,6 +721,8 @@ DeviceSettings;
 The client MUST be authenticated with a **Device Token**.
 
 The server MUST revoke the device token and soft-delete the device. It also resets the device hash state.
+
+Because a logout removes a device from monitoring, the server SHOULD email the owner and the owner's accepted watchers (skipping watchers whose `email_frequency` is `none`) that the device logged out. Email delivery MUST be best-effort: a failure to send MUST NOT fail the request.
 
 On success, the server MUST respond with **HTTP 204**
 

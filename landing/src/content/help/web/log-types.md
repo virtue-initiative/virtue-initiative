@@ -6,30 +6,31 @@ sidebar_position: 2
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
 routine activity (screenshots, sign-ins). A few are **alerts** that flag an
-interruption in monitoring worth a second look.
+interruption in monitoring and sometimes indicate a follow-up communication to
+your partner may be needed.
 
 Open any entry to see its details, the device it came from, and a link back to
 this page.
 
 ## Screenshot
 
-A screenshot was captured on the device. This is the most common entry — the
+A screenshot was captured on the device. This is the most common entry. The
 monitoring app captures the screen on a regular interval while it is running.
 
 ## Screenshot Skipped
 
-Monitoring was active but no screenshot was uploaded — either the screen had
+Monitoring was active but no screenshot was uploaded. Either the screen had
 not changed since the last capture, or the device was locked or asleep. This
 keeps the timeline continuous without storing redundant images.
 
 ## System Login
 
 The user logged into this computer, or the computer started up (on systems
-without a separate login step)
+without a separate login step).
 
 ## System Logout
 
-The user logged out of this computer, or the computer was shut down
+The user logged out of this computer, or the computer was shut down.
 
 ## Screenshot Missed
 
@@ -41,7 +42,8 @@ ones are worth investigating.
 
 ## Monitoring Stopped by User
 
-A user stopped the monitoring process.
+A user stopped the monitoring process intentionally. This event cannot happen
+without user intervention.
 
 ## Monitoring Resumed by User
 

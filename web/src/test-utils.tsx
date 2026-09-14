@@ -16,6 +16,7 @@ export function makeFakeSession(overrides: Partial<Session> = {}): Session {
     onTokenRefreshFailed: vi.fn(),
     isInvalidated: vi.fn().mockReturnValue(false),
     unwrapPrivateKey: vi.fn().mockResolvedValue(undefined),
+    changePassword: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as Session;
 }
@@ -34,7 +35,11 @@ function AllProviders({ children }: { children: ComponentChildren }) {
   );
 }
 
-export function renderWithClient(ui: h.JSX.Element, options?: Omit<RenderOptions, 'wrapper'>) {
-  mockSessionRestore();
+export function renderWithClient(
+  ui: h.JSX.Element,
+  options?: Omit<RenderOptions, 'wrapper'>,
+  session?: Session,
+) {
+  mockSessionRestore(session);
   return render(ui, { wrapper: AllProviders, ...options });
 }
