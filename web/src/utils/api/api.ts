@@ -28,6 +28,12 @@ import type {
   CreateLockedPasswordPayload,
   CreateLockedPasswordResponse,
   RevealLockedPasswordResponse,
+  AnalyticsMetrics,
+  AnalyticsSnapshot,
+  AdminQueryPreset,
+  AdminQueryPayload,
+  AdminQueryResult,
+  AdminQueryScanDetails,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -56,6 +62,12 @@ export type {
   CreateLockedPasswordPayload,
   CreateLockedPasswordResponse,
   RevealLockedPasswordResponse,
+  AnalyticsMetrics,
+  AnalyticsSnapshot,
+  AdminQueryPreset,
+  AdminQueryPayload,
+  AdminQueryResult,
+  AdminQueryScanDetails,
 };
 
 const BASE =
@@ -338,6 +350,17 @@ export const api = {
 
   permanentlyDeleteLockedPassword: (id: string) =>
     req<void>(`/locked-password/${id}/permanent`, { method: 'DELETE' }),
+
+  // api/SPEC.md API-051: admin-only; every call 403s for a non-admin.
+  getAdminAnalytics: (days = 90) => req<AnalyticsSnapshot[]>(`/admin/analytics?days=${days}`),
+
+  refreshAdminAnalytics: () =>
+    req<AnalyticsSnapshot>('/admin/analytics/refresh', { method: 'POST' }),
+
+  getAdminQueryPresets: () => req<AdminQueryPreset[]>('/admin/query/presets'),
+
+  runAdminQuery: (payload: AdminQueryPayload) =>
+    req<AdminQueryResult>('/admin/query', { method: 'POST', body: JSON.stringify(payload) }),
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

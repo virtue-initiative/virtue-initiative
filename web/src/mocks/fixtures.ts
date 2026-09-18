@@ -1,4 +1,5 @@
 import type {
+  AnalyticsSnapshot,
   Device,
   LockedPassword,
   User,
@@ -62,4 +63,22 @@ export const TEST_LOCKED_PASSWORD: LockedPassword = {
   created_at: Date.now() - 3_600_000,
   accessed_at: null,
   deleted_at: null,
+};
+
+export const TEST_ANALYTICS_SNAPSHOT: AnalyticsSnapshot = {
+  day: '2026-09-18',
+  created_at: Date.now() - 3_600_000,
+  metrics: {
+    users: { total: 42, verified: 40, new_1d: 1, new_7d: 5, new_30d: 12 },
+    active_users: { d1: 9, d7: 17, d30: 25 },
+    active_devices: { d1: 12, d7: 34, d30: 40 },
+    devices: {
+      total: 63,
+      owners: 42,
+      by_platform: { linux: 30, android: 33 },
+    },
+    batches: { total: 9001, d1: 120, d7: 800 },
+    partners: { total: 30, accepted: 24, pending: 6, watched_users: 20 },
+    locked_passwords: { total: 7 },
+  },
 };

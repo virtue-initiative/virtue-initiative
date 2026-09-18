@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import admin from './routes/admin';
 import auth from './routes/auth';
 import bugReport from './routes/bug-report';
 import data from './routes/data';
@@ -8,6 +9,7 @@ import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import lockedPasswords from './routes/locked-password';
 import partners from './routes/partners';
+import { snapshotAnalytics } from './lib/analytics';
 import { isApiVersionGone, stripApiVersion } from './lib/api-version';
 import { stripApiBasePath } from './lib/base-path';
 import {
@@ -19,6 +21,8 @@ import {
 } from './lib/retention';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
+
+const ANALYTICS_CRON = '20 0 * * *';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
   getPath: (request, options) => {
@@ -69,6 +73,7 @@ app.route('/device', devices);
 app.route('/locked-password', lockedPasswords);
 app.route('/data', data);
 app.route('/d', deviceOnly);
+app.route('/admin', admin);
 
 app.get('/r2/*', async (c) => {
   const key = c.req.path.replace(/^\/r2\//, '');
@@ -97,11 +102,19 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 export default {
   fetch: app.fetch,
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
-    ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
-    ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
-    ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
-    ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
-    ctx.waitUntil(pruneExpiredLockedPasswords(env, controller.scheduledTime));
+    // Cron expressions here must match wrangler.json "triggers.crons".
+    switch (controller.cron) {
+      case ANALYTICS_CRON:
+        // api/SPEC.md API-051: one metrics snapshot per UTC day.
+        ctx.waitUntil(snapshotAnalytics(env, controller.scheduledTime));
+        break;
+      default:
+        ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
+        ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
+        ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
+        ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
+        ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
+        ctx.waitUntil(pruneExpiredLockedPasswords(env, controller.scheduledTime));
+    }
   },
 };

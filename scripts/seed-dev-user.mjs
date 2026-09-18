@@ -2,7 +2,7 @@
 // Inserts a deterministic dev test account into the local D1 database.
 // Idempotent: uses INSERT OR IGNORE + UPDATE, so re-running setup is safe.
 //
-// Credentials: dev@dev.com / devpassword
+// Credentials: dev@dev.com / devpassword. The account is also marked admin.
 import { argon2id } from 'hash-wasm';
 import { DhkemX25519HkdfSha256 } from '@hpke/dhkem-x25519';
 import { execSync } from 'child_process';
@@ -100,6 +100,8 @@ const sql = `
 INSERT OR IGNORE INTO users (id, email, password_hash, password_salt, password_params_version, email_verified, pub_key, encrypted_priv_key)
 VALUES (X'${USER_ID_HEX}', '${EMAIL}', '${passwordHash}', X'${saltHex}', 'argon2id-v1', 1, X'${pubKeyHex}', X'${privKeyHex}');
 UPDATE users SET pub_key = X'${pubKeyHex}', encrypted_priv_key = X'${privKeyHex}' WHERE id = X'${USER_ID_HEX}';
+-- The dev account is an admin so /admin works out of the box locally (api/SPEC.md API-051).
+INSERT OR IGNORE INTO admins (user_id, created_at) VALUES (X'${USER_ID_HEX}', unixepoch());
 `;
 
 const tmpFile = join(ROOT, '.seed-dev-user-tmp.sql');

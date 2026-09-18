@@ -1,0 +1,129 @@
+.admin-snapshot-time {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.admin-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.admin-stat {
+  gap: var(--space-1);
+}
+
+.admin-stat-label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.admin-stat-value {
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.admin-stat-detail {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-query-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.admin-query-form .vi-field,
+.admin-query-form .vi-textarea,
+.admin-query-form .vi-select {
+  width: 100%;
+  max-width: 48rem;
+}
+
+.admin-query-form .vi-textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.admin-preset-description {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.admin-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.admin-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.admin-results-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.admin-limit-input {
+  width: 8rem;
+}
+
+.admin-scan-warning {
+  margin-bottom: var(--space-4);
+}
+
+.admin-scan-warning-text {
+  margin: 0 0 var(--space-2);
+}
+
+.admin-plan {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+}

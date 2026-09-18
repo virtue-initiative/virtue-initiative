@@ -43,7 +43,7 @@ function normalizeUuidString(uuid: string): string {
   throw new Error(`Invalid UUID: ${uuid}`);
 }
 
-function bytesToUuid(value: unknown): string {
+export function bytesToUuid(value: unknown): string {
   if (typeof value === 'string') {
     return normalizeUuidString(value);
   }
@@ -1293,4 +1293,40 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     ['partnership_id', 'watching_user_id', 'watcher_user_id'],
   );
   return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
+}
+
+// api/SPEC.md API-051: admin status is read from the admins table only; nothing
+// in this module writes to it.
+export async function isAdmin(db: D1Database, userId: string) {
+  const row = await db
+    .prepare('SELECT 1 AS present FROM admins WHERE user_id = ?')
+    .bind(uuidToBytes(userId))
+    .first<{ present: number }>();
+  return row !== null;
+}
+
+export async function upsertAnalyticsSnapshot(
+  db: D1Database,
+  input: { day: string; metrics: string; created_at: number },
+) {
+  return db
+    .prepare(
+      `INSERT OR REPLACE INTO analytics_snapshots (day, metrics, created_at)
+       VALUES (?, ?, ?)`,
+    )
+    .bind(input.day, input.metrics, input.created_at)
+    .run();
+}
+
+export async function listAnalyticsSnapshots(db: D1Database, limit: number) {
+  const result = await db
+    .prepare(
+      `SELECT day, metrics, created_at
+       FROM analytics_snapshots
+       ORDER BY day DESC
+       LIMIT ?`,
+    )
+    .bind(limit)
+    .all<{ day: string; metrics: string; created_at: number }>();
+  return result.results;
 }

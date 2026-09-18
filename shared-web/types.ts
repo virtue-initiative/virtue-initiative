@@ -277,3 +277,80 @@ export const revealLockedPasswordResponseSchema = z.object({
   accessed_at: z.number().nullable(),
 });
 export type RevealLockedPasswordResponse = z.infer<typeof revealLockedPasswordResponseSchema>;
+
+// ── Admin (api/SPEC.md API-051) ──────────────────────────────────────────────
+
+export const analyticsMetricsSchema = z.object({
+  users: z.object({
+    total: z.number(),
+    verified: z.number(),
+    new_1d: z.number(),
+    new_7d: z.number(),
+    new_30d: z.number(),
+  }),
+  active_users: z.object({ d1: z.number(), d7: z.number(), d30: z.number() }),
+  active_devices: z.object({ d1: z.number(), d7: z.number(), d30: z.number() }),
+  devices: z.object({
+    total: z.number(),
+    owners: z.number(),
+    by_platform: z.record(z.string(), z.number()),
+  }),
+  batches: z.object({ total: z.number(), d1: z.number(), d7: z.number() }),
+  partners: z.object({
+    total: z.number(),
+    accepted: z.number(),
+    pending: z.number(),
+    watched_users: z.number(),
+  }),
+  locked_passwords: z.object({ total: z.number() }),
+});
+export type AnalyticsMetrics = z.infer<typeof analyticsMetricsSchema>;
+
+// Ratios are derived, never stored (API-002): average over people who have at least one.
+export function perPersonAverage(total: number, people: number) {
+  return people === 0 ? 0 : Math.round((total / people) * 100) / 100;
+}
+
+export const analyticsSnapshotSchema = z.object({
+  day: z.string(),
+  metrics: analyticsMetricsSchema,
+  created_at: z.number(),
+});
+export type AnalyticsSnapshot = z.infer<typeof analyticsSnapshotSchema>;
+
+export const adminQueryPresetSchema = z.object({
+  name: z.string(),
+  label: z.string(),
+  description: z.string(),
+});
+export type AdminQueryPreset = z.infer<typeof adminQueryPresetSchema>;
+
+export const ADMIN_QUERY_DEFAULT_LIMIT = 100;
+export const ADMIN_QUERY_MAX_LIMIT = 500;
+const adminQueryLimitSchema = z.number().int().min(1).max(ADMIN_QUERY_MAX_LIMIT).optional();
+export const adminQuerySchema = z.union([
+  z.object({ preset: z.string().min(1), limit: adminQueryLimitSchema }),
+  z.object({
+    sql: z.string().min(1).max(20_000),
+    limit: adminQueryLimitSchema,
+    // Run even if the plan shows a full scan of a large table (API-055).
+    allow_scan: z.boolean().optional(),
+  }),
+]);
+export type AdminQueryPayload = z.infer<typeof adminQuerySchema>;
+
+export const adminQueryResultSchema = z.object({
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.unknown())),
+  truncated: z.boolean(),
+  rows_read: z.number(),
+});
+export type AdminQueryResult = z.infer<typeof adminQueryResultSchema>;
+
+// `details` of the HTTP 400 returned when a raw query would fully scan a large table.
+export const adminQueryScanDetailsSchema = z.object({
+  code: z.literal('full_scan'),
+  tables: z.array(z.string()),
+  plan: z.array(z.string()),
+});
+export type AdminQueryScanDetails = z.infer<typeof adminQueryScanDetailsSchema>;
