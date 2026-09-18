@@ -51,6 +51,10 @@ jobs:
 
       - name: Setup Android SDK tools
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default package list includes the legacy "tools"
+          # package, which Google no longer publishes, so sdkmanager exits 1.
+          packages: platform-tools
 
       - name: Cache Android SDK
         uses: actions/cache@v4
