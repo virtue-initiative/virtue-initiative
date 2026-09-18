@@ -29,6 +29,7 @@ import {
 } from '@virtueinitiative/shared-web';
 import { formatRelativeTimestamp } from '../../utils/time';
 import { csvFilename, downloadCsv, toCsv } from './csv';
+import { Trends } from './Trends';
 import './style.css';
 
 const HISTORY_DAYS = 90;
@@ -115,9 +116,9 @@ export function Admin() {
           <h2>History</h2>
         </div>
         {snapshots && snapshots.length > 0 ? (
-          <HistoryTable snapshots={snapshots} />
+          <Trends snapshots={snapshots} />
         ) : (
-          <p class="empty">One row appears here per day once snapshots exist.</p>
+          <p class="empty">One point per day appears here once snapshots exist.</p>
         )}
       </section>
 
@@ -199,47 +200,6 @@ function StatTiles({ metrics }: { metrics: AnalyticsMetrics }) {
           {tile.detail && <span class="admin-stat-detail">{tile.detail}</span>}
         </Card>
       ))}
-    </div>
-  );
-}
-
-function HistoryTable({ snapshots }: { snapshots: AnalyticsSnapshot[] }) {
-  return (
-    <div class="admin-table-wrap">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Day</th>
-            <th>Users</th>
-            <th>Active 7d</th>
-            <th>Active devices 7d</th>
-            <th>Active devices/active user</th>
-            <th>Devices</th>
-            <th>Devices/user</th>
-            <th>Partners</th>
-            <th>Partners/user</th>
-            <th>Batches</th>
-            <th>Locked passwords</th>
-          </tr>
-        </thead>
-        <tbody>
-          {snapshots.map((snapshot) => (
-            <tr key={snapshot.day}>
-              <td>{snapshot.day}</td>
-              <td>{snapshot.metrics.users.total}</td>
-              <td>{snapshot.metrics.active_users.d7}</td>
-              <td>{snapshot.metrics.active_devices.d7}</td>
-              <td>{activeDevicesPerActiveUser(snapshot.metrics)}</td>
-              <td>{snapshot.metrics.devices.total}</td>
-              <td>{devicesPerPerson(snapshot.metrics)}</td>
-              <td>{snapshot.metrics.partners.accepted}</td>
-              <td>{partnersPerPerson(snapshot.metrics)}</td>
-              <td>{snapshot.metrics.batches.total}</td>
-              <td>{snapshot.metrics.locked_passwords.total}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

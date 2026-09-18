@@ -14,6 +14,7 @@ describe('Admin', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    window.localStorage.clear();
   });
 
   it('renders the 404 page when the API answers 403', async () => {
@@ -34,7 +35,7 @@ describe('Admin', () => {
     expect(screen.queryByRole('heading', { name: /^admin$/i })).not.toBeInTheDocument();
   });
 
-  it('renders stat tiles and a history row from the latest snapshot', async () => {
+  it('renders stat tiles from the latest snapshot', async () => {
     renderWithClient(<Admin />);
 
     expect(await screen.findByRole('heading', { name: /^admin$/i })).toBeInTheDocument();
@@ -50,16 +51,43 @@ describe('Admin', () => {
     expect(tiles[2]).toHaveTextContent('2 per active user');
     expect(tiles[3]).toHaveTextContent('1.5 per person with any');
     expect(tiles[5]).toHaveTextContent('1.2 per person with any');
-    expect(screen.getByRole('cell', { name: TEST_ANALYTICS_SNAPSHOT.day })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: '2' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: '1.5' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: '1.2' })).toBeInTheDocument();
+  });
+
+  it('draws one chart per variable and lets any be hidden or shown', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await waitFor(() => {
+      expect(document.querySelectorAll('.admin-trend').length).toBeGreaterThan(20);
+    });
+    const count = document.querySelectorAll('.admin-trend').length;
+    // Fixed variables plus one per platform in the fixture (android, linux).
+    expect(screen.getByRole('img', { name: /^Devices on linux, 30 on/ })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /^Batches, 9,001 on/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('checkbox', { name: 'Batches' }));
+    expect(document.querySelectorAll('.admin-trend')).toHaveLength(count - 1);
+    expect(screen.queryByRole('img', { name: /^Batches, 9,001 on/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /hide all/i }));
+    expect(document.querySelectorAll('.admin-trend')).toHaveLength(0);
+    expect(screen.getByText(/every variable is hidden/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /show all/i }));
+    expect(document.querySelectorAll('.admin-trend')).toHaveLength(count);
+  });
+
+  it('offers a table view of the same variables', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await user.click(await screen.findByRole('button', { name: /^table$/i }));
+
     expect(screen.getByRole('columnheader', { name: 'Locked passwords' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('cell', {
-        name: String(TEST_ANALYTICS_SNAPSHOT.metrics.locked_passwords.total),
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Devices per person' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: TEST_ANALYTICS_SNAPSHOT.day })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '1.50' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '9,001' })).toBeInTheDocument();
   });
 
   it('prompts for a refresh when no snapshot exists yet', async () => {
@@ -96,7 +124,7 @@ describe('Admin', () => {
     await waitFor(() => {
       expect(refreshed).toBe(1);
       expect(document.querySelector('.admin-stat')).toHaveTextContent('77');
-      expect(screen.getByRole('cell', { name: '77' })).toBeInTheDocument();
+      expect(screen.getByRole('img', { name: /^Users, 77 on/ })).toBeInTheDocument();
     });
   });
 
