@@ -323,7 +323,7 @@ function QuerySection() {
         confirmation. Credential columns are never returned.
       </p>
 
-      <Field label="Row limit" id="admin-limit">
+      <Field label="Row limit" id="admin-limit" class="admin-limit-field">
         <Input
           id="admin-limit"
           type="number"

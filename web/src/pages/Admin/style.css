@@ -127,3 +127,8 @@
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
+
+.admin-limit-field {
+  /* Same gap as between the query forms below it. */
+  margin-bottom: var(--space-5);
+}
