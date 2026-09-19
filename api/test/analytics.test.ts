@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import worker from '../src/index';
+import wranglerConfig from '../wrangler.json';
 import { computeAnalyticsMetrics, snapshotAnalytics } from '../src/lib/analytics';
 import { perPersonAverage } from '../../shared-web/types';
 import { clearDB, createDeviceForUser, signupAndGetCookie, uuidToBytes } from './helpers';
@@ -212,5 +213,20 @@ describe('scheduled handler', () => {
 
     await fire('20 0 * * *');
     expect(await snapshotCount()).toBe(1);
+  });
+
+  it('has a branch for every cron in wrangler.json', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      for (const cron of wranglerConfig.triggers.crons) {
+        await fire(cron);
+      }
+      expect(errors).not.toHaveBeenCalledWith(expect.stringMatching(/unhandled cron/i));
+
+      await fire('0 12 * * *');
+      expect(errors).toHaveBeenCalledWith('Unhandled cron expression: 0 12 * * *');
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

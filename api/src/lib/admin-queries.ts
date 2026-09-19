@@ -3,7 +3,8 @@
 import { ADMIN_QUERY_DEFAULT_LIMIT, type AdminQueryResult } from '../../../shared-web/types';
 import { bytesToUuid } from './db';
 
-// Never returned from admin queries, whatever the query asks for (API-055).
+// Dropped from admin query results by output column name (API-055). An alias
+// such as `password_hash AS x` is not caught; this prevents accidents only.
 const SECRET_COLUMNS = new Set([
   'password_hash',
   'password_salt',

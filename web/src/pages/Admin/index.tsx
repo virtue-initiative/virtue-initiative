@@ -280,7 +280,8 @@ function QuerySection() {
       <p class="invite-desc">
         Queries run live against the database. Every row the database reads is billed, so results
         show the rows read and raw SQL that would scan the whole batches table is held for
-        confirmation. Credential columns are never returned.
+        confirmation. Credential columns are hidden from results by name, so renaming one with an
+        alias will show it.
       </p>
 
       <Field label="Row limit" id="admin-limit" class="admin-limit-field">

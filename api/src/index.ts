@@ -22,6 +22,9 @@ import {
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
 
+// Must match wrangler.json "triggers.crons". Each tick runs only its own case,
+// so the daily snapshot never displaces hourly work: 00:05 still fires hourly.
+const HOURLY_CRON = '5 * * * *';
 const ANALYTICS_CRON = '20 0 * * *';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
@@ -102,19 +105,21 @@ app.notFound((c) => c.json({ error: 'Not found' }, 404));
 export default {
   fetch: app.fetch,
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // Cron expressions here must match wrangler.json "triggers.crons".
     switch (controller.cron) {
       case ANALYTICS_CRON:
         // api/SPEC.md API-051: one metrics snapshot per UTC day.
         ctx.waitUntil(snapshotAnalytics(env, controller.scheduledTime));
         break;
-      default:
+      case HOURLY_CRON:
         ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredLockedPasswords(env, controller.scheduledTime));
+        break;
+      default:
+        console.error(`Unhandled cron expression: ${controller.cron}`);
     }
   },
 };

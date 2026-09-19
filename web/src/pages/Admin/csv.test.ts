@@ -25,6 +25,35 @@ describe('toCsv', () => {
     );
   });
 
+  it('keeps text that looks like a formula from running in a spreadsheet', () => {
+    const csv = toCsv({
+      columns: ['name'],
+      rows: [
+        ['=HYPERLINK("http://evil.example","x")'],
+        ['+1+1'],
+        ['-2+3'],
+        ['@SUM(A1)'],
+        ['\tTabbed'],
+        ['safe = fine'],
+        [-1],
+      ],
+    });
+
+    expect(csv).toBe(
+      [
+        'name',
+        `"'=HYPERLINK(""http://evil.example"",""x"")"`,
+        "'+1+1",
+        "'-2+3",
+        "'@SUM(A1)",
+        "'\tTabbed",
+        'safe = fine',
+        '-1',
+        '',
+      ].join('\r\n'),
+    );
+  });
+
   it('produces just a header for an empty result', () => {
     expect(toCsv({ columns: ['n'], rows: [] })).toBe('n\r\n');
   });
