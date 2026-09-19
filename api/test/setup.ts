@@ -108,6 +108,18 @@ CREATE TABLE IF NOT EXISTS locked_passwords (
 );
 CREATE INDEX IF NOT EXISTS idx_locked_passwords_owner_id ON locked_passwords(owner_id);
 CREATE INDEX IF NOT EXISTS idx_locked_passwords_deleted_at ON locked_passwords(deleted_at);
+
+CREATE TABLE IF NOT EXISTS admins (
+  user_id BLOB PRIMARY KEY,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS analytics_snapshots (
+  day TEXT PRIMARY KEY,
+  metrics TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
 
 const statements = schema

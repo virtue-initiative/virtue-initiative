@@ -230,6 +230,12 @@ export async function markUserEmailVerified(userId: string) {
     .run();
 }
 
+export async function markUserAdmin(userId: string) {
+  await env.DB.prepare('INSERT OR IGNORE INTO admins (user_id, created_at) VALUES (?, ?)')
+    .bind(uuidToBytes(userId), Math.floor(Date.now() / 1000))
+    .run();
+}
+
 export function extractTokenFromDelivery(
   delivery: { metadata: string; text: string },
   param: string,
@@ -257,6 +263,8 @@ export function extractTokenFromDelivery(
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   resetHashServerMock();
+  await env.DB.prepare('DELETE FROM analytics_snapshots').run();
+  await env.DB.prepare('DELETE FROM admins').run();
   await env.DB.prepare('DELETE FROM email_tokens').run();
   await env.DB.prepare('DELETE FROM user_sessions').run();
   await env.DB.prepare('DELETE FROM device_sessions').run();

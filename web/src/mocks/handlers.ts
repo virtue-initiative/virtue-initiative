@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import {
+  TEST_ANALYTICS_SNAPSHOT,
   TEST_DEVICES,
   TEST_LOCKED_PASSWORD,
   TEST_USER,
@@ -82,6 +83,29 @@ export const handlers = [
   http.delete(`${BASE}/partner/:id`, () => new HttpResponse(null, { status: 204 })),
 
   // ── Locked passwords ───────────────────────────────────────────────────
+  // ── Admin ──────────────────────────────────────────────────────────────
+  http.get(`${BASE}/admin/analytics`, () => HttpResponse.json([TEST_ANALYTICS_SNAPSHOT])),
+  http.post(`${BASE}/admin/analytics/refresh`, () =>
+    HttpResponse.json({ ...TEST_ANALYTICS_SNAPSHOT, created_at: Date.now() }),
+  ),
+  http.get(`${BASE}/admin/query/presets`, () =>
+    HttpResponse.json([
+      {
+        name: 'recent_signups',
+        label: 'Recent signups',
+        description: 'The 50 newest accounts.',
+      },
+    ]),
+  ),
+  http.post(`${BASE}/admin/query`, () =>
+    HttpResponse.json({
+      columns: ['email', 'created_at'],
+      rows: [['test@example.com', 1_700_000_000_000]],
+      truncated: false,
+      rows_read: 1,
+    }),
+  ),
+
   http.get(`${BASE}/locked-password`, () => HttpResponse.json([TEST_LOCKED_PASSWORD])),
   http.post(`${BASE}/locked-password`, () => HttpResponse.json({ id: 'new-password-1' })),
   http.post(`${BASE}/locked-password/:id/reveal`, () =>

@@ -113,6 +113,57 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
+**AnalyticsMetrics**
+
+Headline numbers computed over the whole database (see API-051). Every field is a raw count; ratios such as devices per person are derived by the client and MUST NOT be stored.
+
+```js
+{
+  "users": { "total": Number, "verified": Number, "new_1d": Number, "new_7d": Number, "new_30d": Number },
+  "active_users": { "d1": Number, "d7": Number, "d30": Number },
+  "active_devices": { "d1": Number, "d7": Number, "d30": Number },
+  "devices": {
+    "total": Number,
+    "owners": Number,
+    "by_platform": { "linux": Number, ... }
+  },
+  "batches": { "total": Number, "d1": Number, "d7": Number },
+  "partners": { "total": Number, "accepted": Number, "pending": Number, "watched_users": Number },
+  "locked_passwords": { "total": Number }
+}
+```
+
+**AnalyticsSnapshot**
+
+```js
+{
+  "day": "2026-09-18",          // UTC calendar day the snapshot belongs to
+  "metrics": AnalyticsMetrics,
+  "created_at": DateTime        // when the metrics were computed
+}
+```
+
+**AdminQueryPreset**
+
+```js
+{
+  "name": "signups_by_day",
+  "label": "Signups by day",
+  "description": "New accounts per UTC day over the last 30 days."
+}
+```
+
+**AdminQueryResult**
+
+```js
+{
+  "columns": ["email", "created_at"],
+  "rows": [["a@example.com", 1700000000000], ...],
+  "truncated": false,          // true when more than `limit` rows matched
+  "rows_read": 1234            // rows the database scanned to answer (what D1 bills)
+}
+```
+
 ### API-003 Authentication
 
 The client MUST provide a refresh token in the Authorization header or a `refresh_token` cookie to access authenticated routes.
@@ -833,3 +884,73 @@ The server MUST email the report to a fixed internal address and include, the me
 The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
 
 On success, the server MUST respond **HTTP 204**.
+
+## API-051 Admin
+
+Admin routes expose aggregate analytics and read-only database access to a small set of operators. They are hidden: the web app MUST NOT link to them from its navigation.
+
+Admin status MUST come from the `admins` table (one row per admin `user_id`) and MUST NOT be settable through any API route; operators grant it directly in the database. Every route in this group requires a **Web Token**. The server MUST respond **HTTP 403** to any authenticated caller who is not an admin.
+
+The server MUST compute an `AnalyticsMetrics` snapshot once per UTC day on a schedule and store it keyed by that day. Recomputing on the same day (API-053) MUST replace that day's row rather than add a second one.
+
+Metric definitions:
+
+- `users.new_*`: accounts whose `created_at` falls in the trailing window (1, 7, or 30 days).
+- `active_users.*`: distinct users that own at least one batch uploaded in the trailing window. Activity is defined by device uploads only; web sessions MUST NOT be tracked for this purpose because it would add a database write per request.
+- `active_devices.*`: distinct devices with at least one batch uploaded in the trailing window. Active devices per active user is `active_devices.dN / active_users.dN` for the same window, derived by the client.
+- `devices.total`: devices that are not soft-deleted. `devices.owners`: distinct users with at least one live device. `devices.by_platform` counts live devices per platform string.
+- `partners.watched_users`: distinct watched users with at least one accepted partnership.
+- Devices per person is `devices.total / devices.owners` and partners per person is `partners.accepted / partners.watched_users`, each over people who have at least one, and 0 when the denominator is 0. Clients compute these from the counts.
+- `locked_passwords.total`: entries that are not soft-deleted.
+
+### API-052 `GET /admin/analytics?days=[days]`
+
+`days` is optional, defaults to 90, and MUST be clamped to at most 365.
+
+The server MUST return the stored snapshots for the most recent `days` days, newest first:
+
+```js
+// array of AnalyticsSnapshot
+```
+
+### API-053 `POST /admin/analytics/refresh`
+
+The server MUST compute the metrics now, store them as today's snapshot (replacing any existing row for today), and respond **HTTP 200** with the resulting `AnalyticsSnapshot`.
+
+### API-054 `GET /admin/query/presets`
+
+The server MUST return the list of named queries it can run:
+
+```js
+// array of AdminQueryPreset
+```
+
+### API-055 `POST /admin/query`
+
+The client MUST send exactly one of:
+
+```js
+{ "preset": "signups_by_day", "limit": 100 }
+{ "sql": "SELECT email, created_at FROM users ORDER BY created_at DESC", "limit": 100, "allow_scan": false }
+```
+
+`limit` is optional, defaults to 100, and MUST be an integer between 1 and 500. `allow_scan` is optional and defaults to false.
+
+The server MUST respond **HTTP 404** for an unknown preset name.
+
+Raw `sql` MUST be a single read-only statement: it MUST begin with `SELECT` or `WITH` (ignoring comments, whitespace and case) and MUST NOT contain more than one statement. The server MUST reject anything else with **HTTP 400** before executing it. The server MUST wrap it so the parser itself guarantees a SELECT and the result is bounded to `limit` rows (a `LIMIT` clause is applied by the server, whatever the query says), and MUST report `truncated: true` when more rows matched. The same bound applies to presets.
+
+The server MUST NOT return credential or secret material from either presets or raw queries. The credential columns are at minimum `password_hash`, `password_salt`, `encrypted_priv_key`, `wrapped_value`, `access_keys`, and any column whose name ends in `token_hash`. The server MUST drop result columns with those names. Matching is by output column name only, so an alias or expression over a credential column is not hidden; this guards against accidental exposure and is not a security boundary against a determined admin. The server SHOULD render 16-byte BLOB values as UUID strings and other BLOBs as hex.
+
+Rows read are billed, so the server SHOULD inspect the plan of raw `sql` (`EXPLAIN QUERY PLAN`, which reads no table rows) before executing it. If the plan contains a full scan of a large table (at present `batches`) and `allow_scan` is not true, the server MUST NOT execute the query and MUST respond **HTTP 400**:
+
+```js
+{
+  "error": "Query would scan a large table",
+  "details": { "code": "full_scan", "tables": ["batches"], "plan": ["SCAN batches", ...] }
+}
+```
+
+Presets are trusted and skip the plan check.
+
+The server MUST respond **HTTP 200** with an `AdminQueryResult`, including `rows_read` as reported by the database so the caller can see what the query cost. A query the database rejects MUST produce **HTTP 400** with `error: "Query failed"` and the database message in `details`.
