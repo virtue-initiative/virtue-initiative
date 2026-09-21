@@ -520,6 +520,92 @@ function Get-DevMsixBuildNumber {
     return $buildNumber
 }
 
+function Convert-PeRvaToFileOffset {
+    param(
+        [object[]]$Sections,
+        [uint32]$Rva
+    )
+
+    foreach ($section in $Sections) {
+        $size = [Math]::Max($section.VirtualSize, $section.RawSize)
+        if ($Rva -ge $section.VirtualAddress -and $Rva -lt ($section.VirtualAddress + $size)) {
+            return $section.RawOffset + ($Rva - $section.VirtualAddress)
+        }
+    }
+
+    throw "RVA 0x$($Rva.ToString('X')) falls outside every section."
+}
+
+function Get-PeImportedModule {
+    param([string]$Path)
+
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+    if ([BitConverter]::ToUInt32($bytes, $peOffset) -ne 0x00004550) {
+        throw "Not a PE image: $Path"
+    }
+
+    $coffOffset = $peOffset + 4
+    $sectionCount = [BitConverter]::ToUInt16($bytes, $coffOffset + 2)
+    $optionalHeaderSize = [BitConverter]::ToUInt16($bytes, $coffOffset + 16)
+    $optionalOffset = $coffOffset + 20
+    $isPe32Plus = [BitConverter]::ToUInt16($bytes, $optionalOffset) -eq 0x20B
+    $dataDirectoryOffset = $optionalOffset + $(if ($isPe32Plus) { 112 } else { 96 })
+
+    # Data directory index 1 is the import table.
+    $importRva = [BitConverter]::ToUInt32($bytes, $dataDirectoryOffset + 8)
+    if ($importRva -eq 0) {
+        return @()
+    }
+
+    $sections = @()
+    for ($i = 0; $i -lt $sectionCount; $i++) {
+        $header = $optionalOffset + $optionalHeaderSize + ($i * 40)
+        $sections += [pscustomobject]@{
+            VirtualSize    = [BitConverter]::ToUInt32($bytes, $header + 8)
+            VirtualAddress = [BitConverter]::ToUInt32($bytes, $header + 12)
+            RawSize        = [BitConverter]::ToUInt32($bytes, $header + 16)
+            RawOffset      = [BitConverter]::ToUInt32($bytes, $header + 20)
+        }
+    }
+
+    $modules = @()
+    $descriptor = Convert-PeRvaToFileOffset -Sections $sections -Rva $importRva
+    while ($true) {
+        # Each descriptor is 20 bytes and the table ends with an all-zero one.
+        $nameRva = [BitConverter]::ToUInt32($bytes, $descriptor + 12)
+        if ($nameRva -eq 0) {
+            break
+        }
+
+        $nameOffset = Convert-PeRvaToFileOffset -Sections $sections -Rva $nameRva
+        $end = $nameOffset
+        while ($bytes[$end] -ne 0) {
+            $end++
+        }
+        $modules += [System.Text.Encoding]::ASCII.GetString($bytes, $nameOffset, $end - $nameOffset)
+        $descriptor += 20
+    }
+
+    return $modules
+}
+
+# The packaged app loads virtue_windows.dll on machines that may have no Visual
+# C++ Redistributable installed, and the MSIX declares no framework package that
+# would supply one. A DLL that links the CRT dynamically loads fine on a build
+# machine and fails with 0x8007007E everywhere else, which is how Store
+# certification failed on 0.1.3, so refuse to package one.
+# See client/.cargo/config.toml.
+function Assert-NoVisualCppRuntimeImport {
+    param([string]$DllPath)
+
+    $imports = Get-PeImportedModule -Path $DllPath
+    $redistributable = $imports | Where-Object { $_ -match '^(vcruntime|msvcp|msvcr|concrt)' }
+    if ($redistributable) {
+        throw "$DllPath imports $($redistributable -join ', ') from the Visual C++ Redistributable, which is not installed on every Windows machine. Build the Rust DLL with a static CRT (see client/.cargo/config.toml)."
+    }
+}
+
 $VersionHelper = Join-Path $PSScriptRoot "Get-VersionInfo.ps1"
 . $VersionHelper
 
@@ -653,9 +739,12 @@ try {
         }
     }
 
-    if (-not (Test-Path (Join-Path $RustOutputDir "virtue_windows.dll"))) {
-        throw "Missing Rust interop DLL at $(Join-Path $RustOutputDir 'virtue_windows.dll')"
+    $rustInteropDll = Join-Path $RustOutputDir "virtue_windows.dll"
+    if (-not (Test-Path $rustInteropDll)) {
+        throw "Missing Rust interop DLL at $rustInteropDll"
     }
+
+    Assert-NoVisualCppRuntimeImport -DllPath $rustInteropDll
 
     if (-not $SkipTests) {
         & $dotnet test $WindowsTestsProject -c $Profile --no-restore

@@ -1,0 +1,15 @@
+# Statically link the MSVC C runtime into Windows builds.
+#
+# With the default dynamic CRT, `virtue_windows.dll` imports VCRUNTIME140.dll,
+# which ships with the Visual C++ Redistributable rather than with Windows and
+# is not part of the MSIX package graph. Store certification runs on machines
+# without the redistributable, where loading the DLL fails with 0x8007007E
+# ("the specified module could not be found") and the app reports "Unable to
+# load DLL 'virtue_windows' or one of its dependencies" as soon as it touches
+# the Rust interop layer. Linking the CRT statically drops the import, so the
+# package stays self-contained the same way the bundled .NET runtime does.
+#
+# build-msix.ps1 re-checks the built DLL's imports and fails the build if a
+# Visual C++ runtime dependency comes back.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
