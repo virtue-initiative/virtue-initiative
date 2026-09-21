@@ -53,6 +53,28 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 
 Response shapes shared with the web are defined as Zod schemas in `shared-web/types.ts` and imported from there by both the API (`src/lib/email-domain.ts` re-exports `emailFrequencySchema` and friends) and the web. When changing an API response shape, update `shared-web/types.ts` first, then update the route handler to match.
 
+## Admin routes and analytics
+
+`/admin/*` (see `SPEC.md` API-051) is gated by `src/middleware/admin.ts`, which checks the `admins` table. There is deliberately no API to grant admin; do it by hand:
+
+```bash
+# local dev
+wrangler d1 execute DB --env staging --local \
+  --command "INSERT INTO admins (user_id, created_at) SELECT id, unixepoch() FROM users WHERE email = 'you@example.com'"
+# staging / prod
+wrangler d1 execute DB --env staging --remote --command "..."
+wrangler d1 execute DB --env prod --remote --command "..."
+```
+
+`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day; the `5 * * * *` cron keeps doing the hourly notification/retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
+
+```bash
+# against a running `bun run dev` / scripts/launch.sh API (port varies under launch.sh)
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=20+0+*+*+*"
+```
+
+Preset queries and the raw-SQL guard live in `src/lib/admin-queries.ts`. Raw queries are run through `EXPLAIN QUERY PLAN` first and refused (400, `details.code = 'full_scan'`) when they would fully scan a table in `LARGE_TABLES`, unless the request sets `allow_scan: true`; every result reports `rows_read`, which is what D1 bills.
+
 ## Bindings
 
 `c.env.DB` is the D1 database. `c.env.BUCKET` is the R2 bucket. See `src/types/bindings.ts` for the full `Env` interface.

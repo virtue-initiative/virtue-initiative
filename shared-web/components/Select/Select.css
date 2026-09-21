@@ -4,9 +4,11 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 0.55rem 2rem 0.55rem 0.75rem;
+  /* line-height 1 clips descenders in Firefox once appearance is none; 1.25 leaves
+     room for them, and the smaller padding keeps the control the same height as .vi-input. */
+  padding: 0.425rem 2rem 0.425rem 0.75rem;
   font-size: var(--text-base);
-  line-height: 1;
+  line-height: 1.25;
   color: var(--text);
   outline: none;
   transition: border-color 0.15s ease;
@@ -36,8 +38,8 @@
 
 .vi-select--sm {
   min-height: 1.9rem;
-  padding-top: 0.28rem;
-  padding-bottom: 0.28rem;
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
   font-size: 0.8125rem;
 }
 

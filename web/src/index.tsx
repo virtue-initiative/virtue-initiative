@@ -21,6 +21,7 @@ import { Logs } from './pages/Logs/index';
 import { Auth } from './pages/Auth/index';
 import { InviteAccept } from './pages/InviteAccept/index';
 import { Settings } from './pages/Settings/index';
+import { Admin } from './pages/Admin/index';
 import { VerifyEmail } from './pages/VerifyEmail/index';
 import { NotFound } from './pages/_404';
 import { ToastProvider, useToast } from '@virtueinitiative/shared-web';
@@ -140,6 +141,8 @@ function AppShell() {
               <Route path="/logs/:userId/list" component={Logs} />
               <Route path="/logs/:userId/gallery" component={Logs} />
               <Route path="/settings" component={Settings} />
+              {/* Hidden on purpose: no sidebar link, and non-admins see the 404 page. */}
+              <Route path="/admin" component={Admin} />
               <Route path="/verify-email" component={VerifyEmail} />
               <Route path="/invite-accept" component={InviteAccept} />
               {import.meta.env.DEV && (
