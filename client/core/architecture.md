@@ -56,9 +56,10 @@ middle — before writing the result back to the shared snapshot and to disk:
 
 ```
 run_forever loop:
-  wait for the next scheduled wakeup or an incoming DaemonRequest
+  wait for the next scheduled wakeup (capped at 60s) or an incoming DaemonRequest
   drain any requests that arrived; apply + persist them; reply to each
     (only after the persist succeeds)
+  if no request was applied and the wakeup isn't due yet: continue  // CORE-020
   working = state.lock().clone()
   run_phases(&mut working, now_ms):
     lifecycle::tick, screenshot::plan                              // phase 1, 2a
@@ -219,11 +220,9 @@ each host language reaches it differs.
 The daemon runs as a separate process. `run_forever()` runs on its own
 thread; `ipc::spawn_server` spawns the IPC-serving thread once at startup and
 returns immediately — no polling from the platform's main loop. Mac's main
-thread instead polls a local boot-vs-monotonic divergence check
-(`MacPlatformHooks::boot_clock_ms`/`monotonic_clock_ms` — inherent methods,
-not part of `LifecycleHooks`) purely for a post-wake UX nudge
-(`daemon.flush_batch_now()`); this is independent daemon-loop plumbing, not
-part of the core alerting model.
+task additionally waits on IOKit wake notifications (`mac/src/power.rs`)
+purely for a post-wake UX nudge (`daemon.flush_batch_now()`); this is
+independent daemon-loop plumbing, not part of the core alerting model.
 
 ### Windows — in-process `Arc<Daemon>`
 
@@ -334,19 +333,20 @@ suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a thir
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
 it never triggers). Screenshot scheduling itself is unaffected and still
 paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
-separately reads its own boot/monotonic clocks for a local post-wake UX
-check, but as **inherent methods** on `MacPlatformHooks` (`capture.rs`),
-called directly by `mac/src/daemon.rs` — not through this trait, and
-unrelated to the suspend evidence above.
+separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
+local post-wake batch flush — not through this trait, and unrelated to the
+suspend evidence above.
 
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl (`impl<T:
 ScreenshotHooks + LifecycleHooks> PlatformHooks for T {}`) — platforms never
 implement it directly, and doing so is a compile error (conflicting impls).
 
 `get_last_login_utc_ms`/`get_last_logout_utc_ms` can be expensive (D-Bus
-round-trips, subprocess shell-outs); `lifecycle::tick` calls them directly
-every tick with no throttling, which is fine now that the loop itself only
-wakes roughly every `screenshot_interval` (minutes), not every second.
+round-trips, subprocess shell-outs); `run_phases` reads them once per tick
+(`lifecycle::SessionTimes::read`) and hands the result to both
+`lifecycle::tick` and `note_session_events`, with no further throttling.
+That's fine because ticks only run when something is actually due
+(CORE-020) — roughly every `screenshot_interval` (minutes), not every second.
 
 ## Batch blob format
 

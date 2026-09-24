@@ -1,6 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
@@ -9,15 +7,7 @@ use virtue_core::api::HttpApiClient;
 
 use crate::capture::MacPlatformHooks;
 use crate::config::{ClientPaths, build_core_config};
-
-const SUSPEND_CHECK_POLL_INTERVAL: Duration = Duration::from_millis(200);
-/// Boot-vs-monotonic divergence, measured locally each poll, worth treating as
-/// "the machine just woke from sleep" for UX purposes (a prompt batch flush).
-/// There's no real-time OS suspend/resume notification anymore (the core
-/// lifecycle model no longer tracks suspend at all) — this constant and the
-/// check built on it are independent daemon-loop UX plumbing, not part of the
-/// core alerting model. See `client/CLAUDE.md`.
-const LOCAL_SUSPEND_MIN_MS: i64 = 5_000;
+use crate::power::spawn_wake_watcher;
 
 type MacDaemon = Daemon<MacPlatformHooks, HttpApiClient>;
 
@@ -107,39 +97,26 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
 
     let daemon: Arc<MacDaemon> = Arc::new(tokio::task::block_in_place(|| {
         let api = HttpApiClient::new(&config)?;
-        Daemon::new(config, platform.clone(), api, state_path)
+        Daemon::new(config, platform, api, state_path)
     })?);
 
     virtue_core::ipc::spawn_server(paths.state_dir.join("daemon.sock"), Arc::clone(&daemon));
 
-    let shutdown = Arc::new(AtomicBool::new(false));
     let (signal_tx, mut signal_rx) = mpsc::unbounded_channel::<String>();
-    spawn_signal_handler(Arc::clone(&daemon), shutdown.clone(), signal_tx);
+    spawn_signal_handler(Arc::clone(&daemon), signal_tx);
+
+    // Flush the batch promptly after waking from sleep rather than waiting
+    // out the batch interval. This is daemon-loop UX plumbing, not part of
+    // the core alerting model. See `client/CLAUDE.md`.
+    let (wake_tx, mut wake_rx) = mpsc::unbounded_channel::<()>();
+    spawn_wake_watcher(wake_tx);
 
     let loop_daemon = Arc::clone(&daemon);
-    let loop_handle = std::thread::spawn(move || loop_daemon.run_forever());
+    let mut loop_task = tokio::task::spawn_blocking(move || loop_daemon.run_forever());
 
-    // Watch for a local wake-from-sleep signal (see `LOCAL_SUSPEND_MIN_MS`)
-    // on this thread, while the daemon's own sequential loop runs on its own
-    // thread.
-    let mut last_clocks: Option<(i64, i64)> = None;
+    // Purely event-driven: this task sleeps until a signal, a wake, or the
+    // daemon loop exiting on its own.
     loop {
-        if shutdown.load(Ordering::SeqCst) || loop_handle.is_finished() {
-            break;
-        }
-
-        if let (Ok(boot_ms), Ok(mono_ms)) =
-            (platform.boot_clock_ms(), platform.monotonic_clock_ms())
-        {
-            if let Some((prev_boot_ms, prev_mono_ms)) = last_clocks {
-                let suspend_ms = (boot_ms - prev_boot_ms) - (mono_ms - prev_mono_ms);
-                if suspend_ms >= LOCAL_SUSPEND_MIN_MS {
-                    daemon.flush_batch_now();
-                }
-            }
-            last_clocks = Some((boot_ms, mono_ms));
-        }
-
         tokio::select! {
             signal = signal_rx.recv() => {
                 if signal.is_some() {
@@ -147,20 +124,19 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
                 }
                 break;
             }
-            _ = tokio::time::sleep(SUSPEND_CHECK_POLL_INTERVAL) => {}
+            Some(()) = wake_rx.recv() => {
+                tokio::task::block_in_place(|| daemon.flush_batch_now());
+            }
+            _ = &mut loop_task => return Ok(()),
         }
     }
 
     daemon.request_stop();
-    let _ = loop_handle.join();
+    let _ = loop_task.await;
     Ok(())
 }
 
-fn spawn_signal_handler(
-    daemon: Arc<MacDaemon>,
-    shutdown: Arc<AtomicBool>,
-    signal_tx: mpsc::UnboundedSender<String>,
-) {
+fn spawn_signal_handler(daemon: Arc<MacDaemon>, signal_tx: mpsc::UnboundedSender<String>) {
     tokio::spawn(async move {
         use tokio::signal::unix::{SignalKind, signal};
 
@@ -180,7 +156,6 @@ fn spawn_signal_handler(
             } => "SIGINT",
         };
 
-        shutdown.store(true, Ordering::SeqCst);
         daemon.request_stop();
         let _ = signal_tx.send(signal_name.to_string());
     });

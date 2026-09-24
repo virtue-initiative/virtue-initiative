@@ -62,6 +62,24 @@ pub struct LifecycleState {
     pub last_restart_alert_at_ms: Option<i64>,
 }
 
+/// The platform's last system login/logout times, read once per tick and
+/// shared by `tick` and `note_session_events` — on desktop these hooks shell
+/// out (e.g. `last` on macOS), so each read isn't free.
+#[derive(Clone, Copy, Default)]
+pub struct SessionTimes {
+    pub last_login_ms: Option<i64>,
+    pub last_logout_ms: Option<i64>,
+}
+
+impl SessionTimes {
+    pub fn read(hooks: &dyn LifecycleHooks) -> Self {
+        Self {
+            last_login_ms: hooks.get_last_login_utc_ms().ok().flatten(),
+            last_logout_ms: hooks.get_last_logout_utc_ms().ok().flatten(),
+        }
+    }
+}
+
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
 /// tick was scheduled for (the daemon's `next_wakeup_at_ms` as of the end of
 /// the previous tick) and records how late the daemon woke, unless excused by
@@ -76,6 +94,7 @@ pub fn tick(
     state: &mut LifecycleState,
     upload: &mut UploadState,
     hooks: &dyn LifecycleHooks,
+    session: SessionTimes,
     now_ms: i64,
     expected_wakeup_at_ms: i64,
 ) {
@@ -102,15 +121,11 @@ pub fn tick(
     // becomes a contradiction below when paired with the *other* side being
     // near, which is what actually signals a reboot bracket that doesn't
     // line up with this gap.
-    let login_near = hooks
-        .get_last_login_utc_ms()
-        .ok()
-        .flatten()
+    let login_near = session
+        .last_login_ms
         .map(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
-    let logout_near = hooks
-        .get_last_logout_utc_ms()
-        .ok()
-        .flatten()
+    let logout_near = session
+        .last_logout_ms
         .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
 
     // Combined login/logout evidence: `None` (no evidence either way),
@@ -188,10 +203,10 @@ pub fn tick(
 pub fn note_session_events(
     state: &mut LifecycleState,
     upload: &mut UploadState,
-    hooks: &dyn LifecycleHooks,
+    session: SessionTimes,
     now_ms: i64,
 ) {
-    if let Ok(Some(login_ms)) = hooks.get_last_login_utc_ms() {
+    if let Some(login_ms) = session.last_login_ms {
         if let Some(baseline) = state.last_seen_login_ms {
             // Allow for jitter
             if login_ms - baseline > 1000 {
@@ -208,7 +223,7 @@ pub fn note_session_events(
         }
     }
 
-    if let Ok(Some(logout_ms)) = hooks.get_last_logout_utc_ms() {
+    if let Some(logout_ms) = session.last_logout_ms {
         if let Some(baseline) = state.last_seen_logout_ms {
             if logout_ms - baseline > 1000 {
                 state.last_seen_logout_ms = Some(logout_ms);
@@ -331,7 +346,8 @@ mod tests {
         expected_wakeup_at_ms: i64,
     ) {
         hooks.clock.set(now_ms);
-        tick(state, upload, hooks, now_ms, expected_wakeup_at_ms);
+        let session = SessionTimes::read(hooks);
+        tick(state, upload, hooks, session, now_ms, expected_wakeup_at_ms);
     }
 
     #[allow(clippy::field_reassign_with_default)]
@@ -677,7 +693,7 @@ mod tests {
         hooks.set_last_login(Some(1_000));
         hooks.set_last_logout(Some(2_000));
 
-        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 1_500);
 
         assert!(upload.pending_hash_events.is_empty());
         assert_eq!(state.last_seen_login_ms, Some(1_000));
@@ -692,10 +708,10 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_login(Some(1_000));
-        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 1_400); // seeds baseline, no event
 
         hooks.set_last_login(Some(9_000));
-        note_session_events(&mut state, &mut upload, &hooks, 9_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 9_500);
 
         assert_eq!(system_event(&upload, 9_000, true), Some(0.0));
         assert_eq!(state.last_seen_login_ms, Some(9_000));
@@ -709,10 +725,10 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_logout(Some(2_000));
-        note_session_events(&mut state, &mut upload, &hooks, 2_400); // seeds baseline, no event
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 2_400); // seeds baseline, no event
 
         hooks.set_last_logout(Some(20_000));
-        note_session_events(&mut state, &mut upload, &hooks, 20_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 20_500);
 
         assert_eq!(system_event(&upload, 20_000, false), Some(0.0));
         assert_eq!(state.last_seen_logout_ms, Some(20_000));
@@ -726,9 +742,9 @@ mod tests {
         hooks.set_last_login(Some(1_000));
         hooks.set_last_logout(Some(2_000));
 
-        note_session_events(&mut state, &mut upload, &hooks, 1_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 1_500);
         let count_after_first = upload.pending_hash_events.len();
-        note_session_events(&mut state, &mut upload, &hooks, 3_000);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 3_000);
 
         assert_eq!(
             upload.pending_hash_events.len(),
@@ -743,13 +759,13 @@ mod tests {
         let mut upload = upload_with_credentials();
         let hooks = TestPlatformHooks::new();
         hooks.set_last_login(Some(1_000));
-        note_session_events(&mut state, &mut upload, &hooks, 1_400); // seeds baseline, no event
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 1_400); // seeds baseline, no event
 
         hooks.set_last_login(Some(5_000));
-        note_session_events(&mut state, &mut upload, &hooks, 5_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 5_500);
 
         hooks.set_last_login(Some(9_000));
-        note_session_events(&mut state, &mut upload, &hooks, 9_500);
+        note_session_events(&mut state, &mut upload, SessionTimes::read(&hooks), 9_500);
 
         assert_eq!(system_event(&upload, 1_000, true), None);
         assert_eq!(system_event(&upload, 5_000, true), Some(0.0));

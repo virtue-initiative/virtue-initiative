@@ -230,6 +230,53 @@ fn batch_recipients(settings: &DeviceSettings) -> Result<Vec<BatchRecipient>, Co
     Ok(settings.wrapping_keys.clone())
 }
 
+/// The screen-lock battery gate: uploads wait while the screen is locked
+/// unless a heartbeat or explicit flush set `bypass_lock`.
+fn uploads_unlocked(state: &UploadState, screen_active: bool) -> bool {
+    screen_active || state.bypass_lock
+}
+
+/// When the pending batch's interval wait ends, or `i64::MIN` when it's
+/// ready to send regardless of the interval.
+fn batch_due_at_ms(state: &UploadState, batch_interval_ms: i64) -> i64 {
+    let urgent = state.post_login_proof_batches_remaining > 0
+        || state.force_flush
+        || state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
+    match state.last_batch_at_ms {
+        Some(last) if !urgent => last + batch_interval_ms,
+        _ => i64::MIN,
+    }
+}
+
+/// The earliest time a hash retry can next make progress, or `None` when
+/// nothing is pending or it's held by something no timer clears (CORE-020).
+pub fn next_hash_attempt_at_ms(state: &UploadState, screen_active: bool) -> Option<i64> {
+    if state.pending_hash_events.is_empty()
+        || !uploads_unlocked(state, screen_active)
+        || state.device_credentials.is_none()
+    {
+        return None;
+    }
+    Some(state.hash_backoff.next_attempt_at_ms)
+}
+
+/// The earliest time the pending batch can next upload, or `None` when
+/// nothing is pending or it's held by something no timer clears (CORE-020).
+pub fn next_batch_attempt_at_ms(
+    state: &UploadState,
+    batch_interval_ms: i64,
+    screen_active: bool,
+) -> Option<i64> {
+    if state.pending_batch_events.is_empty()
+        || !uploads_unlocked(state, screen_active)
+        || state.device_credentials.is_none()
+        || !state.settings.as_ref().is_some_and(can_capture)
+    {
+        return None;
+    }
+    Some(batch_due_at_ms(state, batch_interval_ms).max(state.batch_backoff.next_attempt_at_ms))
+}
+
 // ── Hash retries: plan / execute / commit ──────────────────────────────────
 
 pub struct HashRetryPlan {
@@ -252,7 +299,7 @@ pub fn plan_hash_retries(
     if state.pending_hash_events.is_empty() {
         return None;
     }
-    if !(screen_active || state.bypass_lock) {
+    if !uploads_unlocked(state, screen_active) {
         return None;
     }
     if !state.hash_backoff.ready(now_ms) {
@@ -492,16 +539,10 @@ pub fn plan_batch(
     if state.pending_batch_events.is_empty() {
         return None;
     }
-    if !(screen_active || state.bypass_lock) {
+    if !uploads_unlocked(state, screen_active) {
         return None;
     }
-    let should = state.post_login_proof_batches_remaining > 0
-        || state
-            .last_batch_at_ms
-            .map(|last| now_ms - last >= batch_interval_ms)
-            .unwrap_or(true)
-        || state.force_flush
-        || state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
+    let should = batch_due_at_ms(state, batch_interval_ms) <= now_ms;
     if !should || !state.batch_backoff.ready(now_ms) {
         return None;
     }

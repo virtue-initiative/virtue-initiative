@@ -37,9 +37,9 @@ get_last_logout_utc_ms() -> Result<Option<i64>>
 never implement it directly. `get_monotonic_clock_ms` (a clock that doesn't
 advance while suspended) feeds only `lifecycle::tick`'s suspend evidence
 (CORE-002) — it's not on `ScreenshotHooks`, and screenshot scheduling
-itself still paces off the wall clock. Mac separately keeps its own boot/
-monotonic clock reads as **inherent** methods on `MacPlatformHooks` for a
-local post-wake UX check unrelated to the core model — see `architecture.md`.
+itself still paces off the wall clock. Mac separately listens for IOKit wake
+notifications for a local post-wake UX flush unrelated to the core model —
+see `architecture.md`.
 
 Everything else belongs in `core`.
 

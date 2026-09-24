@@ -24,6 +24,12 @@ pub fn tick(state: &mut HeartbeatState, upload: &mut UploadState, now_ms: i64) {
     }
 }
 
+/// When `tick` will next emit a heartbeat, or `None` while unauthenticated.
+pub fn next_heartbeat_at_ms(state: &HeartbeatState, upload: &UploadState) -> Option<i64> {
+    upload.device_credentials.as_ref()?;
+    Some(state.last_heartbeat_ms + HEARTBEAT_INTERVAL_MS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
