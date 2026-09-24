@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/preact';
+import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
@@ -26,7 +26,7 @@ describe('Devices — device list', () => {
     });
   });
 
-  it('shows a loading indicator instead of "No devices" while the fetch is in flight', async () => {
+  it('shows a loading indicator instead of the empty state while the fetch is in flight', async () => {
     let resolveDevices: (() => void) | undefined;
     server.use(
       http.get(
@@ -41,7 +41,7 @@ describe('Devices — device list', () => {
     renderWithClient(<Devices />);
 
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
-    expect(screen.queryByText('No devices')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add your first device')).not.toBeInTheDocument();
 
     await waitFor(() => expect(resolveDevices).toBeDefined());
     resolveDevices?.();
@@ -51,14 +51,27 @@ describe('Devices — device list', () => {
     });
   });
 
-  it('shows "No devices" once loaded with an empty list', async () => {
+  it('shows setup instructions once loaded with an empty list', async () => {
     server.use(http.get(`${BASE}/device`, () => HttpResponse.json([])));
 
     renderWithClient(<Devices />);
 
-    await waitFor(() => {
-      expect(screen.getByText('No devices')).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', {
+      name: 'Add your first device',
+      level: 2,
     });
+    const emptyState = within(heading.closest('section')!);
+    expect(emptyState.getByText('Download the app.')).toBeInTheDocument();
+    expect(emptyState.getByRole('link', { name: 'Download the app' })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/\/download$/),
+    );
+  });
+
+  it('does not show setup instructions when devices exist', async () => {
+    renderWithClient(<Devices />);
+    await screen.findByText('My Laptop');
+    expect(screen.queryByText('Add your first device')).not.toBeInTheDocument();
   });
 });
 
