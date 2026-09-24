@@ -8,9 +8,9 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix | File                |
-| ------ | ------------------- |
-| `API`  | `api/SPEC.md`       |
+| Prefix | File                  |
+| ------ | --------------------- |
+| `API`  | `api/SPEC.md`         |
 | `HASH` | `hash-server/SPEC.md` |
 | `CORE` | `client/core/SPEC.md` |
 
@@ -28,7 +28,9 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 ## Local dev
 
-`./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, installs/trusts Caddy.
+`./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, seeds sample data, installs/trusts Caddy.
+
+`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then use "Clear cache" in the web app. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
 
 `./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, `landing`, and the standalone `hash-server` (see `hash-server/SPEC.md`) together (interleaved colored logs), each on a random free port. The hash server is minted a `JWT_PUBLIC_KEY` read from `api/.dev.vars` so it verifies tokens signed by the local API:
 

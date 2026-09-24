@@ -9,8 +9,8 @@ import { decodeWebpDimensions } from '../webp-dimensions';
 // errors (plain Error), which are transient and should be retried.
 export class DecryptionError extends Error {}
 
-// Batch payload format must match client/core/src/batch.rs:
-//   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
+// Batch payload format must match client/core/src/module/upload/batch.rs:
+//   msgpack([msgpack(event), ...]) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
 export async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,

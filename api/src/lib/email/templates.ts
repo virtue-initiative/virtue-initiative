@@ -611,6 +611,8 @@ export function renderPartnerDigestTemplate(input: {
     approxScreenshotCount: number;
     tamperCounts: Record<TamperSeverity, number>;
     missingLogDays: string[];
+    /** Web app report covering this digest's day or week for this person. */
+    reportUrl: string;
   }>;
   appName: string;
   appUrl: string;
@@ -651,8 +653,15 @@ export function renderPartnerDigestTemplate(input: {
       ...(summary.missingLogDays.length > 0
         ? [missingLogHeading, ...summary.missingLogDays.map((line) => `- ${line}`)]
         : []),
+      `Read ${owner}'s report: ${summary.reportUrl}`,
     ];
   });
+
+  // One person: a single call to action. Several: each section links its own report.
+  const singleSummary = accountCount === 1 ? input.partnerSummaries[0] : undefined;
+  const singleOwner = singleSummary
+    ? singleSummary.ownerName?.trim() || singleSummary.ownerEmail
+    : null;
 
   const lines = [
     `${periodLabel} accountability summary for ${summaryTarget}`,
@@ -663,8 +672,6 @@ export function renderPartnerDigestTemplate(input: {
     `Warning tamper alerts: ${totalTamperCounts.warning}`,
     `Info-only tamper events: ${totalTamperCounts.info}`,
     ...partnerSections,
-    '',
-    `Please review the screenshots and logs: ${input.appUrl}`,
   ];
 
   const summaryItems = [
@@ -713,6 +720,7 @@ export function renderPartnerDigestTemplate(input: {
           ${listItem(`Info-only tamper events: ${summary.tamperCounts.info}`)}
           ${missingLogHtml}
         </ul>
+        ${singleSummary ? '' : `<p style="${inlineStyle({ margin: '8px 0 0 0', 'font-size': '14px' })}">${themedLink(summary.reportUrl, `Read ${owner}'s report`)}</p>`}
       </div>`;
     })
     .join('');
@@ -729,7 +737,9 @@ export function renderPartnerDigestTemplate(input: {
         padding: '0',
       })}">${summaryItems}</ul>`,
       partnerSummarySections,
-      actionButton(input.appUrl, 'Open dashboard'),
+      ...(singleSummary
+        ? [actionButton(singleSummary.reportUrl, `Read ${singleOwner}'s report`)]
+        : []),
     ],
   });
 

@@ -12,6 +12,11 @@ set positional-arguments
 setup *args:
     ./scripts/setup.sh {{args}}
 
+# (Re)seed local sample accounts, devices, and a week of activity ending now.
+[group('dev')]
+seed *args:
+    bun scripts/seed/index.ts {{args}}
+
 # Start api, web, landing, and the standalone hash-server together.
 [group('dev')]
 dev domain="":

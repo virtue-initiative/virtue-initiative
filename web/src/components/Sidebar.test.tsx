@@ -31,4 +31,17 @@ describe('Sidebar', () => {
       screen.getByRole('link', { name: new RegExp(`${TEST_WATCHING.user.name} logs`, 'i') }),
     ).toHaveAttribute('href', `/logs/${TEST_WATCHING.user.id}`);
   });
+
+  it('renders a report sub-item for me and per accepted partner', async () => {
+    renderWithClient(<Sidebar />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /my report/i })).toHaveAttribute('href', '/report');
+    });
+    expect(
+      await screen.findByRole('link', {
+        name: new RegExp(`${TEST_WATCHING.user.name} report`, 'i'),
+      }),
+    ).toHaveAttribute('href', `/report/${TEST_WATCHING.user.id}`);
+  });
 });
