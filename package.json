@@ -10,5 +10,8 @@
   ],
   "overrides": {
     "esbuild": "0.27.3"
+  },
+  "devDependencies": {
+    "@playwright/cli": "^0.1.21"
   }
 }
