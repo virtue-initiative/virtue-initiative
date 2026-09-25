@@ -247,7 +247,7 @@ Run these on a machine with Java 17, Android SDK, NDK `26.1.10909125`, and Rust 
 From `client/android/`:
 
 ```bash
-./gradlew --no-daemon :app:lintDebug :app:assembleDebug
+./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
 Notes:

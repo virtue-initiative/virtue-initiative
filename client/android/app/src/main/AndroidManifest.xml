@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Self-update (AppUpdater). The second lets Android 12+ install an
+         update without asking once Virtue is its own installer of record. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <!-- Android 11+ package visibility: without this, `resolveActivity` for the
          Status Details "Open log file" action can't see installed text viewers
@@ -74,6 +78,10 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

@@ -75,6 +75,16 @@ Tap <strong>Allow</strong> to let Virtue capture screenshots.
 10. Go back to the Virtue app and sign in with your account.
 11. Done! The app will periodically collect screenshots (about once every 5 minutes) and upload them once an hour. You and your partners will be able to view them from the logs page on the website.
 
+## Updates
+
+Virtue checks for new versions on its own and downloads them over Wi-Fi.
+
+1. When an update is ready, tap the **Virtue update available** notification. You can also tap **Install Update** in the Virtue app.
+2. The first time, Android says your phone isn't allowed to install unknown apps from this source. Tap **Settings**, then turn on **Allow from this source**. On Android 10 and 11, go back afterward.
+3. Tap **Update**.
+
+On Android 12 and later, Virtue installs later updates by itself. On Android 10 and 11, repeat the last step for each update.
+
 ## Usage
 
 _Instructions coming soon._

@@ -117,6 +117,14 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:layout_marginTop="4dp" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/installUpdateButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:backgroundTint="@color/virtue_forest"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:id="@+id/statusButtonsLayout"
                 android:layout_width="match_parent"
