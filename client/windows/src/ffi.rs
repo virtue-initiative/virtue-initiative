@@ -337,7 +337,10 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
             .map(|creds| creds.refresh_token);
 
         let platform_details = windows_platform_details();
-        let logs = request.include_logs.then(|| recent_logs(&paths)).flatten();
+        let logs = request
+            .include_logs
+            .then(|| virtue_core::logging::recent_logs(&paths.log_dir))
+            .flatten();
 
         let config = build_core_config(&paths);
         let api = virtue_core::api::HttpApiClient::new(&config)?;
@@ -478,38 +481,6 @@ fn read_registry_string_value(key_path: &str, value_name: &str) -> Option<String
         let trimmed = value.trim_end_matches('\0').trim();
         (!trimmed.is_empty()).then(|| trimmed.to_string())
     }
-}
-
-/// Best-effort last day of this device's operational logs: today's and (if
-/// present) yesterday's daily-rotated log file from `paths.log_dir` (see
-/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and trimmed
-/// to the API's attachment size cap, keeping the most recent bytes.
-fn recent_logs(paths: &ClientPaths) -> Option<Vec<u8>> {
-    let today = chrono::Local::now().date_naive();
-    let mut combined = String::new();
-
-    for date in [today, today - chrono::Duration::days(1)] {
-        let file_name = format!(
-            "{}.{}.log",
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-            date.format("%Y-%m-%d")
-        );
-        if let Ok(contents) = std::fs::read_to_string(paths.log_dir.join(file_name)) {
-            combined.push_str(&contents);
-        }
-    }
-
-    if combined.is_empty() {
-        return None;
-    }
-
-    let redacted = virtue_core::api::redact_secrets(&combined);
-    let mut logs = redacted.into_bytes();
-    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
-        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
-        logs.drain(0..start);
-    }
-    Some(logs)
 }
 
 #[unsafe(no_mangle)]
@@ -736,34 +707,5 @@ mod tests {
     #[test]
     fn windows_platform_details_is_never_empty() {
         assert!(!windows_platform_details().is_empty());
-    }
-
-    #[test]
-    fn recent_logs_returns_none_when_no_log_files_exist() {
-        let _guard = test_lock().lock().expect("test lock");
-        let paths = temporary_paths("recent-logs-none");
-        paths.ensure_dirs().expect("ensure dirs");
-
-        assert!(recent_logs(&paths).is_none());
-    }
-
-    #[test]
-    fn recent_logs_redacts_secrets_and_returns_todays_log() {
-        let _guard = test_lock().lock().expect("test lock");
-        let paths = temporary_paths("recent-logs-present");
-        paths.ensure_dirs().expect("ensure dirs");
-
-        let today = chrono::Local::now().date_naive().format("%Y-%m-%d");
-        let file_name = format!("virtue.{today}.log");
-        std::fs::write(
-            paths.log_dir.join(file_name),
-            "auth failed: token wst_AbCdEf123456ghijklmnop rejected\n",
-        )
-        .expect("write log file");
-
-        let logs = recent_logs(&paths).expect("logs should be present");
-        let text = String::from_utf8(logs).expect("logs should be utf8");
-        assert!(!text.contains("wst_"));
-        assert!(text.contains("[redacted]"));
     }
 }

@@ -666,10 +666,9 @@ class MainActivity : AppCompatActivity() {
             setStatus(getString(R.string.open_log_unavailable))
             return
         }
-        // The rolling log files are named `virtue.<date>` with no extension, so
-        // a viewer that sniffs the type from the file name (rather than the
-        // intent's) refuses to render them. Hand out a `.txt` copy instead —
-        // which also keeps the viewer off a file the daemon is still appending to.
+        // Hand out a `.txt` copy: a viewer that sniffs the type from the file
+        // name may not render `.log` (or older builds' extensionless files),
+        // and a copy keeps it off a file the daemon is still appending to.
         val readable = java.io.File(cacheDir, "logs").let { dir ->
             dir.mkdirs()
             java.io.File(dir, "virtue-log.txt").also { logFile.copyTo(it, overwrite = true) }

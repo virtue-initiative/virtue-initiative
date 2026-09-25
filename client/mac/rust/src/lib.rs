@@ -112,7 +112,9 @@ pub extern "C" fn virtue_mac_native_report_issue(
             .map(|creds| creds.refresh_token);
 
         let platform_details = mac_platform_details();
-        let logs = include_logs.then(|| recent_logs(&core.paths)).flatten();
+        let logs = include_logs
+            .then(|| virtue_core::logging::recent_logs(&core.paths.logs_dir))
+            .flatten();
 
         let config = build_core_config(&core.paths);
         let api = virtue_core::api::HttpApiClient::new(&config)?;
@@ -173,38 +175,6 @@ fn sw_vers(flag: &str) -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-/// Best-effort last two days of this device's daemon logs: today's and (if
-/// present) yesterday's daily-rotated log file from `paths.logs_dir` (see
-/// `daemon::init_logging`), redacted (`virtue_core::api::redact_secrets`) and
-/// trimmed to the API's attachment size cap, keeping the most recent bytes.
-fn recent_logs(paths: &ClientPaths) -> Option<Vec<u8>> {
-    let today = chrono::Local::now().date_naive();
-    let mut combined = String::new();
-
-    for date in [today, today - chrono::Duration::days(1)] {
-        let file_name = format!(
-            "{}.{}.log",
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-            date.format("%Y-%m-%d")
-        );
-        if let Ok(contents) = std::fs::read_to_string(paths.logs_dir.join(file_name)) {
-            combined.push_str(&contents);
-        }
-    }
-
-    if combined.is_empty() {
-        return None;
-    }
-
-    let redacted = virtue_core::api::redact_secrets(&combined);
-    let mut logs = redacted.into_bytes();
-    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
-        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
-        logs.drain(0..start);
-    }
-    Some(logs)
 }
 
 #[unsafe(no_mangle)]
