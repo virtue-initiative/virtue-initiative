@@ -40,7 +40,7 @@ vi.mock('../../utils/cache/client', () => ({
   },
 }));
 
-function log(id: string, type: string, risk: number): FeedLog {
+function log(id: string, type: string, risk: number, data: FeedLog['data'] = {}): FeedLog {
   const ts = Date.now() - 60_000;
   return {
     id,
@@ -48,7 +48,7 @@ function log(id: string, type: string, risk: number): FeedLog {
     ts,
     created_at: ts,
     type,
-    data: {},
+    data,
     risk,
     batch_status: 'verified',
     source: 'batch',
@@ -87,6 +87,24 @@ describe('Report', () => {
 
     expect(await screen.findByText(/nothing concerning was flagged today\./i)).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: /risk/i })).not.toBeInTheDocument();
+  });
+
+  it('treats unchanged-screen skips as activity, not missing data', async () => {
+    SAMPLE_LOGS = [log('skip', 'screenshot_skipped', 0, { reason: 'static_screen' })];
+    renderWithClient(<Report />);
+
+    expect(await screen.findByText(/nothing concerning was flagged today\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/no screen activity was recorded/i)).not.toBeInTheDocument();
+  });
+
+  it('says there is no data, without an all-clear, when nothing was captured', async () => {
+    SAMPLE_LOGS = [log('locked', 'screenshot_skipped', 0, { reason: 'locked_or_screensaver' })];
+    renderWithClient(<Report userId={TEST_WATCHING.user.id} />);
+
+    expect(await screen.findByText(/no screen activity was recorded today\./i)).toBeInTheDocument();
+    expect(screen.getByText(/was using a device during this time, reach out/i)).toBeInTheDocument();
+    expect(screen.queryByText(/nothing concerning was flagged/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/note of encouragement/i)).not.toBeInTheDocument();
   });
 
   it('names the watched person on their report', async () => {

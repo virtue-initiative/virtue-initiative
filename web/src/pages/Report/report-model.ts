@@ -50,10 +50,20 @@ export interface Report {
   medium: RiskGroup;
   /** Every screenshot captured in the window, flagged or not. */
   screenshotCount: number;
+  /**
+   * Screenshots plus captures skipped because the screen hadn't changed. Zero
+   * means the window has no screen activity to report on at all.
+   */
+  captureCount: number;
 }
 
 export function isScreenshot(log: FeedLog): boolean {
   return log.type === 'screenshot';
+}
+
+/** A capture the client skipped because the screen looked the same as the last one. */
+function isUnchangedScreenSkip(log: FeedLog): boolean {
+  return log.type === 'screenshot_skipped' && log.data?.reason === 'static_screen';
 }
 
 // Most concerning first; ties go to the most recent.
@@ -67,11 +77,13 @@ export function buildReport(logs: FeedLog[], window: ReportWindow): Report {
     high: { alerts: [], screenshots: [] },
     medium: { alerts: [], screenshots: [] },
     screenshotCount: 0,
+    captureCount: 0,
   };
 
   for (const log of logs) {
     if (log.ts < window.start || log.ts > window.end) continue;
     if (isScreenshot(log)) report.screenshotCount++;
+    if (isScreenshot(log) || isUnchangedScreenSkip(log)) report.captureCount++;
 
     const level = getRiskLevel(log.risk);
     const group =
@@ -101,17 +113,26 @@ function minutesLabel(ms: number): string {
 /**
  * Plain-language context for a flagged alert: what it means and why a partner
  * might want to ask about it. `allLogs` lets a "monitoring stopped" alert say
- * when monitoring came back on.
+ * when monitoring came back on. `periodEnded` is true when the report's window
+ * is over: `allLogs` then stops at its end, so a missing restart only means
+ * monitoring wasn't back on before then, not that it's still off now.
  */
-export function explainAlert(log: FeedLog, allLogs: FeedLog[]): string {
+export function explainAlert(
+  log: FeedLog,
+  allLogs: FeedLog[],
+  { periodEnded = false }: { periodEnded?: boolean } = {},
+): string {
   const data = log.data ?? {};
   switch (log.type) {
     case 'user_stop': {
       const resumed = allLogs
         .filter((l) => l.type === 'user_start' && l.device_id === log.device_id && l.ts > log.ts)
         .sort((a, b) => a.ts - b.ts)[0];
-      return resumed
-        ? `Monitoring was turned off, then turned back on ${minutesLabel(resumed.ts - log.ts)} later. Nothing was recorded in between.`
+      if (resumed) {
+        return `Monitoring was turned off, then turned back on ${minutesLabel(resumed.ts - log.ts)} later. Nothing was recorded in between.`;
+      }
+      return periodEnded
+        ? 'Monitoring was turned off and was not turned back on before the end of this report. Nothing was recorded on this device after that.'
         : 'Monitoring was turned off and has not been turned back on yet. Nothing is being recorded on this device.';
     }
     case 'repeated_restarts': {

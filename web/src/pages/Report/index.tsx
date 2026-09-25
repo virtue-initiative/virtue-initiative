@@ -147,6 +147,11 @@ export function Report({ userId: routeUserId }: { userId?: string }) {
   const mediumTotal = report.medium.alerts.length + report.medium.screenshots.length;
   const nothingFlagged = !highCounts && mediumTotal === 0;
   const loading = !result.complete;
+  // No screenshots at all (not even unchanged-screen skips): there's nothing to
+  // report on, which isn't the same as a clean report.
+  const noData = report.captureCount === 0;
+  // A finished window's logs stop at its end, so later events aren't in view.
+  const periodEnded = range.end < Date.now();
 
   const deviceSentence = isOwn
     ? `You have ${monitoredDevices.length ? plural(monitoredDevices.length, 'device') : 'no devices'} being monitored.`
@@ -200,7 +205,9 @@ export function Report({ userId: routeUserId }: { userId?: string }) {
               <span class="report-alert-card-title">{getLogCategory(log)}</span>
               <RiskBadge log={log} />
             </span>
-            <span class="report-alert-card-body">{explainAlert(log, result.logs)}</span>
+            <span class="report-alert-card-body">
+              {explainAlert(log, result.logs, { periodEnded })}
+            </span>
             <span class="report-meta">
               {deviceName(log.device_id)} · {timeLabel(log.ts)}
             </span>
@@ -324,7 +331,22 @@ export function Report({ userId: routeUserId }: { userId?: string }) {
         {alertRow('Medium risk alerts', report.medium.alerts)}
         {screenshotRow('Medium risk screenshots', report.medium.screenshots)}
 
-        {nothingFlagged && !loading && (
+        {noData && !loading && (
+          <div class="report-no-data">
+            <p>
+              No screen activity was recorded {when}. Devices don't send anything while they're off,
+              asleep, locked or not being used, so this is often expected.
+            </p>
+            {!isOwn && (
+              <p>
+                If you know {firstName} was using a device during this time, reach out and ask them
+                about it.
+              </p>
+            )}
+          </div>
+        )}
+
+        {nothingFlagged && !noData && !loading && (
           <div class="report-all-clear">
             <p>
               Nothing concerning was flagged {when}.{' '}

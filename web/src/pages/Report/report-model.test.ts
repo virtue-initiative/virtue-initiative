@@ -73,6 +73,24 @@ describe('buildReport', () => {
     expect(report.screenshotCount).toBe(4);
   });
 
+  it('counts unchanged-screen skips as captures, but not locked-screen skips', () => {
+    const report = buildReport(
+      [
+        log('shot', 'screenshot', at(9), 0),
+        log('same', 'screenshot_skipped', at(10), 0, { reason: 'static_screen' }),
+        log('locked', 'screenshot_skipped', at(11), 0, { reason: 'locked_or_screensaver' }),
+      ],
+      range,
+    );
+    expect(report.screenshotCount).toBe(1);
+    expect(report.captureCount).toBe(2);
+
+    const locked = log('locked', 'screenshot_skipped', at(11), 0, {
+      reason: 'locked_or_screensaver',
+    });
+    expect(buildReport([locked], range).captureCount).toBe(0);
+  });
+
   it('orders by concern, then most recent first', () => {
     const report = buildReport(
       [
@@ -96,6 +114,14 @@ describe('explainAlert', () => {
   it('flags a stop that was never undone', () => {
     const stop = log('stop', 'user_stop', 1_000_000, 0.9);
     expect(explainAlert(stop, [stop])).toMatch(/has not been turned back on/);
+  });
+
+  it("doesn't claim a stop in a finished period is still in effect", () => {
+    // The restart may have come after the window's end, where the logs stop.
+    const stop = log('stop', 'user_stop', 1_000_000, 0.9);
+    const text = explainAlert(stop, [stop], { periodEnded: true });
+    expect(text).toMatch(/was not turned back on before the end of this report/);
+    expect(text).not.toMatch(/has not been turned back on yet/);
   });
 
   it('describes repeated restarts with their count and window', () => {

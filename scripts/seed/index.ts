@@ -11,6 +11,11 @@
 // to the current time. Re-run it (`just seed`) whenever the sample week gets
 // stale, then use "Clear cache" in the web app so it drops the old batches.
 //
+// Restart scripts/launch.sh afterwards if it's running. Batch URLs are written
+// with R2_URL from api/.dev.vars, and launch.sh only rewrites stored batch URLs
+// to its current (random) API port when it starts, so until then the seeded
+// batches point at a port nothing is listening on.
+//
 // Writes go straight to the same local state `wrangler dev --env staging
 // --local` reads (api/.wrangler/state/v3), through wrangler's platform proxy,
 // so no servers need to be running.
@@ -180,6 +185,9 @@ try {
     for (const { watching, watcher } of PARTNERSHIPS) {
       console.log(`  ${watcher.email} watches ${watching.email}`);
     }
+    console.log(
+      'If scripts/launch.sh is running, restart it so the new batch URLs point at its API port.',
+    );
     console.log('If the web app was already open, use "Clear cache" so it drops the old batches.');
   }
 } finally {
