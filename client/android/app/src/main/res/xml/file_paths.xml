@@ -5,8 +5,8 @@
     <files-path
         name="core_logs"
         path="core-data/logs/" />
-    <!-- The `.txt` copy the Status Details screen hands to a viewer; the
-         originals have no extension, which some viewers won't render. -->
+    <!-- The `.txt` copy the Status Details screen hands to a viewer, so it
+         isn't reading a file the daemon is still appending to. -->
     <cache-path
         name="readable_logs"
         path="logs/" />

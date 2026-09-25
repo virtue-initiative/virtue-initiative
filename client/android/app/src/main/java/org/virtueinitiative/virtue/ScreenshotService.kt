@@ -28,7 +28,18 @@ class ScreenshotService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Monitoring active"))
+        // Android can still refuse a foreground-service start (e.g. a
+        // background start with no exemption in effect), and uncaught that
+        // throw crashes the whole process ("Virtue keeps closing", #709).
+        // Monitoring runs in VirtueAccessibilityService either way, so just
+        // go without the notification until the next start attempt.
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification("Monitoring active"))
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Foreground service start refused", e)
+            stopSelf()
+            return
+        }
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
