@@ -8,9 +8,9 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix | File                |
-| ------ | ------------------- |
-| `API`  | `api/SPEC.md`       |
+| Prefix | File                  |
+| ------ | --------------------- |
+| `API`  | `api/SPEC.md`         |
 | `HASH` | `hash-server/SPEC.md` |
 | `CORE` | `client/core/SPEC.md` |
 
@@ -35,6 +35,8 @@ See `AGENTS.md` for how to run checks and tests for each component.
 - No `domain` arg: plain `http://localhost:<port>` for each service (ports differ per run — see the script's own startup banner). This is enough for most manual testing; browsers treat `http://localhost` as a secure context, so the API's `Secure` session cookie still gets set and sent.
 - With a `domain` arg (e.g. `./scripts/launch.sh myfeature`): registers `https://app.<domain>.localhost`, `https://<domain>.localhost`, etc. via the local Caddy instance (requires `setup.sh` to have run), mimicking the production URL structure.
 - `--donate` also starts `api-donate` and forwards Stripe webhooks to it if the `stripe` CLI is available.
+
+To see a `web/` or `landing/` change in a browser, use `bunx playwright-cli` (the `playwright-cli` skill). It runs headless. See "Driving the web app in a browser" in `AGENTS.md`.
 
 `EMAIL_DELIVERY_MODE=log` in `api/.dev.vars` means outgoing emails aren't sent — they're printed to the `[api]`-prefixed dev-server log (subject/text/html/metadata), including the token-bearing links. That's the way to find a signup/email-change/password-reset link during local testing.
 

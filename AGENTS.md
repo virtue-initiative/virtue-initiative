@@ -345,6 +345,37 @@ Note: `APP_URL`, `LANDING_URL`, `R2_URL`, and `HASH_SERVER_URL` are _not_ on thi
 always computes them itself from the ports it picks that run, so overriding them here would have
 no effect under `launch.sh` (they'd only apply if you ran `wrangler dev` directly).
 
+## Driving the web app in a browser
+
+Agents check UI changes in `web/` and `landing/` with Playwright CLI (`@playwright/cli`, a root
+devDependency). The `playwright-cli` skill in `.claude/skills/` documents the commands. Run it as
+`bunx playwright-cli`, not a global install. It runs headless by default, so it works on machines
+with no display.
+
+On a new machine, run `bun install` at the repo root, then `bunx playwright-cli install` once. That
+uses an installed Chrome or Edge if it finds one, otherwise it downloads Chromium and writes a
+local `.playwright/cli.config.json`. Its output goes to `.playwright-cli/`, which is gitignored.
+
+1. Start the stack with `./scripts/launch.sh` in the background, writing its output to a file.
+   Never pipe it into `head`/`tail`, which wedges the API. Read the Web/Landing URLs from its
+   startup banner, because the ports change every run.
+2. Log in with the account `setup.sh` seeds: `dev@dev.com` / `devpassword`.
+3. Run `bunx playwright-cli close` when done, so headless browsers aren't left running.
+
+Gotchas:
+
+- Use refs from the latest snapshot only. Actions such as `open`, `goto` and `click` save their
+  automatic snapshot to a `.playwright-cli/page-*.yml` file, while an explicit `snapshot` prints
+  it inline. Ref prefixes change after a navigation or reload (`e16` becomes `f1e16`), so refs
+  read from an older `.yml` file stop working.
+- On the first visit after `launch.sh` starts, Vite may reload the page while it optimizes
+  dependencies, which invalidates refs. Take a fresh snapshot if a ref is "not found".
+- `screenshot --filename` must be a path inside the repo. An absolute path elsewhere (such as
+  `/tmp`) is silently not written. Save the file inside the repo, then move it.
+- `gh --attach`, which the skill suggests for PR screenshots, needs `gh` 2.99 or later. On older
+  versions, commit the image to the public `virtue-initiative/pr-assets` repo under
+  `pr/<number>/` and link its `raw.githubusercontent.com` URL.
+
 ## Minimum recommended local validation
 
 If you want a practical rule instead of the full matrix:
