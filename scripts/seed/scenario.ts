@@ -184,7 +184,10 @@ function sessionsFor(device: SeedDevice, dayStart: number, now: number, r: Rng) 
     device.form === 'phone' ? [8, 12.5, 17.5, 21] : r.chance(0.5) ? [9, 14, 20] : [10, 19.5];
   for (const hour of starts) {
     if (r.chance(0.2)) continue;
-    const start = dayStart + (hour + r.range(-0.5, 0.5)) * 60 * MINUTE;
+    // Whole milliseconds, like a real client's Date.now(). A fractional timestamp ends up in
+    // batch created_at, and the web cache sends that back as /data's `since`, which must be
+    // an integer.
+    const start = Math.round(dayStart + (hour + r.range(-0.5, 0.5)) * 60 * MINUTE);
     const length = (device.form === 'phone' ? r.int(15, 45) : r.int(40, 110)) * MINUTE;
     const end = Math.min(start + length, now - MINUTE);
     if (end - start > 5 * MINUTE) sessions.push({ start, end });
@@ -244,7 +247,7 @@ export function generateBatches(now: number): SeedBatch[] {
         }
 
         // Tamper-style alerts, mostly on the higher-risk person's devices.
-        const mid = session.start + (session.end - session.start) / 2;
+        const mid = session.start + Math.round((session.end - session.start) / 2);
         if (r.chance(0.12 * device.riskiness)) {
           events.push({ ts: mid, risk: 0.8, type: 'screenshot_missed' });
         }

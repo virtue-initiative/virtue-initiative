@@ -27,8 +27,13 @@ const DEFAULT_SAMPLE_LOGS: FeedLog[] = [
 // read lazily by the mocked `cacheQuery` below, so a test can swap in its own
 // fixture without disturbing the others. Reset after every test.
 let SAMPLE_LOGS: FeedLog[] = DEFAULT_SAMPLE_LOGS;
+// Likewise for a sync failure the mocked `cacheQuery` reports on its final update.
+let SYNC_ERROR: { kind: string; message: string } | undefined;
+const cacheQueryCalls = vi.fn();
 afterEach(() => {
   SAMPLE_LOGS = DEFAULT_SAMPLE_LOGS;
+  SYNC_ERROR = undefined;
+  cacheQueryCalls.mockClear();
   // `useUrlState` persists filters into `window.location` via
   // `history.replaceState`, which — unlike component state — isn't torn down
   // between tests by @testing-library's auto-cleanup. Without this, a filter
@@ -48,13 +53,22 @@ vi.mock('../../utils/cache/client', () => ({
         done: boolean;
         processed: number;
         total: number;
+        error?: { kind: string; message: string };
       }) => void,
     ) => {
+      cacheQueryCalls();
       // Real cache client delivers updates over a BroadcastChannel/worker, so the
       // callback always fires asynchronously — mirror that here, since calling it
       // synchronously would race the effect's own `setLogResult(initial)` call.
       Promise.resolve().then(() => {
-        cb({ logs: SAMPLE_LOGS, replace: true, done: true, processed: 1, total: 1 });
+        cb({
+          logs: SAMPLE_LOGS,
+          replace: true,
+          done: true,
+          processed: 1,
+          total: 1,
+          ...(SYNC_ERROR ? { error: SYNC_ERROR } : {}),
+        });
       });
     },
     refetch: vi.fn(),
@@ -384,5 +398,37 @@ describe('LogDetailDialog — prev/next navigation (#660)', () => {
 
     await user.click(screen.getByRole('button', { name: /previous log/i }));
     expect(onPrev).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Logs — sync errors', () => {
+  it('shows a network failure instead of "Logs synced", and retries on request', async () => {
+    SYNC_ERROR = { kind: 'timeout', message: 'signal timed out' };
+    renderWithClient(<Logs />);
+
+    expect(
+      await screen.findByText("Couldn't reach the server. Showing saved logs."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Logs synced')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading…')).not.toBeInTheDocument();
+    const callsBefore = cacheQueryCalls.mock.calls.length;
+
+    SYNC_ERROR = undefined;
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Logs synced')).toBeInTheDocument();
+    expect(cacheQueryCalls.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('tells the user to close other tabs when another tab holds the cache', async () => {
+    SYNC_ERROR = { kind: 'cache-locked', message: 'NoModificationAllowedError' };
+    renderWithClient(<Logs />);
+
+    expect(
+      await screen.findByText(
+        'Another Virtue tab is using saved logs. Close other Virtue tabs, then select Retry.',
+      ),
+    ).toBeInTheDocument();
   });
 });

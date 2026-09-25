@@ -48,6 +48,12 @@ export type DecryptionStats = {
 
 export type CacheResponse = { id: string; result: unknown } | { id: string; error: string };
 
+// Why a query finished without a fresh sync. `network` and `timeout` mean the server couldn't
+// be reached, `cache-locked` means another tab still holds the cache database open, and
+// `failed` covers everything else.
+export type CacheQueryErrorKind = 'network' | 'timeout' | 'cache-locked' | 'failed';
+export type CacheQueryError = { kind: CacheQueryErrorKind; message: string };
+
 export type CacheChunk = {
   type: 'queryChunk';
   id: string;
@@ -56,6 +62,8 @@ export type CacheChunk = {
   processed: number;
   total: number;
   mode: 'replace' | 'append';
+  // Only on a final (`done`) chunk: the sync didn't complete, and `logs` is what's cached.
+  error?: CacheQueryError;
 };
 
 // Counts-only progress signal emitted during a sync; carries no log payload.
@@ -71,6 +79,7 @@ export type CacheQueryUpdate = {
   done: boolean;
   processed: number;
   total: number;
+  error?: CacheQueryError;
 };
 
 export type CacheQueryCallback = (update: CacheQueryUpdate) => void;
@@ -142,7 +151,34 @@ async function wipeCacheStorage(): Promise<void> {
   }
 }
 
-type PendingEntry = { resolve: (v: unknown) => void; reject: (e: Error) => void };
+const LEADER_LOCK = 'cache-leader';
+
+// While a tab has requests waiting on a leader, it pings for one this often.
+const LIVENESS_INTERVAL_MS = 500;
+
+// A leader that answers nothing for this long is treated as frozen, and its lock is stolen.
+// A frozen tab (Android freezes background tabs) keeps its Web Lock, so without this every
+// other tab would wait on it forever. Jittered per tab so two waiting tabs rarely both steal.
+const LEADER_SILENT_MS = 4000;
+const LEADER_SILENT_JITTER_MS = 1000;
+
+// A query stream that hears nothing for this long is settled with an error. It is a backstop
+// for anything else going wrong, so it sits above the worker's own fetch timeouts (30s for
+// /data, 20s per batch), which already settle a query whose network requests stall.
+const STREAM_STALL_MS = 45_000;
+
+type PendingEntry = {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  // Kept so the request can be re-sent if the leader changes before it's answered.
+  req: CacheRequest;
+};
+
+type OpenStream = {
+  callback: CacheQueryCallback;
+  req: CacheRequest;
+  watchdog: ReturnType<typeof setTimeout> | null;
+};
 
 // Distributive Omit preserves discriminated union members
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -162,24 +198,38 @@ function handleResponse(msg: CacheResponse, pending: Map<string, PendingEntry>) 
 
 export function createCacheClient(): CacheClient {
   const pending = new Map<string, PendingEntry>();
-  const streamCallbacks = new Map<string, CacheQueryCallback>();
+  const streams = new Map<string, OpenStream>();
   const channel = new BroadcastChannel(CHANNEL_NAME);
+  const tabId = makeId();
   let leaderWorker: Worker | null = null;
   let localUserId: string | null = null;
+  // Re-sent to whichever worker takes over, since a new worker starts with no session.
+  let lastSession: CacheRequestBody | null = null;
 
   // 'unknown' until we acquire the leader lock or receive leader-ready from the leader.
   type Role = 'unknown' | 'leader' | 'follower';
   let role: Role = 'unknown';
+  // The leader this tab follows, from its leader-ready. A different id means a new leader
+  // that has never seen this tab's requests.
+  let currentLeaderId: string | null = null;
+  let lastLeaderSeen = Date.now();
+  const leaderSilentLimit = LEADER_SILENT_MS + Math.random() * LEADER_SILENT_JITTER_MS;
 
   // Messages sent before role is known are buffered here.
-  const sendQueue: CacheRequest[] = [];
+  let sendQueue: CacheRequest[] = [];
 
   // Held so HMR disposal (and a cache reset) can release the lock.
   let lockReleaser: (() => void) | null = null;
+  // Withdraws this tab's queued (not yet granted) lock request.
+  let lockRequestAbort: AbortController | null = null;
 
   // Set once a cache reset is under way anywhere. Every tab stops talking to the cache from
   // that point on, because each one is about to reload.
   let resetting = false;
+
+  // Set between the page lifecycle `freeze` and `resume` events. Timers that fire late
+  // because the tab was frozen mustn't be mistaken for a silent leader or a stalled query.
+  let frozen = false;
 
   // Drop the worker and the leader lock. The worker is terminated rather than messaged: a
   // reset has to work when it is wedged, and terminating is also the only way to be rid of
@@ -190,9 +240,16 @@ export function createCacheClient(): CacheClient {
     leaderWorker = null;
     lockReleaser?.();
     lockReleaser = null;
+    lockRequestAbort?.abort();
+    lockRequestAbort = null;
     role = 'unknown';
-    sendQueue.length = 0;
-    streamCallbacks.clear();
+    currentLeaderId = null;
+    stopLivenessCheck();
+    sendQueue = [];
+    for (const stream of streams.values()) {
+      if (stream.watchdog) clearTimeout(stream.watchdog);
+    }
+    streams.clear();
     for (const entry of pending.values()) entry.reject(new Error('cache reset'));
     pending.clear();
     // becomeLeader() replaced this handler; we are no longer the leader.
@@ -203,8 +260,50 @@ export function createCacheClient(): CacheClient {
   // that logs back in without reloading still gets a working cache.
   function rearm() {
     resetting = false;
-    pingScheduled = false;
+    lastLeaderSeen = Date.now();
     requestLeadership();
+  }
+
+  // Give up leadership without a reset: on `freeze`, or after another tab stole the lock.
+  // Terminating the worker releases its OPFS handles so the next leader's worker can open
+  // the database. Anything this tab still has in flight goes to the next leader.
+  function relinquishLeadership() {
+    if (role !== 'leader') return;
+    leaderWorker?.terminate();
+    leaderWorker = null;
+    const release = lockReleaser;
+    lockReleaser = null;
+    release?.();
+    role = 'unknown';
+    currentLeaderId = null;
+    lastLeaderSeen = Date.now();
+    channel.onmessage = followerChannelHandler;
+    resendInFlight();
+  }
+
+  // Every unanswered call and every open query stream.
+  function inFlightRequests(): CacheRequest[] {
+    return [
+      ...[...pending.values()].map((entry) => entry.req),
+      ...[...streams.values()].map((s) => s.req),
+    ];
+  }
+
+  // Re-send the session and everything in flight to a leader that hasn't seen them.
+  // Duplicates are harmless: a response or final chunk for an id that has already settled
+  // is ignored.
+  function resendInFlight() {
+    const reqs: CacheRequest[] = [];
+    if (lastSession) reqs.push({ ...lastSession, id: makeId() } as CacheRequest);
+    reqs.push(...inFlightRequests());
+    console.log('[cache-client] re-sending', reqs.length, 'in-flight requests to a new leader');
+    if (role === 'follower') {
+      for (const req of reqs) channel.postMessage(req);
+      return;
+    }
+    const queued = new Set(sendQueue.map((req) => req.id));
+    for (const req of reqs) if (!queued.has(req.id)) sendQueue.push(req);
+    ensureLivenessCheck();
   }
 
   // Control messages both the leader and the follower channel handlers must honour.
@@ -226,18 +325,65 @@ export function createCacheClient(): CacheClient {
     return false;
   }
 
-  // Send a follower-ping once if we're still unknown after a short delay,
-  // so tabs that open after leader-ready was already broadcast can discover the leader.
-  let pingScheduled = false;
-  function schedulePing() {
-    if (pingScheduled) return;
-    pingScheduled = true;
-    setTimeout(() => {
-      if (role === 'unknown') {
-        console.log('[cache-client] no leader yet, broadcasting follower-ping');
-        channel.postMessage({ type: 'follower-ping' });
+  // While this tab has requests waiting on a leader, ping for one. A late-opening tab finds
+  // the current leader this way, and a leader that stops answering (frozen) gets its lock
+  // stolen so this tab can take over.
+  let livenessTimer: ReturnType<typeof setInterval> | null = null;
+  let stealing = false;
+
+  function hasInFlight() {
+    return streams.size > 0 || pending.size > 0 || sendQueue.length > 0;
+  }
+
+  function ensureLivenessCheck() {
+    if (livenessTimer || role === 'leader' || resetting) return;
+    // The silence clock starts now. An idle follower may not have heard from the leader in
+    // minutes, which says nothing about whether it's alive.
+    lastLeaderSeen = Date.now();
+    livenessTimer = setInterval(() => void checkLeader(), LIVENESS_INTERVAL_MS);
+  }
+
+  function stopLivenessCheck() {
+    if (livenessTimer) clearInterval(livenessTimer);
+    livenessTimer = null;
+  }
+
+  async function checkLeader() {
+    if (role === 'leader' || resetting || !hasInFlight()) {
+      stopLivenessCheck();
+      return;
+    }
+    if (frozen) return;
+    channel.postMessage({ type: 'follower-ping' });
+    if (stealing || !navigator.locks || Date.now() - lastLeaderSeen < leaderSilentLimit) return;
+    stealing = true;
+    try {
+      const { held } = await navigator.locks.query();
+      // `role` may have changed during the await; TS narrowed it from the check above.
+      if (
+        (role as Role) === 'leader' ||
+        resetting ||
+        Date.now() - lastLeaderSeen < leaderSilentLimit
+      ) {
+        return;
       }
-    }, 100);
+      // Nobody holds the lock, so this tab's own queued request is about to be granted.
+      if (!held?.some((lock) => lock.name === LEADER_LOCK)) return;
+      console.warn(
+        '[cache-client] leader has not answered for',
+        Date.now() - lastLeaderSeen,
+        'ms, taking over',
+      );
+      if (role === 'follower') {
+        role = 'unknown';
+        currentLeaderId = null;
+        resendInFlight();
+      }
+      lastLeaderSeen = Date.now();
+      requestLeadership(true);
+    } finally {
+      stealing = false;
+    }
   }
 
   function send(req: CacheRequest) {
@@ -251,30 +397,59 @@ export function createCacheClient(): CacheClient {
     } else if (role === 'follower') {
       console.log('[cache-client] → channel (follower)', req.method);
       channel.postMessage(req);
+      ensureLivenessCheck();
     } else {
       console.log('[cache-client] queued (no leader yet)', req.method);
       sendQueue.push(req);
-      schedulePing();
+      ensureLivenessCheck();
     }
   }
 
+  function armWatchdog(id: string) {
+    const stream = streams.get(id);
+    if (!stream) return;
+    if (stream.watchdog) clearTimeout(stream.watchdog);
+    stream.watchdog = setTimeout(() => {
+      if (frozen) return; // re-armed on resume
+      console.warn('[cache-client] query', id, 'stalled, settling it with an error');
+      endStream(id)?.({
+        done: true,
+        processed: 0,
+        total: 0,
+        error: { kind: 'failed', message: 'The log cache stopped responding.' },
+      });
+    }, STREAM_STALL_MS);
+  }
+
+  // Forget a stream and return its callback, for a final update.
+  function endStream(id: string): CacheQueryCallback | undefined {
+    const stream = streams.get(id);
+    if (!stream) return undefined;
+    if (stream.watchdog) clearTimeout(stream.watchdog);
+    streams.delete(id);
+    return stream.callback;
+  }
+
   function handleChunk(data: CacheChunk) {
-    const cb = streamCallbacks.get(data.id);
-    if (!cb) return;
-    cb({
+    const stream = streams.get(data.id);
+    if (!stream) return;
+    if (data.done) endStream(data.id);
+    else armWatchdog(data.id);
+    stream.callback({
       logs: data.logs,
       replace: data.mode === 'replace',
       done: data.done,
       processed: data.processed,
       total: data.total,
+      ...(data.error ? { error: data.error } : {}),
     });
-    if (data.done) streamCallbacks.delete(data.id);
   }
 
   function handleProgress(data: CacheProgress) {
-    const cb = streamCallbacks.get(data.id);
-    if (!cb) return;
-    cb({ done: false, processed: data.processed, total: data.total });
+    const stream = streams.get(data.id);
+    if (!stream) return;
+    armWatchdog(data.id);
+    stream.callback({ done: false, processed: data.processed, total: data.total });
   }
 
   function becomeLeader() {
@@ -286,6 +461,8 @@ export function createCacheClient(): CacheClient {
     }
     console.log('[cache-client] acquired leader lock, starting worker');
     role = 'leader';
+    currentLeaderId = tabId;
+    stopLivenessCheck();
     // The `new URL(..., import.meta.url)` must be inline here — Vite only
     // statically detects and bundles the worker when it's the direct argument
     // to `new Worker(...)`. Hoisting it to a variable makes Vite skip bundling
@@ -299,8 +476,16 @@ export function createCacheClient(): CacheClient {
       console.error('[cache-client] worker error', e.message, e);
     };
 
-    // Flush any messages buffered before we knew we were the leader.
+    // Flush any messages buffered before we knew we were the leader, plus anything this tab
+    // sent to a previous leader that went away unanswered: a follower can be granted the lock
+    // before the old leader's leader-leaving reaches it. A fresh worker has no session, so
+    // make sure one goes first when this tab has it.
     const queued = sendQueue.splice(0);
+    const queuedIds = new Set(queued.map((msg) => msg.id));
+    for (const req of inFlightRequests()) if (!queuedIds.has(req.id)) queued.push(req);
+    if (lastSession && !queued.some((msg) => msg.method === 'setSession')) {
+      queued.unshift({ ...lastSession, id: makeId() } as CacheRequest);
+    }
     console.log('[cache-client] flushing', queued.length, 'queued messages to worker');
     for (const msg of queued) {
       console.log('[cache-client] → worker (flushed)', msg.method);
@@ -321,38 +506,57 @@ export function createCacheClient(): CacheClient {
       }
     };
 
-    channel.postMessage({ type: 'leader-ready' });
+    channel.postMessage({ type: 'leader-ready', leaderId: tabId });
 
     channel.onmessage = (e: MessageEvent) => {
       if (handleResetControl(e.data)) return;
       if (e.data?.type === 'follower-ping') {
-        // A late-opening follower is asking us to re-announce.
-        channel.postMessage({ type: 'leader-ready' });
+        // A late-opening follower is asking us to re-announce, or a follower is checking
+        // that we're still alive.
+        channel.postMessage({ type: 'leader-ready', leaderId: tabId });
         return;
       }
       if (e.data?.id && leaderWorker) leaderWorker.postMessage(e.data);
     };
   }
 
-  function requestLeadership() {
+  // Queue for the leader lock, or with `steal` take it from a leader that stopped answering.
+  function requestLeadership(steal = false) {
     if (!navigator.locks) {
       console.warn('[cache-client] navigator.locks unavailable, acting as leader immediately');
       becomeLeader();
       return;
     }
+    // Only one request per tab: a steal replaces the queued one, which would otherwise be
+    // granted to us again later.
+    lockRequestAbort?.abort();
+    const abort = new AbortController();
+    lockRequestAbort = steal ? null : abort;
+    let granted = false;
     // The first tab to acquire this lock becomes the leader and owns the DedicatedWorker.
     // When the leader tab closes, the next-queued tab automatically becomes the new leader.
     navigator.locks
-      .request('cache-leader', async () => {
+      .request(LEADER_LOCK, steal ? { steal: true } : { signal: abort.signal }, async () => {
+        granted = true;
+        if (lockRequestAbort === abort) lockRequestAbort = null;
         becomeLeader();
         await new Promise<void>((resolve) => {
           lockReleaser = resolve;
         });
       })
-      .catch((err) => console.error('[cache-client] lock request failed', err));
+      .catch((err) => {
+        if ((err as DOMException).name !== 'AbortError') {
+          console.error('[cache-client] lock request failed', err);
+          return;
+        }
+        // Not granted yet: this tab withdrew the request itself.
+        if (!granted) return;
+        // Granted, then taken: another tab decided this one was frozen and stole the lock.
+        console.warn('[cache-client] another tab took the leader lock, standing down');
+        relinquishLeadership();
+        if (!resetting && !frozen) requestLeadership();
+      });
   }
-
-  requestLeadership();
 
   // Follower path: responses are broadcast by the leader. Named so standDown() can restore
   // it: becomeLeader() replaces channel.onmessage, and a tab that gave up leadership has to
@@ -360,9 +564,30 @@ export function createCacheClient(): CacheClient {
   function followerChannelHandler(e: MessageEvent<unknown>) {
     const data = e.data as Record<string, unknown>;
     if (handleResetControl(data)) return;
+    if (data?.type === 'leader-leaving') {
+      // The leader is about to be frozen and has let go of the lock. The next leader has
+      // never seen this tab's requests.
+      if (role !== 'follower') return;
+      console.log('[cache-client] follower: leader leaving, waiting for the next one');
+      role = 'unknown';
+      currentLeaderId = null;
+      lastLeaderSeen = Date.now();
+      resendInFlight();
+      return;
+    }
     if (data?.type === 'leader-ready') {
+      lastLeaderSeen = Date.now();
+      const leaderId = (data.leaderId as string | undefined) ?? null;
+      if (role === 'follower' && leaderId !== currentLeaderId) {
+        // A new leader took over without a leader-leaving, e.g. after a steal.
+        console.log('[cache-client] follower: new leader', leaderId);
+        currentLeaderId = leaderId;
+        resendInFlight();
+        return;
+      }
       if (role !== 'unknown') return;
       role = 'follower';
+      currentLeaderId = leaderId;
       // Flush buffered messages through the channel now that the leader is ready.
       const queued = sendQueue.splice(0);
       console.log(
@@ -376,23 +601,59 @@ export function createCacheClient(): CacheClient {
       return;
     }
     if (data?.type === 'queryChunk') {
+      lastLeaderSeen = Date.now();
       handleChunk(data as unknown as CacheChunk);
       return;
     }
     if (data?.type === 'queryProgress') {
+      lastLeaderSeen = Date.now();
       handleProgress(data as unknown as CacheProgress);
       return;
     }
+    if (data?.id) lastLeaderSeen = Date.now();
     handleResponse(data as unknown as CacheResponse, pending);
   }
 
+  // Installed before requesting the lock: becomeLeader() replaces it, and without
+  // navigator.locks that happens synchronously inside requestLeadership().
   channel.onmessage = followerChannelHandler;
+  requestLeadership();
+
+  // Chrome freezes background tabs (on Android, aggressively). A frozen tab keeps its Web
+  // Lock, and its worker keeps the OPFS handles, so a frozen leader would stall every other
+  // tab. Hand over before freezing instead: terminate the worker, release the lock, and
+  // withdraw any queued lock request so the lock isn't granted to a tab that can't run.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('freeze', () => {
+      if (resetting) return;
+      console.log('[cache-client] tab freezing, releasing the cache');
+      frozen = true;
+      stopLivenessCheck();
+      lockRequestAbort?.abort();
+      lockRequestAbort = null;
+      if (role === 'leader') {
+        channel.postMessage({ type: 'leader-leaving' });
+        relinquishLeadership();
+        stopLivenessCheck();
+      }
+    });
+    document.addEventListener('resume', () => {
+      if (resetting) return;
+      console.log('[cache-client] tab resumed, rejoining the cache');
+      frozen = false;
+      lastLeaderSeen = Date.now();
+      for (const id of streams.keys()) armWatchdog(id);
+      requestLeadership();
+      ensureLivenessCheck();
+    });
+  }
 
   function call<T>(req: CacheRequestBody): Promise<T> {
     const id = makeId();
+    const full = { ...req, id } as CacheRequest;
     return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
-      send({ ...req, id } as CacheRequest);
+      pending.set(id, { resolve: resolve as (v: unknown) => void, reject, req: full });
+      send(full);
     });
   }
 
@@ -400,8 +661,10 @@ export function createCacheClient(): CacheClient {
   // so the next module instance can acquire the lock immediately.
   if (import.meta.hot) {
     import.meta.hot.dispose(() => {
+      lockRequestAbort?.abort();
       lockReleaser?.();
       leaderWorker?.terminate();
+      stopLivenessCheck();
       channel.close();
     });
   }
@@ -409,14 +672,17 @@ export function createCacheClient(): CacheClient {
   return {
     setSession: (userId, privateKey) => {
       localUserId = userId;
+      lastSession = { method: 'setSession', userId, privateKey };
       send({ id: makeId(), method: 'setSession', userId, privateKey });
     },
 
     cacheQuery: (query, callback) => {
       const id = makeId();
-      streamCallbacks.set(id, callback);
       const targetUserId = query.userId ?? localUserId ?? '';
-      send({ id, method: 'cacheQuery', query, targetUserId });
+      const req: CacheRequest = { id, method: 'cacheQuery', query, targetUserId };
+      streams.set(id, { callback, req, watchdog: null });
+      armWatchdog(id);
+      send(req);
     },
 
     refetch: () => {

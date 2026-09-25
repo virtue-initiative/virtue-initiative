@@ -274,11 +274,16 @@
 
 .logs-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--text-muted);
   margin: 0 0 1rem;
+}
+
+.logs-sync-error {
+  color: var(--danger);
 }
 
 .logs-stats-trigger {
