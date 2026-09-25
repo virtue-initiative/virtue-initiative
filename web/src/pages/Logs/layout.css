@@ -56,13 +56,19 @@
     margin-bottom: 1rem;
   }
 
+  /* Edit Search and the view switcher share one row; the button takes the
+     space the switcher leaves. */
+  .logs-header-actions {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
   .logs-header-view-controls {
-    margin-left: auto;
-    min-width: 0;
+    flex-shrink: 0;
   }
 
   .logs-filter-section {
-    width: 100%;
+    flex: 1;
     min-width: 0;
   }
 }
