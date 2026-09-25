@@ -66,3 +66,14 @@ export function getDigestWindowForRun(input: {
 export function formatUtcDate(timestamp: number) {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
+
+/**
+ * The date the web app's report should open on for a digest window, as
+ * YYYY-MM-DD in the recipient's timezone. Windows end at 06:00 local, so the
+ * day (or last day of the week) they cover is the day before `end`.
+ */
+export function reportDateForWindow(window: { end: number }, timezone: string) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(
+    new Date(window.end - DAY_MS / 2),
+  );
+}

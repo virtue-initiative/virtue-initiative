@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { useLocation } from 'preact-iso';
 import { useAPIContext, useDevices, usePartners, usePasswords, useUser } from '../utils/api';
 import { Avatar } from '@virtueinitiative/shared-web';
-import { DevicesIcon, PartnersIcon, LogsIcon, LockIcon, SettingsIcon } from './icons';
+import { DevicesIcon, PartnersIcon, LogsIcon, LockIcon, ReportIcon, SettingsIcon } from './icons';
 import { LANDING_URL } from '../utils/landing-url';
 import { ReportBugDialog } from './ReportBugDialog';
 
@@ -184,6 +184,10 @@ export function Sidebar() {
   const activeUserId =
     activeLogsUserId === 'gallery' || activeLogsUserId === 'list' ? null : activeLogsUserId;
 
+  const onReport = currentPath === '/report' || currentPath.startsWith('/report/');
+  const reportUserMatch = currentPath.match(/^\/report\/([^/]+)/);
+  const activeReportUserId = reportUserMatch ? reportUserMatch[1] : null;
+
   const deviceCount = devices.filter((device) => device.owner === api.userId).length;
   const activePasswordCount = passwords.filter((password) => password.deleted_at === null).length;
   const partnerCount =
@@ -269,6 +273,34 @@ export function Sidebar() {
           >
             Passwords
           </NavLink>
+
+          <div class="sidebar-nav-group">
+            <a href="/report" class="sidebar-nav-group-heading" onClick={closeMobile}>
+              <span class="sidebar-nav-icon">
+                <ReportIcon />
+              </span>
+              <span class="sidebar-nav-label">Reports</span>
+            </a>
+            <div class="sidebar-nav-sublist">
+              <NavLink
+                href="/report"
+                active={onReport && !activeReportUserId}
+                onNavigate={closeMobile}
+              >
+                My report
+              </NavLink>
+              {acceptedWatchings.map((partner) => (
+                <NavLink
+                  key={partner.id}
+                  href={`/report/${partner.user.id}`}
+                  active={onReport && activeReportUserId === partner.user.id}
+                  onNavigate={closeMobile}
+                >
+                  {(partner.user.name ?? partner.user.email) + ' report'}
+                </NavLink>
+              ))}
+            </div>
+          </div>
 
           <div class="sidebar-nav-group">
             <a href="/logs" class="sidebar-nav-group-heading" onClick={closeMobile}>

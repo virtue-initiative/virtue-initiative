@@ -1,5 +1,5 @@
 import { DigestFrequency, TamperSeverity } from './email-domain';
-import { formatUtcDate, getDigestWindowForRun } from './digest-schedule';
+import { formatUtcDate, getDigestWindowForRun, reportDateForWindow } from './digest-schedule';
 import { listBatchWindowsForUser, listDevicesForUser, listDigestEligiblePartnerships } from './db';
 import { sendEmail } from './email';
 import { renderPartnerDigestTemplate } from './email/templates';
@@ -122,6 +122,11 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       continue;
     }
 
+    const reportQuery = new URLSearchParams({
+      period: emailFrequency === 'weekly' ? 'week' : 'day',
+      date: reportDateForWindow(window, timezone),
+    });
+
     const partnerSummaries = await Promise.all(
       watcherPartnerships
         .slice()
@@ -140,6 +145,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
             partnershipId: partnership.partnership_id,
             ownerName: partnership.watching_user_name,
             ownerEmail: partnership.watching_user_email,
+            reportUrl: `${env.APP_URL}/report/${partnership.watching_user_id}?${reportQuery}`,
             approxScreenshotCount: countApproximateScreenshots(
               batches,
               DEFAULT_CAPTURE_INTERVAL_MS,

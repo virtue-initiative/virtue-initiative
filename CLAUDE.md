@@ -28,7 +28,9 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 ## Local dev
 
-`./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, installs/trusts Caddy.
+`./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, seeds sample data, installs/trusts Caddy.
+
+`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then restart `launch.sh` if it's running and use "Clear cache" in the web app. The restart matters because seeded batch URLs use `R2_URL` from `api/.dev.vars`, and `launch.sh` only rewrites stored batch URLs to its current random API port when it starts. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
 
 `./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, `landing`, and the standalone `hash-server` (see `hash-server/SPEC.md`) together (interleaved colored logs), each on a random free port. The hash server is minted a `JWT_PUBLIC_KEY` read from `api/.dev.vars` so it verifies tokens signed by the local API:
 

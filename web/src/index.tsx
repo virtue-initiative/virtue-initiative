@@ -18,6 +18,7 @@ import { Devices } from './pages/Devices/index';
 import { Partners } from './pages/Partners/index';
 import { Passwords } from './pages/Passwords/index';
 import { Logs } from './pages/Logs/index';
+import { Report } from './pages/Report/index';
 import { Auth } from './pages/Auth/index';
 import { InviteAccept } from './pages/InviteAccept/index';
 import { Settings } from './pages/Settings/index';
@@ -134,6 +135,8 @@ function AppShell() {
               <Route path="/" component={Devices} />
               <Route path="/partners" component={Partners} />
               <Route path="/passwords" component={Passwords} />
+              <Route path="/report" component={Report} />
+              <Route path="/report/:userId" component={Report} />
               <Route path="/logs" component={Logs} />
               <Route path="/logs/list" component={Logs} />
               <Route path="/logs/gallery" component={Logs} />
