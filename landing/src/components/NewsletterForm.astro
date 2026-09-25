@@ -1,0 +1,37 @@
+---
+import { Button, Input } from '@virtueinitiative/shared-web';
+
+// Posts straight to Buttondown's embed endpoint, so it needs no API key and no account.
+// Buttondown sends its own confirmation email before the address is subscribed, which
+// is what makes this safe to accept from anyone. Accounts opt in from the signup form
+// instead (API-010).
+const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/virtueinitiative';
+---
+
+<section class="newsletter" aria-labelledby="newsletter-heading">
+  <div class="eyebrow">Newsletter</div>
+  <h2 id="newsletter-heading">Get project updates</h2>
+  <p>
+    We send occasional news about the project, new features, and new articles. You don't need a
+    Virtue account to subscribe.
+  </p>
+  <form class="newsletter-form" action={BUTTONDOWN_EMBED_URL} method="post">
+    <label class="newsletter-label" for="newsletter-email">Email address</label>
+    <div class="newsletter-row">
+      <Input
+        id="newsletter-email"
+        name="email"
+        type="email"
+        placeholder="you@example.com"
+        autocomplete="email"
+        required
+      />
+      <Button type="submit" variant="primary">Subscribe</Button>
+    </div>
+  </form>
+  <p class="newsletter-fine-print">
+    We'll email you a link to confirm first. We never share your address. See our <a href="/privacy"
+      >Privacy Policy</a
+    >.
+  </p>
+</section>

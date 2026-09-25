@@ -15,8 +15,14 @@ export async function finishSignup(
   verificationToken: string,
   name: string | undefined,
   password: string,
+  newsletterOptIn = false,
 ): Promise<APIClient> {
-  const session = await Session.fromFinishSignup(verificationToken, name, password);
+  const session = await Session.fromFinishSignup(
+    verificationToken,
+    name,
+    password,
+    newsletterOptIn,
+  );
   return new APIClient(session);
 }
 

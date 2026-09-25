@@ -10,6 +10,9 @@ import { Auth } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
+const termsCheckbox = () => screen.getByRole('checkbox', { name: /terms of use/i });
+const newsletterCheckbox = () => screen.getByRole('checkbox', { name: /newsletter/i });
+
 function renderAuth(mode: 'login' | 'signup' | 'forgot-password' = 'login') {
   return render(
     <LocationProvider>
@@ -121,13 +124,13 @@ describe('Auth — finish signup', () => {
     renderAuth('signup');
 
     await waitFor(() => {
-      expect(screen.getByRole('checkbox')).toBeEnabled();
+      expect(termsCheckbox()).toBeEnabled();
     });
 
     const submit = screen.getByRole('button', { name: /create account/i });
     expect(submit).toBeDisabled();
 
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(termsCheckbox());
     expect(submit).toBeEnabled();
 
     window.history.pushState({}, '', '/');
@@ -139,10 +142,10 @@ describe('Auth — finish signup', () => {
     renderAuth('signup');
 
     await waitFor(() => {
-      expect(screen.getByRole('checkbox')).toBeEnabled();
+      expect(termsCheckbox()).toBeEnabled();
     });
 
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(termsCheckbox());
     await user.type(screen.getByPlaceholderText('Choose a password'), 'short');
     await user.type(screen.getByPlaceholderText('Retype your password'), 'short');
 
@@ -164,25 +167,29 @@ describe('Auth — finish signup', () => {
     renderAuth('signup');
 
     await waitFor(() => {
-      expect(screen.getByRole('checkbox')).toBeEnabled();
+      expect(termsCheckbox()).toBeEnabled();
     });
 
     let signupCalls = 0;
+    let signupBody: Record<string, unknown> = {};
     server.use(
-      http.post(`${BASE}/signup`, () => {
+      http.post(`${BASE}/signup`, async ({ request }) => {
         signupCalls += 1;
+        signupBody = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({
           user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
         });
       }),
     );
 
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(termsCheckbox());
     await user.type(screen.getByPlaceholderText('Choose a password'), 'a-long-enough-password');
     await user.type(screen.getByPlaceholderText('Retype your password'), 'a-long-enough-password');
     await user.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => expect(signupCalls).toBe(1), { timeout: 10000 });
+    // The newsletter box starts unchecked, so an untouched form never subscribes.
+    expect(signupBody).not.toHaveProperty('newsletter_opt_in');
     expect(
       screen
         .queryAllByRole('alert')
@@ -191,6 +198,37 @@ describe('Auth — finish signup', () => {
 
     window.history.pushState({}, '', '/');
     // The real argon2id derivation runs here, so allow past the default timeout.
+  }, 15000);
+
+  it('sends the newsletter opt-in only when the box is ticked', async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, '', '/signup?signup_token=test-token');
+    renderAuth('signup');
+
+    await waitFor(() => {
+      expect(newsletterCheckbox()).toBeEnabled();
+    });
+    expect(newsletterCheckbox()).not.toBeChecked();
+
+    let signupBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`${BASE}/signup`, async ({ request }) => {
+        signupBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          user: { id: 'test-user-id', email: 'test@example.com', email_verified: true },
+        });
+      }),
+    );
+
+    await user.click(termsCheckbox());
+    await user.click(newsletterCheckbox());
+    await user.type(screen.getByPlaceholderText('Choose a password'), 'a-long-enough-password');
+    await user.type(screen.getByPlaceholderText('Retype your password'), 'a-long-enough-password');
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => expect(signupBody.newsletter_opt_in).toBe(true), { timeout: 10000 });
+
+    window.history.pushState({}, '', '/');
   }, 15000);
 
   it('warns about a breached password without blocking submission', async () => {
@@ -211,10 +249,10 @@ describe('Auth — finish signup', () => {
     renderAuth('signup');
 
     await waitFor(() => {
-      expect(screen.getByRole('checkbox')).toBeEnabled();
+      expect(termsCheckbox()).toBeEnabled();
     });
 
-    await user.click(screen.getByRole('checkbox'));
+    await user.click(termsCheckbox());
     await user.type(screen.getByPlaceholderText('Choose a password'), password);
     await user.type(screen.getByPlaceholderText('Retype your password'), password);
 
