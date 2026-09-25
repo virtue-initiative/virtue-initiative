@@ -24,13 +24,21 @@ use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+};
 
+// Captures the whole virtual screen (every monitor) as one image. Its origin is
+// the top-left of the bounding box around all monitors, which is negative when
+// a monitor sits left of or above the primary one. The app manifest declares
+// PerMonitorV2 DPI awareness, so these metrics are physical pixels.
 #[cfg(target_os = "windows")]
 pub fn capture_screen_png() -> Result<Vec<u8>> {
     unsafe {
-        let width = GetSystemMetrics(SM_CXSCREEN);
-        let height = GetSystemMetrics(SM_CYSCREEN);
+        let x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
         if width <= 0 || height <= 0 {
             return Err(anyhow!("invalid screen size {}x{}", width, height));
         }
@@ -61,7 +69,7 @@ pub fn capture_screen_png() -> Result<Vec<u8>> {
             return Err(anyhow!("SelectObject failed"));
         }
 
-        if BitBlt(mem_dc, 0, 0, width, height, Some(screen_dc), 0, 0, SRCCOPY).is_err() {
+        if BitBlt(mem_dc, 0, 0, width, height, Some(screen_dc), x, y, SRCCOPY).is_err() {
             let _ = SelectObject(mem_dc, old_obj);
             let _ = DeleteObject(HGDIOBJ(bitmap.0));
             let _ = DeleteDC(mem_dc);
