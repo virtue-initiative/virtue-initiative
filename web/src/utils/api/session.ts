@@ -72,6 +72,7 @@ export class Session {
     token: string,
     name: string | undefined,
     password: string,
+    newsletterOptIn = false,
   ): Promise<Session> {
     const params = await api.getCurrentHashParams();
     const passwordSalt = generateRandomKeyBytes(params.salt_length);
@@ -89,6 +90,7 @@ export class Session {
       pub_key: keyPair.publicKey.toBase64(),
       encrypted_priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
+      ...(newsletterOptIn ? { newsletter_opt_in: true } : {}),
     });
     await saveWrappingKey(wrappingKey);
     const privateKey = await importUserPrivateKey(keyPair.privateKey);

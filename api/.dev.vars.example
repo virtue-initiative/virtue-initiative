@@ -31,6 +31,10 @@ HASH_SERVER_URL=http://localhost:8788
 # Can be changed to SES
 EMAIL_DELIVERY_MODE=log
 
+# Buttondown API key for the newsletter opt-in on signup (API-010). Leave unset
+# locally: signups that opt in are then only logged, not sent to Buttondown.
+# BUTTONDOWN_API_KEY=
+
 # Where POST /bug-report emails get sent
 BUG_REPORT_EMAIL=help@virtueinitiative.org
 
