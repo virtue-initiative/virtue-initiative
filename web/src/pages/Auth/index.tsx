@@ -416,7 +416,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
               />
               <label class="hint-text auth-terms-label" for="newsletter-opt-in">
                 Email me the Virtue Initiative newsletter with project news and updates. This is
-                optional, and you can unsubscribe from any issue.
+                optional, and you can unsubscribe from any email.
               </label>
             </div>
           )}
