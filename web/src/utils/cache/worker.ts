@@ -648,7 +648,9 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
 
 async function fetchData(params?: { since?: number }): Promise<DataPage> {
   const qs = new URLSearchParams();
-  if (params?.since !== undefined) qs.set('since', String(params.since));
+  // /data only accepts an integer. Flooring can re-fetch the newest batch, which the merge
+  // ignores, and it lets a cache that stored a fractional value (old seed data) recover.
+  if (params?.since !== undefined) qs.set('since', String(Math.floor(params.since)));
   const q = qs.toString();
   const res = await fetch(`${BASE}/data${q ? `?${q}` : ''}`, {
     credentials: 'include',
