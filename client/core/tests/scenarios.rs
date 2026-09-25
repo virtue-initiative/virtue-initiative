@@ -643,3 +643,57 @@ fn status_reports_recent_upload_errors_and_they_survive_a_restart() {
         Some("hash_upload".to_string())
     );
 }
+
+// ── Wakeup scheduling (CORE-020) ──────────────────────────────────────────────
+
+/// Seeds a state where one screenshot is waiting on the next batch: the
+/// post-login proof batches are done and a batch just landed at 10s, so the
+/// next one isn't due until 70s (the scenario batch interval is 60s).
+fn scenario_with_batch_waiting_on_interval() -> Scenario {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(0).tick();
+    scenario.with_state_mut(|s| {
+        s.upload.post_login_proof_batches_remaining = 0;
+        s.upload.force_flush = false;
+        s.upload.bypass_lock = false;
+        s.upload.last_batch_at_ms = Some(10_000);
+        s.screenshot.next_screenshot_at_ms = Some(20_000);
+    });
+    scenario.at_t(20_000).tick();
+    assert!(
+        !scenario.state().upload.pending_batch_events.is_empty(),
+        "the screenshot should be waiting for the next batch"
+    );
+    scenario
+}
+
+/// Regression test: a batch waiting out its interval used to schedule the
+/// next wakeup for "now", so `run_forever` ran full ticks back-to-back until
+/// the interval elapsed.
+#[test]
+fn batch_waiting_on_its_interval_does_not_schedule_an_immediate_wakeup() {
+    let scenario = scenario_with_batch_waiting_on_interval();
+    let next = scenario.state().next_wakeup_at_ms;
+    assert!(next > 20_000, "next wakeup {next} should be in the future");
+    assert!(
+        next <= 70_000,
+        "next wakeup {next} should be no later than the batch deadline"
+    );
+}
+
+/// A due batch held by the screen-lock gate can't make progress until the
+/// screen unlocks, which no timer predicts — it must not spin the loop.
+#[test]
+fn due_batch_held_by_screen_lock_does_not_schedule_an_immediate_wakeup() {
+    let mut scenario = scenario_with_batch_waiting_on_interval();
+    scenario.platform.set_locked_or_screensaver(true);
+    scenario.at_t(100_000).tick();
+
+    let state = scenario.state();
+    assert!(!state.upload.pending_batch_events.is_empty());
+    assert!(
+        state.next_wakeup_at_ms > 100_000,
+        "next wakeup {} should wait for the next screenshot draw",
+        state.next_wakeup_at_ms
+    );
+}

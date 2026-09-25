@@ -95,11 +95,11 @@ other platform.
 
 - `linux/src/daemon.rs` — spawns the IPC server thread (`ipc::spawn_server`)
   and `Daemon::run_forever()` on its own thread, then joins the latter
-- `mac/src/daemon.rs` — same, plus a local boot-vs-monotonic divergence poll
-  (via `MacPlatformHooks`'s inherent `boot_clock_ms`/`monotonic_clock_ms`
-  methods, not part of `LifecycleHooks`) driving a post-wake
+- `mac/src/daemon.rs` — same, plus an IOKit system-power watcher
+  (`mac/src/power.rs`, `IORegisterForSystemPower`) driving a post-wake
   `daemon.flush_batch_now()` — independent daemon-loop UX plumbing, not part
-  of the core alerting model
+  of the core alerting model. It's push-based, so the daemon does no work
+  between ticks
 - `windows/src/resident_monitor.rs` — builds one `Arc<Daemon>` in
   process-global state, spawns `run_forever()` on a background thread;
   `app_login`/`app_logout`/`status_snapshot`/stop functions call its

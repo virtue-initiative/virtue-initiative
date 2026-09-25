@@ -23,6 +23,12 @@ loop(persisted state):
   sleep until next time
 ```
 
+## CORE-020 Wakeup scheduling
+
+The wakeup time picked at the end of a tick MUST be the earliest time at which scheduled work can make progress: the next screenshot draw, the next heartbeat, the pending batch becoming eligible to upload (its batch interval elapsing, or immediately when it is otherwise ready to send, e.g. a forced flush), or a hash/batch retry backoff expiring. Pending work that is held by a condition no timer can clear (e.g. uploads held while the screen is locked, or no device credentials or settings) MUST NOT pull the wakeup time earlier; it waits for the next wakeup or client request instead.
+
+The loop MUST NOT run a tick before the wakeup time unless a client request was applied. It MAY wake before the wakeup time (e.g. to bound how far a platform timer can drift across a system suspend), but MUST then go back to waiting without running a tick.
+
 ## CORE-002 Tamper detection
 
 It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless the gap is explained by a legitimate session transition, checked from both ends:

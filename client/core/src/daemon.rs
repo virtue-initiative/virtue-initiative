@@ -551,11 +551,11 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .lock()
             .expect("daemon state lock poisoned")
             .clone();
-        let (_, should_logout) = self.run_phases(&mut working, now_ms);
+        let (screen_active, should_logout) = self.run_phases(&mut working, now_ms);
         if should_logout {
             self.apply_logout(&mut working);
         }
-        working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms);
+        working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
         self.persist(&working);
@@ -661,11 +661,11 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// `run_forever` and `tick_once`.
     fn run_tick(&self, now_ms: i64) {
         self.with_locked_state(|working| {
-            let (_, should_logout) = self.run_phases(working, now_ms);
+            let (screen_active, should_logout) = self.run_phases(working, now_ms);
             if should_logout {
                 self.apply_logout(working);
             }
-            working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms);
+            working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
             working.last_tick_at_ms = Some(now_ms);
         });
     }
@@ -685,9 +685,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     /// Blocking loop. Each iteration: wait for either the next scheduled
     /// wakeup or an incoming request; apply and persist any requests that
-    /// arrived (replying only once that's durable); then run one tick
-    /// against a freshly-reloaded copy of the state and write the result
-    /// back. Both the request-application step and the tick go through
+    /// arrived (replying only once that's durable); then, if a request was
+    /// applied or the wakeup is actually due, run one tick against a
+    /// freshly-reloaded copy of the state and write the result back.
+    ///
+    /// The wait is capped at 60s because `recv_timeout` measures a clock
+    /// that stops while the system is suspended, so an uncapped wait could
+    /// overshoot its wall-clock deadline by however long the machine slept.
+    /// Waking at the cap without anything due goes straight back to waiting
+    /// rather than running a tick (CORE-020). Both the request-application step and the tick go through
     /// `with_locked_state`, so each is its own cross-process-safe
     /// read-modify-write cycle (CORE-016) — there's still no *in-process*
     /// locking in the middle of either one.
@@ -729,6 +735,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             };
 
             let now_ms = self.now_ms();
+            let applied_request = !requests.is_empty();
             self.apply_requests(requests, now_ms);
 
             if stopping {
@@ -737,7 +744,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 return;
             }
 
-            self.run_tick(now_ms);
+            let due = now_ms
+                >= self
+                    .state
+                    .lock()
+                    .expect("daemon state lock poisoned")
+                    .next_wakeup_at_ms;
+            if applied_request || due {
+                self.run_tick(now_ms);
+            }
         }
     }
 
@@ -787,17 +802,19 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {
         let expected_wakeup = working.next_wakeup_at_ms;
         if self.platform.lifecycle_enabled() {
+            let session = lifecycle::SessionTimes::read(&self.platform);
             lifecycle::tick(
                 &mut working.lifecycle,
                 &mut working.upload,
                 &self.platform,
+                session,
                 now_ms,
                 expected_wakeup,
             );
             lifecycle::note_session_events(
                 &mut working.lifecycle,
                 &mut working.upload,
-                &self.platform,
+                session,
                 now_ms,
             );
         }
@@ -874,25 +891,29 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         (screen_active, should_logout)
     }
 
-    /// Picks the next wakeup time: the earlier of the next scheduled
-    /// screenshot draw, the next hash/batch retry attempt (if anything is
-    /// pending), or immediately if an urgent flush is outstanding — never
-    /// earlier than `now_ms`.
-    fn compute_next_wakeup(&self, state: &DaemonState, now_ms: i64) -> i64 {
+    /// Picks the next wakeup time (CORE-020): the earliest of the next
+    /// scheduled screenshot draw, the next heartbeat, and the next time
+    /// pending hash/batch uploads can make progress — never earlier than
+    /// `now_ms`. Uploads held by the screen-lock gate (or missing
+    /// credentials/settings) contribute nothing, since no timer clears
+    /// those; counting them as due now would spin the loop until they did.
+    fn compute_next_wakeup(&self, state: &DaemonState, now_ms: i64, screen_active: bool) -> i64 {
         let mean_interval_ms = self.config.screenshot_interval.as_millis() as i64;
-        let mut candidate = state
+        let batch_interval_ms = self.config.batch_interval.as_millis() as i64;
+        let screenshot = state
             .screenshot
             .next_screenshot_at_ms
             .unwrap_or(now_ms + mean_interval_ms);
 
-        if !state.upload.pending_hash_events.is_empty() {
-            candidate = candidate.min(state.upload.hash_backoff.next_attempt_at_ms.max(now_ms));
-        }
-        if !state.upload.pending_batch_events.is_empty() {
-            candidate = candidate.min(state.upload.batch_backoff.next_attempt_at_ms.max(now_ms));
-        }
-
-        candidate.max(now_ms)
+        [
+            heartbeat::next_heartbeat_at_ms(&state.heartbeat, &state.upload),
+            upload::next_hash_attempt_at_ms(&state.upload, screen_active),
+            upload::next_batch_attempt_at_ms(&state.upload, batch_interval_ms, screen_active),
+        ]
+        .into_iter()
+        .flatten()
+        .fold(screenshot, i64::min)
+        .max(now_ms)
     }
 }
 
