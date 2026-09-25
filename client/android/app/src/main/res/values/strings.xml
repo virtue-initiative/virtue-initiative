@@ -41,10 +41,10 @@
     <!-- Messages -->
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
     <string name="msg_grant_permission">After signing in, grant screenshot permission to enable monitoring.</string>
-    <string name="msg_onboarding_intro">Virtue needs Accessibility permission to monitor your screen. This lets Virtue capture screenshots for accountability — no interaction data is collected.</string>
-    <string name="msg_onboarding_steps">1. Tap \"Open Accessibility Settings\" below\n2. Find \"Virtue\" in the list\n3. Toggle it on and confirm\n4. Return to this app</string>
     <string name="msg_onboarding_waiting">Waiting for Accessibility permission…</string>
     <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
+    <string name="btn_open_app_info">Open App Info</string>
+    <string name="btn_open_app_list">Open App List</string>
     <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
     <string name="msg_force_capture_started">Screenshot uploading…</string>
     <string name="msg_force_capture_failed">Test screenshot failed: %s</string>
@@ -56,6 +56,7 @@
     <string name="dialog_pause_message">This will stop monitoring on this device. People monitoring you may be alerted.</string>
     <string name="dialog_resume_title">Resume monitoring?</string>
     <string name="dialog_resume_message">Resume monitoring on this device?</string>
+    <string name="dialog_accessibility_title">Turn on Screen Monitoring</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="dialog_confirm">Confirm</string>
     <string name="dialog_report_bug_title">Report a Bug</string>
@@ -67,6 +68,35 @@
     <string name="report_bug_send_failed">Failed to send the report.</string>
     <string name="dialog_report_sent_title">Report Sent</string>
     <string name="dialog_report_sent_message">Thanks — your report was sent to the Virtue Initiative team.</string>
+
+    <!-- Accessibility setup guide (AccessibilitySetupGuide.kt). Words in bold
+         must match what Android shows on screen. -->
+    <string name="a11y_guide_intro">Virtue needs Accessibility permission to capture screenshots for accountability. No interaction data is collected.</string>
+    <string name="a11y_guide_restricted_note">Android blocks this permission for apps installed from a downloaded file, so it takes a few extra steps.</string>
+    <string name="a11y_section_downloaded_apps">Downloaded apps</string>
+    <string name="a11y_section_downloaded_services">Downloaded services</string>
+    <string name="a11y_toggle_use_service_named">Use %1$s</string>
+    <string name="a11y_toggle_use_service">Use service</string>
+    <string name="a11y_warning_restricted">Restricted setting</string>
+    <string name="a11y_warning_denied">App was denied access</string>
+    <string name="a11y_warning_button_ok">OK</string>
+    <string name="a11y_warning_button_close">Close</string>
+    <string name="a11y_screenshot_description">Screenshot for the step: %1$s.</string>
+    <string name="a11y_step_open_title">Open Accessibility settings</string>
+    <string name="a11y_step_open_body">Tap the button below. Under \"%1$s\", tap &lt;b>%2$s&lt;/b>.</string>
+    <string name="a11y_step_open_body_restricted">Tap the button below. Under \"%1$s\", tap &lt;b>%2$s&lt;/b>. It will be grayed out, which is expected.</string>
+    <string name="a11y_step_warning_title">Close the warning</string>
+    <string name="a11y_step_warning_body">Android shows &lt;b>%1$s&lt;/b>. Tap &lt;b>%2$s&lt;/b>, then come back to this app.</string>
+    <string name="a11y_step_unlock_title">Allow restricted settings</string>
+    <string name="a11y_step_unlock_body">Tap the button below. On the App info screen, tap &lt;b>⋮&lt;/b> in the top corner, then tap &lt;b>Allow restricted settings&lt;/b>. Enter your PIN if Android asks for it.</string>
+    <string name="a11y_step_unlock_body_from_list">Tap the button below, then tap &lt;b>Virtue&lt;/b> in the list. On the App info screen, tap &lt;b>⋮&lt;/b> in the top corner, then tap &lt;b>Allow restricted settings&lt;/b>. Enter your PIN if Android asks for it.</string>
+    <string name="a11y_step_toggle_title">Turn on Virtue</string>
+    <string name="a11y_step_toggle_body">Turn on &lt;b>%1$s&lt;/b>.</string>
+    <string name="a11y_step_toggle_body_restricted">Open Accessibility settings again and tap &lt;b>%1$s&lt;/b>. Turn on &lt;b>%2$s&lt;/b>.</string>
+    <string name="a11y_step_allow_title">Allow access</string>
+    <string name="a11y_step_allow_body">Tap &lt;b>Allow&lt;/b> to let Virtue capture screenshots.</string>
+    <string name="a11y_step_return_title">Come back to Virtue</string>
+    <string name="a11y_step_return_body">Return to this app. Once Accessibility is on, this screen changes to the sign-in form.</string>
 
     <!-- Accessibility service -->
     <string name="accessibility_service_label">Virtue Screen Monitor</string>

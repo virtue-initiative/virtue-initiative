@@ -237,3 +237,49 @@
     border-radius: 0;
   }
 }
+
+/* Android accessibility guide (download-instructions/android.md). The script
+   in download.astro hides the version-specific parts with `hidden`, which the
+   `display: block` screenshot rule above would otherwise override. */
+.android-guide {
+  margin-block: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.android-guide [hidden] {
+  display: none !important;
+}
+
+.android-guide-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  font-weight: 600;
+}
+
+.android-guide-version select {
+  font: inherit;
+  font-weight: 400;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg, white);
+  color: inherit;
+}
+
+.android-guide-hint {
+  margin-top: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+/* These screenshots are cropped phone screens, so keep them narrower than
+   the full-width desktop screenshots the other platforms use. */
+.instructions-tab-panel.help-doc .android-guide img,
+.instructions-tab-panel.help-doc img[src^='/images/android-setup/'] {
+  width: min(360px, 100%);
+}
