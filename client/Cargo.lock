@@ -3626,10 +3626,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "virtue-android"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
- "chrono",
  "jni",
  "once_cell",
  "serde",
@@ -3643,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3670,10 +3669,9 @@ dependencies = [
 
 [[package]]
 name = "virtue-ios"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
- "chrono",
  "once_cell",
  "serde",
  "serde_json",
@@ -3685,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-linux"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3707,7 +3705,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-mac"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3731,7 +3729,6 @@ name = "virtue-mac-ffi"
 version = "0.0.8"
 dependencies = [
  "anyhow",
- "chrono",
  "once_cell",
  "serde_json",
  "virtue-core",
@@ -3753,7 +3750,7 @@ dependencies = [
 
 [[package]]
 name = "virtue-windows"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "chrono",
