@@ -53,7 +53,6 @@ class MainActivity : AppCompatActivity() {
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
         binding.forceCaptureButton.setOnClickListener { forceCapture() }
-        binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
@@ -166,6 +165,7 @@ class MainActivity : AppCompatActivity() {
             binding.loginPanel.visibility = android.view.View.GONE
             binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
+            renderSetupGuide(binding.onboardingSteps)
             binding.onboardingStatusText.text = getString(R.string.msg_onboarding_waiting)
             binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
@@ -184,6 +184,7 @@ class MainActivity : AppCompatActivity() {
             binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
             if (!coreReady) {
+                renderSetupGuide(binding.onboardingSteps)
                 binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
             }
             binding.statusTitle.text = getString(R.string.status_signed_out)
@@ -283,20 +284,49 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
+    private fun openAppInfo() {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", packageName, null))
+        )
+    }
+
+    private fun openAppList() {
+        startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
+    }
+
+    private fun handleGuideAction(action: AccessibilitySetupGuide.Action) {
+        when (action) {
+            AccessibilitySetupGuide.Action.ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
+            AccessibilitySetupGuide.Action.APP_INFO -> openAppInfo()
+            AccessibilitySetupGuide.Action.APP_LIST -> openAppList()
+        }
+    }
+
+    private fun renderSetupGuide(container: LinearLayout) {
+        AccessibilitySetupGuide.render(this, container, ::handleGuideAction)
+    }
+
+    // Reached when Accessibility is off while signed in (or a sign-in raced the
+    // service connecting), where the onboarding panel isn't on screen.
     private fun showAccessibilityOnboarding() {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Enable Screen Monitoring")
-            .setMessage(
-                "Virtue needs Accessibility permission to monitor your screen.\n\n" +
-                "1. Tap \"Open Settings\" below\n" +
-                "2. Find \"Virtue\" in the list\n" +
-                "3. Toggle it on and confirm\n" +
-                "4. Return here to sign in\n\n" +
-                "Monitoring will start automatically once you're signed in."
-            )
-            .setPositiveButton("Open Settings") { _, _ -> openAccessibilitySettings() }
-            .setNegativeButton(getString(R.string.dialog_cancel), null)
-            .show()
+        val dp = resources.displayMetrics.density
+        val steps = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * dp).toInt()
+            setPadding(pad, (8 * dp).toInt(), pad, 0)
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_accessibility_title))
+            .setView(ScrollView(this).apply { addView(steps) })
+            .setNegativeButton(getString(R.string.btn_done), null)
+            .create()
+        // The guide's buttons leave the app, so close the dialog behind them.
+        AccessibilitySetupGuide.render(this, steps) { action ->
+            dialog.dismiss()
+            handleGuideAction(action)
+        }
+        dialog.show()
     }
 
     private fun requestBackgroundFriendlySettings() {
