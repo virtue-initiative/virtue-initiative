@@ -9,14 +9,18 @@ import { decodeWebpDimensions } from '../webp-dimensions';
 // errors (plain Error), which are transient and should be retried.
 export class DecryptionError extends Error {}
 
-// Batch payload format must match client/core/src/batch.rs:
-//   msgpack({events: [msgpack(event), ...]}) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
+const BATCH_FETCH_TIMEOUT_MS = 20_000;
+
+// Batch payload format must match client/core/src/module/upload/batch.rs:
+//   msgpack([msgpack(event), ...]) → gzip → AES-256-GCM (nonce[12] || ciphertext+tag)
 export async function decryptAndFlattenBatch(
   batch: Batch,
   openBatchKey: (encryptedKey: string) => Promise<CryptoKey>,
   startChainHash: string,
 ): Promise<FeedLog[]> {
-  const response = await fetch(batch.url);
+  // Bounded so one stalled blob can't keep a sync from ever finishing. The cache worker
+  // counts a timeout as a transient failure and retries the batch on the next sync.
+  const response = await fetch(batch.url, { signal: AbortSignal.timeout(BATCH_FETCH_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Fetch failed (${response.status}) for ${batch.url}`);
   }

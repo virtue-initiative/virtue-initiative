@@ -9,7 +9,7 @@ pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::{ApiTransport, UploadedBatchResponse};
 use crate::crypto::{CryptoEngine, compute_event_hash, encode_batch_event};
-use crate::error::CoreError;
+use crate::error::{CoreError, CoreResult};
 use crate::logging::{log_error, log_warning};
 use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
@@ -230,6 +230,53 @@ fn batch_recipients(settings: &DeviceSettings) -> Result<Vec<BatchRecipient>, Co
     Ok(settings.wrapping_keys.clone())
 }
 
+/// The screen-lock battery gate: uploads wait while the screen is locked
+/// unless a heartbeat or explicit flush set `bypass_lock`.
+fn uploads_unlocked(state: &UploadState, screen_active: bool) -> bool {
+    screen_active || state.bypass_lock
+}
+
+/// When the pending batch's interval wait ends, or `i64::MIN` when it's
+/// ready to send regardless of the interval.
+fn batch_due_at_ms(state: &UploadState, batch_interval_ms: i64) -> i64 {
+    let urgent = state.post_login_proof_batches_remaining > 0
+        || state.force_flush
+        || state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
+    match state.last_batch_at_ms {
+        Some(last) if !urgent => last + batch_interval_ms,
+        _ => i64::MIN,
+    }
+}
+
+/// The earliest time a hash retry can next make progress, or `None` when
+/// nothing is pending or it's held by something no timer clears (CORE-020).
+pub fn next_hash_attempt_at_ms(state: &UploadState, screen_active: bool) -> Option<i64> {
+    if state.pending_hash_events.is_empty()
+        || !uploads_unlocked(state, screen_active)
+        || state.device_credentials.is_none()
+    {
+        return None;
+    }
+    Some(state.hash_backoff.next_attempt_at_ms)
+}
+
+/// The earliest time the pending batch can next upload, or `None` when
+/// nothing is pending or it's held by something no timer clears (CORE-020).
+pub fn next_batch_attempt_at_ms(
+    state: &UploadState,
+    batch_interval_ms: i64,
+    screen_active: bool,
+) -> Option<i64> {
+    if state.pending_batch_events.is_empty()
+        || !uploads_unlocked(state, screen_active)
+        || state.device_credentials.is_none()
+        || !state.settings.as_ref().is_some_and(can_capture)
+    {
+        return None;
+    }
+    Some(batch_due_at_ms(state, batch_interval_ms).max(state.batch_backoff.next_attempt_at_ms))
+}
+
 // ── Hash retries: plan / execute / commit ──────────────────────────────────
 
 pub struct HashRetryPlan {
@@ -252,7 +299,7 @@ pub fn plan_hash_retries(
     if state.pending_hash_events.is_empty() {
         return None;
     }
-    if !(screen_active || state.bypass_lock) {
+    if !uploads_unlocked(state, screen_active) {
         return None;
     }
     if !state.hash_backoff.ready(now_ms) {
@@ -354,6 +401,9 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         let encoded = match encode_batch_event(&event) {
             Ok(bytes) => bytes,
             Err(err) => {
+                // Counts as a failure so the queue backs off instead of
+                // retrying the same event every tick (CORE-020).
+                had_failure = true;
                 log_warning(
                     "encode_batch_event failed, keeping event for retry",
                     Some(&err),
@@ -478,7 +528,10 @@ pub fn commit_hash_retries(state: &mut UploadState, outcome: HashRetryOutcome, n
 pub struct BatchPlan {
     device_id: String,
     refresh_token: String,
-    batch: BatchUpload,
+    /// An `Err` here (e.g. a recipient key that won't parse) is reported as
+    /// a deferred upload so it backs off like any other failure, rather than
+    /// leaving the batch due and spinning the loop (CORE-020).
+    batch: CoreResult<BatchUpload>,
     count: usize,
 }
 
@@ -492,16 +545,10 @@ pub fn plan_batch(
     if state.pending_batch_events.is_empty() {
         return None;
     }
-    if !(screen_active || state.bypass_lock) {
+    if !uploads_unlocked(state, screen_active) {
         return None;
     }
-    let should = state.post_login_proof_batches_remaining > 0
-        || state
-            .last_batch_at_ms
-            .map(|last| now_ms - last >= batch_interval_ms)
-            .unwrap_or(true)
-        || state.force_flush
-        || state.pending_batch_events.len() >= MAX_BATCH_ITEMS_PER_UPLOAD;
+    let should = batch_due_at_ms(state, batch_interval_ms) <= now_ms;
     if !should || !state.batch_backoff.ready(now_ms) {
         return None;
     }
@@ -535,8 +582,7 @@ pub fn plan_batch(
         medium_risk_count,
         screenshot_count,
         notifications,
-    )
-    .ok()?;
+    );
 
     Some(BatchPlan {
         device_id: creds.device_id.clone(),
@@ -577,7 +623,17 @@ impl BatchOutcome {
 
 /// Phase 5b: the actual network call, run without holding the state lock.
 pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome {
-    match api.upload_batch(&plan.refresh_token, &plan.batch) {
+    let batch = match plan.batch {
+        Ok(batch) => batch,
+        Err(err) => {
+            log_warning("building the batch failed, deferring upload", Some(&err));
+            return BatchOutcome::Deferred {
+                device_id: plan.device_id,
+                error: format!("building the batch failed: {err}"),
+            };
+        }
+    };
+    match api.upload_batch(&plan.refresh_token, &batch) {
         Ok(response) => {
             tracing::info!(count = plan.count, "batch upload ok");
             BATCH_UPLOAD_SUCCESS_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -770,6 +826,37 @@ mod tests {
         assert!(!should_logout);
         assert!(state.pending_batch_events.is_empty());
         assert_eq!(state.next_hash_seq, 0);
+    }
+
+    /// Regression test: a batch that can't be built (here, a recipient key
+    /// that won't parse) used to make `plan_batch` return `None` with no
+    /// backoff, so the batch stayed due and the loop spun (CORE-020).
+    #[test]
+    fn batch_that_fails_to_build_backs_off_without_calling_the_api() {
+        let mut state = authenticated_state();
+        state.pending_batch_events.push(PendingBatchEvent {
+            ts: 0,
+            risk: 0.0,
+            encoded: vec![1, 2, 3],
+            is_screenshot: false,
+            notify: None,
+        });
+        state.settings.as_mut().unwrap().wrapping_keys[0].pub_key_base64 = "not base64!".into();
+        state.last_batch_at_ms = None;
+
+        let api = MockApiClient::new();
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let outcome = execute_batch(plan, &api);
+        assert!(matches!(outcome, BatchOutcome::Deferred { .. }));
+        assert!(!commit_batch(&mut state, outcome, 1_000));
+
+        assert!(api.state().batch_uploads.is_empty());
+        assert_eq!(state.pending_batch_events.len(), 1);
+        let next = next_batch_attempt_at_ms(&state, 60_000, true).expect("batch still pending");
+        assert!(
+            next > 1_000,
+            "next attempt {next} should wait out a backoff"
+        );
     }
 
     #[test]

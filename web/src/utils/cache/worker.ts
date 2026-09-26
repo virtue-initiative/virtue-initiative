@@ -9,6 +9,7 @@ import { createNativeBatchKeyUnwrapper } from '../api/hpke-native';
 import type { Batch, DataPage } from '../api/api';
 import type { FeedLog } from '../../pages/Logs/types';
 import { CACHE_SCHEMA_VERSION, CACHE_TABLES, findSchemaDrift } from './schema';
+import type { CacheQueryError } from './client';
 
 export type {};
 
@@ -72,6 +73,8 @@ type CacheChunk = {
   // 'replace' → authoritative snapshot (cached fast-path, final result); the consumer swaps
   // its log set. 'append' → incremental delta; the consumer merges it into the existing set.
   mode: 'replace' | 'append';
+  // Only on a final chunk: the sync didn't complete, so `logs` is only what was cached.
+  error?: CacheQueryError;
 };
 // Lightweight sync-progress signal: carries only the block counts, no log payload, so it
 // stays a fixed ~tiny size no matter how much data has accumulated. The full log set is
@@ -88,6 +91,15 @@ let db: any = null;
 // hardReset() empties the OPFS backing files without going through SQLite.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let poolUtil: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let sqlite3: any = null;
+
+// OPFS sync access handles are exclusive. When the previous leader tab hands the cache over,
+// its worker is terminated, but the browser releases that worker's handles asynchronously, so
+// the first install attempt here can lose the race with NoModificationAllowedError. A worker
+// that is frozen rather than terminated never releases them, so give up after a few seconds.
+const OPEN_ATTEMPTS = 8;
+const OPEN_RETRY_MS = 250;
 
 // Directory the SAH pool VFS stores its backing files in: "." + vfsName, with the default
 // vfsName being "opfs-sahpool". Removing it is the fallback when poolUtil is unavailable
@@ -136,15 +148,26 @@ function dropAllTables(): void {
 
 async function openDatabase(): Promise<void> {
   if (!poolUtil) {
-    console.log('[cache-worker] init: loading sqlite3 wasm');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sqlite3 = (await sqlite3InitModule()) as any;
-    console.log('[cache-worker] init: installing OPFS SAH pool VFS');
+    if (!sqlite3) {
+      console.log('[cache-worker] init: loading sqlite3 wasm');
+      sqlite3 = await sqlite3InitModule();
+    }
     // Must open the DB via the pool returned here. Opening with sqlite3.oo1.OpfsDb instead
     // silently falls back to the default OPFS VFS, which proxies every I/O to a separate
     // worker and blocks on Atomics + an fsync per commit — ~100s of ms per write, which
     // throttles the whole decrypt pipeline to a crawl regardless of fetch concurrency.
-    poolUtil = await sqlite3.installOpfsSAHPoolVfs({});
+    for (let attempt = 1; ; attempt++) {
+      console.log('[cache-worker] init: installing OPFS SAH pool VFS, attempt', attempt);
+      try {
+        // A failed install is cached per VFS name unless this is set, which would make
+        // every retry fail immediately with the first error.
+        poolUtil = await sqlite3.installOpfsSAHPoolVfs({ forceReinitIfPreviouslyFailed: true });
+        break;
+      } catch (err) {
+        if (!isHandleLockedError(err) || attempt >= OPEN_ATTEMPTS) throw err;
+        await new Promise((resolve) => setTimeout(resolve, OPEN_RETRY_MS));
+      }
+    }
   }
   console.log('[cache-worker] init: opening /cache.db');
   db = new poolUtil.OpfsSAHPoolDb('/cache.db');
@@ -163,6 +186,10 @@ async function openDatabase(): Promise<void> {
   createSchema();
   db.exec(`PRAGMA user_version = ${CACHE_SCHEMA_VERSION}`);
   console.log('[cache-worker] init: done');
+}
+
+function isHandleLockedError(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === 'NoModificationAllowedError';
 }
 
 // Empty the cache and start over, for the clearCache request that logout issues. This is
@@ -192,6 +219,7 @@ async function hardReset(): Promise<void> {
 // Mutable so a hard reset can replace it. Failures are surfaced to callers in
 // self.onmessage rather than swallowed, so a wedged init can't leave requests hanging.
 let initPromise: Promise<void> = openDatabase();
+let initLockedOut = false;
 initPromise.catch((err) => console.error('[cache-worker] init FAILED', err));
 
 // ---------------------------------------------------------------------------
@@ -517,6 +545,9 @@ const PROGRESS_THROTTLE_MS = 250;
 // progressively during a long sync without re-sending (and re-querying) the whole growing
 // result set each time. Only events materialized since the previous flush cross postMessage.
 const DELTA_INTERVAL_MS = 5000;
+// A mobile connection can stall without ever erroring. Without a bound, one stalled request
+// holds the sync, and every query waiting on it, open forever.
+const DATA_FETCH_TIMEOUT_MS = 30_000;
 const BASE =
   ((import.meta as { env?: { VITE_API_URL?: string } }).env?.VITE_API_URL ??
     'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
@@ -542,6 +573,7 @@ function postChunk(
   processed = 0,
   total = 0,
   mode: 'replace' | 'append' = 'replace',
+  error?: CacheQueryError,
 ): void {
   (self as unknown as DedicatedWorkerGlobalScope).postMessage({
     type: 'queryChunk',
@@ -551,7 +583,45 @@ function postChunk(
     processed,
     total,
     mode,
+    ...(error ? { error } : {}),
   } satisfies CacheChunk);
+}
+
+function toQueryError(err: unknown): CacheQueryError {
+  const e = err as { name?: string; message?: string } | null;
+  const message = e?.message ?? String(err);
+  // AbortSignal.timeout() rejects the fetch with a TimeoutError DOMException.
+  if (e?.name === 'TimeoutError') return { kind: 'timeout', message };
+  // fetch rejects with a TypeError when the request never got a response.
+  if (e?.name === 'TypeError') return { kind: 'network', message };
+  if (isHandleLockedError(err)) return { kind: 'cache-locked', message };
+  return { kind: 'failed', message };
+}
+
+// Post the final chunk to every query waiting on this target, so none is left spinning. A
+// query that fails to read SQLite still settles, with no logs and an error.
+function settleQueries(
+  viewerId: string | null,
+  targetUserId: string,
+  processed = 0,
+  total = 0,
+  error?: CacheQueryError,
+): void {
+  for (const [qid, aq] of activeQueries) {
+    if (aq.targetUserId !== targetUserId) continue;
+    let logs: FeedLog[] = [];
+    let queryError = error;
+    if (viewerId) {
+      try {
+        logs = sqlQueryEvents(viewerId, targetUserId, aq.query);
+      } catch (err) {
+        console.warn('[cache-worker] reading cached logs failed for query', qid, err);
+        queryError ??= toQueryError(err);
+      }
+    }
+    postChunk(qid, logs, true, processed, total, 'replace', queryError);
+    activeQueries.delete(qid);
+  }
 }
 
 function postProgress(id: string, processed: number, total: number): void {
@@ -578,10 +648,13 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
 
 async function fetchData(params?: { since?: number }): Promise<DataPage> {
   const qs = new URLSearchParams();
-  if (params?.since !== undefined) qs.set('since', String(params.since));
+  // /data only accepts an integer. Flooring can re-fetch the newest batch, which the merge
+  // ignores, and it lets a cache that stored a fractional value (old seed data) recover.
+  if (params?.since !== undefined) qs.set('since', String(Math.floor(params.since)));
   const q = qs.toString();
   const res = await fetch(`${BASE}/data${q ? `?${q}` : ''}`, {
     credentials: 'include',
+    signal: AbortSignal.timeout(DATA_FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`getData failed: ${res.status}`);
   return res.json() as Promise<DataPage>;
@@ -598,7 +671,10 @@ let deviceOwnersFetch: Promise<Map<string, string>> | null = null;
 async function fetchDeviceOwners(): Promise<Map<string, string>> {
   if (deviceOwnersFetch) return deviceOwnersFetch;
   deviceOwnersFetch = (async () => {
-    const res = await fetch(`${BASE}/device`, { credentials: 'include' });
+    const res = await fetch(`${BASE}/device`, {
+      credentials: 'include',
+      signal: AbortSignal.timeout(DATA_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`getDevices failed: ${res.status}`);
     const devices = (await res.json()) as Array<{ id: string; owner: string }>;
     return new Map(devices.map((device) => [device.id, device.owner]));
@@ -622,21 +698,15 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
   sqlPruneOldData(viewerId, cutoffTs);
 
   // Return all currently active query IDs for this target user.
-  // Called at "done" time so queries that arrived while the fetch was in-flight are also served.
   const activeQids = () =>
     [...activeQueries.entries()]
       .filter(([, aq]) => aq.targetUserId === targetUserId)
       .map(([id]) => id);
 
-  const serveAll = (processed = 0, total = 0) => {
-    const qids = activeQids();
-    console.log('[cache-worker] serveAll done=true for', qids.length, 'queries');
-    for (const qid of qids) {
-      const aq = activeQueries.get(qid);
-      if (!aq) continue;
-      postChunk(qid, sqlQueryEvents(viewerId, targetUserId, aq.query), true, processed, total);
-      activeQueries.delete(qid);
-    }
+  // Called at "done" time so queries that arrived while the fetch was in-flight are also served.
+  const serveAll = (processed = 0, total = 0, error?: CacheQueryError) => {
+    console.log('[cache-worker] serveAll done=true for', activeQids().length, 'queries');
+    settleQueries(viewerId, targetUserId, processed, total, error);
   };
 
   try {
@@ -659,7 +729,9 @@ async function fetchAndDecrypt(targetUserId: string): Promise<void> {
     sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);
-    serveAll();
+    // Still serve what's cached, but say the sync didn't happen rather than reporting it
+    // as complete.
+    serveAll(0, 0, toQueryError(err));
     return;
   }
 
@@ -770,7 +842,12 @@ function fetchAndDecryptOnce(targetUserId: string): void {
   }
   console.log('[cache-worker] starting fetch for', targetUserId);
   const p = fetchAndDecrypt(targetUserId)
-    .catch((err) => console.error('[cache-worker] fetchAndDecrypt threw', err))
+    .catch((err) => {
+      // A throw outside fetchAndDecrypt's own error handling would otherwise leave every
+      // query for this target waiting for a done chunk that never comes.
+      console.error('[cache-worker] fetchAndDecrypt threw', err);
+      settleQueries(session?.userId ?? null, targetUserId, 0, 0, toQueryError(err));
+    })
     .finally(() => fetchInFlight.delete(targetUserId));
   fetchInFlight.set(targetUserId, p);
 }
@@ -812,10 +889,14 @@ async function handleStreaming(
 
     if (!session) return; // deferred: will fire when setSession arrives
 
-    // Immediate fast-path from SQLite
-    const logs = sqlQueryEvents(session.userId, targetUserId, query);
-    console.log('[cache-worker] fast-path returned', logs.length, 'logs');
-    postChunk(req.id, logs, false);
+    // Immediate fast-path from SQLite. If it fails, the sync still runs and settles the query.
+    try {
+      const logs = sqlQueryEvents(session.userId, targetUserId, query);
+      console.log('[cache-worker] fast-path returned', logs.length, 'logs');
+      postChunk(req.id, logs, false);
+    } catch (err) {
+      console.warn('[cache-worker] fast-path query failed', err);
+    }
 
     fetchAndDecryptOnce(targetUserId);
     return;
@@ -885,14 +966,29 @@ self.onmessage = async (e: MessageEvent<CacheRequest>) => {
     return;
   }
 
+  if (initLockedOut) {
+    // The database was held by another tab's worker, which may have let go since.
+    initLockedOut = false;
+    initPromise = openDatabase();
+    initPromise.catch((err) => console.error('[cache-worker] init retry FAILED', err));
+  }
+
   try {
     await initPromise;
   } catch (err) {
     console.error('[cache-worker] init failed, failing message', req.method, err);
+    // A frozen leader whose lock was stolen still holds the database. It lets go once that
+    // tab resumes and stands down, so the next message (e.g. the Logs page's Retry) tries
+    // again instead of this worker staying broken for its whole life.
+    if (isHandleLockedError(err)) initLockedOut = true;
+    if (req.method === 'setSession') {
+      // Kept for when the database opens, since a retry re-sends only the query.
+      session = { userId: req.userId, privateKey: req.privateKey };
+    }
     const message = `cache unavailable: ${(err as Error).message}`;
     if (req.method === 'cacheQuery') {
-      // Settle the stream so the Logs page shows an empty result instead of spinning.
-      postChunk(req.id, [], true);
+      // Settle the stream so the Logs page shows the error instead of spinning.
+      postChunk(req.id, [], true, 0, 0, 'replace', toQueryError(err));
     } else if (req.method !== 'setSession' && req.method !== 'refetch') {
       self.postMessage({ id: req.id, error: message } satisfies CacheResponse);
     }

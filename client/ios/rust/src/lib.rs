@@ -126,8 +126,8 @@ impl LifecycleHooks for IosPlatformHooks {
 ///
 /// Uses the same `Builder` with an explicit `.log` filename suffix that
 /// Mac/Windows use (the bare `rolling::daily` constructor leaves the
-/// filename extensionless, e.g. `virtue.2026-08-22`) — `recent_logs` below
-/// depends on that suffix to find today's/yesterday's files.
+/// filename extensionless, e.g. `virtue.2026-08-22`), so every platform's
+/// log files look alike.
 fn init_logging(data_dir: &Path) {
     LOG_GUARD.get_or_init(|| {
         let log_dir = data_dir.join("logs");
@@ -339,7 +339,9 @@ pub extern "C" fn virtue_ios_native_report_issue(
             .device_credentials
             .map(|creds| creds.refresh_token);
 
-        let logs = include_logs.then(|| recent_logs(&core.state_dir)).flatten();
+        let logs = include_logs
+            .then(|| virtue_core::logging::recent_logs(&core.state_dir.join("logs")))
+            .flatten();
 
         let config = build_core_config(&core.state_dir);
         let api = HttpApiClient::new(&config)?;
@@ -358,39 +360,6 @@ pub extern "C" fn virtue_ios_native_report_issue(
         Ok(())
     })();
     into_c_result(result)
-}
-
-/// Best-effort last two days of this device's own logs: today's and (if
-/// present) yesterday's daily-rotated log file from `<state_dir>/logs` (see
-/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and
-/// trimmed to the API's attachment size cap, keeping the most recent bytes.
-fn recent_logs(state_dir: &Path) -> Option<Vec<u8>> {
-    let log_dir = state_dir.join("logs");
-    let today = chrono::Local::now().date_naive();
-    let mut combined = String::new();
-
-    for date in [today, today - chrono::Duration::days(1)] {
-        let file_name = format!(
-            "{}.{}.log",
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-            date.format("%Y-%m-%d")
-        );
-        if let Ok(contents) = fs::read_to_string(log_dir.join(file_name)) {
-            combined.push_str(&contents);
-        }
-    }
-
-    if combined.is_empty() {
-        return None;
-    }
-
-    let redacted = virtue_core::api::redact_secrets(&combined);
-    let mut logs = redacted.into_bytes();
-    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
-        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
-        logs.drain(0..start);
-    }
-    Some(logs)
 }
 
 /// Returns a JSON-serialized `ServiceStatus` (caller frees with

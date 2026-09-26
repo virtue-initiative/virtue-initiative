@@ -47,6 +47,8 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 | `Logs/LogsGallery.tsx`     | Justified image gallery with `buildGalleryRows` layout, virtualised rows                                                                                      |
 | `Logs/shared.tsx`          | `FeedLog` type, `getLogMessage`, `getLogCategory`, `LOG_TYPES`, `EventImage` (async IDB image loader), `LogDetailDialog`, `formatDayLabel`/`formatDayAndTime` |
 | `Logs/gallery-layout.ts`   | Pure `buildGalleryRows` — fits images into rows by aspect ratio given a container width                                                                       |
+| `Report/index.tsx`         | Daily/weekly activity report (routes `/report`, `/report/:userId`): flagged alerts and screenshots in sideways-scrolling rows                                 |
+| `Report/report-model.ts`   | Pure `reportWindow`, `buildReport` (buckets logs by concern level), `explainAlert`                                                                            |
 | `Settings/index.tsx`       | Profile/email/delete-account forms                                                                                                                            |
 | `InviteAccept/index.tsx`   | One-shot partner-invite acceptance from a URL token                                                                                                           |
 | `VerifyEmail/index.tsx`    | One-shot email verification from a URL token                                                                                                                  |
@@ -55,14 +57,14 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 
 ### Shared utilities
 
-| File                           | What's here                                                                                                                                         |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/utils/time.ts`            | `formatRelativeTimestamp`, `formatDate`, `formatTime`, `formatDayHeading`, `localDateKey`                                                           |
-| `src/utils/toast.ts`           | Module-level `sendToast` helper (stores the Preact `push` ref so crypto code can fire toasts)                                                       |
-| `src/utils/webp-dimensions.ts` | `decodeWebpDimensions` — reads width/height from VP8/VP8L/VP8X binary headers                                                                       |
-| `src/hooks/useUrlState.ts`     | `useUrlState<T>` — syncs a value to a URL search param; supports string/number/boolean/object                                                       |
-| `src/hooks/usePromise.ts`      | `usePromise` — `[pending, setPromise]` tuple for tracking async button state                                                                        |
-| `src/components/Sidebar.tsx`   | Scrolling left nav: Devices / Partners / Logs (My logs + per-partner) + footer (user card, Settings, Help, Log out); desktop column + mobile drawer |
+| File                           | What's here                                                                                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/utils/time.ts`            | `formatRelativeTimestamp`, `formatDate`, `formatTime`, `formatDayHeading`, `localDateKey`                                                                    |
+| `src/utils/toast.ts`           | Module-level `sendToast` helper (stores the Preact `push` ref so crypto code can fire toasts)                                                                |
+| `src/utils/webp-dimensions.ts` | `decodeWebpDimensions` — reads width/height from VP8/VP8L/VP8X binary headers                                                                                |
+| `src/hooks/useUrlState.ts`     | `useUrlState<T>` — syncs a value to a URL search param; supports string/number/boolean/object                                                                |
+| `src/hooks/usePromise.ts`      | `usePromise` — `[pending, setPromise]` tuple for tracking async button state                                                                                 |
+| `src/components/Sidebar.tsx`   | Scrolling left nav: Devices / Partners / Reports and Logs (mine + per-partner) + footer (user card, Settings, Help, Log out); desktop column + mobile drawer |
 
 ### Types
 

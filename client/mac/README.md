@@ -35,7 +35,7 @@ macOS lifecycle behavior follows the shared core lifecycle model, analogous to L
 - Startup is detected from `kern.boottime`.
 - Shutdown is best-effort via `NSWorkspaceWillPowerOffNotification` plus the daemon stop signal.
 - If launchd delivers the stop signal before the power-off notification, the next boot upgrades a recent `unknown` stop marker into `system_shutdown` so reboot cycles stay zero-risk.
-- Suspend and wake are tracked from `NSWorkspaceWillSleepNotification` / `NSWorkspaceDidWakeNotification`.
+- Waking from sleep triggers a prompt batch flush, via an `IORegisterForSystemPower` notification rather than polling.
 - Explicit tray-initiated stop prompts for confirmation before recording a user-requested stop.
 - Logout prompts for confirmation before sending the shared core logout alert.
 

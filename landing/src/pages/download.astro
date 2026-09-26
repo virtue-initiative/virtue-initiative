@@ -244,3 +244,60 @@ const instructionSections = await Promise.all(
     </div>
   </section>
 </SiteLayout>
+
+<script>
+  // Android accessibility guide (src/content/download-instructions/android.md):
+  // a version <select> shows only the elements whose data-min/data-max range
+  // (Android major versions) includes the chosen version.
+  const guide = document.querySelector<HTMLElement>('[data-android-guide]');
+  const select = guide?.querySelector<HTMLSelectElement>('[data-android-version]');
+
+  function showVersion(version: number) {
+    guide?.querySelectorAll<HTMLElement>('[data-min], [data-max]').forEach((el) => {
+      const min = Number(el.dataset.min ?? -Infinity);
+      const max = Number(el.dataset.max ?? Infinity);
+      el.hidden = version < min || version > max;
+    });
+  }
+
+  // Chrome's reduced user agent always says "Android 10", so ask for the real
+  // version through User-Agent Client Hints and only fall back to the UA
+  // string when it reports something else.
+  async function detectAndroidVersion(): Promise<number | null> {
+    const uaData = (
+      navigator as Navigator & {
+        userAgentData?: {
+          getHighEntropyValues(
+            hints: string[],
+          ): Promise<{ platform?: string; platformVersion?: string }>;
+        };
+      }
+    ).userAgentData;
+    try {
+      const values = await uaData?.getHighEntropyValues(['platformVersion']);
+      if (values?.platform === 'Android' && values.platformVersion) {
+        return parseInt(values.platformVersion, 10);
+      }
+    } catch {
+      // Fall through to the user agent string.
+    }
+    const match = navigator.userAgent.match(/Android (\d+)/);
+    return match && match[1] !== '10' ? parseInt(match[1], 10) : null;
+  }
+
+  if (guide && select) {
+    select.addEventListener('change', () => showVersion(Number(select.value)));
+    showVersion(Number(select.value));
+
+    detectAndroidVersion().then((version) => {
+      if (version === null || Number.isNaN(version)) return;
+      // Options are the lowest version of each group (e.g. "10" covers 10 and 11).
+      const option = Array.from(select.options)
+        .map((o) => Number(o.value))
+        .find((value) => value <= version);
+      if (option === undefined) return;
+      select.value = String(option);
+      showVersion(option);
+    });
+  }
+</script>

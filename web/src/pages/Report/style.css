@@ -1,0 +1,366 @@
+.report-page {
+  max-width: 1100px;
+}
+
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.report-date-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.report-date-center {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.report-date-button {
+  min-width: 11rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--border);
+    background: var(--surface);
+  }
+}
+
+.report-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.report-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  line-height: var(--line-tight);
+}
+
+.report-lede,
+.report-closing,
+.report-all-clear p,
+.report-no-data p {
+  margin: 0;
+  max-width: 65ch;
+  font-size: var(--text-lg);
+  line-height: var(--line-normal);
+}
+
+.report-closing {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.report-syncing,
+.report-footer {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.report-all-clear {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--success);
+  background: var(--surface);
+}
+
+/* Neutral, not a warning: no data usually just means the devices weren't in use. */
+.report-no-data {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--text-muted);
+  background: var(--surface);
+}
+
+/* Sideways-scrolling row */
+
+.report-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.report-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.report-row-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.report-row-count {
+  margin-left: var(--space-1);
+  padding: 0 0.45rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.report-row-nav {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.report-row-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+
+  & svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+.report-row-track {
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  padding-bottom: var(--space-2);
+  scrollbar-width: thin;
+
+  & > * {
+    flex: none;
+    scroll-snap-align: start;
+  }
+}
+
+/* Touch devices swipe; the arrow buttons are for mouse users. */
+@media (hover: none) {
+  .report-row-nav {
+    display: none;
+  }
+}
+
+.report-meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* Alert cards */
+
+.report-alert-card {
+  width: 18rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+
+  &:hover {
+    box-shadow: var(--shadow-md);
+  }
+}
+
+.report-alert-card--medium {
+  border-top-color: var(--warning);
+}
+
+.report-alert-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.report-alert-card-icon {
+  display: inline-flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+
+  & svg {
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.report-alert-card-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  line-height: var(--line-tight);
+}
+
+.report-alert-card-body {
+  flex: 1;
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/* Screenshot tiles */
+
+.report-shot {
+  margin: 0;
+  width: 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.report-shot--portrait {
+  width: 6.25rem;
+}
+
+.report-shot-frame {
+  position: relative;
+  height: 10rem;
+  border-radius: 6px;
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+
+  & .logs-thumb-button,
+  & .logs-thumb-image,
+  & .logs-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+  }
+
+  & .logs-thumb-image {
+    object-fit: cover;
+  }
+}
+
+.report-shot--medium .report-shot-frame {
+  outline-color: var(--warning);
+}
+
+.report-shot-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  pointer-events: none;
+
+  & .logs-verify-badge {
+    font-size: 0.65rem;
+    padding: 0.05rem 0.35rem;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Stack the controls full width: the period toggle splits the row evenly,
+     and the date arrows sit at opposite edges with the date between them. */
+  .report-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .report-toolbar .vi-segmented-control {
+    display: flex;
+    width: 100%;
+
+    & .vi-segmented-control__item {
+      flex: 1;
+    }
+  }
+
+  .report-date-nav {
+    justify-content: space-between;
+  }
+
+  .report-date-center {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .report-date-button {
+    min-width: 0;
+  }
+
+  .report-title {
+    font-size: var(--text-xl);
+  }
+
+  .report-lede,
+  .report-closing,
+  .report-all-clear p,
+  .report-no-data p {
+    font-size: var(--text-base);
+  }
+
+  .report-alert-card {
+    width: 15rem;
+  }
+
+  .report-shot {
+    width: 13rem;
+  }
+
+  .report-shot--portrait {
+    width: 5rem;
+  }
+
+  .report-shot-frame {
+    height: 8rem;
+  }
+}

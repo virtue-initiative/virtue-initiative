@@ -19,7 +19,7 @@ import {
   Field,
   Select,
 } from '@virtueinitiative/shared-web';
-import { cacheClient } from '../../utils/cache/client';
+import { cacheClient, type CacheQueryError } from '../../utils/cache/client';
 import { formatRelativeTimestamp } from '../../utils/time';
 
 function dateToBoundsStart(d: string): number {
@@ -48,6 +48,18 @@ const RANGE_SEGMENTS = [
  * "Screenshot Skipped" entry (locked/asleep or duplicate-frame) shares this one
  * category, so hiding it by category hides both skip reasons at once. */
 const SKIPPED_SCREENSHOTS_CATEGORY = 'Screenshot Skipped';
+
+function syncErrorMessage(error: CacheQueryError): string {
+  switch (error.kind) {
+    case 'network':
+    case 'timeout':
+      return "Couldn't reach the server. Showing saved logs.";
+    case 'cache-locked':
+      return 'Another Virtue tab is using saved logs. Close other Virtue tabs, then select Retry.';
+    default:
+      return "Couldn't sync logs.";
+  }
+}
 
 export function Logs({ userId: routeUserId }: { userId?: string }) {
   const api = useAPIContext();
@@ -103,6 +115,8 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
   });
   const activeTargetUserId = routeUserId ?? userId;
   const scopeKeyRef = useRef<string | null>(null);
+  // Bumped by the Retry button to re-run the query after a failed sync.
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     if (!api || !activeTargetUserId) {
@@ -133,7 +147,12 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [api, activeTargetUserId, selectedDevice, weekStart, weekEnd]);
+  }, [api, activeTargetUserId, selectedDevice, weekStart, weekEnd, retryCount]);
+
+  const retrySync = () => {
+    setLogResult((prev) => ({ ...prev, complete: false, error: undefined }));
+    setRetryCount((n) => n + 1);
+  };
 
   const logs: FeedLog[] = logResult.logs;
   const logsLoading = !logResult.complete;
@@ -358,12 +377,25 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
           </div>
 
           <p class="logs-summary">
-            {logsLoading
-              ? logResult.total > 0
-                ? `Syncing logs… ${logResult.processed}/${logResult.total} blocks`
-                : 'Syncing logs…'
-              : 'Logs synced'}
-            {!logsLoading && pendingCount > 0 && (
+            {logResult.error ? (
+              <span class="logs-sync-error" role="alert" title={logResult.error.message}>
+                {syncErrorMessage(logResult.error)}
+              </span>
+            ) : logsLoading ? (
+              logResult.total > 0 ? (
+                `Syncing logs… ${logResult.processed}/${logResult.total} blocks`
+              ) : (
+                'Syncing logs…'
+              )
+            ) : (
+              'Logs synced'
+            )}
+            {logResult.error && (
+              <Button variant="outline" size="sm" type="button" onClick={retrySync}>
+                Retry
+              </Button>
+            )}
+            {!logsLoading && !logResult.error && pendingCount > 0 && (
               <>
                 {` · ${pendingCount} item${pendingCount !== 1 ? 's' : ''} pending upload`}
                 {selectedDeviceInfo && estimatedNextUpload && estimatedNextUpload > Date.now()

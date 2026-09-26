@@ -192,7 +192,7 @@ export function startApiDevServer(
 
 export function seedDevUser(rootDir: string): void {
   log('Seeding dev user');
-  run(['bun', 'run', `${rootDir}/scripts/seed-dev-user.mjs`]);
+  run(['bun', 'run', `${rootDir}/scripts/seed/index.ts`, '--users-only']);
 }
 
 /** Runs a foreground command with inherited stdio, throwing on non-zero exit. */

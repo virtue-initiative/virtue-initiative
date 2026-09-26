@@ -84,6 +84,8 @@ function pickReleaseFields(release) {
     assets: release.assets.map((asset) => ({
       name: asset.name,
       browser_download_url: asset.browser_download_url,
+      // "sha256:<hex>"; build-android-update.mjs hands it to the Android app.
+      digest: asset.digest ?? null,
     })),
   };
 }

@@ -53,7 +53,6 @@ class MainActivity : AppCompatActivity() {
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
         binding.forceCaptureButton.setOnClickListener { forceCapture() }
-        binding.openAccessibilitySettingsButton.setOnClickListener { openAccessibilitySettings() }
 
         binding.websiteLink.setOnClickListener {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
@@ -66,10 +65,46 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.reportBugLink.setOnClickListener { showReportBugDialog() }
+        binding.installUpdateButton.setOnClickListener { installUpdate() }
 
         KeepAliveWorker.schedule(this)
+        AppUpdater.checkSoon(this)
         requestBackgroundFriendlySettings()
         refreshUi()
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == AppUpdater.ACTION_INSTALL_UPDATE) {
+            // Consume it so a rotation or recreation doesn't start a second install.
+            intent.action = null
+            installUpdate()
+        }
+    }
+
+    private fun installUpdate() {
+        binding.installUpdateButton.isEnabled = false
+        lifecycleScope.launch {
+            val started = withContext(Dispatchers.IO) { AppUpdater.installReadyUpdate(this@MainActivity) }
+            binding.installUpdateButton.isEnabled = true
+            if (!started) refreshUi()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppUpdater.uiVisible = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        AppUpdater.uiVisible = false
     }
 
     override fun onResume() {
@@ -154,6 +189,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshUi() {
+        val updateVersion = AppUpdater.readyVersion(this)
+        binding.installUpdateButton.visibility =
+            if (updateVersion != null) android.view.View.VISIBLE else android.view.View.GONE
+        if (updateVersion != null) {
+            binding.installUpdateButton.text = getString(R.string.btn_install_update, updateVersion)
+        }
+
         val loggedIn = NativeBridge.nativeIsLoggedIn()
         val accessibilityConnected = VirtueAccessibilityService.isConnected()
 
@@ -166,6 +208,7 @@ class MainActivity : AppCompatActivity() {
             binding.loginPanel.visibility = android.view.View.GONE
             binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
+            renderSetupGuide(binding.onboardingSteps)
             binding.onboardingStatusText.text = getString(R.string.msg_onboarding_waiting)
             binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
@@ -184,6 +227,7 @@ class MainActivity : AppCompatActivity() {
             binding.sessionPanel.visibility = android.view.View.GONE
             binding.statusButtonsLayout.visibility = android.view.View.GONE
             if (!coreReady) {
+                renderSetupGuide(binding.onboardingSteps)
                 binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
             }
             binding.statusTitle.text = getString(R.string.status_signed_out)
@@ -283,20 +327,49 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
     }
 
+    private fun openAppInfo() {
+        startActivity(
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.fromParts("package", packageName, null))
+        )
+    }
+
+    private fun openAppList() {
+        startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
+    }
+
+    private fun handleGuideAction(action: AccessibilitySetupGuide.Action) {
+        when (action) {
+            AccessibilitySetupGuide.Action.ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
+            AccessibilitySetupGuide.Action.APP_INFO -> openAppInfo()
+            AccessibilitySetupGuide.Action.APP_LIST -> openAppList()
+        }
+    }
+
+    private fun renderSetupGuide(container: LinearLayout) {
+        AccessibilitySetupGuide.render(this, container, ::handleGuideAction)
+    }
+
+    // Reached when Accessibility is off while signed in (or a sign-in raced the
+    // service connecting), where the onboarding panel isn't on screen.
     private fun showAccessibilityOnboarding() {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Enable Screen Monitoring")
-            .setMessage(
-                "Virtue needs Accessibility permission to monitor your screen.\n\n" +
-                "1. Tap \"Open Settings\" below\n" +
-                "2. Find \"Virtue\" in the list\n" +
-                "3. Toggle it on and confirm\n" +
-                "4. Return here to sign in\n\n" +
-                "Monitoring will start automatically once you're signed in."
-            )
-            .setPositiveButton("Open Settings") { _, _ -> openAccessibilitySettings() }
-            .setNegativeButton(getString(R.string.dialog_cancel), null)
-            .show()
+        val dp = resources.displayMetrics.density
+        val steps = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (20 * dp).toInt()
+            setPadding(pad, (8 * dp).toInt(), pad, 0)
+        }
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_accessibility_title))
+            .setView(ScrollView(this).apply { addView(steps) })
+            .setNegativeButton(getString(R.string.btn_done), null)
+            .create()
+        // The guide's buttons leave the app, so close the dialog behind them.
+        AccessibilitySetupGuide.render(this, steps) { action ->
+            dialog.dismiss()
+            handleGuideAction(action)
+        }
+        dialog.show()
     }
 
     private fun requestBackgroundFriendlySettings() {
@@ -666,10 +739,9 @@ class MainActivity : AppCompatActivity() {
             setStatus(getString(R.string.open_log_unavailable))
             return
         }
-        // The rolling log files are named `virtue.<date>` with no extension, so
-        // a viewer that sniffs the type from the file name (rather than the
-        // intent's) refuses to render them. Hand out a `.txt` copy instead —
-        // which also keeps the viewer off a file the daemon is still appending to.
+        // Hand out a `.txt` copy: a viewer that sniffs the type from the file
+        // name may not render `.log` (or older builds' extensionless files),
+        // and a copy keeps it off a file the daemon is still appending to.
         val readable = java.io.File(cacheDir, "logs").let { dir ->
             dir.mkdirs()
             java.io.File(dir, "virtue-log.txt").also { logFile.copyTo(it, overwrite = true) }

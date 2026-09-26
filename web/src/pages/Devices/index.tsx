@@ -47,7 +47,7 @@ export function Devices() {
       {!loaded ? (
         <p class="loading">Loading…</p>
       ) : ownDevices.length === 0 ? (
-        <p class="empty">No devices</p>
+        <EmptyDevices />
       ) : (
         <CardGrid>
           {ownDevices.map((device) => (
@@ -61,6 +61,51 @@ export function Devices() {
         </CardGrid>
       )}
     </div>
+  );
+}
+
+function DeviceSetupSteps() {
+  return (
+    <ol class="device-setup-steps">
+      <li>
+        <span class="device-setup-step-label">Download the app.</span>
+        Choose the installer for the device you want to monitor.
+      </li>
+      <li>
+        <span class="device-setup-step-label">Follow the installation instructions.</span>
+        Use the platform-specific setup guide if you need it.
+      </li>
+      <li>
+        <span class="device-setup-step-label">Log in on that device.</span>
+        Once the app signs in and uploads, it will show up here.
+      </li>
+    </ol>
+  );
+}
+
+function EmptyDevices() {
+  return (
+    <section class="devices-empty" aria-labelledby="devices-empty-title">
+      <span class="devices-empty-icon">
+        <DevicesIcon />
+      </span>
+      <h2 id="devices-empty-title" class="devices-empty-title">
+        Add your first device
+      </h2>
+      <p class="devices-empty-desc">
+        Nothing is being monitored yet. Install Virtue on a phone or computer and sign in with this
+        account to get started.
+      </p>
+      <DeviceSetupSteps />
+      <div class="devices-empty-actions">
+        <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
+          View guide
+        </Button>
+        <Button variant="primary" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">
+          Download the app
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -86,20 +131,7 @@ function AddDeviceButton() {
           Set up Virtue on a phone or computer, then sign in with this account so it starts
           appearing in your dashboard.
         </p>
-        <ol class="device-setup-steps">
-          <li>
-            <span class="device-setup-step-label">Download the app.</span>
-            Choose the installer for the device you want to monitor.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Follow the installation instructions.</span>
-            Use the platform-specific setup guide if you need it.
-          </li>
-          <li>
-            <span class="device-setup-step-label">Log in on that device.</span>
-            Once the app signs in and uploads, it will show up here.
-          </li>
-        </ol>
+        <DeviceSetupSteps />
         <DialogActions
           left={
             <Button variant="ghost" href={DOWNLOAD_URL} target="_blank" rel="noreferrer">

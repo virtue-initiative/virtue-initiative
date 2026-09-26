@@ -52,17 +52,29 @@
 }
 
 @media (max-width: 600px) {
+  /* The page padding is enough on its own; the extra space only kept content
+     off a desktop scrollbar. */
+  .logs-main {
+    padding-right: 0;
+  }
+
   .logs-header {
     margin-bottom: 1rem;
   }
 
+  /* Edit Search and the view switcher share one row; the button takes the
+     space the switcher leaves. */
+  .logs-header-actions {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
   .logs-header-view-controls {
-    margin-left: auto;
-    min-width: 0;
+    flex-shrink: 0;
   }
 
   .logs-filter-section {
-    width: 100%;
+    flex: 1;
     min-width: 0;
   }
 }
@@ -262,11 +274,16 @@
 
 .logs-summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--text-muted);
   margin: 0 0 1rem;
+}
+
+.logs-sync-error {
+  color: var(--danger);
 }
 
 .logs-stats-trigger {
@@ -432,7 +449,6 @@
 .logs-sticky-date {
   position: sticky;
   top: 0.5rem;
-  right: 0.5rem;
   z-index: 10;
   width: fit-content;
   margin-left: auto;

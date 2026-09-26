@@ -11,7 +11,7 @@ import {
 } from './api';
 import { FeedLog } from '../../pages/Logs/types';
 import { Session } from './session';
-import { cacheClient } from '../cache/client';
+import { cacheClient, type CacheQueryError } from '../cache/client';
 
 export interface UserSettings {
   email?: string;
@@ -38,6 +38,8 @@ export interface LogQueryResult {
   processed: number;
   /** Total batch blocks to decrypt in the in-flight sync (0 if unknown). */
   total: number;
+  /** Set when the sync ended without completing; `logs` is then only what was cached. */
+  error?: CacheQueryError;
 }
 
 // Merge an incremental delta into an existing log set: dedupe by id (incoming wins) and keep
@@ -425,6 +427,7 @@ export class APIClient {
             complete: update.done,
             processed: update.processed,
             total: update.total,
+            ...(update.error ? { error: update.error } : {}),
           });
         },
       );

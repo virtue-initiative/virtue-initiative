@@ -42,3 +42,53 @@
   font-weight: 600;
   font-size: 1.02rem;
 }
+
+/* Empty state */
+
+.devices-empty {
+  max-width: 520px;
+  margin: var(--space-8) auto;
+  padding: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.devices-empty-icon {
+  display: inline-flex;
+  width: 3rem;
+  height: 3rem;
+  color: var(--accent);
+  margin-bottom: var(--space-3);
+}
+
+.devices-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.devices-empty-title {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  margin: 0 0 var(--space-2);
+}
+
+.devices-empty-desc {
+  color: var(--text-muted);
+  margin: 0 auto var(--space-5);
+  max-width: 42ch;
+}
+
+.devices-empty .device-setup-steps {
+  text-align: left;
+  margin: 0 auto var(--space-5);
+  max-width: 380px;
+}
+
+.devices-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}

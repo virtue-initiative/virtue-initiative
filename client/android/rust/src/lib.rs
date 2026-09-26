@@ -214,9 +214,14 @@ impl LifecycleHooks for AndroidPlatformHooks {
 }
 
 /// Installs the process-wide `tracing` subscriber on first call, writing
-/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.log`. Subsequent
-/// calls are no-ops. No runtime override (no `RUST_LOG` on mobile) — the
-/// compiled-in default filter for the build type is used directly.
+/// daily-rotated plain-text logs to `<data_dir>/logs/virtue.<date>.log`.
+/// Subsequent calls are no-ops. No runtime override (no `RUST_LOG` on
+/// mobile) — the compiled-in default filter for the build type is used
+/// directly.
+///
+/// Uses the same `Builder` with an explicit `.log` suffix every other
+/// file-sink platform uses; the bare `rolling::daily` constructor leaves the
+/// file name extensionless and panics if the file can't be opened.
 fn init_logging(data_dir: &Path) {
     LOG_GUARD.get_or_init(|| {
         let log_dir = data_dir.join("logs");
@@ -230,19 +235,37 @@ fn init_logging(data_dir: &Path) {
             eprintln!("failed to prune old logs: {err}");
         }
 
-        let file_appender = tracing_appender::rolling::daily(
-            &log_dir,
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-        );
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        let file_appender = tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix(virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix)
+            .filename_suffix("log")
+            .build(&log_dir);
 
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new(
-                virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
-            ))
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
+        let filter = tracing_subscriber::EnvFilter::new(
+            virtue_core::logging::default_filter_directive(cfg!(debug_assertions)),
+        );
+
+        let guard = match file_appender {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+            Err(err) => {
+                eprintln!("failed to open log file in {}: {err}", log_dir.display());
+                let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stderr());
+                tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_writer(non_blocking)
+                    .with_ansi(false)
+                    .init();
+                guard
+            }
+        };
 
         // jni's catch_unwind (see `native_result` below) collapses every panic
         // into "Rust panic: non-string panic payload" with no detail once it
@@ -529,7 +552,9 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRepor
             .and_then(|auth| auth.device_credentials)
             .map(|creds| creds.refresh_token);
 
-        let logs = include_logs.then(|| recent_logs(&core.state_dir)).flatten();
+        let logs = include_logs
+            .then(|| virtue_core::logging::recent_logs(&core.state_dir.join("logs")))
+            .flatten();
 
         let config = build_core_config(&core.state_dir);
         let api = HttpApiClient::new(&config)?;
@@ -548,40 +573,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRepor
 
         Ok(())
     })
-}
-
-/// Best-effort last day of this device's operational logs: today's and (if
-/// present) yesterday's daily-rotated log file from `<state_dir>/logs` (see
-/// `init_logging`), redacted (`virtue_core::api::redact_secrets`) and trimmed
-/// to the API's attachment size cap, keeping the most recent bytes. Mirrors
-/// the Windows/Linux `report-issue` helpers of the same name.
-fn recent_logs(state_dir: &Path) -> Option<Vec<u8>> {
-    let log_dir = state_dir.join("logs");
-    let today = chrono::Local::now().date_naive();
-    let mut combined = String::new();
-
-    for date in [today, today - chrono::Duration::days(1)] {
-        let file_name = format!(
-            "{}.{}.log",
-            virtue_core::logging::DEFAULT_FILE_LOG_POLICY.file_name_prefix,
-            date.format("%Y-%m-%d")
-        );
-        if let Ok(contents) = fs::read_to_string(log_dir.join(file_name)) {
-            combined.push_str(&contents);
-        }
-    }
-
-    if combined.is_empty() {
-        return None;
-    }
-
-    let redacted = virtue_core::api::redact_secrets(&combined);
-    let mut logs = redacted.into_bytes();
-    if logs.len() > virtue_core::api::MAX_LOG_ATTACHMENT_BYTES {
-        let start = logs.len() - virtue_core::api::MAX_LOG_ATTACHMENT_BYTES;
-        logs.drain(0..start);
-    }
-    Some(logs)
 }
 
 pub fn is_interactive(env: &mut Env) -> jni::errors::Result<bool> {
