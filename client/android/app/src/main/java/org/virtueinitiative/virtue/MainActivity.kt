@@ -65,10 +65,46 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.reportBugLink.setOnClickListener { showReportBugDialog() }
+        binding.installUpdateButton.setOnClickListener { installUpdate() }
 
         KeepAliveWorker.schedule(this)
+        AppUpdater.checkSoon(this)
         requestBackgroundFriendlySettings()
         refreshUi()
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == AppUpdater.ACTION_INSTALL_UPDATE) {
+            // Consume it so a rotation or recreation doesn't start a second install.
+            intent.action = null
+            installUpdate()
+        }
+    }
+
+    private fun installUpdate() {
+        binding.installUpdateButton.isEnabled = false
+        lifecycleScope.launch {
+            val started = withContext(Dispatchers.IO) { AppUpdater.installReadyUpdate(this@MainActivity) }
+            binding.installUpdateButton.isEnabled = true
+            if (!started) refreshUi()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppUpdater.uiVisible = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        AppUpdater.uiVisible = false
     }
 
     override fun onResume() {
@@ -153,6 +189,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshUi() {
+        val updateVersion = AppUpdater.readyVersion(this)
+        binding.installUpdateButton.visibility =
+            if (updateVersion != null) android.view.View.VISIBLE else android.view.View.GONE
+        if (updateVersion != null) {
+            binding.installUpdateButton.text = getString(R.string.btn_install_update, updateVersion)
+        }
+
         val loggedIn = NativeBridge.nativeIsLoggedIn()
         val accessibilityConnected = VirtueAccessibilityService.isConnected()
 

@@ -37,6 +37,12 @@
     <string name="open_log_no_viewer">No app on this device can open a text file.</string>
     <string name="btn_report_bug">Report a Bug</string>
     <string name="btn_send_report">Send Report</string>
+    <string name="btn_install_update">Install Update %1$s</string>
+
+    <!-- App updates -->
+    <string name="update_channel_name">App updates</string>
+    <string name="update_notification_title">Virtue update available</string>
+    <string name="update_notification_text">Tap to install version %1$s.</string>
 
     <!-- Messages -->
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>

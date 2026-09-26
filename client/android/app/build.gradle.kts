@@ -54,6 +54,18 @@ fun loadVersionInfo(clientRoot: File): VersionInfo {
 
 val versionInfo = loadVersionInfo(rootDir.parentFile)
 
+// Mirrors virtue_release_channel in client/scripts/version.sh: stable only for
+// builds of main, unless VIRTUE_RELEASE_CHANNEL says otherwise.
+val releaseChannel = System.getenv("VIRTUE_RELEASE_CHANNEL")
+    ?: if (System.getenv("GITHUB_REF_NAME") == "main") "stable" else "dev"
+
+// Self-update only ships in stable release builds, so dev/staging and debug
+// builds never replace themselves with the stable APK. -PautoUpdate=true
+// forces it on for testing, with -PupdateManifestUrl pointing at a local feed.
+val autoUpdateOverride = (project.findProperty("autoUpdate") as String?)?.toBoolean()
+val updateManifestUrl = (project.findProperty("updateManifestUrl") as String?)
+    ?: "https://virtueinitiative.org/android-update.json"
+
 android {
     namespace = "org.virtueinitiative.virtue"
     compileSdk = 35
@@ -62,10 +74,14 @@ android {
         applicationId = "org.virtueinitiative.virtue"
         minSdk = 29
         targetSdk = 35
-        versionCode = versionInfo.androidVersionCode
+        // -PversionCodeOverride lets a local build stand in for a newer
+        // release when testing self-update.
+        versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt()
+            ?: versionInfo.androidVersionCode
         versionName = versionInfo.buildLabel
         buildConfigField("String", "VIRTUE_BUILD_LABEL", "\"${versionInfo.buildLabel}\"")
         buildConfigField("String", "VIRTUE_BASE_VERSION", "\"${versionInfo.baseVersion}\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$updateManifestUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -82,7 +98,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("boolean", "AUTO_UPDATE", "${autoUpdateOverride ?: false}")
+        }
         release {
+            buildConfigField(
+                "boolean",
+                "AUTO_UPDATE",
+                "${autoUpdateOverride ?: (releaseChannel == "stable")}"
+            )
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -122,6 +146,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    testImplementation("junit:junit:4.13.2")
+    // The android.jar stubs throw on org.json; unit tests need the real thing.
+    testImplementation("org.json:json:20240303")
 }
 
 val rustProfile = (project.findProperty("rustProfile") as String?) ?: "release"

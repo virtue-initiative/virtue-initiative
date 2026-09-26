@@ -12,6 +12,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.DrawableRes
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import com.google.android.material.button.MaterialButton
@@ -43,17 +44,41 @@ object AccessibilitySetupGuide {
      * a downloaded or local APK. Whether the user has since lifted the block
      * isn't readable by the app (the app-op behind it needs GET_APP_OPS_STATS),
      * so the guide keeps showing those steps until Accessibility is on.
+     *
+     * An in-app update ([AppUpdater]) resets the install source. Android 15+
+     * lifts the block along with it, but Android 13 and 14 keep it, so there
+     * the source first recorded by [recordInstallSource] counts too.
      */
     fun isRestricted(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
-        return runCatching {
-            val source = context.packageManager
-                .getInstallSourceInfo(context.packageName)
-                .packageSource
-            source == PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE ||
-                source == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
-        }.getOrDefault(false)
+        if (isSideloadSource(currentInstallSource(context))) return true
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM &&
+            isSideloadSource(installSourcePrefs(context).getInt(KEY_FIRST_SOURCE, -1))
     }
+
+    /** Remembers the install source of the first launch, for [isRestricted]. */
+    fun recordInstallSource(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val prefs = installSourcePrefs(context)
+        if (prefs.contains(KEY_FIRST_SOURCE)) return
+        val source = currentInstallSource(context) ?: return
+        prefs.edit().putInt(KEY_FIRST_SOURCE, source).apply()
+    }
+
+    private const val KEY_FIRST_SOURCE = "first_package_source"
+
+    private fun installSourcePrefs(context: Context) =
+        context.getSharedPreferences("install_source", Context.MODE_PRIVATE)
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun currentInstallSource(context: Context): Int? = runCatching {
+        context.packageManager.getInstallSourceInfo(context.packageName).packageSource
+    }.getOrNull()
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun isSideloadSource(source: Int?) =
+        source == PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE ||
+            source == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
 
     /** Fills [container] with the guide for this device's current state. */
     fun render(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {

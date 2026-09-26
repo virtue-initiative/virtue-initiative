@@ -99,9 +99,9 @@ jobs:
           echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
         working-directory: client
 
-      - name: Android lint + build (debug)
+      - name: Android unit tests + lint + build (debug)
         if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
-        run: ./gradlew --no-daemon -PrustProfile=debug :app:lintDebug :app:assembleDebug
+        run: ./gradlew --no-daemon -PrustProfile=debug :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
         working-directory: client/android
 
       - name: Decode Android signing keystore

@@ -7,3 +7,5 @@ src/data/releases.json
 
 # Generated at build time by scripts/build-appcast.mjs
 public/appcast.xml
+# Generated at build time by scripts/build-android-update.mjs
+public/android-update.json
