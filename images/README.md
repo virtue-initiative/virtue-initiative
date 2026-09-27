@@ -11,6 +11,7 @@ Regeneration:
 - `./images/generate-icons.sh`
 - `./images/generate-icons.sh --target ios` to regenerate only the iOS app icon set
 - `./images/generate-icons.sh --target mac` to regenerate only the mac app icon/tray icon set
+- `./images/generate-icons.sh --target windows` to regenerate only the Windows icon set
 - `./images/generate-icons.sh --background "#rrggbb"` to override the icon background color (default `#f4efe3`)
 
 Requirements:
@@ -23,10 +24,10 @@ What the script does:
 - Recolors `logo-raw.png` to that theme color, preserving alpha.
 - Pads the source to a square (if needed) and scales it down to leave a uniform transparent border, writing `images/logo-prepped.png`. The source framing is preserved — nothing is cropped to the artwork's bounding box.
 - Paints an opaque background (`#f4efe3` by default) behind the logo on any icon shown against a surface, choosing the shape per target:
-  - **Rounded (squircle):** favicons and standalone desktop icons that the OS shows as-is — `favicon.*`, mac `AppIcon.icns`, windows `app-icon.*`, android `ic_launcher.png`.
+  - **Rounded (squircle):** favicons and standalone desktop icons that the OS shows as-is — `favicon.*`, mac `AppIcon.icns`, windows `app-icon.*` and the MSIX logos (`Square44x44Logo*`, including the `*_altform-unplated` taskbar/Start sizes, `Square150x150Logo.png`, `StoreLogo.png`), android `ic_launcher.png`.
   - **Square (full bleed):** icons the OS/browser masks itself — iOS app icons, `apple-touch-icon.png`, `android-chrome-*`.
   - **Circle:** android `ic_launcher_round.png`.
-  - **Transparent (no background):** tray icons, the Windows splash, and the Windows Store tiles / `*_altform-unplated` images, which sit on a system-provided surface.
+  - **Transparent (no background):** the mac tray icon (a template image the menu bar tints) and the Windows splash.
 - Generates and overwrites derived icons used by web and client targets.
 
 Generated targets:
