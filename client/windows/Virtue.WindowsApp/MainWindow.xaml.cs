@@ -537,6 +537,29 @@ public sealed partial class MainWindow : Window
         input.Resources["TextControlPlaceholderForegroundFocused"] = Ink3Brush;
     }
 
+    // The CheckBox template's visual states set the label color from theme
+    // resources, overriding Foreground, so pin every state to ink with a
+    // forest-filled box when checked.
+    private static void StyleCheckBox(CheckBox checkBox)
+    {
+        var r = checkBox.Resources;
+        foreach (var state in new[] { "Unchecked", "Checked", "Indeterminate" })
+        {
+            foreach (var suffix in new[] { "", "PointerOver", "Pressed" })
+            {
+                r[$"CheckBoxForeground{state}{suffix}"] = InkBrush;
+            }
+        }
+
+        foreach (var suffix in new[] { "", "PointerOver", "Pressed" })
+        {
+            r[$"CheckBoxCheckBackgroundFillChecked{suffix}"] = ForestBrush;
+            r[$"CheckBoxCheckBackgroundStrokeChecked{suffix}"] = ForestBrush;
+            r[$"CheckBoxCheckGlyphForegroundChecked{suffix}"] = PaperBrush;
+            r[$"CheckBoxCheckBackgroundStrokeUnchecked{suffix}"] = BorderHoverBrush;
+        }
+    }
+
     private async void StatusDetailsButton_OnClick(object sender, RoutedEventArgs e)
     {
         await ViewModel.RefreshAsync();
@@ -750,6 +773,7 @@ public sealed partial class MainWindow : Window
             FontFamily = BodyFont,
             Foreground = InkBrush,
         };
+        StyleCheckBox(includeLogsCheckBox);
 
         var includeLogsCaption = new TextBlock
         {
