@@ -424,7 +424,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--target",
-        choices=("all", "ios", "mac"),
+        choices=("all", "ios", "mac", "windows"),
         default="all",
         help="Limit generated outputs to a specific target set.",
     )
@@ -457,7 +457,7 @@ def main() -> None:
     # squircle for standalone icons shown as-is (favicons, desktop apps), and a
     # circle for Android's round launcher icon and the Linux tray icon (which
     # sits on a themed surface but needs its own background to stay visible in
-    # dark mode). Windows tiles are left transparent (the OS provides a plate).
+    # dark mode).
     rounded_bg = Background(background_rgb, "rounded", CONTENT_SCALE_ROUNDED)
     square_bg = Background(background_rgb, "square", CONTENT_SCALE_SQUARE)
     circle_bg = Background(background_rgb, "circle", CONTENT_SCALE_CIRCLE)
@@ -507,43 +507,6 @@ def main() -> None:
         save_png(master, linux_assets / "tray-icon.png", 32, circle_bg)
         outputs.append(linux_assets / "tray-icon.png")
 
-        windows_assets = root / "client" / "windows" / "assets"
-        # app-icon is the window/taskbar icon and gets a background. The Store
-        # tiles and *_altform-unplated images stay transparent: Windows draws a
-        # themed plate behind tiles, and "unplated" means no plate at all.
-        save_ico(
-            master,
-            windows_assets / "app-icon.ico",
-            [16, 24, 32, 40, 48, 64, 128, 256],
-            rounded_bg,
-        )
-        save_png(master, windows_assets / "app-icon.png", 256, rounded_bg)
-        save_png(master, windows_assets / "Square44x44Logo.png", 44)
-        save_png(master, windows_assets / "Square150x150Logo.png", 150)
-        save_png(master, windows_assets / "StoreLogo.png", 50)
-        save_png_with_canvas(master, windows_assets / "SplashScreen.png", 620, 300, 220)
-        for size in [16, 20, 24, 32, 40, 48, 64, 256]:
-            save_png(
-                master,
-                windows_assets
-                / f"Square44x44Logo.targetsize-{size}_altform-unplated.png",
-                size,
-            )
-        outputs.extend(
-            [
-                windows_assets / "app-icon.ico",
-                windows_assets / "app-icon.png",
-                windows_assets / "Square44x44Logo.png",
-                windows_assets / "Square150x150Logo.png",
-                windows_assets / "StoreLogo.png",
-                windows_assets / "SplashScreen.png",
-            ]
-            + [
-                windows_assets / f"Square44x44Logo.targetsize-{size}_altform-unplated.png"
-                for size in [16, 20, 24, 32, 40, 48, 64, 256]
-            ]
-        )
-
         android_base = root / "client" / "android" / "app" / "src" / "main" / "res"
         android_sizes = {
             "mipmap-mdpi": 48,
@@ -564,6 +527,48 @@ def main() -> None:
             )
             outputs.append(android_base / bucket / "ic_launcher.png")
             outputs.append(android_base / bucket / "ic_launcher_round.png")
+
+    if args.target in ("all", "windows"):
+        windows_assets = root / "client" / "windows" / "assets"
+        # Every Windows icon gets the squircle. The taskbar and Start menu draw
+        # the *_altform-unplated images straight onto the (possibly dark)
+        # system surface, and the manifest's transparent BackgroundColor means
+        # tiles get no plate either, so a transparent logo all but vanishes in
+        # dark mode. The splash stays transparent over its own background.
+        unplated_sizes = [16, 20, 24, 32, 40, 48, 64, 256]
+        save_ico(
+            master,
+            windows_assets / "app-icon.ico",
+            [16, 24, 32, 40, 48, 64, 128, 256],
+            rounded_bg,
+        )
+        save_png(master, windows_assets / "app-icon.png", 256, rounded_bg)
+        save_png(master, windows_assets / "Square44x44Logo.png", 44, rounded_bg)
+        save_png(master, windows_assets / "Square150x150Logo.png", 150, rounded_bg)
+        save_png(master, windows_assets / "StoreLogo.png", 50, rounded_bg)
+        save_png_with_canvas(master, windows_assets / "SplashScreen.png", 620, 300, 220)
+        for size in unplated_sizes:
+            save_png(
+                master,
+                windows_assets
+                / f"Square44x44Logo.targetsize-{size}_altform-unplated.png",
+                size,
+                rounded_bg,
+            )
+        outputs.extend(
+            [
+                windows_assets / "app-icon.ico",
+                windows_assets / "app-icon.png",
+                windows_assets / "Square44x44Logo.png",
+                windows_assets / "Square150x150Logo.png",
+                windows_assets / "StoreLogo.png",
+                windows_assets / "SplashScreen.png",
+            ]
+            + [
+                windows_assets / f"Square44x44Logo.targetsize-{size}_altform-unplated.png"
+                for size in unplated_sizes
+            ]
+        )
 
     if args.target in ("all", "mac"):
         mac_assets = root / "client" / "mac" / "assets"
