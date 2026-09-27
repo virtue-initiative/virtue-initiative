@@ -4,7 +4,13 @@ import mdx from '@astrojs/mdx';
 
 import preact from '@astrojs/preact';
 
+import sitemap from '@astrojs/sitemap';
+
 import mermaid from 'astro-mermaid';
+
+// Pages that exist but shouldn't be offered to search engines: the 404 page
+// and the post-checkout thank-you page.
+const EXCLUDED_FROM_SITEMAP = new Set(['/404', '/donate/success']);
 
 export default defineConfig({
   site: 'https://virtueinitiative.org',
@@ -47,6 +53,11 @@ export default defineConfig({
     }),
     mdx(),
     preact({ compat: true }),
+    // Writes sitemap-index.xml + sitemap-0.xml against `site`, which
+    // src/pages/robots.txt.ts advertises to crawlers.
+    sitemap({
+      filter: (page) => !EXCLUDED_FROM_SITEMAP.has(new URL(page).pathname),
+    }),
   ],
   vite: {
     esbuild: {

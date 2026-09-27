@@ -6,14 +6,16 @@ import Header from '../components/Header.astro';
 import ImageLightbox from '../components/ImageLightbox.astro';
 import NoindexMeta from '../components/NoindexMeta.astro';
 import { helpSidebar } from '../help/navigation';
+import { DEFAULT_DESCRIPTION } from '../lib/site';
 import '../styles/global.css';
 
 interface Props {
   currentPath: string;
   pageTitle?: string;
+  description?: string;
 }
 
-const { currentPath, pageTitle = 'Help' } = Astro.props;
+const { currentPath, pageTitle = 'Help', description = DEFAULT_DESCRIPTION } = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
 const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
 ---
@@ -37,6 +39,7 @@ const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
       }
     </style>
     <title>{title}</title>
+    <meta name="description" content={description} />
   </head>
   <body class="help-page">
     <Header tagline="Guides and docs for The Virtue Initiative" />

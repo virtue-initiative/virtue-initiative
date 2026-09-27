@@ -20,7 +20,7 @@ const formattedDate = post.data.pubDate.toLocaleDateString('en-US', {
 });
 ---
 
-<SiteLayout pageTitle={post.data.title}>
+<SiteLayout pageTitle={post.data.title} description={post.data.description}>
   <article class="help-content-card help-doc">
     <header class="blog-post-header">
       <p class="blog-post-meta">
