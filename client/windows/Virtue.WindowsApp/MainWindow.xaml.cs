@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Virtue.WindowsApp.Core.Infrastructure;
 using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
 using Windows.Graphics;
@@ -106,7 +107,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         _appWindow = ResolveAppWindow();
         _appWindow.Closing += AppWindowOnClosing;
-        _appWindow.Resize(new SizeInt32(720, 560));
+        SetInitialBounds();
         SetWindowIcon();
         SyncFromViewModel();
         IsVisibleToUser = true;
@@ -1151,6 +1152,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Sizes the window from effective pixels so it opens at the same visual
+    /// size at any display scaling, and centers it in the work area of the
+    /// monitor it opens on (see <see cref="InitialWindowBounds"/>).
+    /// </summary>
+    private void SetInitialBounds()
+    {
+        var dpi = GetDpiForWindow(WindowNative.GetWindowHandle(this));
+        var workArea = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        var bounds = InitialWindowBounds.Compute(
+            dpi,
+            new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+        _appWindow.MoveAndResize(new RectInt32(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+    }
+
     private AppWindow ResolveAppWindow()
     {
         var windowHandle = WindowNative.GetWindowHandle(this);
@@ -1220,6 +1236,9 @@ public sealed partial class MainWindow : Window
             Convert.ToByte(hex.Substring(2, 2), 16),
             Convert.ToByte(hex.Substring(4, 2), 16));
     }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
