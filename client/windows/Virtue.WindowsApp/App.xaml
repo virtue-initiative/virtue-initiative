@@ -1,6 +1,10 @@
 <Application
     x:Class="Virtue.WindowsApp.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    RequestedTheme="Light">
+    <!-- The UI uses a fixed cream/ink palette. Pin the Light theme so any
+         control state we don't restyle falls back to dark text rather than
+         the white text of the Dark theme (#730). -->
     <Application.Resources />
 </Application>
