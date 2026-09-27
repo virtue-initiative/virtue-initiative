@@ -302,6 +302,15 @@ export class APIClient {
     };
   }
 
+  /**
+   * Refetch devices in the background. The cached list stays in place (and
+   * `loaded` stays true) until the new one arrives, so callers keep rendering
+   * the old copy instead of flashing a loading state.
+   */
+  refreshDevices(): Promise<Device[] | null> {
+    return this.fetchDevices();
+  }
+
   async updateDevice(id: string, patch: { name?: string }): Promise<void> {
     await api.patchDevice(id, patch);
     await this.fetchDevices(true);

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
@@ -29,6 +29,13 @@ export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
   const { devices, loaded } = useDevices();
+
+  // The device cache otherwise lives for the whole session, so status and
+  // last-upload times would go stale. Refetch on open; cached cards stay up.
+  useEffect(() => {
+    void api?.refreshDevices();
+  }, [api]);
+
   const updateDevice = (id: string, patch: { name?: string }) =>
     api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
   const removeDevice = (id: string) =>

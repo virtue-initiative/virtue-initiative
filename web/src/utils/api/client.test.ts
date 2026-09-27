@@ -79,6 +79,24 @@ describe('APIClient — devices cache', () => {
     await vi.waitFor(() => expect(client.listDevices()).toHaveLength(TEST_DEVICES.length));
     expect(callCount).toBe(1);
   });
+
+  it('refreshDevices refetches while keeping the cached list until the new one arrives', async () => {
+    const client = makeClient();
+    const cb = vi.fn();
+    client.subscribeDevices(cb);
+    await vi.waitFor(() => expect(cb).toHaveBeenCalledWith(TEST_DEVICES));
+
+    const updated = TEST_DEVICES.map((d) => ({ ...d, name: `${d.name} (renamed)` }));
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json(updated)));
+
+    const refresh = client.refreshDevices();
+    expect(client.listDevices()).toEqual(TEST_DEVICES);
+    expect(client.subscribeDevices(() => {}).loaded).toBe(true);
+
+    await refresh;
+    expect(cb).toHaveBeenLastCalledWith(updated);
+    expect(client.listDevices()).toEqual(updated);
+  });
 });
 
 describe('APIClient — partners cache', () => {
