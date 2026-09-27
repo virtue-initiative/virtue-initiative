@@ -25,6 +25,28 @@ use crate::config::{ClientPaths, build_core_config, default_device_name, load_se
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
+/// Plain-language summary of what this client captures and sends, printed after login and at
+/// the end of `virtue status`. Keep it in step with what the code actually does (CORE-003,
+/// CORE-004, CORE-006) and with the matching summary in the other platforms' apps.
+const MONITORING_SUMMARY: &[&str] = &[
+    "Virtue takes a screenshot of all your screens at random times, about every 5 minutes on average.",
+    "No screenshot is taken while the screen is locked or the screensaver is on.",
+    "If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.",
+    "Before a screenshot leaves this computer, Virtue blacks out any text it finds, then shrinks and blurs the image.",
+    "Virtue rates each screenshot for explicit content on this computer.",
+    "Screenshots are encrypted so only you and your partners can see them.",
+    "Virtue also reports when monitoring is stopped, when a screenshot is missed or fails, and when you log in to or out of this computer.",
+    "Virtue sends a daily check-in to show it is running.",
+    "Other than screenshots, Virtue does not record keystrokes, website addresses, app names, window titles, audio, or location.",
+];
+
+fn print_monitoring_summary() {
+    println!("What Virtue monitors");
+    for line in MONITORING_SUMMARY {
+        println!("  - {line}");
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "virtue")]
 #[command(about = "Virtue Linux client")]
@@ -223,6 +245,8 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
             "Capture is not yet working; service will run and log missed captures until fixed."
         );
     }
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }
@@ -601,6 +625,9 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     );
     println!("  state dir:            {}", paths.state_dir.display());
     println!("  logs:                 {}", log_command());
+
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }

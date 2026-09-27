@@ -15,6 +15,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 headerCard
                 statusCard
+                monitoringCard
                 accountCard
                 if let permissionPhase = coordinator.permissionPhase {
                     permissionCard(permissionPhase)
@@ -149,6 +150,37 @@ struct ContentView: View {
         }
     }
 
+    // Keep in step with what the daemon actually does (core SPEC CORE-003,
+    // CORE-004, CORE-006) and with the matching summary on the other platforms.
+    private var monitoringCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("What Virtue Monitors")
+                ForEach(Self.monitoringSummary, id: \.self) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("•")
+                        Text(line)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                }
+            }
+        }
+    }
+
+    private static let monitoringSummary = [
+        "Virtue takes a screenshot of your main display at random times, about every 5 minutes on average. Other displays are not captured.",
+        "No screenshot is taken while the screen is locked or the screensaver is on.",
+        "If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.",
+        "Before a screenshot leaves this Mac, Virtue blacks out any text it finds, then shrinks and blurs the image.",
+        "Virtue rates each screenshot for explicit content on this Mac.",
+        "Screenshots are encrypted so only you and your partners can see them.",
+        "Virtue also reports when monitoring is stopped, when a screenshot is missed or fails, and when you log in to or out of this Mac.",
+        "Virtue sends a daily check-in to show it is running.",
+        "Other than screenshots, Virtue does not record keystrokes, website addresses, app names, window titles, audio, or location.",
+    ]
+
     private var accountCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
@@ -241,7 +273,7 @@ struct ContentView: View {
             return "Relaunch the Virtue app to continue monitoring."
         }
         if coordinator.daemonStatus == .running {
-            return "The background service is capturing activity on this device."
+            return "Virtue is taking screenshots on this Mac."
         }
         return "Waiting for the background service to start."
     }

@@ -33,11 +33,25 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.RequestPermission()
     ) {}
 
+    private fun renderMonitoringSummary() {
+        val list = binding.monitoringSummaryList
+        list.removeAllViews()
+        for (line in resources.getStringArray(R.array.monitoring_summary)) {
+            list.addView(TextView(this).apply {
+                text = "\u2022  $line"
+                textSize = 14f
+                setTextColor(binding.statusText.currentTextColor)
+                setPadding(0, (4 * resources.displayMetrics.density).toInt(), 0, 0)
+            })
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         binding.versionText.text = "Build ${BuildConfig.VIRTUE_BUILD_LABEL}"
+        renderMonitoringSummary()
 
         if (binding.deviceNameInput.text.isNullOrBlank()) {
             binding.deviceNameInput.setText(deviceName())
