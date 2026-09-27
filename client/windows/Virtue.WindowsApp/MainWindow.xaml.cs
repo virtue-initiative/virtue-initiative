@@ -22,6 +22,8 @@ public sealed partial class MainWindow : Window
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
     private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
+    // Partners are managed in the web app, not from this client.
+    private const string PartnersNavigateUrl = "https://app.virtueinitiative.org/partners";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -31,6 +33,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
     private readonly StackPanel _accountActionsPanel;
+    private readonly StackPanel _partnersPanel;
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
@@ -80,6 +83,7 @@ public sealed partial class MainWindow : Window
         _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
         _accountActionsPanel = new StackPanel();
+        _partnersPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
         _statusDot = new Border
         {
@@ -378,6 +382,20 @@ public sealed partial class MainWindow : Window
         signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
         _loginPanel.Children.Add(signUpLink);
 
+        var openPartnersButton = CreateActionButton("Open Partners Page");
+        openPartnersButton.Click += (_, _) => OpenInBrowser(PartnersNavigateUrl);
+
+        _partnersPanel.Spacing = 8;
+        _partnersPanel.Margin = new Thickness(0, 12, 0, 0);
+        _partnersPanel.Children.Add(new TextBlock
+        {
+            Text = "Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+        _partnersPanel.Children.Add(openPartnersButton);
+
         _accountActionsPanel.Orientation = Orientation.Horizontal;
         _accountActionsPanel.Spacing = 10;
         _accountActionsPanel.Margin = new Thickness(0, 12, 0, 0);
@@ -387,6 +405,7 @@ public sealed partial class MainWindow : Window
         content.Children.Add(CreateSectionLabel("Account"));
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
+        content.Children.Add(_partnersPanel);
         content.Children.Add(_accountActionsPanel);
         content.Children.Add(_errorTextBlock);
 
@@ -1015,6 +1034,7 @@ public sealed partial class MainWindow : Window
             _accountSummaryTextBlock.Text = "Checking sign-in status...";
             _loginPanel.Visibility = Visibility.Collapsed;
             _accountActionsPanel.Visibility = Visibility.Collapsed;
+            _partnersPanel.Visibility = Visibility.Collapsed;
             _signedInActionsPanel.Visibility = Visibility.Collapsed;
         }
         else
@@ -1024,6 +1044,7 @@ public sealed partial class MainWindow : Window
                 : "Sign in to start monitoring.";
             _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
             _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+            _partnersPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
             _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -1185,6 +1206,22 @@ public sealed partial class MainWindow : Window
             // the dialog either way, so a failed launch isn't worth an error
             // dialog on top of the status dialog.
             System.Diagnostics.Debug.WriteLine($"failed to open log folder: {ex}");
+        }
+    }
+
+    private static void OpenInBrowser(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"failed to open {url}: {ex}");
         }
     }
 

@@ -24,6 +24,8 @@ use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_b
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
+/// Partners are managed in the web app, not from this client.
+const PARTNERS_URL: &str = "https://app.virtueinitiative.org/partners";
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue")]
@@ -218,6 +220,9 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
     let probe = probe_backend();
     println!("{}", probe.guidance);
     println!("Logged in. Device id: {device_id}");
+    println!(
+        "Add partners on the Virtue website. Open {PARTNERS_URL} and select \"Invite partner\"."
+    );
     if !probe.captured_ok {
         println!(
             "Capture is not yet working; service will run and log missed captures until fixed."
@@ -526,6 +531,7 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
             .map(|count| count.to_string())
             .unwrap_or_else(|| "<unknown>".to_string())
     );
+    println!("  add partners at:      {PARTNERS_URL}");
 
     println!();
     println!("Queues");
