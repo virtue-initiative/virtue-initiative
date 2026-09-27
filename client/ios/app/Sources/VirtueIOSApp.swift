@@ -213,37 +213,22 @@ struct ContentView: View {
         }
     }
 
-    // Keep in step with what the Safari extension and daemon actually do (core
-    // SPEC CORE-003, CORE-004) and with the matching summary on the other platforms.
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the Safari extension and daemon actually do (core SPEC CORE-003, CORE-004).
     private var monitoringCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
                 SectionLabel("What Virtue Monitors")
-                ForEach(Self.monitoringSummary, id: \.self) { line in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("•")
-                        Text(line)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .font(.subheadline)
+                Text("Virtue only captures Safari. It takes a screenshot of the web page you are viewing about every 5 minutes, blurred and with text blacked out.")
+                    .font(.body)
                     .foregroundStyle(VirtueBrand.textMuted)
-                }
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!)
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.link)
             }
         }
     }
-
-    private static let monitoringSummary = [
-        "Virtue only captures Safari. While you use Safari, it takes a screenshot of the web page on screen at random times, about every 5 minutes on average.",
-        "Other apps, the Home Screen, and Safari tabs you are not viewing are not captured.",
-        "Private Browsing tabs are captured when the extension is allowed in Private Browsing.",
-        "If the page has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.",
-        "Before a screenshot leaves this device, Virtue blacks out any text it finds, then shrinks and blurs the image.",
-        "Virtue rates each screenshot for explicit content on this device.",
-        "Screenshots are encrypted so only you and your partners can see them.",
-        "Virtue also reports when monitoring is paused and when a screenshot fails. While Safari is in use, it sends a daily check-in to show it is running.",
-        "The page address and title appear in Status Details on this device. They are never uploaded.",
-        "Other than screenshots, Virtue does not record keystrokes, audio, or location.",
-    ]
 
     private var safariCard: some View {
         Card {

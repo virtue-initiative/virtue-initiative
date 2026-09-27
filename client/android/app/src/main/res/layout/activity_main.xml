@@ -162,7 +162,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- What Virtue Monitors Card (rows filled in from @array/monitoring_summary) -->
+        <!-- What Virtue Monitors Card -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -180,12 +180,24 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:letterSpacing="0.05" />
 
-            <LinearLayout
-                android:id="@+id/monitoringSummaryList"
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginTop="6dp" />
+                android:text="@string/monitoring_summary"
+                android:textSize="14sp"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:layout_marginTop="10dp" />
+
+            <TextView
+                android:id="@+id/monitoringLearnMoreLink"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/monitoring_learn_more"
+                android:textSize="14sp"
+                android:textColor="@color/virtue_link"
+                android:layout_marginTop="8dp"
+                android:clickable="true"
+                android:focusable="true" />
         </LinearLayout>
 
         <!-- Account Card -->

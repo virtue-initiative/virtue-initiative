@@ -339,35 +339,38 @@ public sealed partial class MainWindow : Window
         return CreateCard(content);
     }
 
-    // Keep in step with what the monitor actually does (core SPEC CORE-003,
-    // CORE-004, CORE-006) and with the matching summary on the other platforms.
-    private static readonly string[] MonitoringSummary =
-    [
-        "Virtue takes a screenshot of every monitor at random times, about every 5 minutes on average.",
-        "No screenshot is taken while the screen is locked or the screensaver is on.",
-        "If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.",
-        "Before a screenshot leaves this PC, Virtue blacks out any text it finds, then shrinks and blurs the image.",
-        "Virtue rates each screenshot for explicit content on this PC.",
-        "Screenshots are encrypted so only you and your partners can see them.",
-        "Virtue also reports when monitoring is stopped, when a screenshot is missed or fails, and when you sign in to or out of Windows.",
-        "Virtue sends a daily check-in to show it is running.",
-        "Other than screenshots, Virtue does not record keystrokes, website addresses, app names, window titles, audio, or location.",
-    ];
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the monitor actually does (core SPEC CORE-003, CORE-004).
+    private const string MonitoringSummary =
+        "Virtue takes a screenshot of every monitor about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.";
+    private const string MonitoringHelpUrl = "https://virtueinitiative.org/help/what-virtue-monitors/windows";
 
     private static UIElement BuildMonitoringCard()
     {
         var content = new StackPanel { Spacing = 8 };
         content.Children.Add(CreateSectionLabel("What Virtue Monitors"));
-        foreach (var line in MonitoringSummary)
+        content.Children.Add(new TextBlock
         {
-            content.Children.Add(new TextBlock
-            {
-                Text = $"\u2022  {line}",
-                TextWrapping = TextWrapping.Wrap,
-                FontFamily = BodyFont,
-                Foreground = Ink2Brush,
-            });
-        }
+            Text = MonitoringSummary,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+
+        var learnMoreLink = new HyperlinkButton
+        {
+            Content = "Learn more",
+            NavigateUri = new Uri(MonitoringHelpUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = LinkBrush,
+        };
+        learnMoreLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        content.Children.Add(learnMoreLink);
 
         return CreateCard(content);
     }

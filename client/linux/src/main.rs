@@ -25,26 +25,21 @@ use crate::config::{ClientPaths, build_core_config, default_device_name, load_se
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
-/// Plain-language summary of what this client captures and sends, printed after login and at
-/// the end of `virtue status`. Keep it in step with what the code actually does (CORE-003,
-/// CORE-004, CORE-006) and with the matching summary in the other platforms' apps.
+/// Short summary of what this client captures, printed after login and at the end of
+/// `virtue status`. The full list lives on the linked help page; keep both in step with what
+/// the code actually does (CORE-003, CORE-004).
 const MONITORING_SUMMARY: &[&str] = &[
-    "Virtue takes a screenshot of all your screens at random times, about every 5 minutes on average.",
-    "No screenshot is taken while the screen is locked or the screensaver is on.",
-    "If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.",
-    "Before a screenshot leaves this computer, Virtue blacks out any text it finds, then shrinks and blurs the image.",
-    "Virtue rates each screenshot for explicit content on this computer.",
-    "Screenshots are encrypted so only you and your partners can see them.",
-    "Virtue also reports when monitoring is stopped, when a screenshot is missed or fails, and when you log in to or out of this computer.",
-    "Virtue sends a daily check-in to show it is running.",
-    "Other than screenshots, Virtue does not record keystrokes, website addresses, app names, window titles, audio, or location.",
+    "Virtue takes a screenshot of all your screens about every 5 minutes.",
+    "Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.",
 ];
+const MONITORING_HELP_URL: &str = "https://virtueinitiative.org/help/what-virtue-monitors/linux";
 
 fn print_monitoring_summary() {
     println!("What Virtue monitors");
     for line in MONITORING_SUMMARY {
-        println!("  - {line}");
+        println!("  {line}");
     }
+    println!("  Learn more: {MONITORING_HELP_URL}");
 }
 
 #[derive(Debug, Parser)]

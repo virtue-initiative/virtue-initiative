@@ -16,21 +16,11 @@
     <string name="status_paused">Monitoring paused</string>
     <string name="status_waiting">Waiting for first capture</string>
 
-    <!-- What Virtue monitors. Keep in step with what the app actually does
-         (client/core/SPEC.md CORE-003, CORE-004, CORE-006) and with the
-         matching summary on the other platforms. -->
-    <string-array name="monitoring_summary">
-        <item>Virtue takes a screenshot of your whole screen at random times, about every 5 minutes on average.</item>
-        <item>No screenshot is taken while the screen is off.</item>
-        <item>If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.</item>
-        <item>Before a screenshot leaves this device, Virtue blacks out any text it finds, then shrinks and blurs the image.</item>
-        <item>Virtue rates each screenshot for explicit content on this device.</item>
-        <item>Screenshots are encrypted so only you and your partners can see them.</item>
-        <item>Virtue also reports when monitoring is paused, when a screenshot is missed or fails, and when this device restarts.</item>
-        <item>Virtue sends a daily check-in to show it is running.</item>
-        <item>Virtue uses Accessibility permission only to take screenshots. It does not read what you type or tap.</item>
-        <item>Other than screenshots, Virtue does not record keystrokes, website addresses, app names, audio, or location.</item>
-    </string-array>
+    <!-- What Virtue monitors. Short summary; the full list is on the linked help
+         page. Keep both in step with what the app actually does
+         (client/core/SPEC.md CORE-003, CORE-004). -->
+    <string name="monitoring_summary">Virtue takes a screenshot of your screen about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.</string>
+    <string name="monitoring_learn_more">Learn more</string>
 
     <!-- Account -->
     <string name="account_signed_in">Signed in</string>
