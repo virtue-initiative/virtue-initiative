@@ -34,6 +34,7 @@ export const emailKinds = [
   'account_exists_notice',
   'email_in_use_notice',
   'bug_report',
+  'bug_report_confirmation',
 ] as const;
 
 export type EmailKind = (typeof emailKinds)[number];
