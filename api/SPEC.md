@@ -247,11 +247,14 @@ The client MUST provide this request shape.
   "pub_key": Base64,
   "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
-  "email_digest_minutes_utc": Number | undefined
+  "email_digest_minutes_utc": Number | undefined,
+  "newsletter_opt_in": Boolean | undefined
 }
 ```
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
+
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
 The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 

@@ -75,6 +75,28 @@ describe('Auth routes', () => {
     expect(unknownBody).toHaveProperty('params');
   });
 
+  it('accepts a newsletter opt-in on /signup without failing when Buttondown is not configured', async () => {
+    await SELF.fetch(`${BASE}/signup-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'reader@example.com' }),
+    });
+    const [delivery] = await listEmailDeliveries();
+    const signupRes = await SELF.fetch(`${BASE}/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        verification_token: extractTokenFromDelivery(delivery!, 'signup_token'),
+        password_auth: await passwordAuthFor('reader-auth'),
+        password_salt: await passwordSaltFor('reader@example.com'),
+        pub_key: await publicKeyFor('reader@example.com'),
+        encrypted_priv_key: privateKeyFor('reader@example.com'),
+        newsletter_opt_in: true,
+      }),
+    });
+    expect(signupRes.status).toBe(200);
+  });
+
   it('signup-request sends an email with a signup token, and /signup creates a verified user', async () => {
     const password_auth = await passwordAuthFor('client-derived-auth');
     const password_salt = await passwordSaltFor('alice@example.com');

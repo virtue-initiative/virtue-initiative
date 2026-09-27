@@ -1,0 +1,54 @@
+.newsletter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 34rem;
+}
+
+.newsletter h2,
+.newsletter p {
+  margin: 0;
+}
+
+/* Inside a help-doc card (the blog index), set it apart from the post list above. */
+.help-doc .newsletter {
+  margin-top: 3rem;
+}
+
+.newsletter h2 {
+  font-family: var(--font-serif);
+  font-size: var(--text-3xl);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.newsletter-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.newsletter-label {
+  font-weight: 600;
+}
+
+.newsletter-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.newsletter-row .vi-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.newsletter .newsletter-fine-print {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 480px) {
+  .newsletter-row {
+    flex-direction: column;
+  }
+}

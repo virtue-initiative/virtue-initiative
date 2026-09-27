@@ -83,6 +83,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   const [resetTokenValid, setResetTokenValid] = useState(!resetToken);
   const [signupTokenValid, setSignupTokenValid] = useState(!signupToken);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  // Opt-in only: starts unchecked and never gates the submit button.
+  const [newsletterOptIn, setNewsletterOptIn] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
   const pwnedCount = usePwnedPasswordCount(password, isNewPassword);
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
@@ -159,7 +161,12 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         if (lengthError) {
           throw new Error(lengthError);
         }
-        const client = await finishSignup(signupToken, name.trim() || undefined, password);
+        const client = await finishSignup(
+          signupToken,
+          name.trim() || undefined,
+          password,
+          newsletterOptIn,
+        );
         setClient(client);
         setName('');
         setPassword('');
@@ -394,6 +401,22 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
                   Privacy Policy
                 </a>
                 .
+              </label>
+            </div>
+          )}
+
+          {authMode === 'finish-signup' && (
+            <div class="auth-terms">
+              <Checkbox
+                id="newsletter-opt-in"
+                name="newsletter-opt-in"
+                checked={newsletterOptIn}
+                onChange={(e) => setNewsletterOptIn((e.target as HTMLInputElement).checked)}
+                disabled={!signupTokenValid}
+              />
+              <label class="hint-text auth-terms-label" for="newsletter-opt-in">
+                Email me the Virtue Initiative newsletter with project news and updates. This is
+                optional, and you can unsubscribe from any email.
               </label>
             </div>
           )}
