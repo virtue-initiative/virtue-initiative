@@ -25,6 +25,23 @@ use crate::config::{ClientPaths, build_core_config, default_device_name, load_se
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 
+/// Short summary of what this client captures, printed after login and at the end of
+/// `virtue status`. The full list lives on the linked help page; keep both in step with what
+/// the code actually does (CORE-003, CORE-004).
+const MONITORING_SUMMARY: &[&str] = &[
+    "Virtue takes a screenshot of all your screens about every 5 minutes.",
+    "Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.",
+];
+const MONITORING_HELP_URL: &str = "https://virtueinitiative.org/help/what-virtue-monitors/linux";
+
+fn print_monitoring_summary() {
+    println!("What Virtue monitors");
+    for line in MONITORING_SUMMARY {
+        println!("  {line}");
+    }
+    println!("  Learn more: {MONITORING_HELP_URL}");
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "virtue")]
 #[command(about = "Virtue Linux client")]
@@ -223,6 +240,8 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
             "Capture is not yet working; service will run and log missed captures until fixed."
         );
     }
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }
@@ -601,6 +620,9 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     );
     println!("  state dir:            {}", paths.state_dir.display());
     println!("  logs:                 {}", log_command());
+
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }

@@ -58,6 +58,15 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://virtueinitiative.org")))
         }
 
+        binding.monitoringLearnMoreLink.setOnClickListener {
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://virtueinitiative.org/help/what-virtue-monitors/android")
+                )
+            )
+        }
+
         binding.signUpLink.setOnClickListener {
             startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/signup"))

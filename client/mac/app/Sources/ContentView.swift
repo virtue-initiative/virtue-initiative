@@ -15,6 +15,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 headerCard
                 statusCard
+                monitoringCard
                 accountCard
                 if let permissionPhase = coordinator.permissionPhase {
                     permissionCard(permissionPhase)
@@ -149,6 +150,23 @@ struct ContentView: View {
         }
     }
 
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the daemon actually does (core SPEC CORE-003, CORE-004).
+    private var monitoringCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("What Virtue Monitors")
+                Text("Virtue takes a screenshot of your main display about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.")
+                    .font(.body)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/mac")!)
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.link)
+            }
+        }
+    }
+
     private var accountCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
@@ -241,7 +259,7 @@ struct ContentView: View {
             return "Relaunch the Virtue app to continue monitoring."
         }
         if coordinator.daemonStatus == .running {
-            return "The background service is capturing activity on this device."
+            return "Virtue is taking screenshots on this Mac."
         }
         return "Waiting for the background service to start."
     }

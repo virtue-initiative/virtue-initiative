@@ -8,12 +8,19 @@
     <!-- Section labels -->
     <string name="section_status">STATUS</string>
     <string name="section_account">ACCOUNT</string>
+    <string name="section_monitoring">WHAT VIRTUE MONITORS</string>
 
     <!-- Status -->
     <string name="status_signed_out">Signed out</string>
     <string name="status_monitoring">Monitoring active</string>
     <string name="status_paused">Monitoring paused</string>
     <string name="status_waiting">Waiting for first capture</string>
+
+    <!-- What Virtue monitors. Short summary; the full list is on the linked help
+         page. Keep both in step with what the app actually does
+         (client/core/SPEC.md CORE-003, CORE-004). -->
+    <string name="monitoring_summary">Virtue takes a screenshot of your screen about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.</string>
+    <string name="monitoring_learn_more">Learn more</string>
 
     <!-- Account -->
     <string name="account_signed_in">Signed in</string>

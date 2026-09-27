@@ -29,6 +29,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     headerCard
                     statusCard
+                    monitoringCard
                     accountCard
                     safariCard
                 }
@@ -212,6 +213,23 @@ struct ContentView: View {
         }
     }
 
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the Safari extension and daemon actually do (core SPEC CORE-003, CORE-004).
+    private var monitoringCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                SectionLabel("What Virtue Monitors")
+                Text("Virtue only captures Safari. It takes a screenshot of the web page you are viewing about every 5 minutes, blurred and with text blacked out.")
+                    .font(.body)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!)
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.link)
+            }
+        }
+    }
+
     private var safariCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
@@ -263,7 +281,7 @@ struct ContentView: View {
             return "Monitoring is stopped on this device until you resume it."
         }
         if coordinator.monitorSummary == "active" {
-            return "The Safari extension is sending fresh capture activity."
+            return "Virtue is taking screenshots of the web pages you view in Safari."
         }
         if coordinator.monitorSummary == "waiting for Safari" {
             return "Monitoring is enabled, but Safari needs to be active on a capturable page."

@@ -191,6 +191,7 @@ public sealed partial class MainWindow : Window
         contentStack.Children.Add(BuildHeader());
         contentStack.Children.Add(_updateNoticeCard);
         contentStack.Children.Add(BuildStatusCard());
+        contentStack.Children.Add(BuildMonitoringCard());
         contentStack.Children.Add(BuildAccountCard());
 
         root.Children.Add(new ScrollViewer
@@ -335,6 +336,42 @@ public sealed partial class MainWindow : Window
         content.Children.Add(_buildLabelTextBlock);
         content.Children.Add(buildRow);
         content.Children.Add(actionRow);
+
+        return CreateCard(content);
+    }
+
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the monitor actually does (core SPEC CORE-003, CORE-004).
+    private const string MonitoringSummary =
+        "Virtue takes a screenshot of every monitor about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.";
+    private const string MonitoringHelpUrl = "https://virtueinitiative.org/help/what-virtue-monitors/windows";
+
+    private static UIElement BuildMonitoringCard()
+    {
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(CreateSectionLabel("What Virtue Monitors"));
+        content.Children.Add(new TextBlock
+        {
+            Text = MonitoringSummary,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+
+        var learnMoreLink = new HyperlinkButton
+        {
+            Content = "Learn more",
+            NavigateUri = new Uri(MonitoringHelpUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = LinkBrush,
+        };
+        learnMoreLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        content.Children.Add(learnMoreLink);
 
         return CreateCard(content);
     }
