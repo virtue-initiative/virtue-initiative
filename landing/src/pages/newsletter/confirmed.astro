@@ -1,0 +1,21 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+
+// Buttondown's subscription_confirmation_redirect_url points here, after the subscriber clicks
+// the link in the confirmation email.
+---
+
+<SiteLayout pageTitle="Subscribed">
+  <section class="newsletter-status">
+    <h2>You're subscribed</h2>
+    <p>
+      Thanks for confirming. We'll email you occasional news about the project, new features, and
+      new articles.
+    </p>
+    <div class="newsletter-status-actions">
+      <Button href="/" variant="primary">Back to home</Button>
+      <Button href="/blog" variant="outline">Read the blog</Button>
+    </div>
+  </section>
+</SiteLayout>

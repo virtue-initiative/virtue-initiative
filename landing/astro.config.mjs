@@ -10,7 +10,12 @@ import mermaid from 'astro-mermaid';
 
 // Pages that exist but shouldn't be offered to search engines: the 404 page
 // and the post-checkout thank-you page.
-const EXCLUDED_FROM_SITEMAP = new Set(['/404', '/donate/success']);
+const EXCLUDED_FROM_SITEMAP = new Set([
+  '/404',
+  '/donate/success',
+  '/newsletter/check-email',
+  '/newsletter/confirmed',
+]);
 
 export default defineConfig({
   site: 'https://virtueinitiative.org',
