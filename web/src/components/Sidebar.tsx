@@ -265,7 +265,12 @@ export function Sidebar() {
             active={currentPath.startsWith('/partners')}
             icon={<PartnersIcon />}
             count={partnerCount}
-            onNavigate={closeMobile}
+            onNavigate={() => {
+              closeMobile();
+              // Same as Devices: re-clicking while on the page doesn't remount it.
+              void api.refreshPartners();
+              void api.refreshDevices();
+            }}
           >
             Partners
           </NavLink>

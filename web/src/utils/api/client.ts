@@ -234,6 +234,14 @@ export class APIClient {
     };
   }
 
+  /**
+   * Refetch watchers and watchings in the background. Like `refreshDevices`,
+   * the cached lists stay in place until the new ones arrive.
+   */
+  refreshPartners(): Promise<PartnerRelationships | null> {
+    return this.fetchPartners();
+  }
+
   async invitePartner(email: string): Promise<void> {
     await api.invitePartner(email);
     await this.fetchPartners(true);

@@ -126,6 +126,28 @@ describe('APIClient — partners cache', () => {
     await vi.waitFor(() => expect(client.listWatchers()).toHaveLength(1));
     expect(callCount).toBe(1);
   });
+
+  it('refreshPartners refetches while keeping the cached lists until the new ones arrive', async () => {
+    const client = makeClient();
+    const watchingCb = vi.fn();
+    client.subscribeWatchings(watchingCb);
+    await vi.waitFor(() => expect(watchingCb).toHaveBeenCalledWith([TEST_WATCHING]));
+
+    const renamed = { ...TEST_WATCHING, user: { ...TEST_WATCHING.user, name: 'Robert' } };
+    server.use(
+      http.get(`${BASE}/partner`, () =>
+        HttpResponse.json({ watchers: [TEST_WATCHER], watching: [renamed] }),
+      ),
+    );
+
+    const refresh = client.refreshPartners();
+    expect(client.listWatchings()).toEqual([TEST_WATCHING]);
+    expect(client.subscribeWatchings(() => {}).loaded).toBe(true);
+
+    await refresh;
+    expect(watchingCb).toHaveBeenLastCalledWith([renamed]);
+    expect(client.listWatchings()).toEqual([renamed]);
+  });
 });
 
 describe('APIClient — logout', () => {
