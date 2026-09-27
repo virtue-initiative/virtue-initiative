@@ -883,6 +883,8 @@ The server MUST email the report to a fixed internal address and include, the me
 
 The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
 
+The server SHOULD also send a confirmation email to that same address, when one is known, with its Reply-To header set to the internal address. The confirmation MUST NOT include the report's `message` or any other client-supplied text, since the address MAY be unverified. The server MUST NOT send the confirmation to an account whose email is unverified. A failure to send the confirmation MUST NOT fail the request.
+
 On success, the server MUST respond **HTTP 204**.
 
 ## API-051 Admin

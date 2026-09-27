@@ -4,7 +4,10 @@ import { z } from 'zod';
 import { rateLimitByIp } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import { findDeviceById, findSessionByRefreshTokenHash, findUserById } from '../lib/db';
-import { renderBugReportTemplate } from '../lib/email/templates';
+import {
+  renderBugReportConfirmationTemplate,
+  renderBugReportTemplate,
+} from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
 import { jsonField } from '../lib/form-validation';
 import { assertTokenPurpose, hashOpaqueToken } from '../lib/tokens';
@@ -136,6 +139,29 @@ bugReport.post(
       attachments,
       metadata: { platform: body.platform, app_version: body.app_version, platformDetails },
     });
+
+    if (contactEmail) {
+      // API-042: the report itself is already delivered, so a failed
+      // confirmation is logged rather than surfaced to the reporter.
+      try {
+        const confirmation = renderBugReportConfirmationTemplate({
+          appName: c.env.APP_NAME,
+          appUrl: c.env.APP_URL,
+        });
+        await sendEmail({
+          env: c.env,
+          db: c.env.DB,
+          kind: 'bug_report_confirmation',
+          recipient: contactEmail,
+          subject: confirmation.subject,
+          text: confirmation.text,
+          html: confirmation.html,
+          replyTo: c.env.BUG_REPORT_EMAIL,
+        });
+      } catch (error) {
+        console.error('bug report confirmation email failed', error);
+      }
+    }
 
     return c.body(null, 204);
   },

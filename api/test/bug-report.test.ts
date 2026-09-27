@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
@@ -7,6 +7,7 @@ import {
   createDeviceForUser,
   listEmailDeliveries,
   signupAndGetCookie,
+  uuidToBytes,
 } from './helpers';
 
 beforeEach(clearDB);
@@ -139,6 +140,71 @@ describe('POST /bug-report', () => {
     const report = deliveries.find((d) => d.kind === 'bug_report');
     expect(report!.attachmentFileNames).toEqual(['recent-logs.txt']);
     expect(report!.text).toContain('Attached: recent-logs.txt');
+  });
+
+  it('sends an anonymous reporter a confirmation that echoes none of their text', async () => {
+    const { form } = bugReportForm({
+      message: 'Visit https://spam.example for a prize.',
+      contact_email: 'reporter@example.com',
+    });
+    const res = await SELF.fetch(`${BASE}/bug-report`, { method: 'POST', body: form });
+
+    expect(res.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const confirmation = deliveries.find((d) => d.kind === 'bug_report_confirmation');
+    expect(confirmation).toBeTruthy();
+    expect(confirmation!.recipient_email).toBe('reporter@example.com');
+    expect(confirmation!.subject).toBe('We received your bug report');
+    expect(confirmation!.text).not.toContain('spam.example');
+    expect(confirmation!.html).not.toContain('spam.example');
+  });
+
+  it('sends the confirmation to the signed-in account email', async () => {
+    const { cookie } = await signupAndGetCookie('confirm-me@example.com');
+    const { form } = bugReportForm({ message: 'Something is broken.' });
+
+    const res = await SELF.fetch(`${BASE}/bug-report`, {
+      method: 'POST',
+      headers: { Cookie: authHeaders(cookie).Cookie },
+      body: form,
+    });
+
+    expect(res.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    const confirmation = deliveries.find((d) => d.kind === 'bug_report_confirmation');
+    expect(confirmation?.recipient_email).toBe('confirm-me@example.com');
+  });
+
+  it('skips the confirmation when the account email is unverified', async () => {
+    const { cookie, userId } = await signupAndGetCookie('unverified-reporter@example.com');
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
+    const { form } = bugReportForm({ message: 'Something is broken.' });
+
+    const res = await SELF.fetch(`${BASE}/bug-report`, {
+      method: 'POST',
+      headers: { Cookie: authHeaders(cookie).Cookie },
+      body: form,
+    });
+
+    expect(res.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    expect(deliveries.some((d) => d.kind === 'bug_report')).toBe(true);
+    expect(deliveries.some((d) => d.kind === 'bug_report_confirmation')).toBe(false);
+  });
+
+  it('sends no confirmation when there is no address to send it to', async () => {
+    const { form } = bugReportForm({ message: 'No contact info here.' });
+    const res = await SELF.fetch(`${BASE}/bug-report`, { method: 'POST', body: form });
+
+    expect(res.status).toBe(204);
+
+    const deliveries = await listEmailDeliveries();
+    expect(deliveries.some((d) => d.kind === 'bug_report_confirmation')).toBe(false);
   });
 
   it('rejects a log_file above the size limit', async () => {

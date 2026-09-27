@@ -778,3 +778,25 @@ export function renderBugReportTemplate(input: {
     html: `<pre>${escapeHtml(text)}</pre>`,
   };
 }
+
+// Sent to the reporter. The address may be an unverified contact_email typed
+// into an anonymous form, so this deliberately echoes none of the report's
+// text (API-042); otherwise the endpoint would relay arbitrary content.
+export function renderBugReportConfirmationTemplate(input: { appName: string; appUrl: string }) {
+  const appName = normalizeAppName(input.appName);
+  const received = 'We received your bug report.';
+  const addMore = 'Reply to this email to add details or screenshots.';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'We received your bug report',
+    textLines: ['Hi,', '', received, '', addMore],
+    htmlSections: [paragraph('Hi,'), paragraph(received), paragraph(addMore)],
+  });
+
+  return {
+    subject: 'We received your bug report',
+    text: footer.text,
+    html: footer.html,
+  };
+}
