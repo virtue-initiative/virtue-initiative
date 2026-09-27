@@ -79,6 +79,24 @@ describe('APIClient — devices cache', () => {
     await vi.waitFor(() => expect(client.listDevices()).toHaveLength(TEST_DEVICES.length));
     expect(callCount).toBe(1);
   });
+
+  it('refreshDevices refetches while keeping the cached list until the new one arrives', async () => {
+    const client = makeClient();
+    const cb = vi.fn();
+    client.subscribeDevices(cb);
+    await vi.waitFor(() => expect(cb).toHaveBeenCalledWith(TEST_DEVICES));
+
+    const updated = TEST_DEVICES.map((d) => ({ ...d, name: `${d.name} (renamed)` }));
+    server.use(http.get(`${BASE}/device`, () => HttpResponse.json(updated)));
+
+    const refresh = client.refreshDevices();
+    expect(client.listDevices()).toEqual(TEST_DEVICES);
+    expect(client.subscribeDevices(() => {}).loaded).toBe(true);
+
+    await refresh;
+    expect(cb).toHaveBeenLastCalledWith(updated);
+    expect(client.listDevices()).toEqual(updated);
+  });
 });
 
 describe('APIClient — partners cache', () => {
@@ -107,6 +125,28 @@ describe('APIClient — partners cache', () => {
     client.listWatchings();
     await vi.waitFor(() => expect(client.listWatchers()).toHaveLength(1));
     expect(callCount).toBe(1);
+  });
+
+  it('refreshPartners refetches while keeping the cached lists until the new ones arrive', async () => {
+    const client = makeClient();
+    const watchingCb = vi.fn();
+    client.subscribeWatchings(watchingCb);
+    await vi.waitFor(() => expect(watchingCb).toHaveBeenCalledWith([TEST_WATCHING]));
+
+    const renamed = { ...TEST_WATCHING, user: { ...TEST_WATCHING.user, name: 'Robert' } };
+    server.use(
+      http.get(`${BASE}/partner`, () =>
+        HttpResponse.json({ watchers: [TEST_WATCHER], watching: [renamed] }),
+      ),
+    );
+
+    const refresh = client.refreshPartners();
+    expect(client.listWatchings()).toEqual([TEST_WATCHING]);
+    expect(client.subscribeWatchings(() => {}).loaded).toBe(true);
+
+    await refresh;
+    expect(watchingCb).toHaveBeenLastCalledWith([renamed]);
+    expect(client.listWatchings()).toEqual([renamed]);
   });
 });
 

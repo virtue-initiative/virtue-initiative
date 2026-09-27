@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import {
   Device,
@@ -56,6 +56,15 @@ export function Partners() {
   const api = useAPIContext();
   const { devices } = useDevices();
   const { watchings: watching, watchers } = usePartners();
+
+  // Partner and device caches otherwise live for the whole session, so invite
+  // status and partners' device status would go stale. Refetch on open; the
+  // cached cards stay up meanwhile.
+  useEffect(() => {
+    void api?.refreshPartners();
+    void api?.refreshDevices();
+  }, [api]);
+
   const invitePartner = (email: string) =>
     api ? api.invitePartner(email) : Promise.reject(new Error('Not signed in'));
   const removeWatching = (id: string) =>

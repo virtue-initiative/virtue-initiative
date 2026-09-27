@@ -2,6 +2,7 @@ import { screen, waitFor } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
+import { useState } from 'preact/hooks';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_DEVICES, TEST_WATCHER, TEST_WATCHING } from '../../mocks/fixtures';
@@ -48,6 +49,59 @@ describe('Partners — sections', () => {
       expect(screen.getByText('No one can monitor you yet.')).toBeInTheDocument();
       expect(screen.getByText('You cannot monitor anyone yet.')).toBeInTheDocument();
     });
+  });
+});
+
+describe('Partners — refresh on open', () => {
+  it('shows the cached partners on reopen and then refetches partners and devices', async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen((o) => !o)}>
+            toggle
+          </button>
+          {open && <Partners />}
+        </>
+      );
+    }
+
+    renderWithClient(<Harness />);
+    await screen.findByText(TEST_WATCHING.user.name!);
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+
+    let resolvePartners: (() => void) | undefined;
+    let deviceFetches = 0;
+    server.use(
+      http.get(
+        `${BASE}/partner`,
+        () =>
+          new Promise((resolve) => {
+            resolvePartners = () =>
+              resolve(
+                HttpResponse.json({
+                  watchers: [TEST_WATCHER],
+                  watching: [{ ...TEST_WATCHING, user: { ...TEST_WATCHING.user, name: 'Robert' } }],
+                }),
+              );
+          }),
+      ),
+      http.get(`${BASE}/device`, () => {
+        deviceFetches++;
+        return HttpResponse.json(TEST_DEVICES);
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+    // Cached copy renders immediately while the refetch is in flight.
+    expect(screen.getByText(TEST_WATCHING.user.name!)).toBeInTheDocument();
+
+    await waitFor(() => expect(resolvePartners).toBeDefined());
+    resolvePartners?.();
+    expect(await screen.findByText('Robert')).toBeInTheDocument();
+    expect(screen.queryByText(TEST_WATCHING.user.name!)).not.toBeInTheDocument();
+    await waitFor(() => expect(deviceFetches).toBe(1));
   });
 });
 
