@@ -1,9 +1,10 @@
 import type { APIRoute } from 'astro';
 
-// Production allows everything and points crawlers at the sitemap. Other modes
-// (staging) still allow crawling so bots can read the per-page noindex tag from
-// NoindexMeta.astro; a Disallow here would hide that tag and leave URLs that
-// were linked from elsewhere indexable without content.
+// Production allows everything and points crawlers at the sitemap. Staging
+// must never be indexed. It still allows crawling here, because a Disallow
+// would hide the noindex tag and header (NoindexMeta.astro and
+// scripts/staging-noindex.mjs), and a disallowed URL linked from elsewhere can
+// still be indexed without its content.
 export const GET: APIRoute = ({ site }) => {
   const lines = ['User-agent: *', 'Allow: /'];
   if (import.meta.env.MODE === 'production') {
