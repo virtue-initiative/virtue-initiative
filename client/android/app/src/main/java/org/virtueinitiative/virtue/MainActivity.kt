@@ -73,6 +73,13 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Partners are managed in the web app, not from this client.
+        binding.openPartnersButton.setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/partners"))
+            )
+        }
+
         binding.reportBugLink.setOnClickListener { showReportBugDialog() }
         binding.installUpdateButton.setOnClickListener { installUpdate() }
 

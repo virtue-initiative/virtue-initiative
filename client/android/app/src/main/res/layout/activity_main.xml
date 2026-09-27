@@ -358,11 +358,29 @@
                     android:textSize="14sp"
                     android:textColor="?attr/colorOnSurfaceVariant" />
 
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/account_add_partners"
+                    android:textSize="14sp"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:layout_marginTop="16dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/openPartnersButton"
+                        style="@style/Widget.App.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/btn_open_partners"
+                        android:textColor="@color/virtue_forest"
+                        app:strokeColor="@color/virtue_forest" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/signOutButton"

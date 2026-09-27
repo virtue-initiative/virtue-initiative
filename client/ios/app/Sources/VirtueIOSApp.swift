@@ -22,6 +22,10 @@ struct ContentView: View {
     @State private var showStatusSheet = false
     @State private var showReportBugSheet = false
     @State private var showReportBugConfirmation = false
+    @Environment(\.openURL) private var openURL
+
+    /// Partners are managed in the web app, not from this client.
+    private let partnersURL = URL(string: "https://app.virtueinitiative.org/partners")!
 
     var body: some View {
         NavigationStack {
@@ -140,6 +144,14 @@ struct ContentView: View {
                         .foregroundStyle(VirtueBrand.text)
                     Text("Device: \(coordinator.deviceName)")
                         .foregroundStyle(VirtueBrand.textMuted)
+
+                    Text("Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".")
+                        .foregroundStyle(VirtueBrand.textMuted)
+                        .padding(.top, 6)
+                    Button("Open Partners Page") {
+                        openURL(partnersURL)
+                    }
+                    .buttonStyle(VirtueButtonStyle())
 
                     HStack(spacing: 10) {
                         Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {

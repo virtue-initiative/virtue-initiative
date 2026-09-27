@@ -25,6 +25,7 @@
     <!-- Account -->
     <string name="account_signed_in">Signed in</string>
     <string name="account_device_id">Device ID: %s</string>
+    <string name="account_add_partners">Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".</string>
     <string name="email_hint">Email</string>
     <string name="password_hint">Password</string>
     <string name="device_name_hint">Device name</string>
@@ -33,6 +34,7 @@
     <string name="btn_sign_in">Sign In</string>
     <string name="btn_sign_up">Don\'t have an account? Sign up</string>
     <string name="btn_sign_out">Sign Out</string>
+    <string name="btn_open_partners">Open Partners Page</string>
     <string name="btn_status_details">Status Details</string>
     <string name="btn_force_capture">Test Screenshot</string>
     <string name="btn_pause_monitoring">Pause Monitoring</string>
