@@ -52,3 +52,22 @@
     flex-direction: column;
   }
 }
+
+/* /newsletter/check-email and /newsletter/confirmed, where Buttondown redirects to. */
+.newsletter-status {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 42rem;
+}
+
+.newsletter-status-note {
+  color: var(--text-muted);
+}
+
+.newsletter-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
