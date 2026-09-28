@@ -8,6 +8,10 @@ Use Screen Time to stop new apps from being installed, such as non-Safari web br
 You will need your accountability partner with you to set the passcode, so you cannot
 turn the block off yourself.
 
+Finish [setting up Virtue](/download#ios), including the Safari extension,
+before you add Screen Time restrictions. Restrictions can stop the extension
+from being turned on.
+
 ## Set up the block
 
 1. Open **Settings** and tap **Screen Time**.

@@ -241,6 +241,20 @@ private final class SafariSharedStateStore {
         lock.unlock()
     }
 
+    /// Stores whichever permission facts this message carried; a nil value
+    /// means Safari didn't let the extension check, so the last known value
+    /// is kept rather than cleared.
+    func markPermissions(allSites: Bool?, privateAllowed: Bool?) {
+        lock.lock()
+        if let allSites {
+            defaults?.set(allSites, forKey: VirtueShared.safariAllSitesGrantedKey)
+        }
+        if let privateAllowed {
+            defaults?.set(privateAllowed, forKey: VirtueShared.safariPrivateAllowedKey)
+        }
+        lock.unlock()
+    }
+
     func readDaemonRunning() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -444,17 +458,20 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     private func handleRequest(_ context: NSExtensionContext) -> [String: Any] {
         SafariSharedStateStore.shared.markMessage()
 
+        let payload = (context.inputItems.first as? NSExtensionItem)?
+            .userInfo?[extensionMessageKey] as? [String: Any]
+        SafariSharedStateStore.shared.markPermissions(
+            allSites: payload?["all_sites"] as? Bool,
+            privateAllowed: payload?["private_allowed"] as? Bool
+        )
+
         if !SafariSharedStateStore.shared.isMonitoringEnabled() {
             SafariFrameStore.shared.updateState(code: captureStateUnknown, clearFrame: true)
             SafariSharedStateStore.shared.markCaptureState(VirtueShared.captureStateUnknown)
             return ["ok": true, "paused": true]
         }
 
-        guard
-            let item = context.inputItems.first as? NSExtensionItem,
-            let userInfo = item.userInfo,
-            let payload = userInfo[extensionMessageKey] as? [String: Any]
-        else {
+        guard let payload else {
             return ["ok": false, "error": "missing_payload"]
         }
 

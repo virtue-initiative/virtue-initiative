@@ -86,6 +86,48 @@ struct CoreServiceStatus: Decodable {
     }
 }
 
+/// What the app knows about Safari extension setup. The extension only runs
+/// while Safari does, so the app never sees it live: these are the last facts
+/// it reported through the app group, and they stay true until it reports
+/// otherwise.
+struct SafariSetupState: Equatable {
+    /// Last message of any kind from the extension. Its existence proves the
+    /// extension was turned on at some point.
+    var lastMessageAt: Date?
+    /// Last web page frame the extension captured.
+    var lastFrameAt: Date?
+    /// `nil` when Safari didn't let the extension check.
+    var allSitesGranted: Bool?
+    var privateAllowed: Bool?
+
+    var extensionTurnedOn: Bool { lastMessageAt != nil }
+    /// Falls back to "a page was captured" when Safari can't report the
+    /// All Websites setting directly.
+    var allWebsitesAllowed: Bool { allSitesGranted ?? (lastFrameAt != nil) }
+    var hasCaptured: Bool { lastFrameAt != nil }
+}
+
+/// The one status the main screen shows.
+enum MonitoringState: Equatable {
+    case signedOut
+    case paused
+    /// Signed in, but the extension has never captured a page.
+    case needsSetup
+    /// Worked before, but Safari now reports a missing permission.
+    case needsPermission
+    case active
+
+    var summary: String {
+        switch self {
+        case .signedOut: return "signed out"
+        case .paused: return "paused"
+        case .needsSetup: return "setup not finished"
+        case .needsPermission: return "needs Safari permission"
+        case .active: return "active"
+        }
+    }
+}
+
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
@@ -99,7 +141,8 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var deviceId: String = "<none>"
     @Published private(set) var accountEmail: String?
     @Published private(set) var monitoringEnabled: Bool = VirtueShared.defaultMonitoringEnabled
-    @Published private(set) var monitorSummary: String = "idle"
+    @Published private(set) var monitoringState: MonitoringState = .signedOut
+    @Published private(set) var safariSetup = SafariSetupState()
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var currentApiBaseUrl: String = VirtueShared.defaultBaseApiUrl
     @Published private(set) var lastCoreLoop: String = "<none>"
@@ -383,6 +426,15 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
+        safariSetup = SafariSetupState(
+            lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
+                .map(Date.init(timeIntervalSince1970:)),
+            lastFrameAt: timestamp(forKey: VirtueShared.safariLastFrameAtKey, defaults: defaults)
+                .map(Date.init(timeIntervalSince1970:)),
+            allSitesGranted: defaults.object(forKey: VirtueShared.safariAllSitesGrantedKey) as? Bool,
+            privateAllowed: defaults.object(forKey: VirtueShared.safariPrivateAllowedKey) as? Bool
+        )
+        updateMonitoringState()
 
         if !monitoringEnabled {
             safariCaptureHealth = "Paused in Virtue"
@@ -474,15 +526,40 @@ final class MonitoringCoordinator: ObservableObject {
             currentApiBaseUrl = apiBaseUrl
         }
 
+        updateMonitoringState()
+    }
+
+    /// Deliberately ignores `is_running` and heartbeat freshness: the app's
+    /// own daemon is almost never running, and Safari is never in the
+    /// foreground while this screen is, so both read as "stopped" every time
+    /// someone looks. Setup facts persist, so they give the same answer
+    /// whenever the app is opened.
+    private func updateMonitoringState() {
+        let setup = safariSetup
         if !loggedIn {
-            monitorSummary = "signed out"
+            monitoringState = .signedOut
         } else if !monitoringEnabled {
-            monitorSummary = "paused"
-        } else if serviceStatus?.isRunning == true {
-            monitorSummary = safariCaptureHealth == "Active in Safari" ? "active" : "waiting for Safari"
+            monitoringState = .paused
+        } else if !setup.extensionTurnedOn || !setup.hasCaptured {
+            monitoringState = .needsSetup
+        } else if setup.allSitesGranted == false || setup.privateAllowed == false {
+            monitoringState = .needsPermission
         } else {
-            monitorSummary = "idle"
+            monitoringState = .active
         }
+    }
+
+    /// Opens a page in Safari specifically (not the default browser), since
+    /// only Safari runs the extension. `x-safari-https` needs iOS 17.
+    func safariURL(for url: URL) -> URL {
+        guard #available(iOS 17.0, *),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == "https"
+        else {
+            return url
+        }
+        components.scheme = "x-safari-https"
+        return components.url ?? url
     }
 
     private func setMonitoringEnabled(_ enabled: Bool) {

@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "ios_setup_apps_safari.jpg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

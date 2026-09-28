@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "ios_setup_allow_extension.jpg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

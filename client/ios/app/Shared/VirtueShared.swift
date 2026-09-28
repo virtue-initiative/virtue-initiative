@@ -45,6 +45,10 @@ enum VirtueShared {
     static let safariLastErrorKey = "VIRTUE_SAFARI_LAST_ERROR"
     static let safariDaemonRunningKey = "VIRTUE_SAFARI_DAEMON_RUNNING"
     static let safariDaemonLastErrorKey = "VIRTUE_SAFARI_DAEMON_LAST_ERROR"
+    /// Bools reported by the extension on every message, when Safari lets it
+    /// check (see `readPermissionState` in background.js). Absent = unknown.
+    static let safariAllSitesGrantedKey = "VIRTUE_SAFARI_ALL_SITES_GRANTED"
+    static let safariPrivateAllowedKey = "VIRTUE_SAFARI_PRIVATE_ALLOWED"
 
     static let safariHeartbeatStaleThresholdSeconds: TimeInterval = 10
     static let safariFrameFreshnessThresholdSeconds: TimeInterval = 20

@@ -76,7 +76,8 @@ function DeviceSetupSteps() {
     <ol class="device-setup-steps">
       <li>
         <span class="device-setup-step-label">Download the app.</span>
-        Choose the installer for the device you want to monitor.
+        Choose the installer for the device you want to monitor. Virtue is not in the App Store, so
+        iPhone and iPad users install it through TestFlight from the download page.
       </li>
       <li>
         <span class="device-setup-step-label">Follow the installation instructions.</span>
@@ -84,7 +85,8 @@ function DeviceSetupSteps() {
       </li>
       <li>
         <span class="device-setup-step-label">Log in on that device.</span>
-        Once the app signs in and uploads, it will show up here.
+        Once the app signs in and uploads, it will show up here. On iPhone and iPad, also turn on
+        the Safari extension. The app shows each step.
       </li>
     </ol>
   );

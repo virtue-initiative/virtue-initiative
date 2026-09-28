@@ -45,8 +45,35 @@ function logDiagnostics(label, response) {
   );
 }
 
-async function sendNative(payload) {
+// Best-effort permission facts for the app's setup checklist: whether the
+// user chose "Allow" for All Websites, and whether the extension may run in
+// Private Browsing. Either is left out when Safari doesn't expose it, so the
+// app can tell "not granted" apart from "couldn't check".
+async function readPermissionState() {
   const b = maybeBrowser();
+  const state = {};
+  try {
+    if (b && b.permissions && typeof b.permissions.contains === "function") {
+      // Safari answers false for "<all_urls>" even when All Websites is set
+      // to Allow; the equivalent match pattern reports the setting correctly.
+      state.all_sites = await b.permissions.contains({ origins: ["*://*/*"] });
+    }
+  } catch (_) {
+    // leave all_sites unset
+  }
+  try {
+    if (b && b.extension && typeof b.extension.isAllowedIncognitoAccess === "function") {
+      state.private_allowed = await b.extension.isAllowedIncognitoAccess();
+    }
+  } catch (_) {
+    // leave private_allowed unset
+  }
+  return state;
+}
+
+async function sendNative(message) {
+  const b = maybeBrowser();
+  const payload = { ...message, ...(await readPermissionState()) };
   const seq = ++messageSeq;
   const startedAt = Date.now();
   const label = `sendNative#${seq} type=${payload && payload.type} source=${
