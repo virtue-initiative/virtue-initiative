@@ -6,7 +6,7 @@ Virtue is not in the App Store. Install it through Apple's TestFlight app using 
 2. On your iPhone or iPad, install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store.
 3. Open the [Virtue TestFlight invitation]({IOS_DOWNLOAD}) on the same device. Tap **Accept**, then **Install**.
 4. Open Virtue and sign in.
-5. Turn on the Virtue Safari extension using the steps below. Virtue does not monitor anything until you do, even though the app says you are signed in. The app shows the same steps, and each one turns green once Virtue sees it is done.
+5. Turn on the Virtue Safari extension using the steps below. Virtue does not monitor anything until you do.
 
 ### Turn on the Safari extension
 
