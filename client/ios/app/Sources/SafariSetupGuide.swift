@@ -178,9 +178,9 @@ struct SafariSetupGuide: View {
     /// land on Virtue's page.
     private var openSettingsText: String {
         if #available(iOS 18.0, *) {
-            return "Tap Open Settings. It opens Virtue's own settings page, so tap Apps at the top left to go back. Then tap Safari in the list of apps."
+            return "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then tap Safari in the list of apps."
         }
-        return "Tap Open Settings. It opens Virtue's own settings page, so tap Settings at the top left to go back. Then scroll down and tap Safari."
+        return "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then scroll down and tap Safari."
     }
 
     private var extensionPath: String {
