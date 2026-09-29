@@ -344,7 +344,7 @@ private struct StatusSheet: View {
                     }
                 }
 
-                Section("Advanced") {
+                Section {
                     DetailRow(label: "Device ID", value: coordinator.deviceId)
                     DetailRow(label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
                     DetailRow(label: "Hash base URL", value: status?.hashBaseUrl ?? "<default>")
@@ -359,6 +359,18 @@ private struct StatusSheet: View {
                             ?? "\(VirtueShared.defaultBatchWindowSeconds)s"
                     )
                     DetailRow(label: "Build", value: VirtueShared.buildLabel)
+                    Button(
+                        coordinator.forceCaptureRequested
+                            ? "Waiting for Safari…"
+                            : "Capture Next Safari Page"
+                    ) {
+                        coordinator.requestForceCapture()
+                    }
+                    .disabled(coordinator.forceCaptureRequested || !coordinator.loggedIn)
+                } header: {
+                    Text("Advanced")
+                } footer: {
+                    Text("Capture Next Safari Page takes a screenshot the next time you view a page in Safari. It uploads that screenshot right away, along with anything else waiting to upload.")
                 }
 
                 Section("Safari Extension") {

@@ -152,6 +152,14 @@ MUST stop the loop after its current tick. The loop MAY be started again afterwa
 
 MUST apply and persist any currently-queued requests, then MUST run exactly one tick, then MUST return — without waiting for a scheduled wakeup and without looping. For a platform with no way to keep a background thread alive between invocations (iOS's Safari-extension native message handler, which the OS only guarantees runs for the duration of one request/response round trip — see `architecture.md`), this MUST be the method called once per invocation instead of `run_forever`. MUST NOT be called concurrently with `run_forever` or with itself on the same `Daemon`.
 
+### CORE-021 force_capture_now
+
+`force_capture_now()`
+
+MUST take a screenshot on the next tick even if one is not yet due, still honoring the locked/screensaver gate, and MUST then force the batch holding it to upload as `flush_batch_now` does.
+
+A platform that drives the daemon with `tick_once` has no loop to service this request while the caller waits for it. It MUST instead be able to ask for a single `tick_once` that applies a `force_capture_now` before the tick, as if that request had been queued.
+
 ## CORE-016 State persistence
 
 State MUST be persisted to a single JSON file (`state_path`) via a tmp-file-plus-rename so a reader never observes a partially-written file.
