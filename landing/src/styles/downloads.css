@@ -280,6 +280,7 @@
 /* These screenshots are cropped phone screens, so keep them narrower than
    the full-width desktop screenshots the other platforms use. */
 .instructions-tab-panel.help-doc .android-guide img,
-.instructions-tab-panel.help-doc img[src^='/images/android-setup/'] {
+.instructions-tab-panel.help-doc img[src^='/images/android-setup/'],
+.instructions-tab-panel.help-doc img[src^='/images/ios-setup/'] {
   width: min(360px, 100%);
 }

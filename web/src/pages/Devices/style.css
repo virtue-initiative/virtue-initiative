@@ -37,6 +37,18 @@
   padding-left: 0.25rem;
 }
 
+.device-setup-note {
+  margin: 0 0 var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.devices-empty .device-setup-note {
+  margin: 0 auto var(--space-5);
+  max-width: 380px;
+  text-align: left;
+}
+
 .device-setup-step-label {
   display: block;
   font-weight: 600;

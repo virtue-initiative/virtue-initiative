@@ -86,6 +86,79 @@ struct CoreServiceStatus: Decodable {
     }
 }
 
+/// What the app knows about Safari extension setup. The extension only runs
+/// while Safari does, so the app never sees it live: these are the last facts
+/// it reported through the app group, and they stay true until it reports
+/// otherwise.
+struct SafariSetupState: Equatable {
+    /// Last message of any kind from the extension. Its existence proves the
+    /// extension was turned on at some point.
+    var lastMessageAt: Date?
+    /// Last web page frame the extension captured.
+    var lastFrameAt: Date?
+    /// `nil` when Safari didn't let the extension check.
+    var allSitesGranted: Bool?
+    var privateAllowed: Bool?
+    /// When the check page reported the extension off. Silence can't say
+    /// that, since an extension that's off writes nothing.
+    var reportedOffAt: Date?
+
+    /// The newest fact wins: an "off" report outranks older messages, and
+    /// any later message outranks the report.
+    var extensionTurnedOn: Bool {
+        guard let lastMessageAt else { return false }
+        if let reportedOffAt, lastMessageAt < reportedOffAt { return false }
+        return true
+    }
+    var reportedOff: Bool { reportedOffAt != nil && !extensionTurnedOn }
+    /// Falls back to "a page was captured" when Safari can't report the
+    /// All Websites setting directly.
+    var allWebsitesAllowed: Bool { allSitesGranted ?? (lastFrameAt != nil) }
+    var hasCaptured: Bool { lastFrameAt != nil }
+}
+
+/// "just now" under two minutes, then "5 minutes ago", "3 hours ago" and so
+/// on. Second-by-second ages keep changing on screen, which is distracting.
+func relativeTime(_ date: Date, now: Date = Date()) -> String {
+    if now.timeIntervalSince(date) < 120 {
+        return "just now"
+    }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .full
+    return formatter.localizedString(for: date, relativeTo: now)
+}
+
+/// The Check extension button's progress. See `startExtensionCheck`.
+enum ExtensionCheck: Equatable {
+    /// Safari was opened at `startedAt`; `returned` once Virtue is back in the
+    /// foreground without an answer.
+    case waiting(startedAt: Date, returned: Bool)
+    case passed
+    /// The check page reported the extension off.
+    case failed
+}
+
+/// The one status the main screen shows.
+enum MonitoringState: Equatable {
+    case signedOut
+    case paused
+    /// Signed in, but the extension has never captured a page.
+    case needsSetup
+    /// Worked before, but Safari now reports a missing permission.
+    case needsPermission
+    case active
+
+    var summary: String {
+        switch self {
+        case .signedOut: return "signed out"
+        case .paused: return "paused"
+        case .needsSetup: return "setup not finished"
+        case .needsPermission: return "needs Safari permission"
+        case .active: return "active"
+        }
+    }
+}
+
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
@@ -99,7 +172,9 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var deviceId: String = "<none>"
     @Published private(set) var accountEmail: String?
     @Published private(set) var monitoringEnabled: Bool = VirtueShared.defaultMonitoringEnabled
-    @Published private(set) var monitorSummary: String = "idle"
+    @Published private(set) var monitoringState: MonitoringState = .signedOut
+    @Published private(set) var safariSetup = SafariSetupState()
+    @Published private(set) var extensionCheck: ExtensionCheck?
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var currentApiBaseUrl: String = VirtueShared.defaultBaseApiUrl
     @Published private(set) var lastCoreLoop: String = "<none>"
@@ -349,6 +424,9 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func handleAppForegroundEvent() {
+        if case .waiting(let startedAt, false) = extensionCheck {
+            extensionCheck = .waiting(startedAt: startedAt, returned: true)
+        }
         refreshSessionState()
         refreshCoreStatus()
         refreshSafariStatus()
@@ -383,6 +461,18 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
+        safariSetup = SafariSetupState(
+            lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
+                .map(Date.init(timeIntervalSince1970:)),
+            lastFrameAt: timestamp(forKey: VirtueShared.safariLastFrameAtKey, defaults: defaults)
+                .map(Date.init(timeIntervalSince1970:)),
+            allSitesGranted: defaults.object(forKey: VirtueShared.safariAllSitesGrantedKey) as? Bool,
+            privateAllowed: defaults.object(forKey: VirtueShared.safariPrivateAllowedKey) as? Bool,
+            reportedOffAt: timestamp(forKey: VirtueShared.safariReportedOffAtKey, defaults: defaults)
+                .map(Date.init(timeIntervalSince1970:))
+        )
+        resolveExtensionCheck()
+        updateMonitoringState()
 
         if !monitoringEnabled {
             safariCaptureHealth = "Paused in Virtue"
@@ -404,7 +494,7 @@ final class MonitoringCoordinator: ObservableObject {
 
         if let lastHeartbeatAt {
             let heartbeatAge = max(0, now - lastHeartbeatAt)
-            safariLastHeartbeat = "\(Int(heartbeatAge.rounded()))s ago (\(formatAbsoluteTime(lastHeartbeatAt)))"
+            safariLastHeartbeat = "\(relativeTime(Date(timeIntervalSince1970: lastHeartbeatAt))) (\(formatAbsoluteTime(lastHeartbeatAt)))"
             if heartbeatAge <= VirtueShared.safariHeartbeatStaleThresholdSeconds {
                 safariCaptureHealth = "Active in Safari"
             } else {
@@ -416,8 +506,7 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         if let lastFrameAt {
-            let frameAge = max(0, now - lastFrameAt)
-            safariLastFrame = "\(Int(frameAge.rounded()))s ago (\(formatAbsoluteTime(lastFrameAt)))"
+            safariLastFrame = "\(relativeTime(Date(timeIntervalSince1970: lastFrameAt))) (\(formatAbsoluteTime(lastFrameAt)))"
         } else {
             safariLastFrame = "<none>"
         }
@@ -474,15 +563,100 @@ final class MonitoringCoordinator: ObservableObject {
             currentApiBaseUrl = apiBaseUrl
         }
 
+        updateMonitoringState()
+    }
+
+    /// Deliberately ignores `is_running` and heartbeat freshness: the app's
+    /// own daemon is almost never running, and Safari is never in the
+    /// foreground while this screen is, so both read as "stopped" every time
+    /// someone looks. Setup facts persist, so they give the same answer
+    /// whenever the app is opened.
+    private func updateMonitoringState() {
+        let setup = safariSetup
         if !loggedIn {
-            monitorSummary = "signed out"
+            monitoringState = .signedOut
         } else if !monitoringEnabled {
-            monitorSummary = "paused"
-        } else if serviceStatus?.isRunning == true {
-            monitorSummary = safariCaptureHealth == "Active in Safari" ? "active" : "waiting for Safari"
+            monitoringState = .paused
+        } else if !setup.extensionTurnedOn || !setup.hasCaptured {
+            monitoringState = .needsSetup
+        } else if setup.allSitesGranted == false || setup.privateAllowed == false {
+            monitoringState = .needsPermission
         } else {
-            monitorSummary = "idle"
+            monitoringState = .active
         }
+    }
+
+    /// Opens the check page in Safari. iOS offers no way to ask whether the
+    /// extension is on, so the page finds out and reports back through its
+    /// Back to Virtue link (`handleOpenURL`). A message from the extension
+    /// after `startedAt` also counts as on.
+    func startExtensionCheck() -> URL {
+        extensionCheck = .waiting(startedAt: Date(), returned: false)
+        return safariURL(for: VirtueSetupLinks.checkPage)
+    }
+
+    private func resolveExtensionCheck() {
+        if extensionCheck == .failed, !safariSetup.reportedOff {
+            // The extension has spoken since; the old report no longer applies.
+            extensionCheck = nil
+        }
+        guard case .waiting(let startedAt, _) = extensionCheck else { return }
+        if let lastMessageAt = safariSetup.lastMessageAt, lastMessageAt >= startedAt {
+            extensionCheck = .passed
+        }
+    }
+
+    /// `virtueinitiative://check-extension?extension=on&all_sites=1&private=0`
+    /// from the check page's Back to Virtue button. Settings the page couldn't
+    /// read are left out and keep their last known values. Anyone can open
+    /// this link, but a false report only changes what this screen shows;
+    /// partners see what reaches the server.
+    func handleOpenURL(_ url: URL) {
+        guard url.scheme == "virtueinitiative", url.host == "check-extension",
+              let defaults = sharedDefaults
+        else { return }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func flag(_ name: String) -> Bool? {
+            switch query.first(where: { $0.name == name })?.value {
+            case "1": return true
+            case "0": return false
+            default: return nil
+            }
+        }
+        let now = Date().timeIntervalSince1970
+        switch query.first(where: { $0.name == "extension" })?.value {
+        case "on":
+            defaults.set(now, forKey: VirtueShared.safariLastMessageAtKey)
+            defaults.removeObject(forKey: VirtueShared.safariReportedOffAtKey)
+            if let allSites = flag("all_sites") {
+                defaults.set(allSites, forKey: VirtueShared.safariAllSitesGrantedKey)
+            }
+            if let privateAllowed = flag("private") {
+                defaults.set(privateAllowed, forKey: VirtueShared.safariPrivateAllowedKey)
+            }
+            extensionCheck = .passed
+        case "off":
+            defaults.set(now, forKey: VirtueShared.safariReportedOffAtKey)
+            extensionCheck = .failed
+        default:
+            // Tapped before the page finished; nothing to record.
+            break
+        }
+        refreshSafariStatus()
+    }
+
+    /// Opens a page in Safari specifically (not the default browser), since
+    /// only Safari runs the extension. `x-safari-https` needs iOS 17.
+    func safariURL(for url: URL) -> URL {
+        guard #available(iOS 17.0, *),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == "https"
+        else {
+            // There is no x-safari-http; plain http goes to the default browser.
+            return url
+        }
+        components.scheme = "x-safari-https"
+        return components.url ?? url
     }
 
     private func setMonitoringEnabled(_ enabled: Bool) {
@@ -531,9 +705,7 @@ final class MonitoringCoordinator: ObservableObject {
             return "<none>"
         }
         let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .short
-        return "\(formatAbsoluteTime(date.timeIntervalSince1970)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+        return "\(formatAbsoluteTime(date.timeIntervalSince1970)) (\(relativeTime(date)))"
     }
 
     private func formatMillisTimestamp(_ timestampMs: Int64?) -> String {
