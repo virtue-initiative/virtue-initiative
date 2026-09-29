@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TEST_ANALYTICS_SNAPSHOT } from '../../mocks/fixtures';
-import { formatTrendValue, niceCeil, seriesFor, trendVariables } from './trends';
+import { formatTrendValue, niceCeil, seriesFor, trendVariables } from './trends-model';
 
 describe('trendVariables', () => {
   it('adds one variable per platform seen in the snapshots', () => {

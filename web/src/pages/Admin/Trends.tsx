@@ -9,7 +9,7 @@ import {
   trendVariables,
   type TrendPoint,
   type TrendVariable,
-} from './trends';
+} from './trends-model';
 
 const HIDDEN_KEY = 'admin-trends-hidden';
 
