@@ -42,6 +42,8 @@ enum VirtueShared {
     static let safariLastFrameAtKey = "VIRTUE_SAFARI_LAST_FRAME_AT"
     static let safariLastURLKey = "VIRTUE_SAFARI_LAST_URL"
     static let safariLastTitleKey = "VIRTUE_SAFARI_LAST_TITLE"
+    /// Set by the app when the check page reports the extension off.
+    static let safariReportedOffAtKey = "VIRTUE_SAFARI_REPORTED_OFF_AT"
     static let safariLastErrorKey = "VIRTUE_SAFARI_LAST_ERROR"
     static let safariDaemonRunningKey = "VIRTUE_SAFARI_DAEMON_RUNNING"
     static let safariDaemonLastErrorKey = "VIRTUE_SAFARI_DAEMON_LAST_ERROR"

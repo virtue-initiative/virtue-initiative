@@ -27,7 +27,7 @@ These screenshots are from iOS 18. On iOS 17 and earlier, Safari is listed direc
 7. Tap **Allow**.
    ![The All Websites page, with Allow highlighted](/images/ios-setup/ios_setup_all_websites_allow.webp)
 8. Close Safari completely. Swipe up from the bottom of the screen and pause, then swipe Safari up and away.
-9. Open Safari and visit any website. Then open Virtue and check that the status says **Monitoring active**.
+9. In Virtue, tap **Check Extension**. Safari opens a page that shows whether the extension is on. Go back to Virtue and check that the status says **Monitoring active**.
 
 ### If you can't turn on the extension
 

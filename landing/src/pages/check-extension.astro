@@ -1,0 +1,200 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../layouts/SiteLayout.astro';
+
+// The iOS app's Check extension button opens this page in Safari. The
+// extension's content.js fills in the data attributes on #virtue-extension-check.
+// Nothing fills them in when the extension is off, so the page times out to
+// "off". Back to Virtue stays disabled until then, and its link carries the
+// result, since only this page can tell the app the extension is off.
+---
+
+<SiteLayout pageTitle="Check the Safari extension">
+  <section class="extension-check">
+    <h2>Check the Safari extension</h2>
+    <p>
+      The Virtue app opened this page to make sure the Virtue Safari extension is turned on. Virtue
+      only monitors Safari while the extension is on.
+    </p>
+
+    <div id="virtue-extension-check" class="extension-check-result" data-state="checking">
+      <p class="extension-check-headline" data-show="checking">Checking the extension…</p>
+      <p class="extension-check-headline" data-show="on">The Virtue Safari extension is on.</p>
+      <p class="extension-check-headline" data-show="off">
+        The Virtue Safari extension did not answer.
+      </p>
+      <p data-show="off">
+        It is turned off, or it is not allowed on this website. Go back to Virtue and follow the
+        Turn on the Safari extension step.
+      </p>
+      <p class="extension-check-headline" data-show="other-browser">Open this page in Safari.</p>
+      <p data-show="other-browser">
+        Only Safari runs the Virtue extension, so this browser can't check it.
+      </p>
+      <ul class="extension-check-problems" data-show="on">
+        <li data-problem="all-sites">
+          It is not allowed on all websites. In Virtue, follow the Allow it on all websites step.
+        </li>
+        <li data-problem="private">
+          It is not allowed in Private Browsing. In Virtue, follow the Allow it in Private Browsing
+          step.
+        </li>
+        <li data-problem="paused">Monitoring is paused in the Virtue app.</li>
+      </ul>
+    </div>
+
+    <p>When the check finishes, tap Back to Virtue. Virtue updates its status from the result.</p>
+    <div class="extension-check-actions">
+      <Button id="back-to-virtue" type="button" variant="primary" disabled>Back to Virtue</Button>
+    </div>
+    <p class="extension-check-note">
+      This page is for the Virtue app on iPhone and iPad. On other devices there is nothing to
+      check.
+    </p>
+  </section>
+</SiteLayout>
+
+<script>
+  const CHECK_TIMEOUT_MS = 8000;
+  const APP_URL = 'virtueinitiative://check-extension';
+  // Other iOS browsers are WebKit too, but only Safari runs the extension.
+  const OTHER_BROWSER = /CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo/.test(navigator.userAgent);
+  const result = document.getElementById('virtue-extension-check');
+  const back = document.getElementById('back-to-virtue') as HTMLButtonElement | null;
+
+  /** The result for the app, as "1"/"0" flags; unknown settings are left out. */
+  function backLink(): string {
+    const data = result?.dataset ?? {};
+    const params = new URLSearchParams();
+    if (data.state === 'on') {
+      params.set('extension', 'on');
+      const flag = (value: string | undefined) =>
+        value === 'true' ? '1' : value === 'false' ? '0' : null;
+      const allSites = flag(data.allSites);
+      const privateAllowed = flag(data.privateAllowed);
+      if (allSites) params.set('all_sites', allSites);
+      if (privateAllowed) params.set('private', privateAllowed);
+      if (data.paused === 'true') params.set('paused', '1');
+    } else if (data.state === 'off') {
+      params.set('extension', 'off');
+    }
+    const query = params.toString();
+    return query ? `${APP_URL}?${query}` : APP_URL;
+  }
+
+  function resolved() {
+    if (back) back.disabled = false;
+  }
+
+  function render() {
+    if (!result) return;
+    const data = result.dataset;
+    if (data.extension === 'on') {
+      result.dataset.state = 'on';
+      const problems: Record<string, boolean> = {
+        'all-sites': data.allSites === 'false',
+        private: data.privateAllowed === 'false',
+        paused: data.paused === 'true',
+      };
+      let any = false;
+      result.querySelectorAll<HTMLElement>('[data-problem]').forEach((item) => {
+        const shown = problems[item.dataset.problem ?? ''] ?? false;
+        item.hidden = !shown;
+        any ||= shown;
+      });
+      result.dataset.problems = String(any);
+      resolved();
+    }
+  }
+
+  if (result) {
+    // Only the attributes content.js sets. render() writes data-state and
+    // data-problems, so watching every attribute would loop forever.
+    new MutationObserver(render).observe(result, {
+      attributeFilter: ['data-extension', 'data-all-sites', 'data-private-allowed', 'data-paused'],
+    });
+    back?.addEventListener('click', () => {
+      window.location.href = backLink();
+    });
+    if (OTHER_BROWSER) {
+      result.dataset.state = 'other-browser';
+      resolved();
+    } else {
+      render();
+      window.setTimeout(() => {
+        if (result.dataset.state === 'checking') {
+          result.dataset.state = 'off';
+          resolved();
+        }
+      }, CHECK_TIMEOUT_MS);
+    }
+  }
+</script>
+
+<style>
+  .extension-check {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-width: 42rem;
+  }
+
+  .extension-check-result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+  }
+
+  .extension-check-result p {
+    margin: 0;
+  }
+
+  .extension-check-headline {
+    font-weight: 600;
+  }
+
+  .extension-check-result[data-state='on'] {
+    border-color: var(--success);
+  }
+
+  .extension-check-result[data-state='on'][data-problems='true'],
+  .extension-check-result[data-state='off'],
+  .extension-check-result[data-state='other-browser'] {
+    border-color: var(--warning);
+  }
+
+  .extension-check-result [data-show] {
+    display: none;
+  }
+
+  .extension-check-result[data-state='checking'] [data-show='checking'],
+  .extension-check-result[data-state='on'] [data-show='on'],
+  .extension-check-result[data-state='off'] [data-show='off'],
+  .extension-check-result[data-state='other-browser'] [data-show='other-browser'] {
+    display: block;
+  }
+
+  .extension-check-problems {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+
+  .extension-check-problems li[hidden] {
+    display: none;
+  }
+
+  .extension-check-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .extension-check-note {
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+</style>

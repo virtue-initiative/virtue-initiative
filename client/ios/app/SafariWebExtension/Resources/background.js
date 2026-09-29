@@ -174,6 +174,23 @@ async function captureAndSend(tab, source) {
   }
 }
 
+// For the check page (content.js). The ping also tells the Virtue app the
+// extension is on, which is what its Check extension button waits for. A
+// failed ping is usually transient (the native side starting up or busy), so
+// it only leaves out the paused flag.
+async function extensionStatus() {
+  let response = null;
+  try {
+    response = await sendNative({ type: "ping", source: "check_page" });
+  } catch (_) {
+    // keep going without the paused flag
+  }
+  return {
+    ...(await readPermissionState()),
+    paused: Boolean(response && response.paused)
+  };
+}
+
 const b = maybeBrowser();
 
 if (b && b.runtime && typeof b.runtime.onInstalled?.addListener === "function") {
@@ -190,6 +207,9 @@ if (b && b.runtime && typeof b.runtime.onStartup?.addListener === "function") {
 
 if (b && b.runtime && typeof b.runtime.onMessage?.addListener === "function") {
   b.runtime.onMessage.addListener((message, sender) => {
+    if (message && message.type === "virtue_extension_status") {
+      return extensionStatus();
+    }
     if (!message || message.type !== "virtue_capture_tick") {
       return undefined;
     }

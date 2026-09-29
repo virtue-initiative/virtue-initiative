@@ -111,13 +111,15 @@ struct SafariSetupGuide: View {
         case .turnOnExtension: return "Turn on the Safari extension"
         case .allowAllWebsites: return "Allow it on all websites"
         case .allowPrivate: return "Allow it in Private Browsing"
-        case .tryIt: return "Open a website in Safari"
+        case .tryIt: return "Check that it works"
         }
     }
 
     private func statusLine(_ step: Step, done: Bool?) -> String? {
         let setup = coordinator.safariSetup
         switch (step, done) {
+        case (.turnOnExtension, false) where setup.reportedOff:
+            return setup.reportedOffAt.map { "The extension was turned off when Virtue checked \(relative($0))." }
         case (.turnOnExtension, true):
             return setup.lastMessageAt.map { "Last heard from Safari \(relative($0))." }
         case (.tryIt, true):
@@ -161,12 +163,9 @@ struct SafariSetupGuide: View {
                 Instruction("Turn on Allow in Private Browsing.", image: "ios_setup_allow_private")
             case .tryIt:
                 Instruction("Close Safari completely. Swipe up from the bottom of the screen and pause, then swipe Safari up and away.")
-                Instruction("Tap Open Safari below and wait for the page to load.")
+                Instruction("Tap Check Extension. Safari opens a page that shows whether the extension is on.")
                 Instruction("Come back to Virtue. This step turns green once Safari has shown Virtue a web page.")
-                Button("Open Safari") {
-                    openURL(coordinator.safariURL(for: VirtueSetupLinks.testPage))
-                }
-                .buttonStyle(VirtueButtonStyle(prominent: true))
+                ExtensionCheckButton(coordinator: coordinator)
             }
         }
     }
@@ -202,15 +201,50 @@ struct SafariSetupGuide: View {
     }
 
     private func relative(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter.localizedString(for: date, relativeTo: Date())
+        relativeTime(date)
     }
 }
 
 enum VirtueSetupLinks {
-    /// Any page works; this one also tells the user what is being captured.
-    static let testPage = URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!
+    /// Any page would do for the app's check. The extension also fills in
+    /// this one (content.js), so it shows the result inside Safari too.
+    static let checkPage = URL(string: "https://virtueinitiative.org/check-extension")!
+}
+
+/// Opens the check page in Safari and shows what Virtue heard once the user
+/// comes back. See `MonitoringCoordinator.startExtensionCheck`.
+struct ExtensionCheckButton: View {
+    @ObservedObject var coordinator: MonitoringCoordinator
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button("Check Extension") {
+                openURL(coordinator.startExtensionCheck())
+            }
+            .buttonStyle(VirtueButtonStyle(prominent: true))
+
+            if let result {
+                Label(result.text, systemImage: result.icon)
+                    .font(.footnote)
+                    .foregroundStyle(result.passed ? VirtueBrand.accent : VirtueBrand.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var result: (text: String, icon: String, passed: Bool)? {
+        switch coordinator.extensionCheck {
+        case .waiting(_, true):
+            return ("No answer yet. On the check page, tap Back to Virtue to see the result.", "hourglass", false)
+        case .passed:
+            return ("The extension is on.", "checkmark.circle.fill", true)
+        case .failed:
+            return ("The extension is turned off. Turn it on with the Turn on the Safari extension step.", "exclamationmark.triangle", false)
+        case .waiting(_, false), nil:
+            return nil
+        }
+    }
 }
 
 private struct StepBadge: View {

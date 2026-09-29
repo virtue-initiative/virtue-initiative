@@ -8,6 +8,7 @@ struct VirtueIOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(coordinator: coordinator)
+                .onOpenURL { coordinator.handleOpenURL($0) }
                 .tint(VirtueBrand.accent)
                 .preferredColorScheme(.light)
         }
@@ -136,6 +137,10 @@ struct ContentView: View {
                     .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
+
+                if coordinator.monitoringState == .active {
+                    ExtensionCheckButton(coordinator: coordinator)
+                }
             }
         }
     }
@@ -149,6 +154,10 @@ struct ContentView: View {
                     Text("Signed in")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(VirtueBrand.text)
+                    if let email = coordinator.coreStatus?.accountEmail ?? coordinator.accountEmail {
+                        Text(email)
+                            .foregroundStyle(VirtueBrand.text)
+                    }
                     Text("Device: \(coordinator.deviceName)")
                         .foregroundStyle(VirtueBrand.textMuted)
 
@@ -271,6 +280,8 @@ struct ContentView: View {
             return "Sign in to register this device and start monitoring."
         case .paused:
             return "Monitoring is stopped on this device until you resume it."
+        case .needsSetup where coordinator.safariSetup.reportedOff:
+            return "The Safari extension is turned off. Follow the steps below to turn it back on."
         case .needsSetup:
             return "You are signed in, but Virtue is not monitoring anything yet. Finish the steps below to turn on the Safari extension."
         case .needsPermission:
@@ -278,11 +289,9 @@ struct ContentView: View {
         case .active:
             var text = "Virtue takes screenshots of the web pages you view in Safari. Other apps are not monitored."
             if let lastSeen = coordinator.safariSetup.lastMessageAt {
-                let formatter = RelativeDateTimeFormatter()
-                formatter.unitsStyle = .full
-                text += " Safari last checked in \(formatter.localizedString(for: lastSeen, relativeTo: Date()))."
+                text += " Safari last checked in \(relativeTime(lastSeen))."
                 if Date().timeIntervalSince(lastSeen) > 24 * 60 * 60 {
-                    text += " If you have used Safari since then, check that the Virtue extension is still turned on."
+                    text += " If you have used Safari since then, tap Check Extension."
                 }
             }
             return text

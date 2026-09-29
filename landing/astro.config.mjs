@@ -12,6 +12,7 @@ import mermaid from 'astro-mermaid';
 // and the post-checkout thank-you page.
 const EXCLUDED_FROM_SITEMAP = new Set([
   '/404',
+  '/check-extension',
   '/donate/success',
   '/newsletter/check-email',
   '/newsletter/confirmed',
