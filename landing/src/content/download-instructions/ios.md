@@ -12,7 +12,7 @@ Virtue is not in the App Store. Install it through Apple's TestFlight app using 
 
 These screenshots are from iOS 18. On iOS 17 and earlier, Safari is listed directly in Settings instead of under **Apps**.
 
-1. Open **Settings**, tap **Apps**, then tap **Safari**. In the Virtue app, **Open Settings** takes you to the list of apps.
+1. Open **Settings**, tap **Apps**, then tap **Safari**. In the Virtue app, **Open Settings** opens Virtue's own settings page. Tap **Apps** at the top left to go back, then tap **Safari**.
    ![The Apps list in Settings, with Safari highlighted](/images/ios-setup/ios_setup_apps_safari.webp)
 2. Scroll down and tap **Extensions**.
    ![Safari settings, with Extensions highlighted](/images/ios-setup/ios_setup_extensions.webp)

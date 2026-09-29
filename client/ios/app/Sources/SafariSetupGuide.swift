@@ -171,14 +171,16 @@ struct SafariSetupGuide: View {
         }
     }
 
-    /// Where `openSettingsURLString` lands differs by version: on iOS 18 it
-    /// showed the Apps list (Virtue's own page has nothing to show), and
-    /// before that it opens Virtue's page under the main Settings list.
+    /// `openSettingsURLString` opens Virtue's own page in Settings. iOS has no
+    /// public URL for the Safari or extension settings (`App-prefs:` is
+    /// private API and fails App Review), so the user has to back out first.
+    /// The iOS 18.6 simulator showed the Apps list instead, but real devices
+    /// land on Virtue's page.
     private var openSettingsText: String {
         if #available(iOS 18.0, *) {
-            return "Tap Open Settings, then tap Safari in the list of apps. If Settings opens on Virtue's page instead, tap Apps at the top left first."
+            return "Tap Open Settings. It opens Virtue's own settings page, so tap Apps at the top left to go back. Then tap Safari in the list of apps."
         }
-        return "Tap Open Settings, then tap Settings at the top left. Scroll down and tap Safari."
+        return "Tap Open Settings. It opens Virtue's own settings page, so tap Settings at the top left to go back. Then scroll down and tap Safari."
     }
 
     private var extensionPath: String {
