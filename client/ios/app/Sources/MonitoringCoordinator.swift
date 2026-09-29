@@ -192,6 +192,8 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastPage: String = "<none>"
     @Published private(set) var safariLastError: String = "<none>"
     @Published private(set) var safariDaemonStatus: String = "Not started yet"
+    /// True while a "Capture Next Safari Page" request waits for the extension.
+    @Published private(set) var forceCaptureRequested: Bool = false
 
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var willEnterForegroundObserver: NSObjectProtocol?
@@ -461,6 +463,7 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
+        forceCaptureRequested = defaults.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
         safariSetup = SafariSetupState(
             lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
                 .map(Date.init(timeIntervalSince1970:)),
@@ -657,6 +660,18 @@ final class MonitoringCoordinator: ObservableObject {
         }
         components.scheme = "x-safari-https"
         return components.url ?? url
+    }
+
+    /// Asks the Safari extension to take a screenshot of the next page it
+    /// sees and upload it right away (CORE-021), instead of waiting for the
+    /// next scheduled capture and batch window. The app can't do this
+    /// itself: only the extension ever has a Safari frame to capture.
+    func requestForceCapture() {
+        sharedDefaults?.set(
+            Date().timeIntervalSince1970,
+            forKey: VirtueShared.safariForceCaptureRequestedAtKey
+        )
+        forceCaptureRequested = true
     }
 
     private func setMonitoringEnabled(_ enabled: Bool) {

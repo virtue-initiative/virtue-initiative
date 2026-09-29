@@ -77,6 +77,9 @@ private func virtue_ios_native_init(
 @_silgen_name("virtue_ios_native_tick_once")
 private func virtue_ios_native_tick_once() -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("virtue_ios_native_force_tick_once")
+private func virtue_ios_native_force_tick_once() -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("virtue_ios_native_nsfw_run_count")
 private func virtue_ios_native_nsfw_run_count() -> UInt64
 
@@ -278,6 +281,18 @@ private final class SafariSharedStateStore {
         lock.unlock()
     }
 
+    func isForceCaptureRequested() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return defaults?.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
+    }
+
+    func clearForceCaptureRequest() {
+        lock.lock()
+        defaults?.removeObject(forKey: VirtueShared.safariForceCaptureRequestedAtKey)
+        lock.unlock()
+    }
+
     func isMonitoringEnabled() -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -320,20 +335,25 @@ private final class SafariNativeRuntime {
     /// already latched into `SafariFrameStore` before this is ever called,
     /// so nothing is lost — the next tick to actually run picks up whatever
     /// the latest stored frame is.
-    func ensureInitializedAndTick() {
+    ///
+    /// `forceCapture` runs the forced variant of the tick (CORE-021).
+    /// Returns whether a tick was actually scheduled, so a caller can hold
+    /// on to a force request that a busy tick skipped.
+    @discardableResult
+    func ensureInitializedAndTick(forceCapture: Bool = false) -> Bool {
         if let initError = initializeIfNeeded() {
             SafariFrameStore.shared.updateState(code: captureStateUnknown, clearFrame: true)
             SafariSharedStateStore.shared.markCaptureError(
                 "native_init_failed: \(initError)",
                 stateCode: VirtueShared.captureStateUnknown
             )
-            return
+            return false
         }
 
         lock.lock()
         if tickInFlight {
             lock.unlock()
-            return
+            return false
         }
         tickInFlight = true
         lock.unlock()
@@ -354,7 +374,9 @@ private final class SafariNativeRuntime {
             // `tickInFlight` out from under a call that's still in progress.
             guard !expired else { return }
 
-            let tickError = virtue_ios_native_tick_once()
+            let tickError = forceCapture
+                ? virtue_ios_native_force_tick_once()
+                : virtue_ios_native_tick_once()
             var tickMessage: String?
             if let tickError {
                 tickMessage = String(cString: tickError)
@@ -366,6 +388,7 @@ private final class SafariNativeRuntime {
             self.tickInFlight = false
             self.lock.unlock()
         }
+        return true
     }
 
     private func initializeIfNeeded() -> String? {
@@ -513,7 +536,12 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             url: payload["url"] as? String,
             title: payload["title"] as? String
         )
-        SafariNativeRuntime.shared.ensureInitializedAndTick()
+        // Only a message carrying a fresh frame can satisfy a force request.
+        // It stays set until a tick is actually scheduled with it.
+        let forceCapture = SafariSharedStateStore.shared.isForceCaptureRequested()
+        if SafariNativeRuntime.shared.ensureInitializedAndTick(forceCapture: forceCapture), forceCapture {
+            SafariSharedStateStore.shared.clearForceCaptureRequest()
+        }
 
         return ["ok": true, "bytes": png.count]
     }

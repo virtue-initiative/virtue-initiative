@@ -456,6 +456,25 @@ fn forced_capture_flushes_the_batch_without_waiting_for_the_interval() {
     );
 }
 
+#[test]
+fn tick_once_forced_captures_and_uploads_without_a_loop_thread() {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(0).tick();
+    scenario.with_state_mut(|s| {
+        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+        s.upload.last_batch_at_ms = Some(0);
+    });
+    let batches_before = scenario.api.state().batch_uploads.len();
+
+    scenario.at_t(1_000);
+    scenario.daemon.tick_once_forced();
+
+    assert!(
+        scenario.api.state().batch_uploads.len() > batches_before,
+        "tick_once_forced should capture and flush a batch even though neither is due"
+    );
+}
+
 // ── Upload: batching ──────────────────────────────────────────────────────────
 
 #[test]
