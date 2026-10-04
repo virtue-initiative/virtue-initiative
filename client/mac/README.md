@@ -120,8 +120,10 @@ intermediate (the original Sub-CA expired 2027-02-01; certificates must come fro
    secrets with a `.p12` export of the new identity (certificate and private key). CI signs and
    notarizes with whatever that secret holds, so releases keep using the old certificate until it
    is replaced.
-5. Locally, `build-app.sh` fails as ambiguous while two certificates for the team are installed;
-   set `CODESIGN_IDENTITY` to the new certificate's SHA-1 until the old one is deleted.
+5. Nothing to change locally: with no `CODESIGN_IDENTITY` set, `build-app.sh` signs with the
+   team's valid Developer ID certificate that expires last, so the old and new certificate can
+   sit side by side until the old one is deleted. Set `CODESIGN_IDENTITY` (a name or SHA-1 from
+   `security find-identity -v -p codesigning`) to force a specific one.
 
 ### Signing note
 
