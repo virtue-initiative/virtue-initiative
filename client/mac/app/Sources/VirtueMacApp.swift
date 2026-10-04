@@ -63,7 +63,7 @@ private struct MenuBarMenuContent: View {
             Button("Test Screenshot") {
                 coordinator.forceCapture()
             }
-            .disabled(coordinator.isForceCapturing)
+            .disabled(coordinator.isForceCapturing || coordinator.needsScreenRecording)
         }
 
         if updateController.isEnabled {

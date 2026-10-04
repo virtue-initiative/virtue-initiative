@@ -57,6 +57,7 @@ import {
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
+import { subscribeToNewsletter } from '../lib/newsletter';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -410,8 +411,15 @@ auth.post('/signup/validate', validateZ('json', signupValidateSchema), async (c)
 });
 
 auth.post('/signup', validateZ('json', signupSchema), async (c) => {
-  const { verification_token, password_auth, password_salt, pub_key, encrypted_priv_key, name } =
-    c.req.valid('json');
+  const {
+    verification_token,
+    password_auth,
+    password_salt,
+    pub_key,
+    encrypted_priv_key,
+    name,
+    newsletter_opt_in,
+  } = c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
   if (!record) {
@@ -457,6 +465,10 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await consumeEmailToken(c.env.DB, record, Date.now());
 
   await createSession(c, userId);
+
+  if (newsletter_opt_in === true) {
+    c.executionCtx.waitUntil(subscribeToNewsletter(c.env, normalizedEmail));
+  }
 
   return c.json<SignupResponse>(
     {

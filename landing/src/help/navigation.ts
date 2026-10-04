@@ -25,6 +25,17 @@ export const helpSidebar: HelpNavItem[] = [
     href: '/help/how-it-works',
   },
   {
+    label: 'What Virtue monitors',
+    href: '/help/what-virtue-monitors',
+    items: [
+      { label: 'Windows', href: '/help/what-virtue-monitors/windows' },
+      { label: 'Mac', href: '/help/what-virtue-monitors/mac' },
+      { label: 'Linux', href: '/help/what-virtue-monitors/linux' },
+      { label: 'Android', href: '/help/what-virtue-monitors/android' },
+      { label: 'iPhone and iPad', href: '/help/what-virtue-monitors/ios' },
+    ],
+  },
+  {
     label: 'Removing access',
     href: '/help/removing-access',
     items: [

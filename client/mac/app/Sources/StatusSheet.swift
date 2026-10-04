@@ -78,11 +78,7 @@ struct StatusSheet: View {
     }
 
     private var permissionLabel: String {
-        switch coordinator.permissionPhase {
-        case .needsRequest: return "Not granted"
-        case .needsRelaunch: return "Granted — relaunch required"
-        case nil: return "Granted"
-        }
+        coordinator.needsScreenRecording ? "Off" : "On"
     }
 
     private var daemonStatusLabel: String {

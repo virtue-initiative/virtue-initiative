@@ -75,11 +75,46 @@ APP_ROOT="target/macos/${APP_NAME}"
 # Invalid" once a real Team ID has ever been registered for this bundle ID,
 # since the ad-hoc signature has no Team ID to satisfy that check). CI has no
 # access to this identity, so it must override both vars to "-"/"" explicitly.
-# "Developer ID Application" (with no name/team suffix) matches whichever such
-# identity is present in the local signer's keychain, so this doesn't need to
-# hardcode any one developer's name.
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application}"
+# The default is scoped to this team's Developer ID certificate. A bare
+# "Developer ID Application" matches every such identity in the keychain and
+# codesign refuses it as ambiguous once a developer also holds a personal one.
+# The team's own certificate is renewed periodically, so for a while the old
+# and the new one sit side by side; newest_valid_identity picks the one that
+# expires last, by SHA-1, so a rotation needs no change here. Override with
+# CODESIGN_IDENTITY (CI does, with the single imported certificate).
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-Y2Z8ZS4D33}"
+
+# Prints the SHA-1 of the valid (unexpired, private key present) code signing
+# identity named "$1" that expires last, or nothing if there is none.
+newest_valid_identity() {
+  local name="$1" valid line hash="" pem="" end ts best="" best_ts=0
+  valid="$(security find-identity -v -p codesigning | grep -F "\"$name\"" || true)"
+  [[ -n "$valid" ]] || return 0
+  while IFS= read -r line; do
+    case "$line" in
+      "SHA-1 hash: "*) hash="${line#SHA-1 hash: }" ;;
+      "-----BEGIN CERTIFICATE-----") pem="$line"$'\n' ;;
+      "-----END CERTIFICATE-----")
+        pem+="$line"$'\n'
+        end="$(openssl x509 -noout -enddate <<<"$pem" | cut -d= -f2)"
+        ts="$(date -j -u -f '%b %e %T %Y %Z' "$end" +%s)"
+        if [[ "$valid" == *"$hash"* ]] && (( ts > best_ts )); then
+          best="$hash"
+          best_ts="$ts"
+        fi
+        pem=""
+        ;;
+      *) [[ -z "$pem" ]] || pem+="$line"$'\n' ;;
+    esac
+  done < <(security find-certificate -a -c "$name" -Z -p)
+  printf '%s' "$best"
+}
+
+if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+  TEAM_IDENTITY_NAME="Developer ID Application: Virtue Initiative Inc. (${DEVELOPMENT_TEAM})"
+  CODESIGN_IDENTITY="$(newest_valid_identity "$TEAM_IDENTITY_NAME")"
+  CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-$TEAM_IDENTITY_NAME}"
+fi
 
 # Auto-update (Sparkle) is opt-in at build time, mirroring the Linux package's
 # /usr/lib/virtue/auto-update-enabled flag: without VIRTUE_ENABLE_AUTO_UPDATE=1

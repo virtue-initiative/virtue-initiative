@@ -247,11 +247,14 @@ The client MUST provide this request shape.
   "pub_key": Base64,
   "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
-  "email_digest_minutes_utc": Number | undefined
+  "email_digest_minutes_utc": Number | undefined,
+  "newsletter_opt_in": Boolean | undefined
 }
 ```
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
+
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
 The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
@@ -882,6 +885,8 @@ The server SHOULD rate limit this endpoint by client IP address, since it MAY be
 The server MUST email the report to a fixed internal address and include, the message, `platform`/`app_version`/`platform_details` if available, and, when authenticated, the reporting user's or device's identity.
 
 The server SHOULD set the Reply-To header to the `contact_email` or the email of the authenticated account.
+
+The server SHOULD also send a confirmation email to that same address, when one is known, with its Reply-To header set to the internal address. The confirmation MUST NOT include the report's `message` or any other client-supplied text, since the address MAY be unverified. The server MUST NOT send the confirmation to an account whose email is unverified. A failure to send the confirmation MUST NOT fail the request.
 
 On success, the server MUST respond **HTTP 204**.
 

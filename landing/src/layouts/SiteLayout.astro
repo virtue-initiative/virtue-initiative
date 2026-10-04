@@ -4,14 +4,16 @@ import Footer from '../components/Footer.astro';
 import Header from '../components/Header.astro';
 import ImageLightbox from '../components/ImageLightbox.astro';
 import NoindexMeta from '../components/NoindexMeta.astro';
+import { DEFAULT_DESCRIPTION } from '../lib/site';
 import '../styles/global.css';
 
 interface Props {
   pageTitle?: string;
   tagline?: string;
+  description?: string;
 }
 
-const { pageTitle, tagline } = Astro.props;
+const { pageTitle, tagline, description = DEFAULT_DESCRIPTION } = Astro.props;
 const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue Initiative';
 ---
 
@@ -34,6 +36,7 @@ const title = pageTitle ? `${pageTitle} - The Virtue Initiative` : 'The Virtue I
       }
     </style>
     <title>{title}</title>
+    <meta name="description" content={description} />
   </head>
   <body>
     <Header tagline={tagline} />

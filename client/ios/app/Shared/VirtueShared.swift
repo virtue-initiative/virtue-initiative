@@ -42,9 +42,18 @@ enum VirtueShared {
     static let safariLastFrameAtKey = "VIRTUE_SAFARI_LAST_FRAME_AT"
     static let safariLastURLKey = "VIRTUE_SAFARI_LAST_URL"
     static let safariLastTitleKey = "VIRTUE_SAFARI_LAST_TITLE"
+    /// Set by the app when the check page reports the extension off.
+    static let safariReportedOffAtKey = "VIRTUE_SAFARI_REPORTED_OFF_AT"
     static let safariLastErrorKey = "VIRTUE_SAFARI_LAST_ERROR"
     static let safariDaemonRunningKey = "VIRTUE_SAFARI_DAEMON_RUNNING"
     static let safariDaemonLastErrorKey = "VIRTUE_SAFARI_DAEMON_LAST_ERROR"
+    /// Bools reported by the extension on every message, when Safari lets it
+    /// check (see `readPermissionState` in background.js). Absent = unknown.
+    static let safariAllSitesGrantedKey = "VIRTUE_SAFARI_ALL_SITES_GRANTED"
+    static let safariPrivateAllowedKey = "VIRTUE_SAFARI_PRIVATE_ALLOWED"
+    /// Set by the app's "Capture Next Safari Page" button; the extension
+    /// clears it once it has scheduled the forced tick.
+    static let safariForceCaptureRequestedAtKey = "VIRTUE_SAFARI_FORCE_CAPTURE_REQUESTED_AT"
 
     static let safariHeartbeatStaleThresholdSeconds: TimeInterval = 10
     static let safariFrameFreshnessThresholdSeconds: TimeInterval = 20

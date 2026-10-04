@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Virtue.WindowsApp.Core.Infrastructure;
 using Virtue.WindowsApp.Core.Interop;
 using Virtue.WindowsApp.Core.ViewModels;
 using Windows.Graphics;
@@ -22,6 +23,8 @@ public sealed partial class MainWindow : Window
     private const string WebsiteDisplayUrl = "virtueinitiative.org";
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
     private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
+    // Partners are managed in the web app, not from this client.
+    private const string PartnersNavigateUrl = "https://app.virtueinitiative.org/partners";
 
     private readonly AppWindow _appWindow;
     private readonly TextBlock _statusTextBlock;
@@ -31,6 +34,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _accountSummaryTextBlock;
     private readonly StackPanel _loginPanel;
     private readonly StackPanel _accountActionsPanel;
+    private readonly StackPanel _partnersPanel;
     private readonly StackPanel _signedInActionsPanel;
     private readonly TextBox _emailTextBox;
     private readonly PasswordBox _passwordBox;
@@ -80,6 +84,7 @@ public sealed partial class MainWindow : Window
         _deviceNameTextBox = new TextBox();
         _loginPanel = new StackPanel();
         _accountActionsPanel = new StackPanel();
+        _partnersPanel = new StackPanel();
         _signedInActionsPanel = new StackPanel();
         _statusDot = new Border
         {
@@ -106,7 +111,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         _appWindow = ResolveAppWindow();
         _appWindow.Closing += AppWindowOnClosing;
-        _appWindow.Resize(new SizeInt32(720, 560));
+        SetInitialBounds();
         SetWindowIcon();
         SyncFromViewModel();
         IsVisibleToUser = true;
@@ -190,6 +195,7 @@ public sealed partial class MainWindow : Window
         contentStack.Children.Add(BuildHeader());
         contentStack.Children.Add(_updateNoticeCard);
         contentStack.Children.Add(BuildStatusCard());
+        contentStack.Children.Add(BuildMonitoringCard());
         contentStack.Children.Add(BuildAccountCard());
 
         root.Children.Add(new ScrollViewer
@@ -338,6 +344,42 @@ public sealed partial class MainWindow : Window
         return CreateCard(content);
     }
 
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the monitor actually does (core SPEC CORE-003, CORE-004).
+    private const string MonitoringSummary =
+        "Virtue takes a screenshot of every monitor about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.";
+    private const string MonitoringHelpUrl = "https://virtueinitiative.org/help/what-virtue-monitors/windows";
+
+    private static UIElement BuildMonitoringCard()
+    {
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(CreateSectionLabel("What Virtue Monitors"));
+        content.Children.Add(new TextBlock
+        {
+            Text = MonitoringSummary,
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+
+        var learnMoreLink = new HyperlinkButton
+        {
+            Content = "Learn more",
+            NavigateUri = new Uri(MonitoringHelpUrl),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(0),
+            FontFamily = BodyFont,
+            Foreground = LinkBrush,
+        };
+        learnMoreLink.Resources["HyperlinkButtonForeground"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPointerOver"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundPressed"] = LinkBrush;
+        learnMoreLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
+        content.Children.Add(learnMoreLink);
+
+        return CreateCard(content);
+    }
+
     private UIElement BuildAccountCard()
     {
         _accountSummaryTextBlock.FontFamily = BodyFont;
@@ -378,6 +420,20 @@ public sealed partial class MainWindow : Window
         signUpLink.Resources["HyperlinkButtonForegroundDisabled"] = Ink3Brush;
         _loginPanel.Children.Add(signUpLink);
 
+        var openPartnersButton = CreateActionButton("Open Partners Page");
+        openPartnersButton.Click += (_, _) => OpenInBrowser(PartnersNavigateUrl);
+
+        _partnersPanel.Spacing = 8;
+        _partnersPanel.Margin = new Thickness(0, 12, 0, 0);
+        _partnersPanel.Children.Add(new TextBlock
+        {
+            Text = "Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".",
+            TextWrapping = TextWrapping.Wrap,
+            FontFamily = BodyFont,
+            Foreground = Ink2Brush,
+        });
+        _partnersPanel.Children.Add(openPartnersButton);
+
         _accountActionsPanel.Orientation = Orientation.Horizontal;
         _accountActionsPanel.Spacing = 10;
         _accountActionsPanel.Margin = new Thickness(0, 12, 0, 0);
@@ -387,6 +443,7 @@ public sealed partial class MainWindow : Window
         content.Children.Add(CreateSectionLabel("Account"));
         content.Children.Add(_accountSummaryTextBlock);
         content.Children.Add(_loginPanel);
+        content.Children.Add(_partnersPanel);
         content.Children.Add(_accountActionsPanel);
         content.Children.Add(_errorTextBlock);
 
@@ -535,6 +592,29 @@ public sealed partial class MainWindow : Window
         input.Resources["TextControlPlaceholderForeground"] = Ink3Brush;
         input.Resources["TextControlPlaceholderForegroundPointerOver"] = Ink3Brush;
         input.Resources["TextControlPlaceholderForegroundFocused"] = Ink3Brush;
+    }
+
+    // The CheckBox template's visual states set the label color from theme
+    // resources, overriding Foreground, so pin every state to ink with a
+    // forest-filled box when checked.
+    private static void StyleCheckBox(CheckBox checkBox)
+    {
+        var r = checkBox.Resources;
+        foreach (var state in new[] { "Unchecked", "Checked", "Indeterminate" })
+        {
+            foreach (var suffix in new[] { "", "PointerOver", "Pressed" })
+            {
+                r[$"CheckBoxForeground{state}{suffix}"] = InkBrush;
+            }
+        }
+
+        foreach (var suffix in new[] { "", "PointerOver", "Pressed" })
+        {
+            r[$"CheckBoxCheckBackgroundFillChecked{suffix}"] = ForestBrush;
+            r[$"CheckBoxCheckBackgroundStrokeChecked{suffix}"] = ForestBrush;
+            r[$"CheckBoxCheckGlyphForegroundChecked{suffix}"] = PaperBrush;
+            r[$"CheckBoxCheckBackgroundStrokeUnchecked{suffix}"] = BorderHoverBrush;
+        }
     }
 
     private async void StatusDetailsButton_OnClick(object sender, RoutedEventArgs e)
@@ -750,6 +830,7 @@ public sealed partial class MainWindow : Window
             FontFamily = BodyFont,
             Foreground = InkBrush,
         };
+        StyleCheckBox(includeLogsCheckBox);
 
         var includeLogsCaption = new TextBlock
         {
@@ -1015,6 +1096,7 @@ public sealed partial class MainWindow : Window
             _accountSummaryTextBlock.Text = "Checking sign-in status...";
             _loginPanel.Visibility = Visibility.Collapsed;
             _accountActionsPanel.Visibility = Visibility.Collapsed;
+            _partnersPanel.Visibility = Visibility.Collapsed;
             _signedInActionsPanel.Visibility = Visibility.Collapsed;
         }
         else
@@ -1024,6 +1106,7 @@ public sealed partial class MainWindow : Window
                 : "Sign in to start monitoring.";
             _loginPanel.Visibility = ViewModel.LoggedIn ? Visibility.Collapsed : Visibility.Visible;
             _accountActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
+            _partnersPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
             _signedInActionsPanel.Visibility = ViewModel.LoggedIn ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -1151,6 +1234,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Sizes the window from effective pixels so it opens at the same visual
+    /// size at any display scaling, and centers it in the work area of the
+    /// monitor it opens on (see <see cref="InitialWindowBounds"/>).
+    /// </summary>
+    private void SetInitialBounds()
+    {
+        var dpi = GetDpiForWindow(WindowNative.GetWindowHandle(this));
+        var workArea = DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        var bounds = InitialWindowBounds.Compute(
+            dpi,
+            new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+        _appWindow.MoveAndResize(new RectInt32(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+    }
+
     private AppWindow ResolveAppWindow()
     {
         var windowHandle = WindowNative.GetWindowHandle(this);
@@ -1188,6 +1286,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static void OpenInBrowser(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = url,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"failed to open {url}: {ex}");
+        }
+    }
+
     private static string DisplayOrPlaceholder(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "<none>" : value;
 
@@ -1220,6 +1334,9 @@ public sealed partial class MainWindow : Window
             Convert.ToByte(hex.Substring(2, 2), 16),
             Convert.ToByte(hex.Substring(4, 2), 16));
     }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);

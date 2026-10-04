@@ -1,0 +1,24 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+
+// Buttondown's subscription_redirect_url points here, so a subscriber lands back on the site
+// after submitting NewsletterForm instead of on Buttondown's own "subscribed" page. They
+// aren't subscribed yet, because Buttondown still needs them to confirm by email.
+---
+
+<SiteLayout pageTitle="Check your email">
+  <section class="newsletter-status">
+    <h2>Check your email</h2>
+    <p>
+      We sent you a link to confirm your subscription. Click it to start getting project updates.
+    </p>
+    <p class="newsletter-status-note">
+      If it doesn't arrive in a few minutes, check your spam folder.
+    </p>
+    <div class="newsletter-status-actions">
+      <Button href="/" variant="primary">Back to home</Button>
+      <Button href="/blog" variant="outline">Read the blog</Button>
+    </div>
+  </section>
+</SiteLayout>

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { PageHeading } from '../../components/PageHeading';
@@ -29,6 +29,13 @@ export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
   const { devices, loaded } = useDevices();
+
+  // The device cache otherwise lives for the whole session, so status and
+  // last-upload times would go stale. Refetch on open; cached cards stay up.
+  useEffect(() => {
+    void api?.refreshDevices();
+  }, [api]);
+
   const updateDevice = (id: string, patch: { name?: string }) =>
     api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
   const removeDevice = (id: string) =>
@@ -66,20 +73,26 @@ export function Devices() {
 
 function DeviceSetupSteps() {
   return (
-    <ol class="device-setup-steps">
-      <li>
-        <span class="device-setup-step-label">Download the app.</span>
-        Choose the installer for the device you want to monitor.
-      </li>
-      <li>
-        <span class="device-setup-step-label">Follow the installation instructions.</span>
-        Use the platform-specific setup guide if you need it.
-      </li>
-      <li>
-        <span class="device-setup-step-label">Log in on that device.</span>
-        Once the app signs in and uploads, it will show up here.
-      </li>
-    </ol>
+    <>
+      <ol class="device-setup-steps">
+        <li>
+          <span class="device-setup-step-label">Download the app.</span>
+          Choose the installer for the device you want to monitor.
+        </li>
+        <li>
+          <span class="device-setup-step-label">Follow the installation instructions.</span>
+          Use the platform-specific setup guide if you need it.
+        </li>
+        <li>
+          <span class="device-setup-step-label">Log in on that device.</span>
+          Once the app signs in and uploads, it will show up here. On iPhone and iPad, also turn on
+          the Safari extension.
+        </li>
+      </ol>
+      <p class="device-setup-note">
+        The iPhone and iPad app is in TestFlight, not the App Store. Get it from the download page.
+      </p>
+    </>
   );
 }
 

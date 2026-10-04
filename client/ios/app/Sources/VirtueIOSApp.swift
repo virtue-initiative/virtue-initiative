@@ -8,6 +8,7 @@ struct VirtueIOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(coordinator: coordinator)
+                .onOpenURL { coordinator.handleOpenURL($0) }
                 .tint(VirtueBrand.accent)
                 .preferredColorScheme(.light)
         }
@@ -22,6 +23,10 @@ struct ContentView: View {
     @State private var showStatusSheet = false
     @State private var showReportBugSheet = false
     @State private var showReportBugConfirmation = false
+    @Environment(\.openURL) private var openURL
+
+    /// Partners are managed in the web app, not from this client.
+    private let partnersURL = URL(string: "https://app.virtueinitiative.org/partners")!
 
     var body: some View {
         NavigationStack {
@@ -29,8 +34,16 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     headerCard
                     statusCard
+                    // Until setup is finished the checklist is the main thing
+                    // on screen; afterwards it moves to the bottom for reference.
+                    if coordinator.monitoringState != .active {
+                        setupCard
+                    }
                     accountCard
-                    safariCard
+                    monitoringCard
+                    if coordinator.monitoringState == .active {
+                        setupCard
+                    }
                 }
                 .padding(20)
             }
@@ -124,6 +137,10 @@ struct ContentView: View {
                     .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
+
+                if coordinator.monitoringState == .active {
+                    ExtensionCheckButton(coordinator: coordinator)
+                }
             }
         }
     }
@@ -137,8 +154,20 @@ struct ContentView: View {
                     Text("Signed in")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(VirtueBrand.text)
+                    if let email = coordinator.coreStatus?.accountEmail ?? coordinator.accountEmail {
+                        Text(email)
+                            .foregroundStyle(VirtueBrand.text)
+                    }
                     Text("Device: \(coordinator.deviceName)")
                         .foregroundStyle(VirtueBrand.textMuted)
+
+                    Text("Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".")
+                        .foregroundStyle(VirtueBrand.textMuted)
+                        .padding(.top, 6)
+                    Button("Open Partners Page") {
+                        openURL(partnersURL)
+                    }
+                    .buttonStyle(VirtueButtonStyle())
 
                     HStack(spacing: 10) {
                         Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out") {
@@ -212,63 +241,61 @@ struct ContentView: View {
         }
     }
 
-    private var safariCard: some View {
+    // Short summary; the full list is on the linked help page. Keep both in step
+    // with what the Safari extension and daemon actually do (core SPEC CORE-003, CORE-004).
+    private var monitoringCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionLabel("Safari")
-                Text("Safari extension capture")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(VirtueBrand.text)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Permission state: \(coordinator.safariPermissionSummary)")
-                    Text("Extension status: \(coordinator.safariDaemonStatus)")
-                }
-                .font(.subheadline)
-                .foregroundStyle(VirtueBrand.textMuted)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("1. Open Settings > Safari > Extensions > Virtue Safari Capture.")
-                    Text("2. Turn on \"Allow Extension\" and \"Allow in Private Browsing\".")
-                    Text("3. In Permissions, select \"Allow\" for \"All Websites\".")
-                    Text("4. Fully close Safari (swipe it away in the app switcher) and reopen it.")
-                    Text("5. Virtue will produce screenshots while browsing.")
-                }
-                .font(.subheadline)
-                .foregroundStyle(VirtueBrand.text)
+                SectionLabel("What Virtue Monitors")
+                Text("Virtue only captures Safari. It takes a screenshot of the web page you are viewing about every 5 minutes, blurred and with text blacked out.")
+                    .font(.body)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!)
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.link)
             }
         }
     }
 
+    private var setupCard: some View {
+        Card {
+            SafariSetupGuide(coordinator: coordinator)
+        }
+    }
+
     private var primaryStatusTitle: String {
-        if !coordinator.loggedIn {
-            return "Signed out"
+        switch coordinator.monitoringState {
+        case .signedOut: return "Signed out"
+        case .paused: return "Monitoring paused"
+        case .needsSetup: return "Setup not finished"
+        case .needsPermission: return "Safari permission needed"
+        case .active: return "Monitoring active"
         }
-        if coordinator.monitorSummary == "paused" {
-            return "Monitoring paused"
-        }
-        if coordinator.monitorSummary == "active" {
-            return "Monitoring active"
-        }
-        if coordinator.monitorSummary == "waiting for Safari" {
-            return "Waiting for Safari"
-        }
-        return "Monitoring idle"
     }
 
     private var statusSubtitle: String {
-        if !coordinator.loggedIn {
+        switch coordinator.monitoringState {
+        case .signedOut:
             return "Sign in to register this device and start monitoring."
-        }
-        if coordinator.monitorSummary == "paused" {
+        case .paused:
             return "Monitoring is stopped on this device until you resume it."
+        case .needsSetup where coordinator.safariSetup.reportedOff:
+            return "The Safari extension is turned off. Follow the steps below to turn it back on."
+        case .needsSetup:
+            return "You are signed in, but Virtue is not monitoring anything yet. Finish the steps below to turn on the Safari extension."
+        case .needsPermission:
+            return "The Safari extension is missing a permission it needs. Follow the highlighted step below."
+        case .active:
+            var text = "Virtue takes screenshots of the web pages you view in Safari. Other apps are not monitored."
+            if let lastSeen = coordinator.safariSetup.lastMessageAt {
+                text += " Safari last checked in \(relativeTime(lastSeen))."
+                if Date().timeIntervalSince(lastSeen) > 24 * 60 * 60 {
+                    text += " If you have used Safari since then, tap Check Extension."
+                }
+            }
+            return text
         }
-        if coordinator.monitorSummary == "active" {
-            return "The Safari extension is sending fresh capture activity."
-        }
-        if coordinator.monitorSummary == "waiting for Safari" {
-            return "Monitoring is enabled, but Safari needs to be active on a capturable page."
-        }
-        return "Monitoring is enabled, but the service is currently idle."
     }
 }
 
@@ -283,7 +310,7 @@ private struct StatusSheet: View {
         NavigationStack {
             List {
                 Section("Account") {
-                    DetailRow(label: "Summary", value: coordinator.monitorSummary)
+                    DetailRow(label: "Summary", value: coordinator.monitoringState.summary)
                     DetailRow(label: "Status", value: coordinator.statusMessage)
                     DetailRow(label: "Email", value: status?.accountEmail ?? coordinator.accountEmail ?? "<none>")
                     DetailRow(label: "Device name", value: status?.deviceName ?? "<none>")
@@ -317,7 +344,7 @@ private struct StatusSheet: View {
                     }
                 }
 
-                Section("Advanced") {
+                Section {
                     DetailRow(label: "Device ID", value: coordinator.deviceId)
                     DetailRow(label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
                     DetailRow(label: "Hash base URL", value: status?.hashBaseUrl ?? "<default>")
@@ -332,6 +359,18 @@ private struct StatusSheet: View {
                             ?? "\(VirtueShared.defaultBatchWindowSeconds)s"
                     )
                     DetailRow(label: "Build", value: VirtueShared.buildLabel)
+                    Button(
+                        coordinator.forceCaptureRequested
+                            ? "Waiting for Safari…"
+                            : "Capture Next Safari Page"
+                    ) {
+                        coordinator.requestForceCapture()
+                    }
+                    .disabled(coordinator.forceCaptureRequested || !coordinator.loggedIn)
+                } header: {
+                    Text("Advanced")
+                } footer: {
+                    Text("Capture Next Safari Page takes a screenshot the next time you view a page in Safari. It uploads that screenshot right away, along with anything else waiting to upload.")
                 }
 
                 Section("Safari Extension") {
@@ -361,7 +400,7 @@ private struct StatusSheet: View {
     private var status: CoreServiceStatus? { coordinator.coreStatus }
 }
 
-private struct VirtueButtonStyle: ButtonStyle {
+struct VirtueButtonStyle: ButtonStyle {
     var prominent: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {

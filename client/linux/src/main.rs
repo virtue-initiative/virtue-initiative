@@ -24,6 +24,25 @@ use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_b
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
+/// Partners are managed in the web app, not from this client.
+const PARTNERS_URL: &str = "https://app.virtueinitiative.org/partners";
+
+/// Short summary of what this client captures, printed after login and at the end of
+/// `virtue status`. The full list lives on the linked help page; keep both in step with what
+/// the code actually does (CORE-003, CORE-004).
+const MONITORING_SUMMARY: &[&str] = &[
+    "Virtue takes a screenshot of all your screens about every 5 minutes.",
+    "Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.",
+];
+const MONITORING_HELP_URL: &str = "https://virtueinitiative.org/help/what-virtue-monitors/linux";
+
+fn print_monitoring_summary() {
+    println!("What Virtue monitors");
+    for line in MONITORING_SUMMARY {
+        println!("  {line}");
+    }
+    println!("  Learn more: {MONITORING_HELP_URL}");
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "virtue")]
@@ -218,11 +237,16 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
     let probe = probe_backend();
     println!("{}", probe.guidance);
     println!("Logged in. Device id: {device_id}");
+    println!(
+        "Add partners on the Virtue website. Open {PARTNERS_URL} and select \"Invite partner\"."
+    );
     if !probe.captured_ok {
         println!(
             "Capture is not yet working; service will run and log missed captures until fixed."
         );
     }
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }
@@ -526,6 +550,7 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
             .map(|count| count.to_string())
             .unwrap_or_else(|| "<unknown>".to_string())
     );
+    println!("  add partners at:      {PARTNERS_URL}");
 
     println!();
     println!("Queues");
@@ -601,6 +626,9 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
     );
     println!("  state dir:            {}", paths.state_dir.display());
     println!("  logs:                 {}", log_command());
+
+    println!();
+    print_monitoring_summary();
 
     Ok(())
 }

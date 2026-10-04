@@ -344,22 +344,6 @@ pub extern "C" fn virtue_mac_native_stop_daemon(user_initiated: bool) -> *mut c_
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_mac_native_relaunch_daemon(daemon_exe_path: *const c_char) -> *mut c_char {
-    let result = (|| -> Result<()> {
-        let core = core()?;
-        let exe = c_string_or_empty(daemon_exe_path);
-        if agent_is_registered(core) {
-            launch_agent::stop_agent(&core.paths)
-                .context("failed to stop existing background service before relaunch")?;
-        }
-        launch_agent::ensure_agent_running(&core.paths, Path::new(&exe))
-            .context("failed to relaunch background service")?;
-        Ok(())
-    })();
-    into_c_result(result)
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_agent_is_registered() -> bool {
     core().map(agent_is_registered).unwrap_or(false)
 }

@@ -4,6 +4,7 @@ import { Button } from '@virtueinitiative/shared-web';
 import CheckIcon from '../components/icons/CheckIcon.astro';
 import MinusIcon from '../components/icons/MinusIcon.astro';
 import LogoMark from '../components/LogoMark.astro';
+import NewsletterForm from '../components/NewsletterForm.astro';
 import RightArrowIcon from '../components/icons/RightArrowIcon.astro';
 import SiteLayout from '../layouts/SiteLayout.astro';
 import { APP_URL } from '../lib/app-url';
@@ -299,6 +300,8 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
         </section>
       )
     }
+
+    <NewsletterForm />
 
     <section class="home-section home-cta">
       <div class="home-section-heading">

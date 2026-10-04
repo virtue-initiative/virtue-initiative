@@ -1,6 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import SiteLayout from '../../layouts/SiteLayout.astro';
+import NewsletterForm from '../../components/NewsletterForm.astro';
 
 const posts = (await getCollection('blog', ({ data }) => !data.draft)).sort(
   (a, b) => b.data.pubDate.getTime() - a.data.pubDate.getTime(),
@@ -23,7 +24,7 @@ function getExcerpt(body: string, maxLength = 220): string {
 }
 ---
 
-<SiteLayout pageTitle="Blog">
+<SiteLayout pageTitle="Blog" description="News and updates from The Virtue Initiative.">
   <article class="help-content-card help-doc">
     <h1>Blog</h1>
     <p>
@@ -62,5 +63,7 @@ function getExcerpt(body: string, maxLength = 220): string {
         <p class="blog-empty">No posts yet — check back soon.</p>
       )
     }
+
+    <NewsletterForm />
   </article>
 </SiteLayout>

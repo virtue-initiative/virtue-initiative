@@ -422,6 +422,19 @@ pub extern "C" fn virtue_ios_native_tick_once() -> *mut c_char {
     into_c_result(result)
 }
 
+/// `virtue_ios_native_tick_once`, but forcing a screenshot and an immediate
+/// batch upload on this tick (CORE-021). The Safari extension calls this in
+/// place of the plain tick when the app has asked for a forced capture.
+#[no_mangle]
+pub extern "C" fn virtue_ios_native_force_tick_once() -> *mut c_char {
+    let result = (|| -> Result<()> {
+        core()?.daemon.tick_once_forced();
+        Ok(())
+    })();
+
+    into_c_result(result)
+}
+
 /// Process-lifetime count of NSFW model invocations, for the same
 /// memory-diagnostics purpose as `virtue_ios_native_batch_upload_count`.
 #[no_mangle]

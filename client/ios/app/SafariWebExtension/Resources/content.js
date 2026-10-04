@@ -49,4 +49,39 @@
 
   startTickLoop();
   sendTick("initial_load");
+
+  // virtueinitiative.org/check-extension shows whether this extension is on.
+  // Only Virtue's own site gets an answer, so other sites can't use the page's
+  // element to find out that someone runs Virtue.
+  function isVirtueSite() {
+    const host = location.hostname;
+    return (
+      host === "virtueinitiative.org" ||
+      host.endsWith(".virtueinitiative.org") ||
+      host === "localhost" ||
+      host.endsWith(".localhost")
+    );
+  }
+
+  function reportStatusToCheckPage() {
+    const target = document.getElementById("virtue-extension-check");
+    if (!target || !isVirtueSite()) {
+      return;
+    }
+    browser.runtime
+      .sendMessage({ type: "virtue_extension_status" })
+      .then((status) => {
+        status = status || {};
+        target.dataset.extension = "on";
+        target.dataset.allSites = String(status.all_sites);
+        target.dataset.privateAllowed = String(status.private_allowed);
+        target.dataset.paused = String(Boolean(status.paused));
+      })
+      .catch(() => {
+        // This script is running, so the extension is on even without details.
+        target.dataset.extension = "on";
+      });
+  }
+
+  reportStatusToCheckPage();
 })();

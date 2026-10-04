@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
+import { useState } from 'preact/hooks';
 import { describe, expect, it } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_DEVICES } from '../../mocks/fixtures';
@@ -72,6 +73,56 @@ describe('Devices — device list', () => {
     renderWithClient(<Devices />);
     await screen.findByText('My Laptop');
     expect(screen.queryByText('Add your first device')).not.toBeInTheDocument();
+  });
+});
+
+describe('Devices — refresh on open', () => {
+  it('shows the cached devices on reopen and then refetches them', async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen((o) => !o)}>
+            toggle
+          </button>
+          {open && <Devices />}
+        </>
+      );
+    }
+
+    renderWithClient(<Harness />);
+    await screen.findByText('My Laptop');
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+    expect(screen.queryByText('My Laptop')).not.toBeInTheDocument();
+
+    let resolveDevices: (() => void) | undefined;
+    server.use(
+      http.get(
+        `${BASE}/device`,
+        () =>
+          new Promise((resolve) => {
+            resolveDevices = () =>
+              resolve(
+                HttpResponse.json(
+                  TEST_DEVICES.map((d) =>
+                    d.name === 'My Laptop' ? { ...d, name: 'Work Laptop' } : d,
+                  ),
+                ),
+              );
+          }),
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'toggle' }));
+    // Cached copy renders immediately while the refetch is in flight.
+    expect(screen.getByText('My Laptop')).toBeInTheDocument();
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+
+    await waitFor(() => expect(resolveDevices).toBeDefined());
+    resolveDevices?.();
+    expect(await screen.findByText('Work Laptop')).toBeInTheDocument();
+    expect(screen.queryByText('My Laptop')).not.toBeInTheDocument();
   });
 });
 

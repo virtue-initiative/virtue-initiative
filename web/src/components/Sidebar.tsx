@@ -251,7 +251,12 @@ export function Sidebar() {
             active={currentPath === '/'}
             icon={<DevicesIcon />}
             count={deviceCount}
-            onNavigate={closeMobile}
+            onNavigate={() => {
+              closeMobile();
+              // Re-clicking while already on `/` doesn't remount the page, so
+              // its own on-open refetch wouldn't run.
+              void api.refreshDevices();
+            }}
           >
             Devices
           </NavLink>
@@ -260,7 +265,12 @@ export function Sidebar() {
             active={currentPath.startsWith('/partners')}
             icon={<PartnersIcon />}
             count={partnerCount}
-            onNavigate={closeMobile}
+            onNavigate={() => {
+              closeMobile();
+              // Same as Devices: re-clicking while on the page doesn't remount it.
+              void api.refreshPartners();
+              void api.refreshDevices();
+            }}
           >
             Partners
           </NavLink>

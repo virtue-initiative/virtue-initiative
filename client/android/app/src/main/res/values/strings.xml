@@ -8,6 +8,7 @@
     <!-- Section labels -->
     <string name="section_status">STATUS</string>
     <string name="section_account">ACCOUNT</string>
+    <string name="section_monitoring">WHAT VIRTUE MONITORS</string>
 
     <!-- Status -->
     <string name="status_signed_out">Signed out</string>
@@ -15,17 +16,26 @@
     <string name="status_paused">Monitoring paused</string>
     <string name="status_waiting">Waiting for first capture</string>
 
+    <!-- What Virtue monitors. Short summary; the full list is on the linked help
+         page. Keep both in step with what the app actually does
+         (client/core/SPEC.md CORE-003, CORE-004). -->
+    <string name="monitoring_summary">Virtue takes a screenshot of your screen about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.</string>
+    <string name="monitoring_learn_more">Learn more</string>
+
     <!-- Account -->
     <string name="account_signed_in">Signed in</string>
     <string name="account_device_id">Device ID: %s</string>
+    <string name="account_add_partners">Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".</string>
     <string name="email_hint">Email</string>
     <string name="password_hint">Password</string>
     <string name="device_name_hint">Device name</string>
 
     <!-- Buttons -->
     <string name="btn_sign_in">Sign In</string>
+    <string name="btn_signing_in">Signing In…</string>
     <string name="btn_sign_up">Don\'t have an account? Sign up</string>
     <string name="btn_sign_out">Sign Out</string>
+    <string name="btn_open_partners">Open Partners Page</string>
     <string name="btn_status_details">Status Details</string>
     <string name="btn_force_capture">Test Screenshot</string>
     <string name="btn_pause_monitoring">Pause Monitoring</string>
@@ -45,6 +55,8 @@
     <string name="update_notification_text">Tap to install version %1$s.</string>
 
     <!-- Messages -->
+    <string name="msg_sign_in_required_fields">Enter your email and password.</string>
+    <string name="msg_sign_in_failed">Sign in failed. %1$s</string>
     <string name="msg_sign_in_to_start">Sign in to start monitoring</string>
     <string name="msg_grant_permission">After signing in, grant screenshot permission to enable monitoring.</string>
     <string name="msg_onboarding_waiting">Waiting for Accessibility permission…</string>
