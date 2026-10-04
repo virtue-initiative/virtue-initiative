@@ -4,11 +4,6 @@ import Foundation
 import ServiceManagement
 import VirtueKit
 
-enum PermissionPhase {
-    case needsRequest
-    case needsRelaunch
-}
-
 /// Faithfully ports `main.rs`'s tray event loop state machine: the daemon
 /// poll cadence, the `STOPPED_TIMEOUT` grace period that tolerates a brief
 /// launchd restart race, the "Unreachable" (alive-but-busy) distinction, and
@@ -34,9 +29,9 @@ final class MonitoringCoordinator: ObservableObject {
 
     @Published private(set) var daemonStatus: DaemonStatus = .stopped
     @Published private(set) var unexpectedStopMessage: String?
-    @Published private(set) var permissionPhase: PermissionPhase?
-    @Published private(set) var isRelaunching: Bool = false
-    @Published private(set) var relaunchError: String?
+    /// Screen Recording is off. macOS has already been asked (once, at
+    /// launch); from here the user turns it on in System Settings.
+    @Published private(set) var needsScreenRecording: Bool = false
 
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var lastLoopAt: String = "<none>"
@@ -63,7 +58,6 @@ final class MonitoringCoordinator: ObservableObject {
     /// Set by the app once the updater exists; nil in builds without
     /// auto-update wired in.
     weak var updateController: UpdateController?
-    private var relaunching = false
     private var gracefulShutdown = false
     private var stoppedSince: Date?
     private var postRelaunchGraceUntil: Date?
@@ -80,15 +74,9 @@ final class MonitoringCoordinator: ObservableObject {
             unexpectedStopMessage = "Core initialization failed: \(initError)"
         }
         refreshSessionState()
-        // Only ever set from `login()` before this — meaning a relaunch
-        // while already logged in (persisted credentials from a prior
-        // session/install) left this at its default `nil` forever, so the
-        // permission card silently never appeared regardless of actual TCC
-        // status. This is a mere Preflight check, not a request, so it's
-        // safe to call unconditionally at every launch.
-        if loggedIn {
-            refreshPermissionPhase()
-        }
+        // Ask for Screen Recording right away, before sign-in, so the first
+        // screenshot after sign-in is never a failed one (issue #632).
+        requestPermissionIfNeeded()
 
         // `ensure_daemon_running` below does a `launchctl kickstart -k`,
         // which force-restarts the daemon on *every* launch — not just
@@ -152,10 +140,6 @@ final class MonitoringCoordinator: ObservableObject {
             }
             password = ""
             refreshSessionState()
-            // Do not auto-request screen-capture access here: macOS shows its
-            // prompt only once per launch, so triggering it now would consume
-            // the one-shot before the user clicks "Request Permissions".
-            refreshPermissionPhase()
         }
     }
 
@@ -243,39 +227,18 @@ final class MonitoringCoordinator: ObservableObject {
 
     // MARK: - Permissions
 
-    func requestPermissions() {
-        // Spawns a throwaway `screencapture` subprocess to force the TCC
-        // prompt; keep it off the main actor like every other native call
-        // that can block.
-        Task {
-            let granted = await Task.detached(priority: .userInitiated) {
-                NativeBridge.requestCapturePermission()
-            }.value
-            permissionPhase = granted ? nil : .needsRelaunch
-        }
+    /// macOS shows its Screen Recording prompt at most once per app, ever, so
+    /// this runs at launch rather than behind a button: a button would either
+    /// do nothing (prompt already used) or spend the only prompt late. Once
+    /// the prompt is used, `openScreenRecordingSettings` is the way forward.
+    /// The request returns without waiting for the user's answer.
+    private func requestPermissionIfNeeded() {
+        needsScreenRecording = !NativeBridge.requestCapturePermission()
     }
 
-    func relaunchToAcceptPermissions() {
-        relaunching = true
-        isRelaunching = true
-        relaunchError = nil
-        Task {
-            let error = await Task.detached(priority: .userInitiated) { [daemonExePath] in
-                NativeBridge.relaunchDaemon(daemonExePath: daemonExePath)
-            }.value
-            relaunching = false
-            isRelaunching = false
-            if let error {
-                relaunchError = error
-                return
-            }
-            postRelaunchGraceUntil = Date().addingTimeInterval(Self.postRelaunchGrace)
-            // The app process itself doesn't restart, so a local TCC query may
-            // still return false even though the relaunched daemon has the
-            // permission. Update the UI directly rather than waiting for a poll.
-            permissionPhase = nil
-            unexpectedStopMessage = nil
-        }
+    func openScreenRecordingSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Status polling
@@ -304,7 +267,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func pollTick() {
-        guard !relaunching, !isPolling else {
+        guard !isPolling else {
             return
         }
         checkForReplacedBundle()
@@ -333,7 +296,7 @@ final class MonitoringCoordinator: ObservableObject {
         // a genuinely successful `.running` poll, or the UI is stuck showing
         // "Starting…" for the whole grace window even when the daemon came
         // up within a second or two, as it normally does.
-        let inGracePeriod = relaunching || gracefulShutdown
+        let inGracePeriod = gracefulShutdown
             || (postRelaunchGraceUntil.map { Date() < $0 } ?? false)
 
         switch snapshot.status {
@@ -369,20 +332,15 @@ final class MonitoringCoordinator: ObservableObject {
             lastLoopAt = status.lastLoopAtMs.map(formatMillisTimestamp) ?? "<none>"
             coreStatus = status
         }
-        // Local TCC cache check, not IPC — cheap enough to run on the main actor.
-        if NativeBridge.hasCapturePermission() {
-            permissionPhase = nil
-        }
+        // Deliberately no re-check of Screen Recording here: macOS caches the
+        // answer for the life of the process, so a grant only shows up after
+        // a relaunch (macOS's "Quit & Reopen", or `restartApp`).
     }
 
     private func refreshSessionState() {
         loggedIn = NativeBridge.isLoggedIn()
         deviceId = NativeBridge.getDeviceId() ?? "<none>"
         accountEmail = NativeBridge.getAccountEmail()
-    }
-
-    private func refreshPermissionPhase() {
-        permissionPhase = NativeBridge.hasCapturePermission() ? nil : .needsRequest
     }
 
     // MARK: - Stale instances (issue #539)
@@ -458,6 +416,13 @@ final class MonitoringCoordinator: ObservableObject {
     /// Relaunch this app from its (new) bundle and exit. `open` is used
     /// rather than re-exec'ing so the replacement process is started by
     /// launchservices against the new bundle, not inherited from this one.
+    /// For someone who turned on Screen Recording but picked "Later" on
+    /// macOS's "Quit & Reopen" prompt. The new instance kickstarts the daemon,
+    /// so it picks up the permission too.
+    func restartApp() {
+        relaunchSelf()
+    }
+
     private func relaunchSelf() {
         isRelaunchingIntoNewBundle = true
         let bundleURL = Bundle.main.bundleURL
