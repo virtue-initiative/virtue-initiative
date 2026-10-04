@@ -75,11 +75,16 @@ APP_ROOT="target/macos/${APP_NAME}"
 # Invalid" once a real Team ID has ever been registered for this bundle ID,
 # since the ad-hoc signature has no Team ID to satisfy that check). CI has no
 # access to this identity, so it must override both vars to "-"/"" explicitly.
-# "Developer ID Application" (with no name/team suffix) matches whichever such
-# identity is present in the local signer's keychain, so this doesn't need to
-# hardcode any one developer's name.
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application}"
+# The default is scoped to this team's Developer ID certificate. A bare
+# "Developer ID Application" matches every such identity in the keychain and
+# codesign refuses it as ambiguous once a developer also holds a personal one.
+# It is still ambiguous while two certificates for this team are installed
+# (e.g. mid-rotation, with the old and new certificate side by side); set
+# CODESIGN_IDENTITY to the new certificate's SHA-1 from
+# `security find-identity -v -p codesigning`, or delete the old one. See
+# "Renewing the Developer ID certificate" in client/mac/README.md.
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-Y2Z8ZS4D33}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: Virtue Initiative Inc. (${DEVELOPMENT_TEAM})}"
 
 # Auto-update (Sparkle) is opt-in at build time, mirroring the Linux package's
 # /usr/lib/virtue/auto-update-enabled flag: without VIRTUE_ENABLE_AUTO_UPDATE=1
