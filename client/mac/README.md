@@ -104,6 +104,27 @@ must not change without accepting a one-time re-prompt for every existing user:
 Moving between an ad-hoc-signed local build and a Developer ID release build does re-prompt;
 that is unavoidable and only affects developers.
 
+### Renewing the Developer ID certificate
+
+The release certificate is a "Developer ID Application: Virtue Initiative Inc. (Y2Z8ZS4D33)"
+certificate. Renewing it needs no code change, because the Team ID — which TCC and Sparkle key
+on — stays the same. Do this when it nears expiry, and whenever Apple retires a Developer ID
+intermediate (the original Sub-CA expired 2027-02-01; certificates must come from **G2**):
+
+1. Create a CSR in Keychain Access (or with `openssl`) on the Mac that will hold the private key.
+2. In Certificates, Identifiers & Profiles (Account Holder only), add a **Developer ID
+   Application** certificate, choose the **G2 Sub-CA** intermediary, and upload the CSR.
+3. Install the downloaded `.cer` and check `openssl x509 -inform DER -in <file> -noout -issuer`
+   shows `OU=G2`.
+4. Update the `MACOS_DIST_CERTIFICATE_P12_BASE64` and `MACOS_DIST_CERTIFICATE_PASSWORD` GitHub
+   secrets with a `.p12` export of the new identity (certificate and private key). CI signs and
+   notarizes with whatever that secret holds, so releases keep using the old certificate until it
+   is replaced.
+5. Nothing to change locally: with no `CODESIGN_IDENTITY` set, `build-app.sh` signs with the
+   team's valid Developer ID certificate that expires last, so the old and new certificate can
+   sit side by side until the old one is deleted. Set `CODESIGN_IDENTITY` (a name or SHA-1 from
+   `security find-identity -v -p codesigning`) to force a specific one.
+
 ### Signing note
 
 `build-app.sh` signs Sparkle's nested helpers (`Autoupdate`, `Updater.app`, and the two XPC
