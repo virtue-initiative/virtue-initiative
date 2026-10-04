@@ -126,15 +126,16 @@ struct ContentView: View {
                     }
                     .buttonStyle(VirtueButtonStyle())
 
-                    Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
-                        if coordinator.monitoringEnabled {
-                            showPauseConfirmation = true
-                        } else {
-                            coordinator.toggleMonitoring()
+                    if coordinator.loggedIn {
+                        Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
+                            if coordinator.monitoringEnabled {
+                                showPauseConfirmation = true
+                            } else {
+                                coordinator.toggleMonitoring()
+                            }
                         }
+                        .buttonStyle(VirtueButtonStyle(prominent: true))
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
 
