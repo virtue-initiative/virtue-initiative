@@ -16,6 +16,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updateLayoutParams
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import org.virtueinitiative.virtue.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyWindowInsets()
         binding.versionText.text = "Build ${BuildConfig.VIRTUE_BUILD_LABEL}"
 
         if (binding.deviceNameInput.text.isNullOrBlank()) {
@@ -49,6 +54,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.loginButton.setOnClickListener { login() }
+        binding.emailInput.doAfterTextChanged { showLoginError(null) }
+        binding.passwordInput.doAfterTextChanged { showLoginError(null) }
         binding.signOutButton.setOnClickListener { logout() }
         binding.statusDetailsButton.setOnClickListener { showStatusDetails() }
         binding.pauseResumeButton.setOnClickListener { toggleMonitoring() }
@@ -150,11 +157,13 @@ class MainActivity : AppCompatActivity() {
             ?.ifBlank { null } ?: deviceName()
 
         if (email.isBlank() || password.isBlank()) {
-            setStatus("Email and password are required")
+            showLoginError(getString(R.string.msg_sign_in_required_fields))
             return
         }
 
+        showLoginError(null)
         binding.loginButton.isEnabled = false
+        binding.loginButton.text = getString(R.string.btn_signing_in)
         lifecycleScope.launch {
             val error = withContext(Dispatchers.IO) {
                 var result = NativeBridge.nativeLogin(email, password, deviceName)
@@ -167,14 +176,44 @@ class MainActivity : AppCompatActivity() {
                 result
             }
             binding.loginButton.isEnabled = true
+            binding.loginButton.text = getString(R.string.btn_sign_in)
 
             if (error == null) {
                 AccountEmailStore.save(this@MainActivity, email)
                 refreshUi()
             } else {
-                setStatus("Login failed: $error")
+                // The API's messages (e.g. "Invalid email or password") carry no
+                // trailing period.
+                val detail = if (error.trimEnd().lastOrNull() in ".!?".toList()) error else "$error."
+                showLoginError(getString(R.string.msg_sign_in_failed, detail))
             }
         }
+    }
+
+    // targetSdk 35 forces edge-to-edge, so the window no longer shrinks for the
+    // keyboard (adjustResize) or stops below the status bar on its own. Inset the
+    // root ScrollView by hand. Using margins rather than padding resizes it, and
+    // a ScrollView that shrinks scrolls its focused field back into view.
+    private fun applyWindowInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.updateLayoutParams<android.view.ViewGroup.MarginLayoutParams> {
+                topMargin = bars.top
+                leftMargin = bars.left
+                rightMargin = bars.right
+                bottomMargin = maxOf(bars.bottom, ime.bottom)
+            }
+            WindowInsetsCompat.CONSUMED
+        }
+    }
+
+    private fun showLoginError(message: String?) {
+        binding.loginErrorText.text = message.orEmpty()
+        binding.loginErrorText.visibility =
+            if (message == null) android.view.View.GONE else android.view.View.VISIBLE
     }
 
     private fun logout() {

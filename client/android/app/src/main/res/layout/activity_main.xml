@@ -306,6 +306,18 @@
                         android:inputType="text" />
                 </com.google.android.material.textfield.TextInputLayout>
 
+                <!-- Sign-in errors go here, next to the form, rather than in the
+                     status card, which is scrolled off-screen while typing. -->
+                <TextView
+                    android:id="@+id/loginErrorText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:textSize="14sp"
+                    android:textColor="@color/status_danger"
+                    android:accessibilityLiveRegion="polite"
+                    android:visibility="gone" />
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -317,6 +329,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/btn_sign_in"
+                        android:textColor="@color/surface"
                         android:backgroundTint="@color/virtue_forest" />
 
                     <TextView
