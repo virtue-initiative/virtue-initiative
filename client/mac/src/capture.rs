@@ -34,14 +34,12 @@ pub fn request_screen_capture_access() -> bool {
         return true;
     }
 
+    // Shows macOS's prompt, which also adds the app to the Screen Recording
+    // list in System Settings. It returns immediately, before the user
+    // answers. There used to be a throwaway `screencapture` here as well,
+    // but that raised a second, identical prompt as soon as the first was
+    // answered (issue #632).
     let _ = unsafe { CGRequestScreenCaptureAccess() };
-
-    // Some macOS/TCC states do not visibly present the prompt from
-    // CGRequestScreenCaptureAccess alone. Make one explicit throwaway capture
-    // attempt for user-initiated permission flows, but never return these bytes
-    // to core so a denied black capture cannot be uploaded.
-    let _ = run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
-        .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]));
 
     has_screen_capture_access()
 }

@@ -18,11 +18,20 @@ struct ContentView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 headerCard
-                statusCard
-                monitoringCard
-                accountCard
-                if let permissionPhase = coordinator.permissionPhase {
-                    permissionCard(permissionPhase)
+                // First, above the fold: nothing else works until it's done.
+                if coordinator.needsScreenRecording {
+                    permissionCard
+                }
+                // Signed out, the sign-in form is the next step, so it comes
+                // before the status and help cards rather than below the fold.
+                if coordinator.loggedIn {
+                    statusCard
+                    monitoringCard
+                    accountCard
+                } else {
+                    accountCard
+                    monitoringCard
+                    statusCard
                 }
             }
             .padding(20)
@@ -123,7 +132,9 @@ struct ContentView: View {
                             coordinator.forceCapture()
                         }
                         .buttonStyle(VirtueButtonStyle())
-                        .disabled(!coordinator.loggedIn || coordinator.isForceCapturing)
+                        // Off until Screen Recording is on, so it can't pull
+                        // attention from the Restart Virtue step (issue #632).
+                        .disabled(!coordinator.loggedIn || coordinator.needsScreenRecording || coordinator.isForceCapturing)
                         .overlay {
                             // A disabled view stops receiving the hover events that
                             // drive `.help()`, so host the tooltip on a plain
@@ -132,6 +143,10 @@ struct ContentView: View {
                                 Color.clear
                                     .contentShape(Rectangle())
                                     .help("Sign in to use this feature")
+                            } else if coordinator.needsScreenRecording {
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .help("Allow Screen Recording to use this feature")
                             }
                         }
                     }
@@ -218,35 +233,51 @@ struct ContentView: View {
         }
     }
 
-    private func permissionCard(_ phase: PermissionPhase) -> some View {
+    private var permissionCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                SectionLabel("Screen Recording")
-                switch phase {
-                case .needsRequest:
-                    Text("Virtue needs Screen Recording permission to capture screenshots.")
-                        .foregroundStyle(VirtueBrand.textMuted)
-                    Button("Request Permissions") {
-                        coordinator.requestPermissions()
-                    }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .padding(.top, 6)
-                case .needsRelaunch:
-                    Text("Permission was granted in System Settings, but Virtue must relaunch its background service to use it.")
-                        .foregroundStyle(VirtueBrand.textMuted)
-                    Button(coordinator.isRelaunching ? "Restarting…" : "Relaunch to Accept Permissions") {
-                        coordinator.relaunchToAcceptPermissions()
-                    }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .disabled(coordinator.isRelaunching)
-                    .padding(.top, 6)
-                    if let relaunchError = coordinator.relaunchError {
-                        Text("Relaunch failed: \(relaunchError)")
-                            .font(.subheadline)
-                            .foregroundStyle(VirtueBrand.danger)
-                    }
+                SectionLabel("Action Needed")
+                Text("Allow Screen Recording")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(VirtueBrand.text)
+                Text("Virtue can't take screenshots until you allow Screen Recording.")
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    permissionStep(1, "Click Open System Settings.")
+                    permissionStep(2, "Turn on Virtue in the list.")
+                    permissionStep(3, "When macOS asks, click Quit & Reopen.")
                 }
+                .padding(.top, 2)
+                HStack(spacing: 10) {
+                    Button("Open System Settings") {
+                        coordinator.openScreenRecordingSettings()
+                    }
+                    .buttonStyle(VirtueButtonStyle(prominent: true))
+                    // macOS only reports the change to a freshly started app,
+                    // so this covers anyone who clicked Later in step 3.
+                    Button("Restart Virtue") {
+                        coordinator.restartApp()
+                    }
+                    .buttonStyle(VirtueButtonStyle())
+                }
+                .padding(.top, 6)
+                Text("If you turned it on and clicked Later, click Restart Virtue.")
+                    .font(.footnote)
+                    .foregroundStyle(VirtueBrand.textMuted)
             }
+        }
+    }
+
+    private func permissionStep(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number).")
+                .fontWeight(.semibold)
+                .foregroundStyle(VirtueBrand.text)
+                .frame(minWidth: 16, alignment: .leading)
+            Text(text)
+                .foregroundStyle(VirtueBrand.text)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -256,6 +287,9 @@ struct ContentView: View {
         }
         if coordinator.unexpectedStopMessage != nil {
             return "Monitoring stopped"
+        }
+        if coordinator.needsScreenRecording {
+            return "Screen Recording off"
         }
         if coordinator.daemonStatus == .running {
             return "Monitoring active"
@@ -269,6 +303,9 @@ struct ContentView: View {
         }
         if coordinator.unexpectedStopMessage != nil {
             return "Relaunch the Virtue app to continue monitoring."
+        }
+        if coordinator.needsScreenRecording {
+            return "Allow Screen Recording above so Virtue can take screenshots."
         }
         if coordinator.daemonStatus == .running {
             return "Virtue is taking screenshots on this Mac."

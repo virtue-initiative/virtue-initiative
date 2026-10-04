@@ -57,11 +57,6 @@ private func virtue_mac_native_ensure_daemon_running(
 @_silgen_name("virtue_mac_native_stop_daemon")
 private func virtue_mac_native_stop_daemon(_ userInitiated: Bool) -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_mac_native_relaunch_daemon")
-private func virtue_mac_native_relaunch_daemon(
-    _ daemonExePath: UnsafePointer<CChar>?
-) -> UnsafeMutablePointer<CChar>?
-
 @_silgen_name("virtue_mac_native_agent_is_registered")
 private func virtue_mac_native_agent_is_registered() -> Bool
 
@@ -210,14 +205,6 @@ enum NativeBridge {
     static func stopDaemon(userInitiated: Bool) -> String? {
         callReturningError {
             virtue_mac_native_stop_daemon(userInitiated)
-        }
-    }
-
-    static func relaunchDaemon(daemonExePath: String) -> String? {
-        callReturningError {
-            daemonExePath.withCString { pathCString in
-                virtue_mac_native_relaunch_daemon(pathCString)
-            }
         }
     }
 
