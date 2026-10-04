@@ -769,12 +769,29 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// same `Daemon` (same restriction as `run_forever`, enforced the same
     /// way — see `take_request_receiver`).
     pub fn tick_once(&self) {
+        self.tick_once_with(false);
+    }
+
+    /// `tick_once`, but with a `force_capture_now` applied ahead of the
+    /// tick as if it had been queued (CORE-021). A `tick_once` caller has no
+    /// loop to service `force_capture_now`'s blocking request, so this is
+    /// how it asks for one.
+    pub fn tick_once_forced(&self) {
+        self.tick_once_with(true);
+    }
+
+    fn tick_once_with(&self, force_capture: bool) {
         let rx = self.take_request_receiver();
         let now_ms = self.now_ms();
 
         let mut requests: Vec<DaemonRequest> = Vec::new();
         while let Ok(req) = rx.try_recv() {
             requests.push(req);
+        }
+        if force_capture {
+            // Nobody waits on this reply; the fire's send just fails quietly.
+            let (reply, _) = mpsc::channel();
+            requests.push(DaemonRequest::ForceCapture { reply });
         }
         let stopping = {
             let had_stop = requests.iter().any(|r| matches!(r, DaemonRequest::Stop));
