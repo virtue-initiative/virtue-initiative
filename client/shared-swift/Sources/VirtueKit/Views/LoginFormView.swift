@@ -51,8 +51,16 @@ public struct LoginFormView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
             }
-            TextField("Device name", text: $deviceName)
-                .textFieldStyle(.roundedBorder)
+            // The field is pre-filled with a default name, so a placeholder alone
+            // would vanish. A persistent label keeps it clear what the field is for.
+            VStack(alignment: .leading, spacing: VirtueSpacing.s1) {
+                Text("Device name")
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.textMuted)
+                TextField("Device name", text: $deviceName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Device name")
+            }
 
             Button(isSigningIn ? "Signing In…" : "Sign In", action: onSubmit)
                 .buttonStyle(VirtueButtonStyle(prominent: true))

@@ -176,6 +176,9 @@ public sealed partial class MainWindow : Window
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
 
+        // The box is pre-filled with a default name, so a placeholder alone never
+        // shows. A persistent header keeps it clear what the field is for.
+        _deviceNameTextBox.Header = "Device name";
         _deviceNameTextBox.PlaceholderText = "Device name";
         _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
         _deviceNameTextBox.TextChanged += (_, _) => ViewModel.DeviceNameInput = _deviceNameTextBox.Text;
