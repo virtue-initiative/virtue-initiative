@@ -18,11 +18,20 @@
 #   prune    delete cached target dirs whose worktree no longer exists
 #   status   show the mount, base build and linked worktrees
 #
+# The Windows VM gets the same treatment on a ReFS Dev Drive inside the VM
+# (see client/windows/VM_SETUP.md); client/windows/scripts/remote-windows-build.sh
+# picks it up automatically once a base exists:
+#
+#   warm-windows   (re)build the VM's base from origin/staging
+#   prune-windows  delete VM build roots whose worktree no longer exists
+#
 # Env:
 #   VIRTUE_COW_DIR   mount point (default /mnt/virtue-cow)
 #   VIRTUE_COW_IMG   image file for `init` (default ~/storage/virtue-cow.img,
 #                    or ~/virtue-cow.img if ~/storage doesn't exist)
 #   VIRTUE_COW_SIZE  image size for `init` (default 80G; the file is sparse)
+#   VIRTUE_WIN_HOST      SSH host of the Windows VM (default virtue-win11)
+#   VIRTUE_WIN_COW_ROOT  cache root on the VM's Dev Drive (default V:/virtue)
 
 set -euo pipefail
 
@@ -79,8 +88,9 @@ cmd_init() {
 }
 
 # What every worktree is likely to build: launch.sh's `cargo run`, plus test
-# binaries. virtue-linux needs leptonica/tesseract dev libs (see
-# client/linux/README.md), so it's only warmed when they're installed.
+# binaries, and the Android JNI library. virtue-linux needs leptonica/tesseract
+# dev libs (see client/linux/README.md), so it's only warmed when they're
+# installed.
 build_component() {
     local name="$1" src="$2" target="$3"
     case "$name" in
@@ -97,9 +107,30 @@ build_component() {
             fi
             # shellcheck disable=SC2086
             (cd "$src/client" && CARGO_TARGET_DIR="$target" cargo build $pkgs \
-                && CARGO_TARGET_DIR="$target" cargo test --no-run $pkgs)
+                && CARGO_TARGET_DIR="$target" cargo test --no-run $pkgs) || return 1
+            build_android_jni "$src" "$target"
             ;;
     esac
+}
+
+# The Android JNI library, built exactly as client/android/app/build.gradle.kts's
+# buildRustNative task does (same NDK path, ABIs and --release), so a worktree's
+# Gradle build finds it already compiled. Skipped if the Android toolchain
+# isn't installed (see client/android/README.md).
+build_android_jni() {
+    local src="$1" target="$2"
+    local sdk="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+    local ndk_version
+    ndk_version="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' "$src/client/android/app/build.gradle.kts")"
+    local ndk="${ANDROID_NDK_ROOT:-$sdk/ndk/$ndk_version}"
+    if ! command -v cargo-ndk > /dev/null 2>&1 || [ ! -d "$ndk" ]; then
+        echo "cow-cache: cargo-ndk or the Android NDK ($ndk) not found, skipping Android" >&2
+        return 0
+    fi
+    (cd "$src/client/android" \
+        && ANDROID_SDK_ROOT="$sdk" ANDROID_HOME="$sdk" ANDROID_NDK_ROOT="$ndk" ANDROID_NDK_HOME="$ndk" \
+            CARGO_TARGET_DIR="$target" cargo ndk -t arm64-v8a -t x86_64 -o "$target/android-jnilibs" \
+            build --release --locked --manifest-path rust/Cargo.toml)
 }
 
 cmd_warm() {
@@ -213,12 +244,72 @@ cmd_status() {
     return 0
 }
 
+WIN_HOST="${VIRTUE_WIN_HOST:-virtue-win11}"
+WIN_COW="${VIRTUE_WIN_COW_ROOT:-V:/virtue}"
+
+# Runs PowerShell from stdin on the VM. -EncodedCommand sidesteps the quoting
+# of ssh -> cmd -> powershell entirely.
+win_ps() {
+    local script
+    script="$(printf '$ProgressPreference = "SilentlyContinue"\n$ErrorActionPreference = "Stop"\n'; cat)"
+    ssh -n -o BatchMode=yes "$WIN_HOST" "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $(printf '%s' "$script" | iconv -f utf-8 -t utf-16le | base64 -w0)"
+}
+
+require_win_cow() {
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_HOST" "echo ok" > /dev/null 2>&1 \
+        || die "can't reach $WIN_HOST over SSH (is the VM running?)"
+    local drive="${WIN_COW%%:*}"
+    [ "$(win_ps <<< "Test-Path '${drive}:\\'" | tr -d '\r')" = "True" ] \
+        || die "$WIN_HOST has no ${drive}: Dev Drive (see client/windows/VM_SETUP.md)"
+}
+
+cmd_warm_windows() {
+    require_win_cow
+    git -C "$ROOT" fetch origin staging
+    local rev
+    rev="$(git -C "$ROOT" rev-parse origin/staging)"
+    local build="$ROOT/client/windows/scripts/remote-windows-build.sh"
+    local next="$WIN_COW/base.new"
+
+    win_ps <<< "if (Test-Path '$next') { Remove-Item -Recurse -Force '$next' }"
+    # smoke builds the host-target crates plus clippy; msix builds the
+    # x86_64-pc-windows-msvc target and the packaged app. Warm both.
+    "$build" --build-host "$WIN_HOST" --no-cow --mode smoke \
+        --build-root "$next" --target-dir "$next/cargo-target" --source-rev "$rev"
+    "$build" --build-host "$WIN_HOST" --no-cow --mode msix --skip-sync \
+        --build-root "$next" --target-dir "$next/cargo-target"
+
+    win_ps <<EOF
+Set-Content -Path '$next/info' -Value "rev=$rev"
+if (Test-Path '$WIN_COW/base') { Remove-Item -Recurse -Force '$WIN_COW/base' }
+Rename-Item -Path '$next' -NewName 'base'
+EOF
+    echo "cow-cache: Windows base warmed at ${rev:0:9}."
+}
+
+cmd_prune_windows() {
+    require_win_cow
+    local key src
+    # Each build root records the worktree it was built from (see
+    # remote-windows-build.sh); drop the ones whose worktree is gone.
+    win_ps <<< "Get-ChildItem '$WIN_COW/worktrees' -Directory -ErrorAction SilentlyContinue | ForEach-Object { \"\$(\$_.Name)\`t\$(Get-Content (Join-Path \$_.FullName 'source') -ErrorAction SilentlyContinue)\" }" \
+        | tr -d '\r' | while IFS="$(printf '\t')" read -r key src; do
+            [ -n "$key" ] || continue
+            if [ -z "$src" ] || [ ! -d "$src" ]; then
+                echo "cow-cache: removing $WIN_COW/worktrees/$key (${src:-unknown worktree} is gone)"
+                win_ps <<< "Remove-Item -Recurse -Force '$WIN_COW/worktrees/$key'"
+            fi
+        done
+}
+
 case "${1:-}" in
     init) cmd_init ;;
     warm) cmd_warm ;;
     link) cmd_link ;;
     prune) cmd_prune ;;
     status) cmd_status ;;
+    warm-windows) cmd_warm_windows ;;
+    prune-windows) cmd_prune_windows ;;
     *)
         sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
         exit 1

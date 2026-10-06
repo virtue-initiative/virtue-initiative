@@ -97,7 +97,10 @@ bash client/windows/scripts/remote-windows-build.sh \
 
 ## Install the MSIX
 
-Run the generated install script on the VM (handles cert trust and package installation):
+Run the generated install script on the VM (handles cert trust and package installation). The
+path below is the `C:\virtue-build` fallback. With the Dev Drive set up (see `VM_SETUP.md`, step 8),
+each worktree builds under `V:\virtue\worktrees\<worktree>-<hash>\` instead, and the build script
+prints the exact path at the end.
 
 ```bash
 ssh virtue-win11 "powershell -NoProfile -ExecutionPolicy Bypass -File \

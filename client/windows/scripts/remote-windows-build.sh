@@ -14,8 +14,15 @@ Usage:
 Options:
   --mode <smoke|msix>             Default: smoke.
   --build-host <ssh-host>         SSH host/alias for the Windows VM (required)
-  --build-root <win-path>         Remote workspace root. Default: C:/virtue-build
-  --cache-root <win-path>         Remote cache root. Default: C:/virtue-build/cache
+  --build-root <win-path>         Remote workspace root. Default: a per-worktree dir
+                                  on the VM's copy-on-write Dev Drive if it has one
+                                  (see below), else C:/virtue-build
+  --cache-root <win-path>         Remote cache root (sccache, signing cert).
+                                  Default: C:/virtue-build/cache
+  --target-dir <win-path>         Remote CARGO_TARGET_DIR. Default: <cache-root>/cargo-target,
+                                  or <build-root>/cargo-target on the Dev Drive
+  --source-rev <git-rev>          Upload this commit's client/ instead of the working tree
+  --no-cow                        Don't use the Dev Drive even if the VM has one
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
   --version <version>             Artifact label. Default: 0.1.6-dev
@@ -24,6 +31,13 @@ Options:
   --log-dir <dir>                 Local directory for full remote run logs.
                                   Default: client/windows/dist/remote-logs
   -h, --help                      Show this help
+
+Copy-on-write Dev Drive: if the VM has a base build at $VIRTUE_WIN_COW_ROOT/base
+(default V:/virtue/base, made by `scripts/cow-cache.sh warm-windows`), each
+worktree gets its own build root under $VIRTUE_WIN_COW_ROOT/worktrees/, so
+builds from different worktrees can run at once without clobbering each other.
+Its cargo target dir starts as a block-cloned copy of the base's, so only the
+workspace's own crates rebuild.
 EOF
 }
 
@@ -40,8 +54,13 @@ ps_quote() {
 
 MODE="smoke"
 BUILD_HOST=""
-BUILD_ROOT="C:/virtue-build"
+BUILD_ROOT=""
 CACHE_ROOT="C:/virtue-build/cache"
+TARGET_DIR=""
+SEED_TARGET_DIR=""
+SOURCE_REV=""
+USE_COW=1
+WIN_COW_ROOT="${VIRTUE_WIN_COW_ROOT:-V:/virtue}"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
 VERSION="0.1.6-dev"
@@ -68,6 +87,18 @@ while [[ $# -gt 0 ]]; do
     --cache-root)
       CACHE_ROOT="${2:-}"
       shift 2
+      ;;
+    --target-dir)
+      TARGET_DIR="${2:-}"
+      shift 2
+      ;;
+    --source-rev)
+      SOURCE_REV="${2:-}"
+      shift 2
+      ;;
+    --no-cow)
+      USE_COW=0
+      shift
       ;;
     --target)
       TARGET="${2:-}"
@@ -142,19 +173,40 @@ echo "Logging to $LOG_FILE"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-REMOTE_ARCHIVE_NAME="virtue-client-src.tgz"
-REMOTE_SCRIPT_NAME="virtue-remote-build.ps1"
+# Same key scripts/cow-cache.sh uses for this worktree's Linux cache: basename
+# plus a hash of the absolute path, since basenames aren't unique.
+WORKTREE_KEY="$(basename "$REPO_ROOT")-$(printf '%s' "$REPO_ROOT" | sha256sum | cut -c1-8)"
+
+if [[ -z "$BUILD_ROOT" ]]; then
+  BUILD_ROOT="C:/virtue-build"
+  if [[ $USE_COW -eq 1 ]] && [[ "$(ssh "$BUILD_HOST" "powershell -NoProfile -Command Test-Path '$WIN_COW_ROOT/base/info'" | tr -d '\r')" == "True" ]]; then
+    BUILD_ROOT="$WIN_COW_ROOT/worktrees/$WORKTREE_KEY"
+    TARGET_DIR="${TARGET_DIR:-$BUILD_ROOT/cargo-target}"
+    SEED_TARGET_DIR="$WIN_COW_ROOT/base/cargo-target"
+    echo "Using per-worktree build root on the Dev Drive: $BUILD_ROOT"
+  fi
+fi
+TARGET_DIR="${TARGET_DIR:-$CACHE_ROOT/cargo-target}"
+
+# Per-worktree names, so concurrent runs from different worktrees don't
+# overwrite each other's upload.
+REMOTE_ARCHIVE_NAME="virtue-client-src-$WORKTREE_KEY.tgz"
+REMOTE_SCRIPT_NAME="virtue-remote-build-$WORKTREE_KEY.ps1"
 
 if [[ $SKIP_SYNC -eq 0 ]]; then
   ARCHIVE_PATH="$TMP_DIR/$REMOTE_ARCHIVE_NAME"
-  tar -C "$REPO_ROOT" \
-    --exclude='client/target' \
-    --exclude='client/**/target' \
-    --exclude='client/windows/dist' \
-    --exclude='client/android/.gradle' \
-    --exclude='client/android/**/build' \
-    -czf "$ARCHIVE_PATH" \
-    client
+  if [[ -n "$SOURCE_REV" ]]; then
+    git -C "$REPO_ROOT" archive --format=tar.gz -o "$ARCHIVE_PATH" "$SOURCE_REV" client
+  else
+    tar -C "$REPO_ROOT" \
+      --exclude='client/target' \
+      --exclude='client/**/target' \
+      --exclude='client/windows/dist' \
+      --exclude='client/android/.gradle' \
+      --exclude='client/android/**/build' \
+      -czf "$ARCHIVE_PATH" \
+      client
+  fi
   scp -q "$ARCHIVE_PATH" "$BUILD_HOST:$REMOTE_ARCHIVE_NAME"
 fi
 
@@ -176,12 +228,28 @@ cat >"$TMP_DIR/$REMOTE_SCRIPT_NAME" <<EOF
 \$skipSync = $( [[ $SKIP_SYNC -eq 1 ]] && echo '$true' || echo '$false' )
 \$signingCertPath = '$(ps_quote "$SIGNING_CERT_PATH")'
 \$signingCertPass = '$(ps_quote "$SIGNING_CERT_PASS")'
+\$targetDir = '$(ps_quote "$TARGET_DIR")'
+\$seedTargetDir = '$(ps_quote "$SEED_TARGET_DIR")'
+\$worktreeSource = '$(ps_quote "$REPO_ROOT")'
 
 \$repoRoot = Join-Path \$buildRoot "src"
 \$clientDir = Join-Path \$repoRoot "client"
 
 New-Item -ItemType Directory -Force -Path \$buildRoot | Out-Null
 New-Item -ItemType Directory -Force -Path \$repoRoot | Out-Null
+# Lets cow-cache.sh prune-windows find build roots whose worktree is gone.
+Set-Content -Path (Join-Path \$buildRoot "source") -Value \$worktreeSource
+
+# First build in this worktree: start from a copy of the base build's target
+# dir. On the ReFS Dev Drive robocopy block-clones, so this is near-instant
+# and takes no extra space until files diverge.
+if (\$seedTargetDir -and -not (Test-Path \$targetDir) -and (Test-Path \$seedTargetDir)) {
+    Write-Host "Seeding \$targetDir from \$seedTargetDir"
+    robocopy \$seedTargetDir \$targetDir /E /COPY:DAT /DCOPY:DAT /MT:16 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if (\$LASTEXITCODE -ge 8) {
+        throw "robocopy seeding failed with exit code \$LASTEXITCODE"
+    }
+}
 
 if (-not \$skipSync) {
     \$archivePath = Join-Path \$HOME "$(ps_quote "$REMOTE_ARCHIVE_NAME")"
@@ -189,10 +257,18 @@ if (-not \$skipSync) {
         throw "Missing archive at \$archivePath"
     }
 
+    # Replace the source but keep MSBuild's bin/ and obj/ dirs, so the C#
+    # projects build incrementally (tar keeps the original mtimes, so
+    # unchanged files still look unchanged).
     if (Test-Path \$clientDir) {
-        Remove-Item -Recurse -Force \$clientDir
+        Get-ChildItem -LiteralPath \$clientDir -Recurse -File -Force |
+            Where-Object { \$_.FullName -notmatch '\\\\(bin|obj)\\\\' } |
+            Remove-Item -Force
     }
     tar -xf \$archivePath -C \$repoRoot
+    if (\$LASTEXITCODE -ne 0) {
+        throw "tar extraction failed with exit code \$LASTEXITCODE"
+    }
 }
 
 if (-not (Test-Path \$clientDir)) {
@@ -206,7 +282,6 @@ try {
         \$windowsAppProject = Join-Path \$windowsAppDir "Virtue.WindowsApp\\Virtue.WindowsApp.csproj"
         \$windowsCoreProject = Join-Path \$windowsAppDir "Virtue.WindowsApp.Core\\Virtue.WindowsApp.Core.csproj"
         \$windowsTestsProject = Join-Path \$windowsAppDir "Virtue.WindowsApp.Tests\\Virtue.WindowsApp.Tests.csproj"
-        \$targetDir = Join-Path \$cacheRoot "cargo-target"
         \$sccacheDir = Join-Path \$cacheRoot "sccache"
         New-Item -ItemType Directory -Force -Path \$cacheRoot | Out-Null
         New-Item -ItemType Directory -Force -Path \$targetDir | Out-Null
@@ -277,6 +352,8 @@ try {
             throw "dotnet build for Virtue.WindowsApp failed with exit code \$LASTEXITCODE"
         }
     } elseif (\$mode -eq "msix") {
+        # build-msix.ps1 uses CARGO_TARGET_DIR over its CacheRoot default.
+        \$env:CARGO_TARGET_DIR = \$targetDir
         \$script = Join-Path \$clientDir "windows\\scripts\\build-msix.ps1"
         \$msixArgs = @{
             Version = \$version
