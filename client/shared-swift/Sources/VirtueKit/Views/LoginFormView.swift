@@ -6,6 +6,7 @@ public struct LoginFormView: View {
     @Binding private var email: String
     @Binding private var password: String
     @Binding private var deviceName: String
+    private let deviceNamePlaceholder: String
     private let isSigningIn: Bool
     private let loginError: String?
     private let onSubmit: () -> Void
@@ -15,6 +16,7 @@ public struct LoginFormView: View {
         email: Binding<String>,
         password: Binding<String>,
         deviceName: Binding<String>,
+        deviceNamePlaceholder: String,
         isSigningIn: Bool,
         loginError: String?,
         onSubmit: @escaping () -> Void
@@ -22,6 +24,7 @@ public struct LoginFormView: View {
         self._email = email
         self._password = password
         self._deviceName = deviceName
+        self.deviceNamePlaceholder = deviceNamePlaceholder
         self.isSigningIn = isSigningIn
         self.loginError = loginError
         self.onSubmit = onSubmit
@@ -51,7 +54,7 @@ public struct LoginFormView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
             }
-            TextField("Device name", text: $deviceName)
+            TextField(deviceNamePlaceholder, text: $deviceName)
                 .textFieldStyle(.roundedBorder)
 
             Button(isSigningIn ? "Signing In…" : "Sign In", action: onSubmit)
