@@ -159,7 +159,7 @@ struct ContentView: View {
                         Text(email)
                             .foregroundStyle(VirtueBrand.text)
                     }
-                    Text("Device: \(coordinator.deviceName)")
+                    Text("Device: \(coordinator.coreStatus?.deviceName ?? UIDevice.current.name)")
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     Text("Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".")
