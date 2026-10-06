@@ -176,7 +176,7 @@ public sealed partial class MainWindow : Window
         _passwordBox.PasswordChanged += PasswordBox_OnPasswordChanged;
         StyleInput(_passwordBox);
 
-        _deviceNameTextBox.PlaceholderText = Environment.MachineName;
+        _deviceNameTextBox.PlaceholderText = $"Device name (default \"{Environment.MachineName}\")";
         _deviceNameTextBox.Text = ViewModel.DeviceNameInput;
         _deviceNameTextBox.TextChanged += (_, _) => ViewModel.DeviceNameInput = _deviceNameTextBox.Text;
         StyleInput(_deviceNameTextBox);

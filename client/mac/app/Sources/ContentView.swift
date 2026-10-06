@@ -223,7 +223,7 @@ struct ContentView: View {
                         email: $coordinator.email,
                         password: $coordinator.password,
                         deviceName: $coordinator.deviceName,
-                        deviceNamePlaceholder: NativeBridge.defaultDeviceName(),
+                        deviceNamePlaceholder: "Device name (default \"\(NativeBridge.defaultDeviceName())\")",
                         isSigningIn: coordinator.isSigningIn,
                         loginError: coordinator.loginError,
                         onSubmit: coordinator.login

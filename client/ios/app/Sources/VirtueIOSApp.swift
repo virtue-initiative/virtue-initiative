@@ -211,7 +211,7 @@ struct ContentView: View {
                             .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
                         }
 
-                        TextField(UIDevice.current.name, text: $coordinator.deviceName)
+                        TextField("Device name (default \"\(UIDevice.current.name)\")", text: $coordinator.deviceName)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
 
