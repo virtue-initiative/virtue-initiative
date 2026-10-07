@@ -1,5 +1,6 @@
 # Rust build output
-target/
+# No trailing slash: also matches the symlink scripts/cow-cache.sh puts here.
+target
 target-docker/
 
 # Cargo registry/home cache used by linux/scripts/build-deb-docker.sh

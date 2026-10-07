@@ -206,3 +206,47 @@ cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 dotnet test .\windows\Virtue.WindowsApp.Tests\Virtue.WindowsApp.Tests.csproj -c Debug
 .\windows\scripts\build-msix.ps1 -Profile Debug -Version 0.1.6-dev
 ```
+
+## 8) Optional: per-worktree builds on a Dev Drive
+
+By default every worktree builds in the same `C:\virtue-build` tree, so two worktrees building at
+once overwrite each other, and switching branches rebuilds. With a Dev Drive (ReFS, which supports
+block cloning), `remote-windows-build.sh` gives each worktree its own build root under
+`V:\virtue\worktrees\`. Its cargo target dir starts as a block-cloned copy of a shared base build,
+so only the workspace's own crates rebuild. If there is no base, the script falls back to
+`C:\virtue-build`.
+
+Add a second virtual disk on the Linux host. The file is sparse and only grows with use. A Dev
+Drive must be at least 50 GB.
+
+```bash
+qemu-img create -f qcow2 ~/storage/iso/virtue-win11-devdrive.qcow2 100G
+```
+
+```bash
+printf '%s\n' "<disk type='file' device='disk'><driver name='qemu' type='qcow2' discard='unmap'/><source file='$HOME/storage/iso/virtue-win11-devdrive.qcow2'/><target dev='vdb' bus='virtio'/></disk>" > /tmp/devdrive.xml
+```
+
+```bash
+virsh --connect qemu:///system attach-device virtue-win11 /tmp/devdrive.xml --config
+```
+
+Restart the VM (`virsh shutdown`, then `virsh start`) so it picks up the disk. Then format it as a
+Dev Drive in the VM (PowerShell as Administrator):
+
+```powershell
+$disk = Get-Disk | Where-Object PartitionStyle -eq 'RAW' | Select-Object -First 1
+Initialize-Disk -Number $disk.Number -PartitionStyle GPT
+New-Partition -DiskNumber $disk.Number -UseMaximumSize -DriveLetter V
+Format-Volume -DriveLetter V -FileSystem ReFS -DevDrive -NewFileSystemLabel VirtueDev
+```
+
+Build the shared base from `origin/staging` (from the Linux host repo root). The first run takes
+about 15 minutes. Rerun it after a toolchain upgrade or a big `Cargo.lock` change.
+
+```bash
+./scripts/cow-cache.sh warm-windows
+```
+
+`./scripts/cow-cache.sh prune-windows` removes the build roots of deleted worktrees. Pass
+`--no-cow` to `remote-windows-build.sh` to use `C:\virtue-build` anyway.

@@ -1,4 +1,5 @@
-target/
+# No trailing slash: also matches the symlink scripts/cow-cache.sh puts here.
+target
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
