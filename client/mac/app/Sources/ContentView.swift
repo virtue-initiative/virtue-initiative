@@ -152,7 +152,7 @@ struct ContentView: View {
                     }
 
                     HStack(spacing: 10) {
-                        Button("Report a Bug") {
+                        Button("Report an Issue") {
                             showReportBugSheet = true
                         }
                         .buttonStyle(VirtueButtonStyle())

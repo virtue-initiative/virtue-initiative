@@ -371,7 +371,7 @@ export function Sidebar() {
                 <span class="sidebar-nav-icon">
                   <BugIcon />
                 </span>
-                <span class="sidebar-nav-label">Report a bug</span>
+                <span class="sidebar-nav-label">Report an issue</span>
               </button>
               <button
                 class="sidebar-nav-link sidebar-logout"
