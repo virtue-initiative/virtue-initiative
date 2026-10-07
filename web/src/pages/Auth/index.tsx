@@ -249,7 +249,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         <p class="auth-subtitle">Accountability starts here.</p>
 
         <Alert variant="info" class="auth-dev-warning">
-          <strong>Note:</strong> Virtue is still being tested and may have some rough edges.
+          <strong>Note:</strong> Virtue is still being tested and may have some rough edges. Please{' '}
+          <a href={`${LANDING_URL}/help/reporting-an-issue`}>report any problems</a> you run into.
         </Alert>
 
         {(authMode === 'login' || authMode === 'signup') && (

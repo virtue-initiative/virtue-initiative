@@ -195,7 +195,7 @@ pub extern "C" fn virtue_mac_native_get_device_id() -> *mut c_char {
 
 /// The email address of the currently signed-in account, persisted to
 /// `ui_state_file` at login (see `virtue_mac_native_login`), or null when
-/// signed out. Used to pre-fill the "Report a Bug" contact-email field.
+/// signed out. Used to pre-fill the "Report an Issue" contact-email field.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_get_account_email() -> *mut c_char {
     let email = core()

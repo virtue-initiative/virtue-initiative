@@ -52,6 +52,10 @@ export const helpSidebar: HelpNavItem[] = [
     ],
   },
   {
+    label: 'Reporting an issue',
+    href: '/help/reporting-an-issue',
+  },
+  {
     label: 'Tips',
     href: '/help/tips',
   },

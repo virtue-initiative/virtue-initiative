@@ -96,7 +96,7 @@ struct ContentView: View {
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
                         .foregroundStyle(VirtueBrand.textMuted)
-                    Button("Report a Bug") {
+                    Button("Report an Issue") {
                         showReportBugSheet = true
                     }
                     .font(.footnote)

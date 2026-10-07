@@ -120,7 +120,7 @@ public sealed class WindowsTrayIconHost : ITrayIconHost
             _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayForceCapture, "Test Screenshot");
         }
 
-        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report a Bug");
+        _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayReportBug, "Report an Issue");
         _ = AppendMenu(_menuHandle, MfString, (UIntPtr)IdTrayExit, "Exit");
 
         if (oldMenuHandle != IntPtr.Zero)
