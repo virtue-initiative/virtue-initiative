@@ -1,8 +1,8 @@
 .dev-warning-banner {
-  background: var(--danger);
-  border: 1px solid var(--danger-strong);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: white; /* literal: text on danger banner */
+  color: var(--text);
   padding: 0.85rem 1.25rem;
   font-size: 0.95rem;
   line-height: 1.5;
