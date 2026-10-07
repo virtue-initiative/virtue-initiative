@@ -162,7 +162,7 @@ enum MonitoringState: Equatable {
 final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
-    @Published var deviceName: String = UIDevice.current.name
+    @Published var deviceName: String = ""
 
     @Published private(set) var statusMessage: String = "Not initialized"
     @Published private(set) var isSigningIn: Bool = false
