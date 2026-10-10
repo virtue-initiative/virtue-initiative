@@ -81,7 +81,8 @@ const partnerUserSchema = z.object({
 export const partnerInfoSchema = z.object({
   id: z.string(),
   user: partnerUserSchema.extend({ id: z.string().optional() }),
-  status: z.enum(['pending', 'accepted']),
+  // 'invite_failed' is a pending invite whose email bounced (api/SPEC.md API-056).
+  status: z.enum(['pending', 'accepted', 'invite_failed']),
   created_at: z.number().optional(),
 });
 export type PartnerInfo = z.infer<typeof partnerInfoSchema>;
@@ -208,7 +209,10 @@ export const bugReportSchema = z.object({
 });
 export type BugReportPayload = z.infer<typeof bugReportSchema>;
 
-export const createPartnerSchema = z.object({ email: z.email() });
+export const createPartnerSchema = z.object({
+  email: z.email(),
+  replace_id: z.uuid().optional(),
+});
 export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
 
 export const inviteTokenSchema = z.object({ token: z.string().min(1) });
@@ -252,12 +256,13 @@ export const updateUserResponseSchema = z.object({
   ok: z.boolean(),
   email_verification_required: z.boolean().optional(),
   pending_email: z.string().optional(),
+  email_bounced: z.boolean().optional(),
 });
 export type UpdateUserResponse = z.infer<typeof updateUserResponseSchema>;
 
 export const createPartnerResponseSchema = z.object({
   id: z.string(),
-  status: z.literal('pending'),
+  status: z.enum(['pending', 'invite_failed']),
 });
 export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
 

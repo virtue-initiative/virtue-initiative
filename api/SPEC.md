@@ -90,10 +90,12 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     "email": "partner@example.com",
     "name": "Partner Name" | undefined
   },
-  "status": "pending" | "accepted",
+  "status": "pending" | "accepted" | "invite_failed",
   "created_at": DateTime
 }
 ```
+
+`invite_failed` MUST only be reported in `watchers`, for a pending partnership whose invite token has a bounce (see API-056).
 
 **DeviceSettings**
 
@@ -234,6 +236,12 @@ If a user at that email does not exist, the server MUST send a signup link to th
 If a user at that email already exists, the server MUST send a notification to that email saying that their account already exists.
 
 In BOTH cases, the server MUST respond **HTTP 204**.
+
+If the email has a permanent bounce (see API-056), the server MUST NOT send either email. It MUST respond **HTTP 422** with this shape, whether or not a user exists at that email.
+
+```js
+{ "error": "...", "code": "email_bounced" }
+```
 
 ### API-010 `POST /signup`
 
@@ -392,6 +400,12 @@ If the email has been marked as unverified, the server SHOULD send a verificatio
   { "error": "Please verify your email before logging in. A verification email has been sent." }
 ```
 
+If that verification email was not sent because the email has a permanent bounce (see API-056), the server MUST instead return `403` with
+
+```js
+{ "error": "...", "code": "email_bounced" }
+```
+
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
 ### API-017 `POST /email-verification/validate`
@@ -461,9 +475,12 @@ The server MUST return this response shape.
 {
   "ok": true,
   "email_verification_required": true | undefined,
-  "pending_email": "new@example.com" | undefined
+  "pending_email": "new@example.com" | undefined,
+  "email_bounced": true | undefined
 }
 ```
+
+The server MUST set `email_bounced` when the `email_change` email was not sent because the new email has a permanent bounce (see API-056).
 
 ### API-021 `DELETE /user?confirm_email=[email]`
 
@@ -512,20 +529,25 @@ The client MUST authenticate with a **Web Token** and send
 
 ```js
 {
-  "email": "partner@example.com"
+  "email": "partner@example.com",
+  "replace_id": UUID | undefined
 }
 ```
 
 The server SHOULD send a partner request email to the provided email address.
+
+If `replace_id` is provided, it MUST name a partnership the user owns that has not been accepted, otherwise the server MUST respond **HTTP 404**. The server MUST delete that partnership and its invite token before creating the new one. This is how a failed invite is resent.
 
 The server SHOULD then respond **HTTP 200**
 
 ```js
 {
   "id": UUID,
-  "status": "pending"
+  "status": "pending" | "invite_failed"
 }
 ```
+
+`invite_failed` means the invite was not sent because the email has a permanent bounce (see API-056).
 
 ### API-024 `POST /partner/validate`
 
@@ -840,7 +862,9 @@ The server MUST handle any AWS SNS webhook.
 
 The server MUST confirm the subscription (`SubscriptionConfirmation`)
 
-The server SHOULD process `Bounce`/`Complaint` notifications by marking the users' emails as bounced and unverified.
+The server MUST record every recipient of a `Bounce` notification as an email bounce (see API-056). It SHOULD mark users at a permanently bounced email as bounced and unverified. A temporary bounce MUST NOT mark a user unverified.
+
+The server SHOULD process `Complaint` notifications by marking the users' emails as unverified.
 
 The server MUST respond **HTTP 200** with this shape.
 
@@ -849,6 +873,29 @@ The server MUST respond **HTTP 200** with this shape.
 { "ok": true, "updated": Number }    // Bounce/Complaint notification
 { "ok": true }                        // ignored event
 ```
+
+### API-056 Email bounces
+
+The server MUST keep a record of each bounce with this shape.
+
+```js
+{
+  "id": UUID,
+  "email": "user@example.com",
+  "bounced_at": DateTime,
+  "reason": "permanent" | "temporary"
+}
+```
+
+A `Bounce` notification with `bounceType` `Permanent` is `permanent`. Any other `bounceType` is `temporary`.
+
+Every email token MUST have a nullable reference to an email bounce. A token with a bounce is one whose email was not delivered. The token itself stays valid.
+
+When the server sends an email for an email token, it SHOULD tag the message with the token's id, so a later `Bounce` notification can be matched to that token. On a bounce, the server MUST set the bounce on the token the notification names. On a permanent bounce, it MUST also set the bounce on every other unconsumed token for that email that has none.
+
+The server MUST NOT send any email to an address that has a permanent bounce. If that email was for an email token, the server MUST instead set that bounce on the token immediately.
+
+The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
 
 ### API-042 `POST /bug-report`
 
