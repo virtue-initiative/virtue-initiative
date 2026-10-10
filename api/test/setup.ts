@@ -66,6 +66,14 @@ CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_us
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
 
+CREATE TABLE IF NOT EXISTS email_bounces (
+  id BLOB PRIMARY KEY,
+  email TEXT NOT NULL,
+  bounced_at INTEGER NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_bounces_email ON email_bounces(email);
+
 CREATE TABLE IF NOT EXISTS email_tokens (
   id BLOB PRIMARY KEY,
   user_id BLOB,
@@ -75,6 +83,7 @@ CREATE TABLE IF NOT EXISTS email_tokens (
   expires_at INTEGER NOT NULL,
   consumed_at INTEGER,
   created_at INTEGER NOT NULL,
+  bounce_id BLOB REFERENCES email_bounces(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

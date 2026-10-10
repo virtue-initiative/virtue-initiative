@@ -1,6 +1,7 @@
 import {
   api,
   Batch,
+  CreatePartnerResponse,
   Device,
   LockedPassword,
   PartnerRelationships,
@@ -22,6 +23,7 @@ export interface UserSettings {
 export interface UpdateSettingsResult {
   email_verification_required?: boolean;
   pending_email?: string;
+  email_bounced?: boolean;
 }
 
 export interface LogQuery {
@@ -121,6 +123,7 @@ export class APIClient {
     return {
       email_verification_required: result.email_verification_required,
       pending_email: result.pending_email,
+      email_bounced: result.email_bounced,
     };
   }
 
@@ -242,9 +245,11 @@ export class APIClient {
     return this.fetchPartners();
   }
 
-  async invitePartner(email: string): Promise<void> {
-    await api.invitePartner(email);
+  // `replaceId` resends: the server swaps that unaccepted invite for the new one.
+  async invitePartner(email: string, replaceId?: string): Promise<CreatePartnerResponse['status']> {
+    const { status } = await api.invitePartner(email, replaceId);
     await this.fetchPartners(true);
+    return status;
   }
 
   async acceptInvite(inviteToken: string): Promise<void> {
