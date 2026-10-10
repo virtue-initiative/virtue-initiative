@@ -560,9 +560,10 @@ pub fn plan_batch(
         .pending_batch_events
         .len()
         .min(MAX_BATCH_ITEMS_PER_UPLOAD);
-    let mut items = state.pending_batch_events[..count].to_vec();
-    items.sort_by_key(|event| event.ts);
-    let start_time_ms = items[0].ts;
+    // BATCH-006: events stay in the order the hash server accepted them (the
+    // queue's order), never re-sorted, or the batch fails verification.
+    let items = state.pending_batch_events[..count].to_vec();
+    let start_time_ms = items.iter().map(|event| event.ts).min()?;
     let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
     let medium_risk_count = items
         .iter()
@@ -826,6 +827,71 @@ mod tests {
         assert!(!should_logout);
         assert!(state.pending_batch_events.is_empty());
         assert_eq!(state.next_hash_seq, 0);
+    }
+
+    /// BATCH-006: the payload keeps hash order even when timestamps disagree
+    /// with it, and `start_time` is still the earliest event.
+    #[test]
+    fn batch_keeps_hash_order_when_timestamps_are_out_of_order() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        use aes_gcm::{Aes256Gcm, Nonce};
+        use base64::Engine;
+        use hpke::aead::AesGcm256;
+        use hpke::kdf::HkdfSha256;
+        use hpke::kem::{Kem as KemTrait, X25519HkdfSha256};
+        use hpke::{Deserializable, OpModeR, Serializable, setup_receiver};
+        use rand_core::{OsRng, TryRngCore};
+        use std::io::Read;
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let (private_key, public_key) =
+            <X25519HkdfSha256 as KemTrait>::gen_keypair(&mut OsRng.unwrap_err());
+
+        let mut state = authenticated_state();
+        state.settings.as_mut().unwrap().wrapping_keys[0].pub_key_base64 =
+            b64.encode(public_key.to_bytes());
+        state.last_batch_at_ms = None;
+        for (ts, encoded) in [(300, vec![3]), (100, vec![1]), (200, vec![2])] {
+            state.pending_batch_events.push(PendingBatchEvent {
+                ts,
+                risk: 0.0,
+                encoded,
+                is_screenshot: false,
+                notify: None,
+            });
+        }
+
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let batch = plan.batch.expect("batch builds");
+        assert_eq!(batch.start_time_ms, 100);
+
+        let envelope = b64
+            .decode(&batch.access_keys[0].hpke_key_base64)
+            .expect("base64");
+        let enc = <<X25519HkdfSha256 as KemTrait>::EncappedKey as Deserializable>::from_bytes(
+            &envelope[..32],
+        )
+        .expect("encapped key");
+        let batch_key = setup_receiver::<AesGcm256, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &private_key,
+            &enc,
+            b"",
+        )
+        .expect("receiver")
+        .open(&envelope[32..], b"")
+        .expect("open batch key");
+        let gzipped = Aes256Gcm::new_from_slice(&batch_key)
+            .expect("key")
+            .decrypt(Nonce::from_slice(&batch.bytes[..12]), &batch.bytes[12..])
+            .expect("decrypt");
+        let mut payload = Vec::new();
+        flate2::read::GzDecoder::new(gzipped.as_slice())
+            .read_to_end(&mut payload)
+            .expect("gunzip");
+        let events: Vec<Vec<u8>> = rmp_serde::from_slice(&payload).expect("decode");
+
+        assert_eq!(events, vec![vec![3], vec![1], vec![2]]);
     }
 
     /// Regression test: a batch that can't be built (here, a recipient key

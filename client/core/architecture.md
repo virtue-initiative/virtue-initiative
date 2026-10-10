@@ -350,11 +350,11 @@ That's fine because ticks only run when something is actually due
 
 ## Batch blob format
 
-See `../CLAUDE.md` (repo root) for the exact wire format. Summary:
+See `batch-format/SPEC.md` (repo root) for the exact wire format. Summary:
 
 ```
 events → encode_batch_event() per event → BatchBuilder::build_upload()
-       → msgpack({events: [...]}) → gzip → AES-256-GCM
+       → msgpack([event, ...]) → gzip → AES-256-GCM
 wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
@@ -412,7 +412,7 @@ semantics.
 Per-event content hashes are uploaded to `POST /hash` independently of batches:
 
 ```
-content_hash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+content_hash = sha256(encoded_event_bytes)
 new_state    = sha256(current_state[32] || content_hash[32])
 ```
 
