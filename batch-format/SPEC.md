@@ -68,9 +68,9 @@ The consumer MUST ignore keys it does not know and MUST NOT reject an event beca
 
 A byte string appears in two places: each element of the payload array (an encoded event), and the `image` field of a `screenshot` event.
 
-A byte string MUST be encoded as either a msgpack `bin` value or a msgpack array of integers from 0 to 255. The consumer MUST accept both forms. A new producer SHOULD use `bin`.
+The producer MUST encode a byte string as a msgpack `bin` value.
 
-> Note: the Rust client currently emits the array form in both places.
+The consumer MUST also accept a msgpack array of integers from 0 to 255, because batches written before this requirement use that form.
 
 ## BATCH-005 Access keys
 
