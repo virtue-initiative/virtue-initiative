@@ -39,8 +39,9 @@ The user logged out of this computer, or the computer was shut down.
 A scheduled screenshot was noticeably late, or several recent ones added up to
 a longer-than-expected delay, and it wasn't explained by a nearby sign-in,
 sign-out, or the device being asleep. Time spent asleep does not create this
-event. It can happen when the device was under heavy load, was offline, or
-monitoring was interrupted. An occasional one is normal; frequent ones are
+event. It usually means the monitoring app was not running for a while, for
+example because it was killed or frozen, or the device was too busy to run it
+on time. Being offline does not cause it. An occasional one is normal; frequent ones are
 worth investigating.
 
 ## Monitoring Stopped by User

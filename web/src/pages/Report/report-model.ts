@@ -143,7 +143,7 @@ export function explainAlert(
       return `The monitoring app ${what}${within}. A crash loop can cause this, but so can someone trying to stop it.`;
     }
     case 'screenshot_missed':
-      return 'Scheduled screenshots were taken late or not at all while the device was awake. Monitoring may have been interrupted, or the device may have been under heavy load or offline.';
+      return 'Scheduled screenshots were taken late or not at all while the device was awake. The monitoring app may have been stopped, killed or frozen, or the device may have been too busy to run it on time.';
     case 'capture_failed':
       return 'The device failed to take several screenshots in a row. This often follows a permissions or settings change.';
     case 'alert':
