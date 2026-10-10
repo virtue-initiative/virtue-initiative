@@ -1,7 +1,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { v4 as uuidv4 } from 'uuid';
 import { EmailKind } from './email-domain';
-import { findUserByEmail } from './db';
+import { findPermanentEmailBounce, findUserByEmail, setEmailTokenBounce } from './db';
 import { Env } from '../types/bindings';
 
 export interface EmailContent {
@@ -34,6 +34,9 @@ interface SendEmailInput extends EmailContent {
   recipient: string;
   related_user_id?: string;
   related_partnership_id?: string;
+  // The email token this message carries, if any. Lets a bounce be recorded
+  // against that token (API-056).
+  email_token_id?: string;
   metadata?: Record<string, unknown>;
   allowUnverified?: boolean;
   replyTo?: string;
@@ -47,6 +50,14 @@ interface SendEmailInput extends EmailContent {
 let sesClient: SESv2Client | null = null;
 const mockEmailOutbox: MockEmailDelivery[] = [];
 const FROM_DISPLAY_NAME = 'The Virtue Initiative';
+// SES message tag carrying the email token id, echoed back in bounce events.
+export const EMAIL_TOKEN_TAG = 'email_token_id';
+
+export interface SendEmailResult {
+  id: string;
+  // Set when the email was not sent because the recipient has a permanent bounce.
+  bounce_id?: string;
+}
 
 function withDisplayName(fromEmail: string) {
   return fromEmail.includes('<') ? fromEmail : `${FROM_DISPLAY_NAME} <${fromEmail}>`;
@@ -66,8 +77,26 @@ function getSesClient(env: Env) {
   return sesClient;
 }
 
-export async function sendEmail(input: SendEmailInput) {
+export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const id = uuidv4();
+
+  // API-056: never send to an address with a permanent bounce.
+  const bounce = await findPermanentEmailBounce(input.db, input.recipient);
+  if (bounce) {
+    if (input.email_token_id) {
+      await setEmailTokenBounce(input.db, {
+        token_id: input.email_token_id,
+        bounce_id: bounce.id,
+      });
+    }
+    console.info('email delivery skipped for permanently bounced recipient', {
+      kind: input.kind,
+      recipient: input.recipient,
+      subject: input.subject,
+    });
+    return { id: `bounced-${id}`, bounce_id: bounce.id };
+  }
+
   const recipientEmailVerified =
     input.recipientEmailVerified ??
     (await findUserByEmail(input.db, input.recipient))?.email_verified;
@@ -118,6 +147,9 @@ export async function sendEmail(input: SendEmailInput) {
         FromEmailAddress: withDisplayName(input.env.AWS_SES_FROM_EMAIL),
         Destination: { ToAddresses: [input.recipient] },
         ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
+        EmailTags: input.email_token_id
+          ? [{ Name: EMAIL_TOKEN_TAG, Value: input.email_token_id }]
+          : undefined,
         Content: {
           Simple: {
             Subject: { Data: input.subject },

@@ -92,7 +92,11 @@ export function Settings() {
       api
         .updateSettings({ email: normalizedEmail })
         .then((result) => {
-          if (result.email_verification_required) {
+          if (result.email_bounced) {
+            setEmailStatus(
+              `Email to ${result.pending_email ?? normalizedEmail} bounced, so we did not send a verification link. Use a different email address.`,
+            );
+          } else if (result.email_verification_required) {
             setEmailChangeVerificationTarget(result.pending_email ?? normalizedEmail);
             emailChangeDialogRef.current?.showModal();
           } else {

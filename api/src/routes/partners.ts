@@ -7,6 +7,7 @@ import {
   consumeEmailToken,
   createPartner,
   createEmailToken,
+  deleteEmailTokenById,
   deletePartnerById,
   findPartnerByInviteTokenHash,
   findPartnerById,
@@ -37,7 +38,7 @@ partners.post(
   async (c) => {
     const userId = c.get('sub');
     const currentUser = await findUserById(c.env.DB, userId);
-    const { email } = c.req.valid('json');
+    const { email, replace_id: replaceId } = c.req.valid('json');
 
     if (!currentUser) {
       return c.json({ error: 'Not found' }, 404);
@@ -47,10 +48,26 @@ partners.post(
       return c.json({ error: 'Bad Request', details: { email: ['Cannot invite yourself'] } }, 400);
     }
 
+    // API-023: resending replaces an invite that was never accepted.
+    const replaced = replaceId ? await findPartnerById(c.env.DB, replaceId) : null;
+    if (
+      replaceId &&
+      (!replaced || replaced.watching_user_id !== userId || replaced.status !== 'pending')
+    ) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
     const existing = await findPartnerInviteForOwner(c.env.DB, userId, email);
 
-    if (existing) {
+    if (existing && existing.id !== replaced?.id) {
       return c.json({ error: 'Partnership already exists' }, 409);
+    }
+
+    if (replaced) {
+      await deletePartnerById(c.env.DB, replaced.id);
+      if (replaced.invite_token_id) {
+        await deleteEmailTokenById(c.env.DB, replaced.invite_token_id);
+      }
     }
 
     const id = uuidv4();
@@ -84,7 +101,7 @@ partners.post(
       appUrl: c.env.APP_URL,
       inviteUrl: `${c.env.APP_URL}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
-    await sendEmail({
+    const sent = await sendEmail({
       env: c.env,
       db: c.env.DB,
       kind: 'partner_invite',
@@ -94,10 +111,14 @@ partners.post(
       html: inviteEmail.html,
       related_user_id: userId,
       related_partnership_id: id,
+      email_token_id: inviteTokenId,
       metadata: { partnerEmail: email, inviteToken },
     });
 
-    return c.json<CreatePartnerResponse>({ id, status: 'pending' }, 200);
+    return c.json<CreatePartnerResponse>(
+      { id, status: sent.bounce_id ? 'invite_failed' : 'pending' },
+      200,
+    );
   },
 );
 
