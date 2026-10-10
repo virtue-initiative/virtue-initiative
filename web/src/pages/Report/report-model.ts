@@ -140,12 +140,12 @@ export function explainAlert(
       const window = typeof data.window_ms === 'number' ? data.window_ms : null;
       const what = count ? `restarted ${count} times` : 'restarted several times';
       const within = window ? ` within ${minutesLabel(window)}` : '';
-      return `The monitoring app ${what}${within}. Updates can cause this, but so can someone trying to stop it.`;
+      return `The monitoring app ${what}${within}. A crash loop can cause this, but so can someone trying to stop it.`;
     }
     case 'screenshot_missed':
-      return 'Scheduled screenshots did not happen on time. The device may have been asleep, or monitoring may have been interrupted.';
+      return 'Scheduled screenshots were taken late or not at all while the device was awake. Monitoring may have been interrupted, or the device may have been under heavy load or offline.';
     case 'capture_failed':
-      return 'The device could not take screenshots for a while. This sometimes follows a permissions or settings change.';
+      return 'The device failed to take several screenshots in a row. This often follows a permissions or settings change.';
     case 'alert':
       return typeof data.message === 'string' && data.message
         ? data.message

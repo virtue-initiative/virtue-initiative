@@ -89,7 +89,7 @@ pub enum UploadKind {
         details: Option<String>,
     },
     Heartbeat,
-    /// A single wakeup was more than a minute late, or the sum of recent
+    /// A single wakeup was more than two minutes late, or the sum of recent
     /// lateness (over the last 10 tracked wakeups) exceeded 5 minutes.
     /// Excused near a system login/logout. See CORE-002.
     ScreenshotMissed,
