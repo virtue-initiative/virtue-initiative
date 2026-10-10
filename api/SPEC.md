@@ -836,13 +836,21 @@ This forwards to R2. Only used in dev. It SHOULD be disabled in production.
 
 ### API-041 `POST /email/sns`
 
-The server MUST handle any AWS SNS webhook.
+The server MUST handle AWS SNS webhooks for the topics listed in `SNS_TOPIC_ARNS`, a comma-separated list of topic ARNs.
 
-The server MUST confirm the subscription (`SubscriptionConfirmation`)
+The server MUST reject a request with **HTTP 400** if the body is not an SNS message, and with **HTTP 403** if:
+
+- `TopicArn` is not in `SNS_TOPIC_ARNS` (an unset or empty list rejects every request)
+- `SigningCertURL` is not an HTTPS URL on an `sns.<region>.amazonaws.com` host
+- the SNS message signature (`SignatureVersion` `1` or `2`) does not verify against that certificate
+
+The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
+
+The server MUST confirm the subscription (`SubscriptionConfirmation`) by fetching `SubscribeURL`, and MUST reject the request with **HTTP 403** if that is not an HTTPS URL on an `sns.<region>.amazonaws.com` host.
 
 The server SHOULD process `Bounce`/`Complaint` notifications by marking the users' emails as bounced and unverified.
 
-The server MUST respond **HTTP 200** with this shape.
+For an accepted message the server MUST respond **HTTP 200** with this shape.
 
 ```js
 { "ok": true, "subscribed": true }   // SubscriptionConfirmation
