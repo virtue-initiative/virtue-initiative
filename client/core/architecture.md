@@ -401,6 +401,9 @@ unlike the pre-rewrite in-memory version. `plan_hash_retries`/`plan_batch`
 each require `screen_active || state.bypass_lock` before attempting network
 I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 0 || interval elapsed || state.force_flush || queue >= MAX_BATCH_ITEMS`.
+A batch always takes every hashed event (BATCH-006), so `plan_hash_retries`
+stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
+and resumes after that batch lands.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
 backoffs to "ready now" — bypassing the cooldown for one attempt, matching

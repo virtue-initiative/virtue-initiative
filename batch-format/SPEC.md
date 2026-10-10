@@ -28,7 +28,7 @@ The producer MUST build the blob as follows:
 4. Encrypt the result with AES-256-GCM, using a fresh random 32-byte batch key, a fresh random 12-byte nonce, and no additional authenticated data.
 5. Output `nonce || ciphertext || tag`, where `tag` is the 16-byte GCM tag.
 
-A batch key MUST NOT be reused for another batch. A batch MUST contain at least one event and SHOULD contain no more than 200.
+A batch key MUST NOT be reused for another batch. A batch MUST contain at least one event. The producer SHOULD limit a batch to 200 events (BATCH-006).
 
 The consumer MUST treat any failure to decrypt, decompress or decode the blob as permanent, and MUST NOT show any events from that batch.
 
@@ -95,7 +95,7 @@ state        = sha256(state || content_hash)
 
 The state starts at 32 zero bytes. When a batch is uploaded, the API records the hash server's current state as the batch's `end_hash` and resets the state to zero. Each batch is therefore verified on its own.
 
-The producer MUST put events in the batch in the same order their hashes were sent, and MUST only include events whose hash the hash server has accepted.
+The producer MUST put events in the batch in the same order their hashes were sent. A batch MUST contain exactly the events whose hashes the hash server has accepted since the previous batch, because `end_hash` covers all of them. To limit the size of a batch, the producer MUST stop sending hashes once the limit is reached, until that batch is uploaded.
 
 To verify a batch, the consumer MUST start from 32 zero bytes, apply the two steps above to each event in payload order, and compare the final state to `end_hash`. If they differ, the consumer MUST mark every event in the batch as failing verification. It SHOULD still show them.
 
