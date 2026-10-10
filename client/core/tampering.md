@@ -21,7 +21,7 @@ loop spec, kept minimal by design):
   in any of these cases it's excused, not recorded. Unlike the login/logout
   pair, suspend evidence can only ever add an excuse, never block one.
 - An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
-  whenever a single entry exceeds 1 minute, or the sum of the array's
+  whenever a single entry exceeds 2 minutes, or the sum of the array's
   non-negative entries exceeds 5 minutes.
 - `UserStop` (`EXTRA_HIGH_RISK`, immediate) is driven directly by an explicit
   user action (`Daemon::note_user_stop`, reached via `UserStopRequested`
