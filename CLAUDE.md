@@ -8,11 +8,12 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix | File                  |
-| ------ | --------------------- |
-| `API`  | `api/SPEC.md`         |
-| `HASH` | `hash-server/SPEC.md` |
-| `CORE` | `client/core/SPEC.md` |
+| Prefix  | File                   |
+| ------- | ---------------------- |
+| `API`   | `api/SPEC.md`          |
+| `HASH`  | `hash-server/SPEC.md`  |
+| `CORE`  | `client/core/SPEC.md`  |
+| `BATCH` | `batch-format/SPEC.md` |
 
 ## Repo map
 
@@ -50,32 +51,33 @@ These five things are implemented independently in both Rust (`client/core/`) an
 
 ### 1. Batch wire format
 
-Rust produces, TypeScript consumes:
+Rust produces, TypeScript consumes. `batch-format/SPEC.md` is the source of truth:
 
 ```
-events → msgpack({events: [...]}) → gzip → AES-256-GCM(batchKey)
+event → msgpack({ts, risk?, type, data?})
+events → msgpack([event, ...]) → gzip → AES-256-GCM(batchKey)
 wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Key files:
 
-- Rust: `client/core/src/batch.rs`, `client/core/src/crypto.rs`
-- TypeScript: `web/src/batch-materializer.ts`, `web/src/crypto.ts`
+- Rust: `client/core/src/module/upload/batch.rs`, `client/core/src/crypto.rs`
+- TypeScript: `web/src/utils/api/batch-materializer.ts`, `web/src/utils/api/crypto.ts`
 
 ### 2. Per-event content hash
 
 Used to build the hash chain uploaded to `POST /hash`:
 
 ```
-contentHash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+contentHash = sha256(msgpack-encoded event bytes, exactly as they appear in the batch)
 ```
 
-Value encoding: strings → UTF-8, numbers → i64 LE, booleans → 0x00/0x01, bytes → raw.
+See BATCH-006.
 
 Key files:
 
-- Rust: `client/core/src/crypto.rs`
-- TypeScript: `web/src/crypto.ts` (`computeNewState`, `verifyBatch`)
+- Rust: `client/core/src/crypto.rs` (`compute_event_hash`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`verifyBatch`)
 
 ### 3. Rolling hash state
 
@@ -121,10 +123,10 @@ Read these before touching crypto, batch, or auth code:
 ## What not to change without full cross-component review
 
 - The AES-GCM nonce position or length (must be first 12 bytes)
-- The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
+- The msgpack schema (an array at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
 - The JWT token `type` claim values (`"device"`, `"server"`)
-- The hash chain input encoding rules (LE integers, sorted keys)
+- The hash chain input (the encoded event bytes, hashed as-is)
 
 ## Copy style
 

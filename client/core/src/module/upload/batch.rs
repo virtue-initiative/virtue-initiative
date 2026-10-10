@@ -2,12 +2,20 @@ use std::io::Write;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use serde_bytes::Bytes;
 
 use crate::crypto::CryptoEngine;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{BatchRecipient, BatchUpload, NotifyPayload};
 
 pub(crate) const MAX_BATCH_ITEMS_PER_UPLOAD: usize = 200;
+
+/// The msgpack payload: an array holding each encoded event as a `bin`
+/// value (BATCH-002, BATCH-004).
+fn encode_payload(encoded_events: &[Vec<u8>]) -> CoreResult<Vec<u8>> {
+    let events: Vec<&Bytes> = encoded_events.iter().map(|e| Bytes::new(e)).collect();
+    Ok(rmp_serde::to_vec_named(&events)?)
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct BatchBuilder;
@@ -36,7 +44,7 @@ impl BatchBuilder {
             ));
         }
 
-        let msgpack = rmp_serde::to_vec_named(encoded_events)?;
+        let msgpack = encode_payload(encoded_events)?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -69,6 +77,9 @@ impl BatchBuilder {
 
 #[cfg(test)]
 mod tests {
+    use serde_bytes::ByteBuf;
+
+    use super::encode_payload;
     use crate::crypto::encode_batch_event;
     use crate::model::LogEntry;
     use crate::model::UploadKind;
@@ -86,10 +97,53 @@ mod tests {
 
         let encoded_event = encode_batch_event(&entry).expect("encode event");
         let encoded_batch =
-            rmp_serde::to_vec_named(&vec![encoded_event.clone()]).expect("encode batch");
-        let decoded_batch: Vec<Vec<u8>> =
+            encode_payload(std::slice::from_ref(&encoded_event)).expect("encode batch");
+        let decoded_batch: Vec<ByteBuf> =
             rmp_serde::from_slice(&encoded_batch).expect("decode batch");
 
-        assert_eq!(decoded_batch, vec![encoded_event]);
+        assert_eq!(decoded_batch, vec![ByteBuf::from(encoded_event)]);
+    }
+
+    /// BATCH-004: byte strings are msgpack `bin`, not arrays of integers.
+    #[test]
+    fn byte_strings_are_encoded_as_msgpack_bin() {
+        let image = vec![0_u8, 127, 128, 255];
+        let entry = LogEntry {
+            ts: 123,
+            risk: None,
+            event: UploadKind::Screenshot {
+                image: image.clone(),
+                content_type: "image/webp".to_string(),
+                skin_detection: None,
+                nsfw_detection: None,
+            },
+        };
+
+        let encoded_event = encode_batch_event(&entry).expect("encode event");
+        // bin8 marker, length, then the raw bytes.
+        let image_bin = [&[0xc4, image.len() as u8][..], &image].concat();
+        assert!(
+            encoded_event
+                .windows(image_bin.len())
+                .any(|window| window == image_bin),
+            "image must be a bin value"
+        );
+        let decoded: LogEntry = rmp_serde::from_slice(&encoded_event).expect("decode event");
+        assert!(matches!(decoded.event, UploadKind::Screenshot { image: got, .. } if got == image));
+
+        // State files written before this change hold the image as a JSON
+        // array of numbers, and must still load.
+        let legacy: LogEntry = serde_json::from_value(serde_json::json!({
+            "ts": 123,
+            "type": "screenshot",
+            "data": { "image": image, "content_type": "image/webp" }
+        }))
+        .expect("decode legacy state");
+        assert!(matches!(legacy.event, UploadKind::Screenshot { image: got, .. } if got == image));
+
+        let payload = encode_payload(std::slice::from_ref(&encoded_event)).expect("encode batch");
+        // fixarray of one element, then a bin8 holding the event.
+        assert_eq!(payload[..3], [0x91, 0xc4, encoded_event.len() as u8]);
+        assert_eq!(payload[3..], encoded_event[..]);
     }
 }

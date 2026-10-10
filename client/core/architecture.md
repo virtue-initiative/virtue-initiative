@@ -350,11 +350,11 @@ That's fine because ticks only run when something is actually due
 
 ## Batch blob format
 
-See `../CLAUDE.md` (repo root) for the exact wire format. Summary:
+See `batch-format/SPEC.md` (repo root) for the exact wire format. Summary:
 
 ```
 events → encode_batch_event() per event → BatchBuilder::build_upload()
-       → msgpack({events: [...]}) → gzip → AES-256-GCM
+       → msgpack([event, ...]) → gzip → AES-256-GCM
 wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
@@ -401,6 +401,9 @@ unlike the pre-rewrite in-memory version. `plan_hash_retries`/`plan_batch`
 each require `screen_active || state.bypass_lock` before attempting network
 I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 0 || interval elapsed || state.force_flush || queue >= MAX_BATCH_ITEMS`.
+A batch always takes every hashed event (BATCH-006), so `plan_hash_retries`
+stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
+and resumes after that batch lands.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
 backoffs to "ready now" — bypassing the cooldown for one attempt, matching
@@ -412,7 +415,7 @@ semantics.
 Per-event content hashes are uploaded to `POST /hash` independently of batches:
 
 ```
-content_hash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+content_hash = sha256(encoded_event_bytes)
 new_state    = sha256(current_state[32] || content_hash[32])
 ```
 

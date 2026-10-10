@@ -254,6 +254,7 @@ pub fn next_hash_attempt_at_ms(state: &UploadState, screen_active: bool) -> Opti
     if state.pending_hash_events.is_empty()
         || !uploads_unlocked(state, screen_active)
         || state.device_credentials.is_none()
+        || batch_room(state) == 0
     {
         return None;
     }
@@ -279,12 +280,21 @@ pub fn next_batch_attempt_at_ms(
 
 // ── Hash retries: plan / execute / commit ──────────────────────────────────
 
+/// How many more events may be hashed before the pending batch is full. A
+/// batch must hold every event hashed since the last one (BATCH-006), so
+/// hashing stops at the cap until that batch uploads (CORE-005).
+fn batch_room(state: &UploadState) -> usize {
+    MAX_BATCH_ITEMS_PER_UPLOAD.saturating_sub(state.pending_batch_events.len())
+}
+
 pub struct HashRetryPlan {
     device_id: String,
     refresh_token: String,
     hash_base_url: Option<String>,
     cached_token: Option<(String, i64)>,
     events: Vec<LogEntry>,
+    /// Most events this pass may hash, see `batch_room`.
+    room: usize,
     next_hash_seq: u32,
     now_ms: i64,
 }
@@ -305,8 +315,13 @@ pub fn plan_hash_retries(
     if !state.hash_backoff.ready(now_ms) {
         return None;
     }
+    let room = batch_room(state);
+    if room == 0 {
+        return None;
+    }
     let creds = state.device_credentials.clone()?;
     Some(HashRetryPlan {
+        room,
         device_id: creds.device_id,
         refresh_token: creds.refresh_token,
         hash_base_url: state
@@ -345,6 +360,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         hash_base_url,
         cached_token,
         events,
+        room,
         mut next_hash_seq,
         now_ms,
     } = plan;
@@ -393,7 +409,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut stop = false;
 
     for event in events {
-        if stop || retried >= MAX_HASH_RETRIES_PER_LOOP {
+        if stop || retried >= MAX_HASH_RETRIES_PER_LOOP || newly_hashed.len() >= room {
             still_pending.push(event);
             continue;
         }
@@ -556,13 +572,12 @@ pub fn plan_batch(
     let settings = state.settings.as_ref().filter(|s| can_capture(s))?;
     let recipients = batch_recipients(settings).ok()?;
 
-    let count = state
-        .pending_batch_events
-        .len()
-        .min(MAX_BATCH_ITEMS_PER_UPLOAD);
-    let mut items = state.pending_batch_events[..count].to_vec();
-    items.sort_by_key(|event| event.ts);
-    let start_time_ms = items[0].ts;
+    // BATCH-006: the batch holds every hashed event, in the order the hash
+    // server accepted them (the queue's order), or it fails verification.
+    // `batch_room` is what keeps this within MAX_BATCH_ITEMS_PER_UPLOAD.
+    let count = state.pending_batch_events.len();
+    let items = state.pending_batch_events.clone();
+    let start_time_ms = items.iter().map(|event| event.ts).min()?;
     let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
     let medium_risk_count = items
         .iter()
@@ -826,6 +841,118 @@ mod tests {
         assert!(!should_logout);
         assert!(state.pending_batch_events.is_empty());
         assert_eq!(state.next_hash_seq, 0);
+    }
+
+    fn pending_batch_event() -> PendingBatchEvent {
+        PendingBatchEvent {
+            ts: 0,
+            risk: 0.0,
+            encoded: vec![1, 2, 3],
+            is_screenshot: false,
+            notify: None,
+        }
+    }
+
+    /// CORE-005: hashing stops at the batch cap, so a batch always holds
+    /// everything the hash server's state covers (BATCH-006).
+    #[test]
+    fn hashing_stops_at_the_batch_cap_and_resumes_after_the_batch_uploads() {
+        let mut state = authenticated_state();
+        state.hash_token_cache = Some(("token".into(), 1_000));
+        state.last_batch_at_ms = None;
+        state
+            .pending_batch_events
+            .resize(MAX_BATCH_ITEMS_PER_UPLOAD - 1, pending_batch_event());
+        for _ in 0..3 {
+            enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+        }
+        let api = MockApiClient::new();
+
+        let plan = plan_hash_retries(&mut state, 1_000, true).expect("room for one more");
+        let outcome = execute_hash_retries(plan, &api);
+        commit_hash_retries(&mut state, outcome, 1_000);
+        assert_eq!(api.state().hash_uploads.len(), 1);
+        assert_eq!(state.pending_batch_events.len(), MAX_BATCH_ITEMS_PER_UPLOAD);
+        assert_eq!(state.pending_hash_events.len(), 2);
+
+        assert!(plan_hash_retries(&mut state, 1_000, true).is_none());
+        assert_eq!(state.pending_hash_events.len(), 2);
+        assert!(
+            next_hash_attempt_at_ms(&state, true).is_none(),
+            "a full batch must not schedule a hash wakeup (CORE-020)"
+        );
+
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("a full batch is due");
+        let outcome = execute_batch(plan, &api);
+        assert!(!commit_batch(&mut state, outcome, 1_000));
+        assert!(state.pending_batch_events.is_empty());
+
+        assert!(plan_hash_retries(&mut state, 1_000, true).is_some());
+    }
+
+    /// BATCH-006: the payload keeps hash order even when timestamps disagree
+    /// with it, and `start_time` is still the earliest event.
+    #[test]
+    fn batch_keeps_hash_order_when_timestamps_are_out_of_order() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        use aes_gcm::{Aes256Gcm, Nonce};
+        use base64::Engine;
+        use hpke::aead::AesGcm256;
+        use hpke::kdf::HkdfSha256;
+        use hpke::kem::{Kem as KemTrait, X25519HkdfSha256};
+        use hpke::{Deserializable, OpModeR, Serializable, setup_receiver};
+        use rand_core::{OsRng, TryRngCore};
+        use std::io::Read;
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let (private_key, public_key) =
+            <X25519HkdfSha256 as KemTrait>::gen_keypair(&mut OsRng.unwrap_err());
+
+        let mut state = authenticated_state();
+        state.settings.as_mut().unwrap().wrapping_keys[0].pub_key_base64 =
+            b64.encode(public_key.to_bytes());
+        state.last_batch_at_ms = None;
+        for (ts, encoded) in [(300, vec![3]), (100, vec![1]), (200, vec![2])] {
+            state.pending_batch_events.push(PendingBatchEvent {
+                ts,
+                risk: 0.0,
+                encoded,
+                is_screenshot: false,
+                notify: None,
+            });
+        }
+
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let batch = plan.batch.expect("batch builds");
+        assert_eq!(batch.start_time_ms, 100);
+
+        let envelope = b64
+            .decode(&batch.access_keys[0].hpke_key_base64)
+            .expect("base64");
+        let enc = <<X25519HkdfSha256 as KemTrait>::EncappedKey as Deserializable>::from_bytes(
+            &envelope[..32],
+        )
+        .expect("encapped key");
+        let batch_key = setup_receiver::<AesGcm256, HkdfSha256, X25519HkdfSha256>(
+            &OpModeR::Base,
+            &private_key,
+            &enc,
+            b"",
+        )
+        .expect("receiver")
+        .open(&envelope[32..], b"")
+        .expect("open batch key");
+        let gzipped = Aes256Gcm::new_from_slice(&batch_key)
+            .expect("key")
+            .decrypt(Nonce::from_slice(&batch.bytes[..12]), &batch.bytes[12..])
+            .expect("decrypt");
+        let mut payload = Vec::new();
+        flate2::read::GzDecoder::new(gzipped.as_slice())
+            .read_to_end(&mut payload)
+            .expect("gunzip");
+        let events: Vec<Vec<u8>> = rmp_serde::from_slice(&payload).expect("decode");
+
+        assert_eq!(events, vec![vec![3], vec![1], vec![2]]);
     }
 
     /// Regression test: a batch that can't be built (here, a recipient key
