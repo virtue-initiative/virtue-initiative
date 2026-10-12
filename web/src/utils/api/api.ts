@@ -300,10 +300,10 @@ export const api = {
 
   getPartners: () => req<PartnerRelationships>('/partner'),
 
-  invitePartner: (email: string) =>
+  invitePartner: (email: string, replaceId?: string) =>
     req<CreatePartnerResponse>('/partner', {
       method: 'POST',
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, ...(replaceId ? { replace_id: replaceId } : {}) }),
     }),
 
   validatePartnerInvite: (inviteToken: string) =>

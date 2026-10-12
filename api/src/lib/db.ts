@@ -202,6 +202,72 @@ export async function markUsersEmailBouncedByEmails(db: D1Database, emails: stri
     .run();
 }
 
+export type EmailBounceReason = 'permanent' | 'temporary';
+
+// API-056
+export async function createEmailBounce(
+  db: D1Database,
+  input: { id: string; email: string; bounced_at: number; reason: EmailBounceReason },
+) {
+  return db
+    .prepare('INSERT INTO email_bounces (id, email, bounced_at, reason) VALUES (?, ?, ?, ?)')
+    .bind(uuidToBytes(input.id), input.email, input.bounced_at, input.reason)
+    .run();
+}
+
+export async function findPermanentEmailBounce(db: D1Database, email: string) {
+  return firstWithUuidFields<{ id: string; bounced_at: number }>(
+    db
+      .prepare(
+        `SELECT id, bounced_at FROM email_bounces
+         WHERE email = ? AND reason = 'permanent'
+         ORDER BY bounced_at DESC
+         LIMIT 1`,
+      )
+      .bind(email.trim().toLowerCase()),
+    ['id'],
+  );
+}
+
+export async function deleteEmailBouncesByEmail(db: D1Database, email: string) {
+  return db.prepare('DELETE FROM email_bounces WHERE email = ?').bind(email).run();
+}
+
+export async function setEmailTokenBounce(
+  db: D1Database,
+  input: { token_id: string; email?: string; bounce_id: string },
+) {
+  // The optional email guard keeps a bounce from landing on a token that was
+  // sent to someone else.
+  const query = input.email
+    ? 'UPDATE email_tokens SET bounce_id = ? WHERE id = ? AND email = ?'
+    : 'UPDATE email_tokens SET bounce_id = ? WHERE id = ?';
+  const prepared = db.prepare(query);
+  return (
+    input.email
+      ? prepared.bind(uuidToBytes(input.bounce_id), uuidToBytes(input.token_id), input.email)
+      : prepared.bind(uuidToBytes(input.bounce_id), uuidToBytes(input.token_id))
+  ).run();
+}
+
+export async function setBounceOnOutstandingEmailTokens(
+  db: D1Database,
+  email: string,
+  bounceId: string,
+) {
+  return db
+    .prepare(
+      `UPDATE email_tokens SET bounce_id = ?
+       WHERE email = ? AND consumed_at IS NULL AND bounce_id IS NULL`,
+    )
+    .bind(uuidToBytes(bounceId), email)
+    .run();
+}
+
+export async function deleteEmailTokenById(db: D1Database, tokenId: string) {
+  return db.prepare('DELETE FROM email_tokens WHERE id = ?').bind(uuidToBytes(tokenId)).run();
+}
+
 export async function createUser(
   db: D1Database,
   input: {
@@ -886,13 +952,16 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
     watcher_email: string;
     watcher_id: string | null;
     watcher_name: string | null;
+    invite_bounced: number;
   }>(
     db
       .prepare(
         `SELECT p.id, p.status, p.created_at, p.watcher_email,
-                 u.id AS watcher_id, u.name AS watcher_name
+                 u.id AS watcher_id, u.name AS watcher_name,
+                 et.bounce_id IS NOT NULL AS invite_bounced
            FROM partners p
            LEFT JOIN users u ON u.id = p.watcher_user_id
+           LEFT JOIN email_tokens et ON et.id = p.invite_token_id
            WHERE p.watching_user_id = ?
            ORDER BY p.created_at DESC`,
       )
