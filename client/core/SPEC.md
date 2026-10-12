@@ -68,6 +68,8 @@ See /api/SPEC.md and /hash-server/SPEC.md for details on the format.
 
 Both hash server uploads and batch uploads MUST be stored in the state object and retried with exponentional backoff on each wakeup.
 
+A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
+
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 
 ## CORE-006 Other events
