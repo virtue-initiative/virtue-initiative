@@ -840,6 +840,8 @@ The server MUST clamp an `end_time` later than the time it received the batch to
 
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
 
+The server SHOULD NOT store a batch's `url`. It MUST derive the `url` from the batch's stored version, its owner and its `id`, so that a later change to the object storage layout leaves batches uploaded under an earlier version resolving to where they were stored.
+
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
 
 ```js

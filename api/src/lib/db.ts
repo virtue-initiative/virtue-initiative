@@ -1,4 +1,4 @@
-type SqlValue = string | number | ArrayBuffer | null;
+type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
 function parseUserSettings(json: string | null): { email_frequency: string; timezone: string } {
   try {
@@ -519,22 +519,13 @@ export async function deleteDeviceSessionsByDeviceId(db: D1Database, deviceId: s
     .run();
 }
 
-export async function listBatchUrlsForDevice(db: D1Database, deviceId: string) {
-  const result = await db
-    .prepare('SELECT url FROM batches WHERE device_id = ?')
-    .bind(uuidToBytes(deviceId))
-    .all<{ url: string }>();
-
-  return result.results;
-}
-
-export async function listBatchUrlsForUser(db: D1Database, userId: string) {
-  const result = await db
-    .prepare('SELECT url FROM batches WHERE user_id = ?')
-    .bind(uuidToBytes(userId))
-    .all<{ url: string }>();
-
-  return result.results;
+export async function listBatchesForDevice(db: D1Database, deviceId: string) {
+  return allWithUuidFields<{ id: string; user_id: string; version: string }>(
+    db
+      .prepare('SELECT id, user_id, version FROM batches WHERE device_id = ?')
+      .bind(uuidToBytes(deviceId)),
+    ['id', 'user_id'],
+  );
 }
 
 export async function deleteDeviceById(db: D1Database, deviceId: string) {
@@ -648,11 +639,10 @@ export async function createBatch(
     id: string;
     user_id: string;
     device_id: string;
-    url: string;
     start_time: number;
     end_time: number;
-    end_hash: string;
-    access_keys: string;
+    end_hash: ArrayBuffer;
+    access_keys: Uint8Array;
     version: string;
     high_risk_count?: number;
     medium_risk_count?: number;
@@ -662,15 +652,14 @@ export async function createBatch(
   return db
     .prepare(
       `INSERT INTO batches (
-         id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
+         id, user_id, device_id, start_time, end_time, end_hash, access_keys,
          version, high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
       uuidToBytes(input.user_id),
       uuidToBytes(input.device_id),
-      input.url,
       input.start_time,
       input.end_time,
       input.end_hash,
@@ -689,7 +678,7 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, version, created_at
+  let query = `SELECT id, user_id, device_id, start_time, end_time, end_hash, access_keys, version, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
 
@@ -704,11 +693,11 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
     id: string;
     user_id: string;
     device_id: string;
-    url: string;
     start_time: number;
     end_time: number;
-    end_hash: string;
-    access_keys: string;
+    // BLOBs. access_keys is still JSON text on rows from before it became msgpack.
+    end_hash: unknown;
+    access_keys: unknown;
     version: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);

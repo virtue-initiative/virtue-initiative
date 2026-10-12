@@ -5,12 +5,13 @@ import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
-  listBatchUrlsForDevice,
+  listBatchesForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
   listVisibleOwnerIds,
   updateDevice,
 } from '../lib/db';
+import { batchObjectKey } from '../lib/batch-url';
 import { hashGetMany } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
@@ -89,16 +90,10 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   }
 
   const owner = await findUserById(c.env.DB, c.get('sub'));
-  const batchUrls = await listBatchUrlsForDevice(c.env.DB, deviceId);
+  const batches = await listBatchesForDevice(c.env.DB, deviceId);
   await deleteDeviceById(c.env.DB, deviceId);
 
-  const r2Prefix = `${c.env.R2_URL}/`;
-  await Promise.all(
-    batchUrls
-      .map((batch) => batch.url)
-      .filter((url) => url.startsWith(r2Prefix))
-      .map((url) => deleteObject(c.env, url.slice(r2Prefix.length))),
-  );
+  await Promise.all(batches.map((batch) => deleteObject(c.env, batchObjectKey(batch))));
 
   if (owner) {
     const email = renderDeviceDeletedTemplate({

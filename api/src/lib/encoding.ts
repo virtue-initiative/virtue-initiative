@@ -14,3 +14,7 @@ export function encodeHex(value: ArrayBuffer | Uint8Array): string {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
   return Buffer.from(bytes).toString('hex');
 }
+
+export function decodeHex(value: string): ArrayBuffer {
+  return Uint8Array.from(Buffer.from(value, 'hex')).buffer;
+}

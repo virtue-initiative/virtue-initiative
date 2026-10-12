@@ -16,10 +16,12 @@ import {
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
 } from '../lib/db';
+import { encodeAccessKeys } from '../lib/access-keys';
+import { batchObjectKey, batchUrl } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
-import { encodeBase64 } from '../lib/encoding';
+import { decodeHex, encodeBase64 } from '../lib/encoding';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
 import { putObject } from '../lib/r2';
@@ -309,20 +311,22 @@ deviceOnly.post(
     const hashState = await hashGet(c.env, device.id);
     const endHash = hashState.hash;
     const batchId = uuidv4();
-    const key = `user/${device.owner}/batches/${batchId}.enc`;
-    const url = `${c.env.R2_URL}/${key}`;
+    const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
+    const url = batchUrl(c.env, stored);
 
-    await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
+    await putObject(
+      c.env,
+      batchObjectKey(stored),
+      await file.arrayBuffer(),
+      'application/octet-stream',
+    );
     await createBatch(c.env.DB, {
-      id: batchId,
-      user_id: device.owner,
+      ...stored,
       device_id: device.id,
-      url,
       start_time: startTime,
       end_time: endTime,
-      end_hash: endHash,
-      access_keys: JSON.stringify(access_keys),
-      version: CURRENT_API_VERSION,
+      end_hash: decodeHex(endHash),
+      access_keys: encodeAccessKeys(access_keys),
       high_risk_count: event_counts.high,
       medium_risk_count: event_counts.medium,
       created_at: createdAt,
