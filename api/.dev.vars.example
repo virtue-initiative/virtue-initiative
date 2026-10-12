@@ -38,6 +38,10 @@ EMAIL_DELIVERY_MODE=log
 # Where POST /bug-report emails get sent
 BUG_REPORT_EMAIL=help@virtueinitiative.org
 
+# Comma-separated SNS topic ARNs whose bounce/complaint webhooks POST /email/sns
+# accepts (API-041). Unset rejects every SNS request.
+# SNS_TOPIC_ARNS=arn:aws:sns:us-east-1:123456789012:ses-events
+
 # AWS credentials for SES
 # AWS_ACCESS_KEY_ID=
 # AWS_SECRET_ACCESS_KEY=
