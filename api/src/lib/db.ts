@@ -717,8 +717,11 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
 export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, limit: number) {
   const result = await db
     .prepare(
-      `DELETE FROM batches WHERE id IN (
-         SELECT id FROM batches WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
+      // batches is keyed by (user_id, created_at, id), so the delete names the whole
+      // key. The subquery is answered from idx_batches_created_at alone.
+      `DELETE FROM batches WHERE (user_id, created_at, id) IN (
+         SELECT user_id, created_at, id FROM batches
+         WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
        )`,
     )
     .bind(cutoff, limit)
@@ -792,8 +795,8 @@ export async function listBatchWindowsForUser(
       .prepare(
         // A batch is stored after the period it covers ends, so its created_at is at
         // or after its end_time, give or take device clock skew. The created_at
-        // bound lets idx_batches_user_id_created_at skip everything well before the
-        // window instead of reading the user's whole retention period.
+        // bound lets the (user_id, created_at, id) primary key skip everything well
+        // before the window instead of reading the user's whole retention period.
         `SELECT id, device_id, start_time, end_time, high_risk_count, medium_risk_count
          FROM batches
          WHERE user_id = ? AND created_at > ? AND end_time > ? AND start_time < ?
