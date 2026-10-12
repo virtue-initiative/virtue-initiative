@@ -92,6 +92,7 @@ export class APIClient {
   constructor(session: Session) {
     this.session = session;
     this.userId = session.userId;
+    this.userCache = session.initialUser ?? null;
     cacheClient?.setSession(session.userId, session.privateKey ?? null);
     session.onTokenRefreshFailed(() => {
       this.fireLogoutOnce();

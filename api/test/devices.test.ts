@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF } from 'cloudflare:test';
+import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
@@ -8,6 +8,7 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetCookie,
+  uuidToBytes,
 } from './helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 
@@ -52,6 +53,40 @@ describe('Main device routes', () => {
     const body = (await res.json()) as Array<{ id: string; last_hash_at: number | null }>;
     const found = body.find((item) => item.id === device.id);
     expect(found?.last_hash_at).toBe(1_700_000_000_000);
+  });
+
+  it("reports each device's latest batch end_time as last_upload_at", async () => {
+    const { cookie, userId } = await signupAndGetCookie('dave@example.com');
+    const active = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
+    const idle = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
+
+    for (const [index, endTime] of [1_000, 3_000, 2_000].entries()) {
+      await env.DB.prepare(
+        `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          uuidToBytes(`00000000-0000-4000-8000-00000000000${index}`),
+          uuidToBytes(userId),
+          uuidToBytes(active.id),
+          `https://example.com/batch-${index}`,
+          endTime - 500,
+          endTime,
+          '0'.repeat(64),
+          '{}',
+          endTime,
+        )
+        .run();
+    }
+
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ id: string; last_upload_at: number | null }>;
+    expect(body.find((item) => item.id === active.id)?.last_upload_at).toBe(3_000);
+    expect(body.find((item) => item.id === idle.id)?.last_upload_at).toBeNull();
   });
 
   it('updates an owned device', async () => {

@@ -30,7 +30,8 @@ import { verifyUserCredentials } from '../lib/credentials';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-const HASH_TOKEN_TTL_SECONDS = 60 * 60;
+// API-002: outlives the hourly batch upload, which mints the next one.
+const HASH_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const registerDeviceSchema = z.object({

@@ -50,6 +50,7 @@ export type Device = z.infer<typeof deviceSchema>;
 
 export const batchSchema = z.object({
   id: z.string(),
+  user_id: z.string(),
   device_id: z.string(),
   start_time: z.number(),
   end_time: z.number(),

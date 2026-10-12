@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS batches (
   id BLOB PRIMARY KEY,
   user_id BLOB NOT NULL,
   device_id BLOB NOT NULL,
-  url TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL,
   start_time INTEGER NOT NULL,
   end_time INTEGER NOT NULL,
   end_hash TEXT NOT NULL,
@@ -44,9 +44,10 @@ CREATE TABLE IF NOT EXISTS batches (
   created_at INTEGER NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_batches_user_id_created_at ON batches(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
+CREATE INDEX IF NOT EXISTS idx_batches_device_id_end_time ON batches(device_id, end_time);
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,

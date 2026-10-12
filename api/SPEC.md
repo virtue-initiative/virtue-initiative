@@ -13,7 +13,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`. It MUST be valid for 2 hours, so that a device uploading a batch every hour does not need `GET /d/device` in between
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -69,6 +69,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```js
 {
   "id": UUID,
+  "user_id": UUID, // the owner of the device
   "device_id": UUID,
   "start_time": DateTime,
   "end_time": DateTime,

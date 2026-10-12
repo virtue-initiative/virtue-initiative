@@ -576,24 +576,18 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        // Pre-aggregate each owner's batches per device (using idx_batches_user_id,
-        // since batches.user_id is always the device owner) before joining to devices.
-        // This avoids the LEFT JOIN batches row-explosion that GROUP BY had to collapse.
+        // The MAX(end_time) subquery is answered from the last entry of
+        // idx_batches_device_id_end_time, so it reads one row per device instead
+        // of every batch the device has uploaded.
         // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
         // server now — see hashGetMany in lib/hash-server.ts — not in D1.
         `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                lu.last_upload_at
+                (SELECT MAX(b.end_time) FROM batches b WHERE b.device_id = d.id) AS last_upload_at
          FROM devices d
-         LEFT JOIN (
-           SELECT device_id, MAX(end_time) AS last_upload_at
-           FROM batches
-           WHERE user_id IN (${placeholders(ownerIds.length)})
-           GROUP BY device_id
-         ) lu ON lu.device_id = d.id
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
       )
-      .bind(...[...ownerIds, ...ownerIds].map(uuidToBytes)),
+      .bind(...ownerIds.map(uuidToBytes)),
     ['id', 'owner'],
   );
 }
@@ -776,6 +770,10 @@ export async function deleteExpiredDeviceSessionsChunk(
   return result.meta.changes;
 }
 
+// How far ahead of the server a device's clock may run before its batches can
+// be missed by listBatchWindowsForUser.
+const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+
 export async function listBatchWindowsForUser(
   db: D1Database,
   userId: string,
@@ -792,12 +790,16 @@ export async function listBatchWindowsForUser(
   }>(
     db
       .prepare(
+        // A batch is stored after the period it covers ends, so its created_at is at
+        // or after its end_time, give or take device clock skew. The created_at
+        // bound lets idx_batches_user_id_created_at skip everything well before the
+        // window instead of reading the user's whole retention period.
         `SELECT id, device_id, start_time, end_time, high_risk_count, medium_risk_count
          FROM batches
-         WHERE user_id = ? AND end_time > ? AND start_time < ?
+         WHERE user_id = ? AND created_at > ? AND end_time > ? AND start_time < ?
          ORDER BY start_time ASC`,
       )
-      .bind(uuidToBytes(userId), windowStart, windowEnd),
+      .bind(uuidToBytes(userId), windowStart - BATCH_CLOCK_SKEW_MS, windowStart, windowEnd),
     ['id', 'device_id'],
   );
 }

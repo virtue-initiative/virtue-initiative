@@ -35,7 +35,9 @@ pub struct Upload {
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
-const HASH_TOKEN_MAX_AGE_MS: i64 = 55 * 60 * 1_000;
+// The API mints hash tokens valid for 2 hours (API-002). Refreshing 10 minutes ahead of
+// that leaves an hourly batch upload to renew the token, with no GET /d/device in between.
+const HASH_TOKEN_MAX_AGE_MS: i64 = 110 * 60 * 1_000;
 
 const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s
 const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes

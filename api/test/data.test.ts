@@ -84,6 +84,7 @@ describe('Data and device API routes', () => {
     expect(dataRes.status).toBe(200);
     const data = (await dataRes.json()) as {
       batches: Array<{
+        user_id: string;
         device_id: string;
         end_hash: string;
         version: string;
@@ -95,6 +96,7 @@ describe('Data and device API routes', () => {
       watchers: unknown[];
     };
     expect(data.batches[0]).toMatchObject({
+      user_id: userId,
       device_id: device.id,
       version: CURRENT_API_VERSION,
       encrypted_key: Buffer.from('owner-envelope').toString('base64'),
