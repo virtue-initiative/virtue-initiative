@@ -206,7 +206,7 @@ function renderSection(baseUrl, ref) {
 function updateDocument() {
   const baseUrl = getGitHubBaseUrl();
   const ref = getRequestedRef();
-  const generatedSection = `${sectionStart}\n${renderSection(baseUrl, ref)}\n${sectionEnd}`;
+  const generatedSection = `${sectionStart}\n\n${renderSection(baseUrl, ref)}\n\n${sectionEnd}`;
   const existing = fs.readFileSync(docPath, "utf8");
 
   let next;
