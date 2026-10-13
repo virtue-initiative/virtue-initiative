@@ -96,8 +96,8 @@ then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
 
 Key files:
 
-- Rust: `client/core/src/api.rs`
-- TypeScript: `web/src/crypto.ts` (`derivePasswordMaterial`)
+- Rust: `client/core/src/crypto.rs` (`derive_password_auth`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`derivePasswordMaterial`)
 
 ### 5. HPKE key wrapping
 
@@ -107,7 +107,7 @@ Wire format: `enc[kem.encSize bytes] || ciphertext`.
 Key files:
 
 - Rust: `client/core/src/crypto.rs`
-- TypeScript: `web/src/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
 
 The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
 the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
