@@ -41,11 +41,9 @@ CREATE TABLE IF NOT EXISTS batches (
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, created_at, id),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
-CREATE INDEX IF NOT EXISTS idx_batches_device_id_end_time ON batches(device_id, end_time);
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,

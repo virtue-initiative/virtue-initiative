@@ -7,6 +7,11 @@
 -- * `access_keys` becomes a BLOB holding msgpack (lib/access-keys.ts). Existing
 --   rows keep their JSON text, which the API still reads. They age out with the
 --   30-day batch retention.
+-- * The index on (device_id, end_time) and the foreign key on device_id are
+--   dropped. The index cost a written row on every batch. Without it the
+--   foreign key would make every device delete scan the whole table for
+--   children, so deleteDeviceById removes a device's batches itself, through
+--   the owner's primary key range.
 PRAGMA defer_foreign_keys = true;
 
 -- Stop here unless every stored url is exactly what the API will now derive.
@@ -41,8 +46,7 @@ CREATE TABLE batches_new (
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   PRIMARY KEY (user_id, created_at, id),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
 -- unhex() returns NULL for anything that is not hex, which the NOT NULL on
@@ -59,4 +63,3 @@ DROP TABLE batches;
 ALTER TABLE batches_new RENAME TO batches;
 
 CREATE INDEX idx_batches_created_at ON batches(created_at);
-CREATE INDEX idx_batches_device_id_end_time ON batches(device_id, end_time);

@@ -519,18 +519,25 @@ export async function deleteDeviceSessionsByDeviceId(db: D1Database, deviceId: s
     .run();
 }
 
-export async function listBatchesForDevice(db: D1Database, deviceId: string) {
+// batches has no index on device_id. These two name the owner as well, so they
+// read the owner's primary key range instead of the whole table.
+export async function listBatchesForDevice(db: D1Database, deviceId: string, ownerId: string) {
   return allWithUuidFields<{ id: string; user_id: string; version: string }>(
     db
-      .prepare('SELECT id, user_id, version FROM batches WHERE device_id = ?')
-      .bind(uuidToBytes(deviceId)),
+      .prepare('SELECT id, user_id, version FROM batches WHERE user_id = ? AND device_id = ?')
+      .bind(uuidToBytes(ownerId), uuidToBytes(deviceId)),
     ['id', 'user_id'],
   );
 }
 
-export async function deleteDeviceById(db: D1Database, deviceId: string) {
+// batches.device_id has no foreign key, so nothing cascades from the device row:
+// the device's batches are deleted here.
+export async function deleteDeviceById(db: D1Database, deviceId: string, ownerId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
-  await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
+  await db
+    .prepare('DELETE FROM batches WHERE user_id = ? AND device_id = ?')
+    .bind(uuidToBytes(ownerId), deviceIdBytes)
+    .run();
   return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
 }
 
@@ -567,13 +574,14 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        // The MAX(end_time) subquery is answered from the last entry of
-        // idx_batches_device_id_end_time, so it reads one row per device instead
-        // of every batch the device has uploaded.
+        // batches has no index on device_id, so the subquery names the owner too
+        // and reads that owner's range of the (user_id, created_at, id) primary
+        // key: at most the batches they uploaded in the 30-day retention window.
         // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
         // server now — see hashGetMany in lib/hash-server.ts — not in D1.
         `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                (SELECT MAX(b.end_time) FROM batches b WHERE b.device_id = d.id) AS last_upload_at
+                (SELECT MAX(b.end_time) FROM batches b
+                 WHERE b.user_id = d.owner AND b.device_id = d.id) AS last_upload_at
          FROM devices d
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
