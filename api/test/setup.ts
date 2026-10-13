@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS users (
   encrypted_priv_key BLOB,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 CREATE TABLE IF NOT EXISTS devices (
   id BLOB PRIMARY KEY,
@@ -64,7 +63,6 @@ CREATE TABLE IF NOT EXISTS partners (
 );
 CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
-CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
 
 CREATE TABLE IF NOT EXISTS email_bounces (
   id BLOB PRIMARY KEY,
