@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api as rawApi, PartnerInviteValidation } from '../../utils/api/api';
 import { describeError, useAPIContext } from '../../utils/api';
-import { Alert, Button, Card, Select } from '@virtueinitiative/shared-web';
+import { Alert, Button, Card } from '@virtueinitiative/shared-web';
 import '../../styles/email-link.css';
 
 function navigate(path: string) {
@@ -18,7 +18,6 @@ type InviteState =
 export function InviteAccept() {
   const apiClient = useAPIContext();
   const [state, setState] = useState<InviteState>({ status: 'loading' });
-  const [frequency, setFrequency] = useState<'daily' | 'weekly'>('weekly');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -61,13 +60,13 @@ export function InviteAccept() {
       });
   }, [apiClient]);
 
-  const saveFrequency = async () => {
+  const saveFrequency = async (frequency: 'daily' | 'weekly') => {
     if (!apiClient) return;
     setSaving(true);
     setSaveError(null);
     try {
       await apiClient.updateSettings({ settings: { email_frequency: frequency } });
-      setState((prev) => (prev.status === 'success' ? { ...prev, askFrequency: false } : prev));
+      navigate('/');
     } catch (err) {
       setSaveError(describeError(err, 'Failed to save your email preference.'));
     } finally {
@@ -88,21 +87,42 @@ export function InviteAccept() {
             </p>
             {state.askFrequency ? (
               <>
-                <p>How often would you like to receive summary emails?</p>
-                <Select
-                  value={frequency}
-                  onChange={(e) =>
-                    setFrequency((e.target as HTMLSelectElement).value as 'daily' | 'weekly')
-                  }
-                  disabled={saving}
-                >
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </Select>
+                <p>
+                  Summary emails list what happened on the devices you watch, so you can catch up
+                  without opening the app. Choose how often you want them.
+                </p>
                 {saveError && <Alert variant="error">{saveError}</Alert>}
-                <Button variant="primary" type="button" onClick={saveFrequency} disabled={saving}>
-                  Save and continue
-                </Button>
+                <div class="email-link-choices">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => saveFrequency('daily')}
+                    disabled={saving}
+                  >
+                    Daily
+                  </Button>
+                  <Button
+                    variant="primary"
+                    type="button"
+                    onClick={() => saveFrequency('weekly')}
+                    disabled={saving}
+                  >
+                    Weekly
+                  </Button>
+                </div>
+                <p>
+                  You can change this any time, or turn off emails, in your{' '}
+                  <a
+                    href="/settings"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate('/settings');
+                    }}
+                  >
+                    email settings
+                  </a>
+                  .
+                </p>
               </>
             ) : (
               <Button variant="primary" type="button" onClick={() => navigate('/')}>
