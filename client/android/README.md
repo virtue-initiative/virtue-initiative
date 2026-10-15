@@ -157,6 +157,17 @@ The app has two product flavors:
   instead shows a one-time dialog that opens the battery-optimization settings list.
   `BuildConfig.PLAY_STORE` is true only here.
 
+The `play` flavor also declares the `isMonitoringTool` manifest flag that Play's
+stalkerware policy requires of monitoring apps (`src/play/AndroidManifest.xml`).
+
+Both flavors show an Accessibility disclosure with Agree and No Thanks buttons before the
+setup steps (`AccessibilityConsent.kt`, `AccessibilitySetupGuide.renderDisclosure`). Play
+requires it because Virtue isn't an accessibility tool, and the wording is what Play
+reviewers read, so change it with the Play Console declaration in mind. Raise
+`AccessibilityConsent.VERSION` when it changes enough that users should see it again.
+Signed-in users also get a Delete Account link, which opens the web app's Settings, because
+Play requires account deletion to be reachable from the app.
+
 Task names include the flavor: `assembleDirectDebug`, `installPlayDebug`,
 `bundlePlayRelease`, and so on. `scripts/build.sh` and `scripts/install.sh` build `direct`
 unless given `--play`. Play Console takes the `.aab` from `bundlePlayRelease`, which CI

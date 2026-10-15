@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
+import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.text.HtmlCompat
 import com.google.android.material.button.MaterialButton
@@ -80,9 +81,26 @@ object AccessibilitySetupGuide {
         source == PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE ||
             source == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
 
-    /** Fills [container] with the guide for this device's current state. */
-    fun render(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {
+    /**
+     * Fills [container] with the guide for this device's current state. Until
+     * the user agrees to the disclosure ([AccessibilityConsent]), that is all
+     * it shows, so no step can send them to Accessibility settings first.
+     * [onConsentChanged] runs after the user agrees or declines.
+     */
+    fun render(
+        context: Context,
+        container: LinearLayout,
+        onAction: (Action) -> Unit,
+        onConsentChanged: () -> Unit = {},
+    ) {
         container.removeAllViews()
+        if (!AccessibilityConsent.isGiven(context)) {
+            renderDisclosure(context, container) {
+                render(context, container, onAction, onConsentChanged)
+                onConsentChanged()
+            }
+            return
+        }
         val restricted = isRestricted(context)
 
         container.addView(bodyText(context, context.getString(R.string.a11y_guide_intro)))
@@ -94,6 +112,64 @@ object AccessibilitySetupGuide {
 
         steps(context, restricted).forEachIndexed { index, step ->
             container.addView(stepView(context, index + 1, step, onAction))
+        }
+    }
+
+    // Google Play's prominent disclosure for the Accessibility API: shown in
+    // normal use, on its own, saying what is accessed and how it is shared,
+    // and ending in an explicit choice.
+    private fun renderDisclosure(context: Context, container: LinearLayout, rerender: () -> Unit) {
+        if (AccessibilityConsent.declined) {
+            container.addView(bodyText(context, context.getString(R.string.a11y_declined_body)))
+            container.addView(actionButton(context, R.string.a11y_declined_review, filled = true) {
+                AccessibilityConsent.declined = false
+                rerender()
+            })
+            return
+        }
+
+        container.addView(TextView(context).apply {
+            text = context.getString(R.string.a11y_disclosure_title)
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(ContextCompat.getColor(context, R.color.ink))
+        })
+        listOf(
+            R.string.a11y_disclosure_intro,
+            R.string.a11y_disclosure_shared,
+            R.string.a11y_disclosure_not_collected,
+            R.string.a11y_disclosure_turn_off,
+        ).forEach { res ->
+            container.addView(bodyText(context, html(context.getString(res))).apply {
+                (layoutParams as LinearLayout.LayoutParams).topMargin = dp(context, 10)
+            })
+        }
+        container.addView(actionButton(context, R.string.a11y_disclosure_agree, filled = true) {
+            AccessibilityConsent.give(context)
+            rerender()
+        }.apply { (layoutParams as LinearLayout.LayoutParams).topMargin = dp(context, 18) })
+        container.addView(actionButton(context, R.string.a11y_disclosure_decline, filled = false) {
+            AccessibilityConsent.declined = true
+            rerender()
+        })
+    }
+
+    private fun actionButton(context: Context, @StringRes label: Int, filled: Boolean, onClick: () -> Unit): MaterialButton {
+        val forest = ContextCompat.getColor(context, R.color.virtue_forest)
+        val button = if (filled) {
+            MaterialButton(context).apply { backgroundTintList = ColorStateList.valueOf(forest) }
+        } else {
+            MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                setTextColor(forest)
+                strokeColor = ColorStateList.valueOf(forest)
+            }
+        }
+        return button.apply {
+            text = context.getString(label)
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(context, 8) }
         }
     }
 
