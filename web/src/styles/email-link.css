@@ -23,12 +23,3 @@
   margin: 0;
   color: var(--text-muted);
 }
-
-.email-link-choices {
-  display: flex;
-  gap: 0.75rem;
-}
-
-.email-link-choices > * {
-  flex: 1;
-}

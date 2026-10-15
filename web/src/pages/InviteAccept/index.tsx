@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api as rawApi, PartnerInviteValidation } from '../../utils/api/api';
 import { describeError, useAPIContext } from '../../utils/api';
-import { Alert, Button, Card } from '@virtueinitiative/shared-web';
+import { Alert, Button, Card, SegmentedControl } from '@virtueinitiative/shared-web';
 import '../../styles/email-link.css';
 
 function navigate(path: string) {
@@ -9,6 +9,11 @@ function navigate(path: string) {
   window.history.pushState({}, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
+
+const FREQUENCY_SEGMENTS = [
+  { label: 'Daily', value: 'daily' },
+  { label: 'Weekly', value: 'weekly' },
+];
 
 type InviteState =
   | { status: 'loading' }
@@ -18,6 +23,7 @@ type InviteState =
 export function InviteAccept() {
   const apiClient = useAPIContext();
   const [state, setState] = useState<InviteState>({ status: 'loading' });
+  const [frequency, setFrequency] = useState<'daily' | 'weekly'>('weekly');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -60,7 +66,7 @@ export function InviteAccept() {
       });
   }, [apiClient]);
 
-  const saveFrequency = async (frequency: 'daily' | 'weekly') => {
+  const saveFrequency = async () => {
     if (!apiClient) return;
     setSaving(true);
     setSaveError(null);
@@ -92,24 +98,14 @@ export function InviteAccept() {
                   without opening the app. Choose how often you want them.
                 </p>
                 {saveError && <Alert variant="error">{saveError}</Alert>}
-                <div class="email-link-choices">
-                  <Button
-                    variant="outline"
-                    type="button"
-                    onClick={() => saveFrequency('daily')}
-                    disabled={saving}
-                  >
-                    Daily
-                  </Button>
-                  <Button
-                    variant="primary"
-                    type="button"
-                    onClick={() => saveFrequency('weekly')}
-                    disabled={saving}
-                  >
-                    Weekly
-                  </Button>
-                </div>
+                <SegmentedControl
+                  segments={FREQUENCY_SEGMENTS}
+                  value={frequency}
+                  onChange={(value) => setFrequency(value as 'daily' | 'weekly')}
+                />
+                <Button variant="primary" type="button" onClick={saveFrequency} disabled={saving}>
+                  Done
+                </Button>
                 <p>
                   You can change this any time, or turn off emails, in your{' '}
                   <a
