@@ -107,10 +107,14 @@ export default {
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     switch (controller.cron) {
       case DAILY_CRON:
-        // api/SPEC.md API-051: one metrics snapshot per UTC day.
-        ctx.waitUntil(snapshotAnalytics(env, controller.scheduledTime));
-        // Visits every user, so once a day rather than hourly (see lib/retention.ts).
-        ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
+        // Batch cleanup visits every user, so it runs once a day rather than hourly (see
+        // lib/retention.ts). The snapshot (API-051, one per UTC day) waits for it, so its
+        // batch counts don't depend on how far a concurrent delete has got.
+        ctx.waitUntil(
+          pruneExpiredBatches(env, controller.scheduledTime)
+            .catch((err) => console.error('[cron] batch cleanup failed', err))
+            .then(() => snapshotAnalytics(env, controller.scheduledTime)),
+        );
         break;
       case HOURLY_CRON:
         ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));

@@ -22,8 +22,12 @@ export function encodeAccessKeys(accessKeys: Record<string, string>): Uint8Array
   );
 }
 
-/** Returns the base64 wrapped key stored for `userId`, or null if there is none. */
-export function wrappedKeyForUser(stored: unknown, userId: string): string | null {
+/**
+ * Returns the base64 wrapped key stored for `userId`, or null if there is none. A
+ * stored value that can't be decoded also gives null, so the batch is left out, but it
+ * is logged with `batchId`: it means a corrupt row, not a batch the user can't read.
+ */
+export function wrappedKeyForUser(stored: unknown, userId: string, batchId: string): string | null {
   try {
     // Rows written before the column became msgpack hold the uploaded JSON as
     // text. They age out with the 30-day batch retention.
@@ -32,7 +36,7 @@ export function wrappedKeyForUser(stored: unknown, userId: string): string | nul
     }
 
     const bytes = toBytes(stored);
-    if (!bytes) return null;
+    if (!bytes) throw new Error(`unexpected access_keys value of type ${typeof stored}`);
 
     for (const [id, wrappedKey] of decode(bytes) as Array<[Uint8Array, Uint8Array]>) {
       if (bytesToUuid(id) === userId) {
@@ -40,7 +44,8 @@ export function wrappedKeyForUser(stored: unknown, userId: string): string | nul
       }
     }
     return null;
-  } catch {
+  } catch (err) {
+    console.warn(`[access-keys] could not decode access_keys of batch ${batchId}`, err);
     return null;
   }
 }

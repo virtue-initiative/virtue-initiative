@@ -5,7 +5,6 @@ import {
   deleteDeviceById,
   findOwnedDevice,
   findUserById,
-  listBatchesForDevice,
   listAcceptedNotificationTargetsForUser,
   listDevicesForOwners,
   listVisibleOwnerIds,
@@ -90,8 +89,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   }
 
   const owner = await findUserById(c.env.DB, c.get('sub'));
-  const batches = await listBatchesForDevice(c.env.DB, deviceId, device.owner);
-  await deleteDeviceById(c.env.DB, deviceId, device.owner);
+  const batches = await deleteDeviceById(c.env.DB, deviceId, device.owner);
 
   await Promise.all(batches.map((batch) => deleteObject(c.env, batchObject(c.env, batch).key)));
 

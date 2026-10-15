@@ -48,7 +48,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
   return c.json({
     batches: batches
       .map((batch) => {
-        const encryptedKey = wrappedKeyForUser(batch.access_keys, userId);
+        const encryptedKey = wrappedKeyForUser(batch.access_keys, userId, batch.id);
         if (!encryptedKey) {
           return null;
         }

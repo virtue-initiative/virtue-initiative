@@ -13,6 +13,7 @@ import {
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 import { decode } from '@msgpack/msgpack';
 import { CURRENT_API_VERSION } from '../src/lib/api-version';
+import { createBatch } from '../src/lib/db';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -23,6 +24,70 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Data and device API routes', () => {
+  it('refuses a batch when the hash server returns a malformed hash', async () => {
+    await signupAndGetCookie('badhash@example.com');
+    const device = await createDeviceForUser('badhash@example.com', 'password123', 'PC', 'linux');
+    seedHashState(device.id, { hash: 'abc', seq: 1, last_received: 1000 });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
+      body: batchMetadataForm({ start_time: 1_000, end_time: 2_000, access_keys: {} }),
+    });
+
+    expect(res.status).toBe(502);
+    const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM batches').first<{ n: number }>();
+    expect(count?.n).toBe(0);
+    error.mockRestore();
+  });
+
+  it('does not store a batch for a device that no longer exists', async () => {
+    const { userId } = await signupAndGetCookie('gone@example.com');
+    const result = await createBatch(env.DB, {
+      id: '00000000-0000-4000-8000-0000000000aa',
+      user_id: userId,
+      device_id: '00000000-0000-4000-8000-0000000000bb',
+      start_time: 1_000,
+      end_time: 2_000,
+      end_hash: new Uint8Array(32).buffer,
+      access_keys: new Uint8Array(),
+      version: CURRENT_API_VERSION,
+      created_at: 2_000,
+    });
+
+    expect(result.meta.changes).toBe(0);
+  });
+
+  it('leaves out and logs a batch whose access keys cannot be decoded', async () => {
+    const { cookie, userId } = await signupAndGetCookie('corrupt@example.com');
+    const device = await createDeviceForUser('corrupt@example.com', 'password123', 'PC', 'linux');
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, version, created_at)
+       VALUES (?, ?, ?, 1000, 2000, ?, ?, ?, 2000)`,
+    )
+      .bind(
+        uuidToBytes('00000000-0000-4000-8000-0000000000cc'),
+        uuidToBytes(userId),
+        uuidToBytes(device.id),
+        new Uint8Array(32),
+        new Uint8Array([0xc1]),
+        CURRENT_API_VERSION,
+      )
+      .run();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const res = await SELF.fetch(`${BASE}/data?since=0`, { headers: authHeaders(cookie) });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { batches: unknown[] }).batches).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('00000000-0000-4000-8000-0000000000cc'),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
   it('clamps batch times from a device clock running ahead, and logs a warning', async () => {
     await signupAndGetCookie('skew@example.com');
     const device = await createDeviceForUser('skew@example.com', 'password123', 'Laptop', 'linux');

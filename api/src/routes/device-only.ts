@@ -24,7 +24,7 @@ import { hashGet, hashReset } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
-import { putObject } from '../lib/r2';
+import { deleteObject, putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -310,12 +310,18 @@ deviceOnly.post(
 
     const hashState = await hashGet(c.env, device.id);
     const endHash = hashState.hash;
+    // end_hash is stored as its 32 raw bytes, and decodeHex would silently truncate a
+    // malformed value, so hold the hash server to its 64-hex-character contract.
+    if (!/^[0-9a-f]{64}$/i.test(endHash)) {
+      console.error(`[batch] hash server returned a malformed hash for device ${device.id}`);
+      return c.json({ error: 'Hash server returned an invalid hash' }, 502);
+    }
     const batchId = uuidv4();
     const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
     const { key, url } = batchObject(c.env, stored);
 
     await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
-    await createBatch(c.env.DB, {
+    const inserted = await createBatch(c.env.DB, {
       ...stored,
       device_id: device.id,
       start_time: startTime,
@@ -326,6 +332,11 @@ deviceOnly.post(
       medium_risk_count: event_counts.medium,
       created_at: createdAt,
     });
+    if (inserted.meta.changes === 0) {
+      // The device was deleted while this upload was in flight.
+      await deleteObject(c.env, key);
+      return c.json({ error: 'Not found' }, 404);
+    }
     await hashReset(c.env, device.id);
 
     for (const notification of notifications) {

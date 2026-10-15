@@ -521,24 +521,24 @@ export async function deleteDeviceSessionsByDeviceId(db: D1Database, deviceId: s
 
 // batches has no index on device_id. These two name the owner as well, so they
 // read the owner's primary key range instead of the whole table.
-export async function listBatchesForDevice(db: D1Database, deviceId: string, ownerId: string) {
-  return allWithUuidFields<{ id: string; user_id: string; version: string }>(
-    db
-      .prepare('SELECT id, user_id, version FROM batches WHERE user_id = ? AND device_id = ?')
-      .bind(uuidToBytes(ownerId), uuidToBytes(deviceId)),
-    ['id', 'user_id'],
-  );
-}
-
 // batches.device_id has no foreign key, so nothing cascades from the device row:
-// the device's batches are deleted here.
+// the device's batches are deleted here, in one transaction with the device. Returns
+// the batches it deleted, so the caller can remove their R2 objects once that commits.
 export async function deleteDeviceById(db: D1Database, deviceId: string, ownerId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
-  await db
-    .prepare('DELETE FROM batches WHERE user_id = ? AND device_id = ?')
-    .bind(uuidToBytes(ownerId), deviceIdBytes)
-    .run();
-  return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
+  const [deleted] = await db.batch([
+    db
+      .prepare(
+        'DELETE FROM batches WHERE user_id = ? AND device_id = ? RETURNING id, user_id, version',
+      )
+      .bind(uuidToBytes(ownerId), deviceIdBytes),
+    db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes),
+  ]);
+  return (deleted.results as { id: unknown; user_id: unknown; version: string }[]).map((row) => ({
+    id: bytesToUuid(row.id),
+    user_id: bytesToUuid(row.user_id),
+    version: row.version,
+  }));
 }
 
 export async function deleteUserById(db: D1Database, userId: string) {
@@ -657,17 +657,22 @@ export async function createBatch(
     created_at: number;
   },
 ) {
+  const deviceIdBytes = uuidToBytes(input.device_id);
   return db
     .prepare(
+      // batches.device_id has no foreign key, so the insert checks the device still
+      // exists itself; otherwise a device deleted mid-upload would leave an orphan row.
       `INSERT INTO batches (
          id, user_id, device_id, start_time, end_time, end_hash, access_keys,
          version, high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       )
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?)`,
     )
     .bind(
       uuidToBytes(input.id),
       uuidToBytes(input.user_id),
-      uuidToBytes(input.device_id),
+      deviceIdBytes,
       input.start_time,
       input.end_time,
       input.end_hash,
@@ -676,6 +681,7 @@ export async function createBatch(
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
+      deviceIdBytes,
     )
     .run();
 }
