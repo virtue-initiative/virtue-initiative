@@ -210,7 +210,7 @@ The links and snippets below are generated from the current tree by `node script
 
 Argon2id output is split into `passwordAuth` and the AES wrapping key with HKDF-SHA256.
 
-Source: [`web/src/crypto.ts:L83-L110`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L83-L110)
+Source: [`web/src/utils/api/crypto.ts:L73-L96`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L73-L96)
 
 ```ts
 export async function derivePasswordMaterial(
@@ -243,7 +243,7 @@ export async function derivePasswordMaterial(
 
 The web client encrypts the private key locally with AES-GCM before upload.
 
-Source: [`web/src/crypto.ts:L112-L124`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L112-L124)
+Source: [`web/src/utils/api/crypto.ts:L98-L103`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L98-L103)
 
 ```ts
 export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
@@ -258,7 +258,7 @@ export async function encryptData(key: CryptoKey, data: Uint8Array): Promise<Uin
 
 The web app generates the user keypair from the HPKE suite's X25519 KEM.
 
-Source: [`web/src/crypto.ts:L140-L151`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L140-L151)
+Source: [`web/src/utils/api/crypto.ts:L116-L123`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L116-L123)
 
 ```ts
 export async function generateUserKeyPair() {
@@ -275,7 +275,7 @@ export async function generateUserKeyPair() {
 
 Batch access envelopes are opened with HPKE and imported back into WebCrypto as AES keys.
 
-Source: [`web/src/crypto.ts:L159-L171`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/crypto.ts#L159-L171)
+Source: [`web/src/utils/api/crypto.ts:L135-L142`](https://github.com/virtue-initiative/virtue-initiative/blob/main/web/src/utils/api/crypto.ts#L135-L142)
 
 ```ts
 export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: BufferSource) {
@@ -305,7 +305,7 @@ export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
 
 The Rust client matches the browser flow with Argon2id and HKDF-SHA256("auth").
 
-Source: [`client/core/src/crypto.rs:L82-L105`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L82-L105)
+Source: [`client/core/src/crypto.rs:L80-L103`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L80-L103)
 
 ```rs
 pub fn derive_password_auth(
@@ -338,29 +338,32 @@ pub fn derive_password_auth(
 
 Each batch gets a fresh AES key, then the client HPKE-wraps that key for every recipient.
 
-Source: [`client/core/src/batch.rs:L14-L56`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/batch.rs#L14-L56)
+Source: [`client/core/src/module/upload/batch.rs:L25-L75`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/module/upload/batch.rs#L25-L75)
 
 ```rs
     pub fn build_upload(
-        items: &[BufferedBatchEvent],
+        encoded_events: &[Vec<u8>],
         crypto: &CryptoEngine,
         recipients: &[BatchRecipient],
+        start_time_ms: i64,
         end_time_ms: i64,
+        high_risk_count: u32,
+        medium_risk_count: u32,
+        screenshot_count: u32,
+        notifications: Vec<NotifyPayload>,
     ) -> CoreResult<BatchUpload> {
-        let first = items.first().ok_or(CoreError::InvalidState(
-            "cannot build a batch from an empty buffer",
-        ))?;
+        if encoded_events.is_empty() {
+            return Err(CoreError::InvalidState(
+                "cannot build a batch from an empty buffer",
+            ));
+        }
         if recipients.is_empty() {
             return Err(CoreError::InvalidState(
                 "cannot build a batch without any recipients",
             ));
         }
 
-        let encoded_events = items
-            .iter()
-            .map(|item| encode_batch_event(&item.event))
-            .collect::<CoreResult<Vec<_>>>()?;
-        let msgpack = rmp_serde::to_vec_named(&encoded_events)?;
+        let msgpack = encode_payload(encoded_events)?;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&msgpack)?;
@@ -378,10 +381,15 @@ Source: [`client/core/src/batch.rs:L14-L56`](https://github.com/virtue-initiativ
             .collect::<CoreResult<Vec<_>>>()?;
 
         Ok(BatchUpload {
-            start_time_ms: first.event.ts,
+            start_time_ms,
             end_time_ms,
             bytes: encrypted,
             access_keys,
+            total_count: encoded_events.len() as u32,
+            high_risk_count,
+            medium_risk_count,
+            screenshot_count,
+            notifications,
         })
     }
 ```

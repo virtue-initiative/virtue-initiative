@@ -9,7 +9,7 @@ These two files implement the TypeScript side of contracts shared with the Rust 
 - `src/utils/api/crypto.ts` — AES-256-GCM decrypt, HPKE unwrap, argon2id password derivation, hash-chain verification
 - `src/utils/api/batch-materializer.ts` — fetches and decrypts the batch blob produced by the Rust client; decodes the msgpack event array
 
-Changes to the encryption format, nonce layout, msgpack schema, or hash algorithm must mirror the Rust implementation in `client/core/src/crypto.rs` and `client/core/src/batch.rs`.
+Changes to the encryption format, nonce layout, msgpack schema, or hash algorithm must mirror the Rust implementation in `client/core/src/crypto.rs` and `client/core/src/module/upload/batch.rs`.
 
 ## Code map
 
