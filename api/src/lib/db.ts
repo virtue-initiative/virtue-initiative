@@ -280,6 +280,7 @@ export async function createUser(
     encrypted_priv_key: ArrayBuffer;
     name?: string;
     email_verified?: boolean;
+    timezone?: string;
   },
 ) {
   return db
@@ -298,7 +299,7 @@ export async function createUser(
       input.passwordParamsVersion,
       input.name ?? null,
       input.email_verified ? 1 : 0,
-      JSON.stringify({ email_frequency: 'weekly', timezone: 'UTC' }),
+      JSON.stringify({ email_frequency: 'weekly', timezone: input.timezone ?? 'UTC' }),
       input.pub_key,
       input.encrypted_priv_key,
       Date.now(),

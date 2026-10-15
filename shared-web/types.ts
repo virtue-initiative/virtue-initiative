@@ -141,6 +141,7 @@ export const signupSchema = z.object({
   encrypted_priv_key: z.base64(),
   name: z.string().min(1).optional(),
   newsletter_opt_in: z.boolean().optional(),
+  timezone: z.string().optional(),
 });
 export type SignupPayload = z.infer<typeof signupSchema>;
 

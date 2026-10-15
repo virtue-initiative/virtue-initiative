@@ -256,7 +256,8 @@ The client MUST provide this request shape.
   "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
   "email_digest_minutes_utc": Number | undefined,
-  "newsletter_opt_in": Boolean | undefined
+  "newsletter_opt_in": Boolean | undefined,
+  "timezone": "America/New_York" | undefined
 }
 ```
 
@@ -268,7 +269,9 @@ The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note
 
 The server MUST return a `refresh_token` cookie containing the refresh token.
 
-The server MUST create an account for the user, with `settings.email_frequency` set to `weekly` and `settings.timezone` set to `UTC`, and return **HTTP 200** with this shape.
+If `timezone` is absent or is not a valid IANA time zone name, the server MUST use `UTC` instead and MUST NOT reject the signup.
+
+The server MUST create an account for the user, with `settings.email_frequency` set to `weekly` and `settings.timezone` set to the provided `timezone`, and return **HTTP 200** with this shape.
 
 ```js
 {

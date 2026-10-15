@@ -396,6 +396,28 @@ describe('Auth routes', () => {
     expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
+  it('stores the timezone sent at signup and falls back to UTC when it is missing or invalid', async () => {
+    const readTimezone = async (cookie: string) => {
+      const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
+      const body = (await res.json()) as { settings: { timezone: string } };
+      return body.settings.timezone;
+    };
+
+    const berlin = await signupAndGetCookie(
+      'tz-berlin@example.com',
+      'pw',
+      undefined,
+      'Europe/Berlin',
+    );
+    expect(await readTimezone(berlin.cookie)).toBe('Europe/Berlin');
+
+    const invalid = await signupAndGetCookie('tz-bad@example.com', 'pw', undefined, 'Not/AZone');
+    expect(await readTimezone(invalid.cookie)).toBe('UTC');
+
+    const missing = await signupAndGetCookie('tz-none@example.com', 'pw');
+    expect(await readTimezone(missing.cookie)).toBe('UTC');
+  });
+
   it('returns the current user and allows updating profile fields but not key material', async () => {
     const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 
