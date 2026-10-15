@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
+import { cacheClient } from '../../utils/cache';
 import { PageHeading } from '../../components/PageHeading';
 import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
 import { DevicesIcon } from '../../components/icons';
@@ -45,6 +46,7 @@ export function Devices() {
     () => devices.filter((device) => device.owner === userId),
     [devices, userId],
   );
+  const lastUploads = useLastUploads(userId, devices);
 
   return (
     <div class="dashboard">
@@ -61,6 +63,7 @@ export function Devices() {
             <DeviceCard
               key={device.id}
               device={device}
+              lastUpload={lastUploads ? (lastUploads[device.id] ?? null) : undefined}
               onUpdateDevice={updateDevice}
               onRemoveDevice={removeDevice}
             />
@@ -164,12 +167,39 @@ function AddDeviceButton() {
   );
 }
 
+// GET /device doesn't report last uploads (API-029), since the server would have to read
+// every batch to find them. The cache already holds this user's batches, so each device's
+// latest comes from there, after pulling in any new batch rows. Null until it answers, or
+// for good if this browser has no cache.
+function useLastUploads(userId: string | null, devices: Device[]) {
+  const [lastUploads, setLastUploads] = useState<Record<string, number> | null>(null);
+
+  useEffect(() => {
+    if (!userId || !cacheClient) return;
+    let cancelled = false;
+    cacheClient
+      .getDeviceLastUploads(userId, userId)
+      .then((result) => {
+        if (!cancelled) setLastUploads(result);
+      })
+      .catch((err) => console.warn('[devices] failed to read last uploads', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, devices]);
+
+  return lastUploads;
+}
+
 function DeviceCard({
   device,
+  lastUpload,
   onUpdateDevice,
   onRemoveDevice,
 }: {
   device: Device;
+  // undefined while unknown, null when the device has never uploaded.
+  lastUpload: number | null | undefined;
   onUpdateDevice: (id: string, patch: { name?: string }) => Promise<void>;
   onRemoveDevice: (id: string) => Promise<void>;
 }) {
@@ -236,7 +266,7 @@ function DeviceCard({
         <dt>Platform</dt>
         <dd>{device.platform}</dd>
         <dt>Last upload</dt>
-        <dd>{formatRelativeTimestamp(device.last_upload_at)}</dd>
+        <dd>{lastUpload === undefined ? '—' : formatRelativeTimestamp(lastUpload)}</dd>
         <dt>Last activity</dt>
         <dd>{formatRelativeTimestamp(device.last_hash_at)}</dd>
       </dl>

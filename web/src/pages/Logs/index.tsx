@@ -166,8 +166,9 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
 
   const [estimatedNextUpload, setEstimatedNextUpload] = useState<number | null>(null);
 
+  // Re-read when a sync finishes, since it may have brought in a newer batch.
   useEffect(() => {
-    if (!userId || !activeTargetUserId || !selectedDevice || !selectedDeviceInfo?.last_upload_at) {
+    if (!userId || !activeTargetUserId || !selectedDevice) {
       setEstimatedNextUpload(null);
       return;
     }
@@ -181,12 +182,12 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         const intervals = endTimes.slice(1).map((t, i) => t - endTimes[i]);
         intervals.sort((a, b) => a - b);
         const median = intervals[Math.floor(intervals.length / 2)];
-        if (median > 0 && selectedDeviceInfo.last_upload_at) {
-          setEstimatedNextUpload(selectedDeviceInfo.last_upload_at + median);
+        if (median > 0) {
+          setEstimatedNextUpload(endTimes[endTimes.length - 1] + median);
         }
       })
       .catch(() => {});
-  }, [userId, activeTargetUserId, selectedDevice, selectedDeviceInfo?.last_upload_at]);
+  }, [userId, activeTargetUserId, selectedDevice, logResult.complete]);
 
   const activeDevices = useMemo(
     () => deviceList.filter((d) => d.owner === (activeTargetUserId ?? '')),

@@ -27,6 +27,7 @@ export type CacheRequest =
       targetUserId: string;
       deviceId: string;
     }
+  | { id: string; method: 'getDeviceLastUploads'; viewerId: string; targetUserId: string }
   | {
       id: string;
       method: 'getDecryptionStats';
@@ -101,6 +102,8 @@ export interface CacheClient {
     targetUserId: string,
     deviceId: string,
   ): Promise<number[]>;
+  // Each device's latest batch end_time, keyed by device id, after syncing new batch rows.
+  getDeviceLastUploads(viewerId: string, targetUserId: string): Promise<Record<string, number>>;
   getDecryptionStats(
     viewerId: string,
     targetUserId: string,
@@ -742,6 +745,8 @@ export function createCacheClient(): CacheClient {
 
     getDeviceBatchEndTimes: (viewerId, targetUserId, deviceId) =>
       call<number[]>({ method: 'getDeviceBatchEndTimes', viewerId, targetUserId, deviceId }),
+    getDeviceLastUploads: (viewerId, targetUserId) =>
+      call<Record<string, number>>({ method: 'getDeviceLastUploads', viewerId, targetUserId }),
 
     getDecryptionStats: (viewerId, targetUserId, deviceId, startTime, endTime) =>
       call<DecryptionStats>({

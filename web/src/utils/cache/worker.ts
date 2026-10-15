@@ -51,6 +51,7 @@ type CacheRequest =
       targetUserId: string;
       deviceId: string;
     }
+  | { id: string; method: 'getDeviceLastUploads'; viewerId: string; targetUserId: string }
   | {
       id: string;
       method: 'getDecryptionStats';
@@ -452,6 +453,24 @@ function sqlGetDeviceBatchEndTimes(
   return times;
 }
 
+// Latest batch end_time per device. GET /device doesn't report it (API-029), since the
+// server would have to read every batch to find it.
+function sqlGetDeviceLastUploads(viewerId: string, targetUserId: string): Record<string, number> {
+  const lastUploads: Record<string, number> = {};
+  db.exec(
+    `SELECT device_id, MAX(end_time) FROM batches WHERE viewer_id=? AND target_user_id=?
+     GROUP BY device_id`,
+    {
+      bind: [viewerId, targetUserId],
+      rowMode: 'array',
+      callback: (row: [string, number]) => {
+        lastUploads[row[0]] = row[1];
+      },
+    },
+  );
+  return lastUploads;
+}
+
 function sqlGetDecryptionStats(
   viewerId: string,
   targetUserId: string,
@@ -583,6 +602,9 @@ const lastSyncedAt = new Map<string, number>();
 // Bumped when setSession switches user, so a fetch from the previous session that
 // finishes late doesn't mark the new session's targets as freshly synced.
 let sessionEpoch = 0;
+
+// targetUserId → in-flight /data sync of batch rows alone (see syncBatchRows)
+const rowSyncInFlight = new Map<string, { promise: Promise<void>; epoch: number }>();
 
 // all target user IDs ever seen (so refetch can cover them all)
 const knownTargetUserIds = new Set<string>();
@@ -717,10 +739,48 @@ async function fetchDeviceOwners(): Promise<Map<string, string>> {
 // ---------------------------------------------------------------------------
 // Core fetch + decrypt loop
 
+// Pull the batch rows added since the last sync into SQLite, without downloading or
+// decrypting anything. A target that has only just synced is left alone unless `force`,
+// and a call made while another is running for the same target shares its request.
+function syncBatchRows(viewerId: string, targetUserId: string, force: boolean): Promise<void> {
+  // A row sync only runs when it hits the network, so one already running for this session
+  // serves a forced request too. One from an earlier session doesn't.
+  const running = rowSyncInFlight.get(targetUserId);
+  if (running && running.epoch === sessionEpoch) return running.promise;
+  // A target that has only just synced is answered from SQLite alone.
+  if (isSyncFresh(lastSyncedAt.get(targetUserId), Date.now(), force)) return Promise.resolve();
+  const entry = { epoch: sessionEpoch, promise: Promise.resolve() };
+  entry.promise = fetchBatchRows(viewerId, targetUserId, entry.epoch).finally(() => {
+    if (rowSyncInFlight.get(targetUserId) === entry) rowSyncInFlight.delete(targetUserId);
+  });
+  rowSyncInFlight.set(targetUserId, entry);
+  return entry.promise;
+}
+
+async function fetchBatchRows(viewerId: string, targetUserId: string, epoch: number) {
+  const since = sqlGetSince(viewerId, targetUserId);
+  console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
+  const page = await fetchDataShared(since);
+  const deviceOwners = needsDeviceOwners(page.batches) ? await fetchDeviceOwners() : null;
+  // /data doesn't filter by owner server-side, so scope this target's slice of the
+  // bundled response down to the batches it owns.
+  const scopedBatches = scopeBatchesToTarget(page.batches, targetUserId, deviceOwners);
+  console.log(
+    '[cache-worker] /data returned',
+    page.batches.length,
+    'batches,',
+    scopedBatches.length,
+    'in scope for',
+    targetUserId,
+  );
+  sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
+  // A fetch from a previous session mustn't mark the new session's target as fresh.
+  if (epoch === sessionEpoch) lastSyncedAt.set(targetUserId, Date.now());
+}
+
 async function fetchAndDecrypt(targetUserId: string, force: boolean): Promise<void> {
   if (!session) return;
   const { userId: viewerId, privateKey } = session;
-  const epoch = sessionEpoch;
   const cutoffTs = Date.now() - THIRTY_DAYS_MS;
   console.log('[cache-worker] fetchAndDecrypt start for', targetUserId);
 
@@ -738,33 +798,14 @@ async function fetchAndDecrypt(targetUserId: string, force: boolean): Promise<vo
     settleQueries(viewerId, targetUserId, processed, total, error);
   };
 
-  // A query for a target that has only just synced is answered from SQLite alone.
-  if (!isSyncFresh(lastSyncedAt.get(targetUserId), Date.now(), force)) {
-    try {
-      const since = sqlGetSince(viewerId, targetUserId);
-      console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
-      const page = await fetchDataShared(since);
-      const deviceOwners = needsDeviceOwners(page.batches) ? await fetchDeviceOwners() : null;
-      // /data doesn't filter by owner server-side, so scope this target's slice of the
-      // bundled response down to the batches it owns.
-      const scopedBatches = scopeBatchesToTarget(page.batches, targetUserId, deviceOwners);
-      console.log(
-        '[cache-worker] /data returned',
-        page.batches.length,
-        'batches,',
-        scopedBatches.length,
-        'in scope for',
-        targetUserId,
-      );
-      sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
-      if (epoch === sessionEpoch) lastSyncedAt.set(targetUserId, Date.now());
-    } catch (err) {
-      console.warn('[cache-worker] fetch failed for', targetUserId, err);
-      // Still serve what's cached, but say the sync didn't happen rather than reporting it
-      // as complete.
-      serveAll(0, 0, toQueryError(err));
-      return;
-    }
+  try {
+    await syncBatchRows(viewerId, targetUserId, force);
+  } catch (err) {
+    console.warn('[cache-worker] fetch failed for', targetUserId, err);
+    // Still serve what's cached, but say the sync didn't happen rather than reporting it
+    // as complete.
+    serveAll(0, 0, toQueryError(err));
+    return;
   }
 
   const unmaterialized = sqlGetUnmaterializedBatches(viewerId, targetUserId, cutoffTs);
@@ -983,6 +1024,16 @@ async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
   if (req.method === 'getDeviceBatchEndTimes') {
     return sqlGetDeviceBatchEndTimes(req.viewerId, req.targetUserId, req.deviceId);
   }
+  if (req.method === 'getDeviceLastUploads') {
+    // Sync first so the answer includes the latest uploads, but answer from what's cached
+    // if the sync fails.
+    if (session?.userId === req.viewerId) {
+      await syncBatchRows(req.viewerId, req.targetUserId, false).catch((err) =>
+        console.warn('[cache-worker] last-upload sync failed for', req.targetUserId, err),
+      );
+    }
+    return sqlGetDeviceLastUploads(req.viewerId, req.targetUserId);
+  }
   if (req.method === 'getDecryptionStats') {
     return sqlGetDecryptionStats(
       req.viewerId,
@@ -1010,6 +1061,7 @@ self.onmessage = async (e: MessageEvent<CacheRequest>) => {
       await hardReset();
       activeQueries.clear();
       fetchInFlight.clear();
+      rowSyncInFlight.clear();
       knownTargetUserIds.clear();
       initPromise = Promise.resolve();
       response = { id: req.id, result: 0 };

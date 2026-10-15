@@ -41,7 +41,6 @@ export const deviceSchema = z.object({
   owner: z.string(),
   name: z.string(),
   platform: z.string(),
-  last_upload_at: z.number().nullable(),
   last_hash_at: z.number().nullable(),
   pending_count: z.number(),
   status: z.enum(['online', 'offline', 'logged_out']),

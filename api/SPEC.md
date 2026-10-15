@@ -57,7 +57,6 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "owner": UUID,
   "name": "My Laptop",
   "platform": "linux",
-  "last_upload_at": DateTime | null,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
   "status": "online" | "offline" | "logged_out"
@@ -703,6 +702,8 @@ The server MUST hard-delete the entry regardless of its current `deleted_at` and
 The client MUST be authenticated with a **Web Token**.
 
 The server SHOULD fetch the count from the hash server and the last updated from the hash server.
+
+The server MUST report `status` as `logged_out` for a logged-out device, `online` when `last_hash_at` is within the last 2 hours, and `offline` otherwise, including when the hash server cannot be reached. The server SHOULD NOT read batches to build this response. A client that needs a device's last upload SHOULD derive it from the batches returned by `GET /data` (API-033).
 
 The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
 

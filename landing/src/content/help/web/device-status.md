@@ -10,7 +10,7 @@ it still set up at all.
 
 ## Online
 
-The device uploaded a batch of activity within the last two hours.
+The device has checked in within the last two hours. A device checks in each time it captures activity.
 
 This is the normal state for a device that's in use. A device that's switched
 off, asleep, or offline for the night will leave this state without anything
@@ -18,11 +18,11 @@ being wrong.
 
 ## Offline
 
-The device is still set up, but its last upload was more than two hours ago.
+The device is still set up, but it last checked in more than two hours ago.
 
 This is common and usually harmless: the computer or phone is off, sleeping,
 or has no internet connection. It will flip back to **Online** on its own
-once the device uploads again. No action needed on your side.
+once the device checks in again. No action needed on your side.
 
 Offline stops being routine when it lasts. A device that's offline for days
 while the person is clearly using it is worth asking about: the app may have
