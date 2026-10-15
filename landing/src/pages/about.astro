@@ -26,12 +26,16 @@ import { APP_URL } from '../lib/app-url';
       </p>
     </div>
 
+    <h2>Our vision</h2>
+
     <p>
       Our vision is to see the Christian church and the world freed from pornography. There are
       billions of dollars made by keeping men and women stuck. For many people, it starts from a
       young age, and it&apos;s hard to give up, even if they desperately want to. We want to provide
       tools that support you and make it easier.
     </p>
+
+    <h2>Our story</h2>
 
     <p>
       The Virtue Initiative began in February 2026 when we started looking at accountability apps.
@@ -40,24 +44,11 @@ import { APP_URL } from '../lib/app-url';
       goal is to fundraise all our financial support and keep the app free.
     </p>
 
-    <p>
-      Hopefully you&apos;re willing to join us on this mission. If you&apos;ve been or know someone
-      who&apos;s been struggling to break free from porn, <a href={`${APP_URL}/signup`}>sign up</a> now
-      or send this to them. You might also want to read <a href="/help/tips"
-        >this page on tips to beat pornography</a
-      >.
-    </p>
-
-    <p>
-      If you wish to support us monetarily, you can <a href="/donate">donate</a>. If you have any
-      questions, feel free to contact us at <a href="mailto:help@virtueinitiative.org"
-        >help@virtueinitiative.org</a
-      > or join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
-    </p>
-
     <h2>How can you help?</h2>
 
-    <p>We are still early in the project, and there are a few practical things you can do to help.</p>
+    <p>
+      We are still early in the project, and there are a few practical things you can do to help.
+    </p>
 
     <ol>
       <li>
@@ -71,6 +62,14 @@ import { APP_URL } from '../lib/app-url';
         not tax deductible. We are working toward 501(c)(3) status, but getting it is expensive
         (lawyers, filing fees, etc.). If you want and are able to support our mission, we could use
         some money to help get this off the ground.
+        <div class="about-note">
+          <p>
+            Note: We are organized as a nonprofit in New York and have a board, so we are required
+            to operate as a nonprofit and must use any funds we receive to further our mission. You
+            just cannot write off donations as tax deductible yet (which only matters if you do not
+            take the standard deduction).
+          </p>
+        </div>
       </li>
       <li>
         <strong>Tell others about the app</strong>. The core app is already mostly built. The
@@ -79,6 +78,19 @@ import { APP_URL } from '../lib/app-url';
         it! Spread the word!
       </li>
     </ol>
+
+    <p>
+      If you are struggling yourself, <a href="/help/tips">our tips to beat pornography</a> are a good
+      place to start.
+    </p>
+
+    <h2>Contact us</h2>
+
+    <p>
+      If you have any questions, feel free to contact us at <a href="mailto:help@virtueinitiative.org"
+        >help@virtueinitiative.org</a
+      > or join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
+    </p>
   </section>
 </SiteLayout>
 
@@ -107,8 +119,12 @@ import { APP_URL } from '../lib/app-url';
     margin-top: 1rem;
   }
 
-  #about p + h2 {
+  #about h2:not(:first-child) {
     margin-top: 2.25rem;
+  }
+
+  #about ol + p {
+    margin-top: 1.25rem;
   }
 
   #about ol {
@@ -118,6 +134,20 @@ import { APP_URL } from '../lib/app-url';
 
   #about li + li {
     margin-top: 0.5rem;
+  }
+
+  .about-note {
+    background: var(--bg-subtle);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 0.5rem 0.5rem 0;
+    padding: 0.75rem 1.25rem;
+    margin: 0.75rem 0;
+  }
+
+  .about-note p {
+    margin-top: 0 !important;
+    font-size: 1rem !important;
+    line-height: 1.7 !important;
   }
 
   .about-callout {
