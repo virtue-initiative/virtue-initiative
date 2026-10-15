@@ -587,26 +587,6 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   );
 }
 
-export async function listDevicesForUser(db: D1Database, userId: string) {
-  return allWithUuidFields<{
-    id: string;
-    owner: string;
-    name: string;
-    platform: string;
-    created_at: number;
-  }>(
-    db
-      .prepare(
-        `SELECT id, owner, name, platform, created_at
-         FROM devices
-         WHERE owner = ?
-         ORDER BY created_at DESC`,
-      )
-      .bind(uuidToBytes(userId)),
-    ['id', 'owner'],
-  );
-}
-
 export async function createBatch(
   db: D1Database,
   input: {
@@ -775,39 +755,89 @@ export async function deleteExpiredDeviceSessionsChunk(
   return result.meta.changes;
 }
 
-// Margin on listBatchWindowsForUser's created_at bound. POST /d/batch clamps
+// D1 allows at most 100 bound parameters per statement.
+const DIGEST_ACTIVITY_CHUNK = 90;
+// Margin on listDigestActivity's created_at bound. POST /d/batch clamps
 // end_time to created_at (API-038), so new batches need none; it covers rows
 // stored before that clamp, from devices whose clock ran ahead.
 const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 
-export async function listBatchWindowsForUser(
+type DigestBatchWindow = {
+  user_id: string;
+  device_id: string;
+  start_time: number;
+  end_time: number;
+  high_risk_count: number;
+  medium_risk_count: number;
+};
+
+type DigestDevice = {
+  id: string;
+  owner: string;
+  name: string;
+  created_at: number;
+};
+
+/**
+ * Loads what a digest needs about a set of watched users (API-057): their
+ * devices, and their batches that overlap the window. Every statement goes in a
+ * single D1 batch, so a digest costs one round trip however many users it covers.
+ */
+export async function listDigestActivity(
   db: D1Database,
-  userId: string,
+  userIds: string[],
   windowStart: number,
   windowEnd: number,
 ) {
-  return allWithUuidFields<{
-    id: string;
-    device_id: string;
-    start_time: number;
-    end_time: number;
-    high_risk_count: number;
-    medium_risk_count: number;
-  }>(
-    db
-      .prepare(
-        // A batch is stored after the period it covers ends, and POST /d/batch clamps
-        // end_time to the time it was stored, so created_at >= end_time. The created_at
-        // bound lets the (user_id, created_at, id) primary key skip everything well
-        // before the window instead of reading the user's whole retention period.
-        `SELECT id, device_id, start_time, end_time, high_risk_count, medium_risk_count
-         FROM batches
-         WHERE user_id = ? AND created_at > ? AND end_time > ? AND start_time < ?
-         ORDER BY start_time ASC`,
-      )
-      .bind(uuidToBytes(userId), windowStart - BATCH_CLOCK_SKEW_MS, windowStart, windowEnd),
-    ['id', 'device_id'],
-  );
+  const chunks: ArrayBuffer[][] = [];
+  for (let i = 0; i < userIds.length; i += DIGEST_ACTIVITY_CHUNK) {
+    chunks.push(userIds.slice(i, i + DIGEST_ACTIVITY_CHUNK).map(uuidToBytes));
+  }
+  if (chunks.length === 0) {
+    return { batches: [], devices: [] };
+  }
+
+  const results = await db.batch<Record<string, unknown>>([
+    ...chunks.map((ids) =>
+      db
+        .prepare(
+          // A batch is stored after the period it covers ends, and POST /d/batch clamps
+          // end_time to the time it was stored, so created_at >= end_time. The created_at
+          // bound lets the (user_id, created_at, id) primary key skip everything well
+          // before the window instead of reading each user's whole retention period.
+          `SELECT user_id, device_id, start_time, end_time, high_risk_count, medium_risk_count
+           FROM batches
+           WHERE user_id IN (${placeholders(ids.length)})
+             AND created_at > ? AND end_time > ? AND start_time < ?`,
+        )
+        .bind(...ids, windowStart - BATCH_CLOCK_SKEW_MS, windowStart, windowEnd),
+    ),
+    ...chunks.map((ids) =>
+      db
+        .prepare(
+          `SELECT id, owner, name, created_at
+           FROM devices
+           WHERE owner IN (${placeholders(ids.length)})
+           ORDER BY created_at DESC`,
+        )
+        .bind(...ids),
+    ),
+  ]);
+
+  const batchResults = results.slice(0, chunks.length);
+  const deviceResults = results.slice(chunks.length);
+  return {
+    batches: batchResults.flatMap((result) =>
+      result.results.map((row) =>
+        decodeUuidFields(row as unknown as DigestBatchWindow, ['user_id', 'device_id']),
+      ),
+    ),
+    devices: deviceResults.flatMap((result) =>
+      result.results.map((row) =>
+        decodeUuidFields(row as unknown as DigestDevice, ['id', 'owner']),
+      ),
+    ),
+  };
 }
 
 export async function findPartnerInviteForOwner(db: D1Database, ownerId: string, email: string) {
@@ -1347,6 +1377,8 @@ export async function deleteExpiredLockedPasswordsChunk(
   return result.meta.changes;
 }
 
+// Unverified watchers are left out, since sendEmail would skip their digest
+// anyway (API-057), and this saves building it.
 export async function listDigestEligiblePartnerships(db: D1Database) {
   const rows = await allWithUuidFields<{
     partnership_id: string;
@@ -1368,7 +1400,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
         FROM partners p
         JOIN users owner ON owner.id = p.watching_user_id
         JOIN users recipient ON recipient.id = p.watcher_user_id
-        WHERE p.status = 'accepted'`,
+        WHERE p.status = 'accepted' AND recipient.email_verified = 1`,
     ),
     ['partnership_id', 'watching_user_id', 'watcher_user_id'],
   );

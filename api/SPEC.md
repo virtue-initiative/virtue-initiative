@@ -924,6 +924,16 @@ The server MUST NOT send any email to an address that has a permanent bounce. If
 
 The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
 
+### API-057 Digest emails
+
+The server MUST run a digest job every hour. It MUST send each verified watcher whose `email_frequency` is `daily` or `weekly` one digest email that summarizes every user they watch.
+
+A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
+
+A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure.
+
+The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
+
 ### API-042 `POST /bug-report`
 
 The client MAY authenticate with a **Web Token** or a **Device Token**. The client MAY also send no token at all.

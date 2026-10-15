@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { env, SELF } from 'cloudflare:test';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { env, fetchMock, SELF } from 'cloudflare:test';
+import { listDigestActivity } from '../src/lib/db';
 import { runNotificationSchedule } from '../src/lib/scheduler';
 import {
   authHeaders,
@@ -18,6 +19,33 @@ const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
 const OLD_DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000004';
 const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
+
+// Signs up a watcher, verifies their email, has them accept an invite from the
+// owner, and sets them to daily digests (new accounts default to weekly).
+async function addVerifiedWatcher(ownerCookie: string, email: string) {
+  const { cookie, userId } = await signupAndGetCookie(email, 'pw');
+  await markUserEmailVerified(userId);
+  await SELF.fetch(`${BASE}/partner`, {
+    method: 'POST',
+    headers: authHeaders(ownerCookie),
+    body: JSON.stringify({ email }),
+  });
+  const inviteDelivery = (await listEmailDeliveries()).find(
+    (delivery) => delivery.kind === 'partner_invite' && delivery.recipient_email === email,
+  );
+  const { inviteToken } = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
+  await SELF.fetch(`${BASE}/partner/accept`, {
+    method: 'POST',
+    headers: authHeaders(cookie),
+    body: JSON.stringify({ token: inviteToken }),
+  });
+  await SELF.fetch(`${BASE}/user`, {
+    method: 'PATCH',
+    headers: authHeaders(cookie),
+    body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
+  });
+  return userId;
+}
 
 describe('Notification scheduler', () => {
   it('sends a daily digest at the configured local hour using the prior 24 hours', async () => {
@@ -408,5 +436,134 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.text).toContain(
       `${env.APP_URL}/report/${ownerId}?period=week&date=2026-01-04`,
     );
+  });
+
+  it('keeps sending digests to other watchers when SES rejects one', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const { cookie: ownerCookie } = await signupAndGetCookie('ses-owner@example.com', 'pw');
+    const watcherEmails = [
+      'ses-watcher-a@example.com',
+      'ses-watcher-b@example.com',
+      'ses-watcher-c@example.com',
+    ];
+    for (const email of watcherEmails) {
+      await addVerifiedWatcher(ownerCookie, email);
+    }
+
+    const rejected = 'ses-watcher-b@example.com';
+    const sesRecipients: string[] = [];
+    fetchMock.activate();
+    fetchMock.disableNetConnect();
+    fetchMock
+      .get('https://email.us-east-1.amazonaws.com')
+      .intercept({ path: '/v2/email/outbound-emails', method: 'POST' })
+      .reply((opts) => {
+        const body = JSON.parse(String(opts.body)) as {
+          Destination: { ToAddresses: string[] };
+        };
+        const recipient = body.Destination.ToAddresses[0];
+        sesRecipients.push(recipient);
+        if (recipient === rejected) {
+          return {
+            statusCode: 400,
+            data: JSON.stringify({ message: 'Email address is not verified.' }),
+            responseOptions: { headers: { 'x-amzn-errortype': 'MessageRejected' } },
+          };
+        }
+        return { statusCode: 200, data: JSON.stringify({ MessageId: `msg-${recipient}` }) };
+      })
+      .times(watcherEmails.length);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await runNotificationSchedule({ ...env, EMAIL_DELIVERY_MODE: 'ses' }, now);
+    } finally {
+      fetchMock.deactivate();
+    }
+
+    expect(sesRecipients.sort()).toEqual(watcherEmails);
+    const digests = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    expect(digests.map((digest) => [digest.recipient_email, digest.status])).toEqual([
+      [rejected, 'failed'],
+    ]);
+    expect(errors).toHaveBeenCalledWith('digest email failed', expect.anything());
+    errors.mockRestore();
+  });
+
+  it('keeps sending digests to other watchers when one fails to build', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const { cookie: ownerCookie } = await signupAndGetCookie('build-owner@example.com', 'pw');
+    const brokenId = await addVerifiedWatcher(ownerCookie, 'build-broken@example.com');
+    await addVerifiedWatcher(ownerCookie, 'build-ok@example.com');
+    // An unknown timezone makes Intl throw while working out the window.
+    await env.DB.prepare('UPDATE users SET settings = ? WHERE id = ?')
+      .bind(
+        JSON.stringify({ email_frequency: 'daily', timezone: 'Not/AZone' }),
+        uuidToBytes(brokenId),
+      )
+      .run();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await runNotificationSchedule(env, now);
+
+    const digests = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    expect(digests.map((digest) => digest.recipient_email)).toEqual(['build-ok@example.com']);
+    expect(errors).toHaveBeenCalledWith('digest email failed', expect.anything());
+    errors.mockRestore();
+  });
+
+  it('skips watchers whose email is not verified', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const { cookie: ownerCookie } = await signupAndGetCookie('unverified-owner@example.com', 'pw');
+    const watcherId = await addVerifiedWatcher(ownerCookie, 'unverified-watcher@example.com');
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(watcherId))
+      .run();
+
+    await runNotificationSchedule(env, now);
+
+    expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'daily_digest')).toBe(
+      false,
+    );
+  });
+
+  it('loads digest activity for more watched users than fit in one statement', async () => {
+    const { userId: ownerId } = await signupAndGetCookie('many-owner@example.com', 'pw');
+    const device = await createDeviceForUser('many-owner@example.com', 'pw', 'Many', 'linux');
+    const batchStart = Date.UTC(2026, 0, 5, 12, 0, 0);
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes(DAILY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
+        batchStart,
+        batchStart + 60_000,
+        'hash-many',
+        EMPTY_ACCESS_KEYS,
+        batchStart,
+      )
+      .run();
+
+    // The real user is past the first chunk of 90.
+    const userIds = Array.from({ length: 150 }, () => crypto.randomUUID());
+    userIds[120] = ownerId;
+    const activity = await listDigestActivity(
+      env.DB,
+      userIds,
+      Date.UTC(2026, 0, 5, 0, 0, 0),
+      Date.UTC(2026, 0, 6, 0, 0, 0),
+    );
+
+    expect(activity.batches.map((batch) => [batch.user_id, batch.device_id])).toEqual([
+      [ownerId, device.id],
+    ]);
+    expect(activity.devices.map((d) => [d.id, d.owner])).toEqual([[device.id, ownerId]]);
   });
 });
