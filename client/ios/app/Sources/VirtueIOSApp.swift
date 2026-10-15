@@ -104,6 +104,7 @@ private struct HomeView: View {
                 VStack(alignment: .leading, spacing: 28) {
                     header
                     focus { proxy.scrollTo(Self.topID, anchor: .top) }
+                    LegalLinks()
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 12)
@@ -155,6 +156,7 @@ private struct HomeView: View {
 private struct SignInForm: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     @State private var isPasswordVisible = false
+    @State private var showSignInConsent = false
     @FocusState private var focus: Field?
 
     private enum Field { case email, password, deviceName, server }
@@ -265,11 +267,24 @@ private struct SignInForm: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
             }
         }
+        // App Review 2.5.14 requires explicit consent before an app records
+        // user activity, so every sign-in asks first. Keep the description in
+        // step with WhatVirtueMonitorsView.
+        .alert("Allow Virtue to monitor Safari?", isPresented: $showSignInConsent) {
+            Button("Cancel", role: .cancel) {}
+            Button("Agree and Sign In") {
+                coordinator.login()
+            }
+        } message: {
+            Text(
+                "After you sign in and turn on the Safari extension, Virtue takes a screenshot of the web page you are viewing in Safari about every 5 minutes. Screenshots are blurred, text is blacked out, and they are encrypted before upload. The accountability partners you invite can view them. Your partners may be alerted if you pause monitoring or sign out."
+            )
+        }
     }
 
     private func signIn() {
         focus = nil
-        coordinator.login()
+        showSignInConsent = true
     }
 }
 
@@ -381,6 +396,21 @@ private struct StatusFocus: View {
 
 // MARK: - Menu and small screens
 
+/// App Review 5.1.1(i) requires the privacy policy to be reachable in the app,
+/// signed in or not.
+private struct LegalLinks: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Link(
+                "Privacy Policy", destination: URL(string: "https://virtueinitiative.org/privacy")!)
+            Link("Terms of Use", destination: URL(string: "https://virtueinitiative.org/terms")!)
+        }
+        .font(.footnote)
+        .foregroundStyle(VirtueBrand.link)
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+}
+
 private struct MenuView: View {
     @ObservedObject var coordinator: MonitoringCoordinator
     let onSignOut: () -> Void
@@ -397,6 +427,14 @@ private struct MenuView: View {
             Section {
                 NavigationLink("Report an Issue", value: Route.reportIssue)
                 if coordinator.loggedIn {
+                    // App Review 5.1.1(v) requires account deletion in any app that
+                    // offers sign-up. It lives on the web Settings page (API-021),
+                    // and Apple accepts a direct link to it.
+                    Link(
+                        "Delete Account",
+                        destination: URL(string: "https://app.virtueinitiative.org/settings")!
+                    )
+                    .foregroundStyle(VirtueBrand.bad)
                     Button(
                         coordinator.isSigningOut ? "Signing Out…" : "Sign Out", role: .destructive,
                         action: onSignOut
