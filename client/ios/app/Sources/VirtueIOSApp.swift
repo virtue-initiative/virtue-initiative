@@ -23,10 +23,18 @@ struct ContentView: View {
     @State private var showStatusSheet = false
     @State private var showReportBugSheet = false
     @State private var showReportBugConfirmation = false
+    @State private var showSignInConsent = false
     @Environment(\.openURL) private var openURL
 
     /// Partners are managed in the web app, not from this client.
     private let partnersURL = URL(string: "https://app.virtueinitiative.org/partners")!
+    /// App Review 5.1.1(v) requires account deletion in any app that offers
+    /// sign-up. Deletion lives on the web app's Settings page (API-021), and
+    /// Apple accepts a direct link to it.
+    private let accountSettingsURL = URL(string: "https://app.virtueinitiative.org/settings")!
+    /// App Review 5.1.1(i) requires the privacy policy to be reachable in the app.
+    private let privacyPolicyURL = URL(string: "https://virtueinitiative.org/privacy")!
+    private let termsURL = URL(string: "https://virtueinitiative.org/terms")!
 
     var body: some View {
         NavigationStack {
@@ -44,6 +52,7 @@ struct ContentView: View {
                     if coordinator.monitoringState == .active {
                         setupCard
                     }
+                    legalLinks
                 }
                 .padding(20)
             }
@@ -70,6 +79,17 @@ struct ContentView: View {
             }
         } message: {
             Text("This will stop monitoring on this device. People monitoring you may be alerted.")
+        }
+        // App Review 2.5.14 requires explicit consent before an app records
+        // user activity, so every sign-in asks first. Keep the description in
+        // step with monitoringCard.
+        .alert("Allow Virtue to monitor Safari?", isPresented: $showSignInConsent) {
+            Button("Cancel", role: .cancel) {}
+            Button("Agree and Sign In") {
+                coordinator.login()
+            }
+        } message: {
+            Text("After you sign in and turn on the Safari extension, Virtue takes a screenshot of the web page you are viewing in Safari about every 5 minutes. Screenshots are blurred, text is blacked out, and they are encrypted before upload. The accountability partners you invite can view them. Your partners may be alerted if you pause monitoring or sign out.")
         }
         .alert("Sign out?", isPresented: $showLogoutConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -178,6 +198,14 @@ struct ContentView: View {
                         .disabled(coordinator.isSigningOut)
                     }
                     .padding(.top, 6)
+
+                    Text("To delete your account and its data, open Settings on the Virtue website and select \"Delete account\".")
+                        .foregroundStyle(VirtueBrand.textMuted)
+                        .padding(.top, 6)
+                    Button("Delete Account") {
+                        openURL(accountSettingsURL)
+                    }
+                    .buttonStyle(VirtueButtonStyle())
                 } else {
                     Text("Sign in to start monitoring on this device.")
                         .foregroundStyle(VirtueBrand.textMuted)
@@ -217,7 +245,7 @@ struct ContentView: View {
 
                         HStack(spacing: 10) {
                             Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
-                                coordinator.login()
+                                showSignInConsent = true
                             }
                             .buttonStyle(VirtueButtonStyle(prominent: true))
                             .disabled(coordinator.isSigningIn)
@@ -257,6 +285,16 @@ struct ContentView: View {
                     .foregroundStyle(VirtueBrand.link)
             }
         }
+    }
+
+    private var legalLinks: some View {
+        HStack(spacing: 16) {
+            Link("Privacy Policy", destination: privacyPolicyURL)
+            Link("Terms of Use", destination: termsURL)
+        }
+        .font(.footnote)
+        .foregroundStyle(VirtueBrand.link)
+        .frame(maxWidth: .infinity)
     }
 
     private var setupCard: some View {

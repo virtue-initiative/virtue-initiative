@@ -34,6 +34,7 @@ targets:
       - path: app/Sources
       - path: app/Shared
       - path: app/Assets.xcassets
+      - path: app/PrivacyInfo.xcprivacy
     dependencies:
       - target: VirtueSafariWebExtension
         embed: true

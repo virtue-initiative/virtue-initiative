@@ -28,6 +28,8 @@
 		D71AC5E78D4C54DBC7C85940 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 11C2314DE20A2FE8644630C0 /* content.js */; };
 		EF4DAF33BF771649BCEFE118 /* VirtueShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9318D22E92C9D6BC594C78C /* VirtueShared.swift */; };
 		EFF31FC58844CC7C06BF2C67 /* icon-512.png in Resources */ = {isa = PBXBuildFile; fileRef = 45C29AD806137A862D8A86D1 /* icon-512.png */; };
+		90CE0103690AC97246503827 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8C6FD50058E81A6A50D43946 /* PrivacyInfo.xcprivacy */; };
+		4512270D92435375F83FB745 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 082EF4B3AE7AE7B345AA200C /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +80,8 @@
 		DFC6D4D2C5FC6F4FA7F6FF50 /* VirtueIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VirtueIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
 		F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueIOSApp.swift; sourceTree = "<group>"; };
+		8C6FD50058E81A6A50D43946 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		082EF4B3AE7AE7B345AA200C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -99,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				3BBD9A53091E10E166D28CE6 /* Assets.xcassets */,
+				8C6FD50058E81A6A50D43946 /* PrivacyInfo.xcprivacy */,
 				EBDF7F1676FFB9988776E0AF /* SafariWebExtension */,
 				E623F115E3F991AF7ECB9324 /* Shared */,
 				DDEAC77C25DAC6787ACDF8BC /* Sources */,
@@ -148,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				1EF8E39BDF57FBA718622D6E /* Info.plist */,
+				082EF4B3AE7AE7B345AA200C /* PrivacyInfo.xcprivacy */,
 				3BD5B034516AECD2FC30C5BB /* SafariWebExtensionHandler.swift */,
 				78E4221B4364750675B94A46 /* VirtueSafariWebExtension.entitlements */,
 				F24C234EC63F6585C4380899 /* Resources */,
@@ -251,6 +257,7 @@
 				EFF31FC58844CC7C06BF2C67 /* icon-512.png in Resources */,
 				D421490A6A73B0F84D2ACE64 /* icon-96.png in Resources */,
 				BBBFFA2BF80D57AE03825FD8 /* manifest.json in Resources */,
+				4512270D92435375F83FB745 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -259,6 +266,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A51145928D574A0D8FD4B59C /* Assets.xcassets in Resources */,
+				90CE0103690AC97246503827 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
