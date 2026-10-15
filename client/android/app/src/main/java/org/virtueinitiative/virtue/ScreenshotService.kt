@@ -99,7 +99,7 @@ class ScreenshotService : Service() {
 
     private fun buildNotification(text: String): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setSmallIcon(R.drawable.ic_stat_virtue)
             .setContentTitle("Virtue")
             .setContentText(text)
             .setOngoing(true)
