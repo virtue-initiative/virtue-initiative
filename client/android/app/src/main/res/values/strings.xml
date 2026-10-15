@@ -75,6 +75,10 @@
     <string name="dialog_resume_title">Resume monitoring?</string>
     <string name="dialog_resume_message">Resume monitoring on this device?</string>
     <string name="dialog_accessibility_title">Turn on Screen Monitoring</string>
+    <string name="dialog_battery_title">Keep Virtue Running</string>
+    <string name="dialog_battery_message">Android may pause Virtue to save battery, which can cause missed screenshots. On the next screen, switch the list to All apps, tap Virtue, and choose Don\'t optimize.</string>
+    <string name="btn_open_settings">Open Settings</string>
+    <string name="btn_not_now">Not Now</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="dialog_confirm">Confirm</string>
     <string name="dialog_report_bug_title">Report an Issue</string>

@@ -30,6 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private const val PREFS_BATTERY_PROMPT = "battery_prompt"
+private const val KEY_BATTERY_PROMPT_SHOWN = "shown"
+
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
@@ -190,7 +193,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // targetSdk 35 forces edge-to-edge, so the window no longer shrinks for the
+    // targetSdk 35+ forces edge-to-edge, so the window no longer shrinks for the
     // keyboard (adjustResize) or stops below the status bar on its own. Inset the
     // root ScrollView by hand. Using margins rather than padding resizes it, and
     // a ScrollView that shrinks scrolls its focused field back into view.
@@ -439,14 +442,39 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(PowerManager::class.java)
             if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                runCatching {
-                    startActivity(
-                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                            .setData(Uri.parse("package:$packageName"))
-                    )
+                if (BuildConfig.PLAY_STORE) {
+                    showBatteryOptimizationDialog()
+                } else {
+                    runCatching {
+                        startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                .setData(Uri.parse("package:$packageName"))
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Play builds can't ask for the exemption directly (Play restricts
+     * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS), so explain it once and send the
+     * user to the settings list, where they pick Virtue themselves.
+     */
+    private fun showBatteryOptimizationDialog() {
+        val prefs = getSharedPreferences(PREFS_BATTERY_PROMPT, MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_BATTERY_PROMPT_SHOWN, false)) return
+        prefs.edit().putBoolean(KEY_BATTERY_PROMPT_SHOWN, true).apply()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_battery_title))
+            .setMessage(getString(R.string.dialog_battery_message))
+            .setPositiveButton(getString(R.string.btn_open_settings)) { _, _ ->
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
+            .setNegativeButton(getString(R.string.btn_not_now), null)
+            .show()
     }
 
     private fun setStatus(message: String) {
