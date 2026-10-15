@@ -486,6 +486,16 @@ function PartnerCard({
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
+        {!isWatching && (
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
+          </Button>
+        )}
       </CardHeader>
       {!isWatching && (
         <dl class="partner-details">
@@ -523,21 +533,23 @@ function PartnerCard({
           )}
         </div>
       )}
-      <CardActions>
-        {isWatching && partner.user.id && (
-          <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
-            View logs
+      {isWatching && (
+        <CardActions>
+          {partner.user.id && (
+            <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
+              View logs
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
           </Button>
-        )}
-        <Button
-          variant="danger"
-          type="button"
-          onClick={() => confirmRef.current?.showModal()}
-          disabled={action !== null}
-        >
-          {action === 'remove' ? 'Removing…' : 'Remove'}
-        </Button>
-      </CardActions>
+        </CardActions>
+      )}
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
