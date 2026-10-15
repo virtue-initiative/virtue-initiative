@@ -42,6 +42,37 @@ describe('APIClient — user cache', () => {
     expect(callCount).toBe(1);
   });
 
+  it('uses the user the session opened with, without fetching it again', async () => {
+    let callCount = 0;
+    server.use(
+      http.get(`${BASE}/user`, () => {
+        callCount++;
+        return HttpResponse.json(TEST_USER);
+      }),
+    );
+    const seeded = { ...TEST_USER, name: 'From session' };
+    const client = new APIClient(
+      makeFakeSession({ takeInitialUser: vi.fn().mockReturnValueOnce(seeded) }),
+    );
+    expect(client.getUser()).toEqual(seeded);
+    expect(callCount).toBe(0);
+  });
+
+  it('refetches the user after a password change re-wraps the private key', async () => {
+    let callCount = 0;
+    server.use(
+      http.get(`${BASE}/user`, () => {
+        callCount++;
+        return HttpResponse.json(TEST_USER);
+      }),
+    );
+    const client = new APIClient(
+      makeFakeSession({ takeInitialUser: vi.fn().mockReturnValueOnce(TEST_USER) }),
+    );
+    await client.changePassword('old-password', 'new-password');
+    expect(callCount).toBe(1);
+  });
+
   it('unsubscribes correctly', async () => {
     const client = makeClient();
     const cb = vi.fn();

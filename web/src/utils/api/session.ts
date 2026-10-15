@@ -39,8 +39,8 @@ export class Session {
   userId: string;
   wrappingKey: CryptoKey;
   privateKey: CryptoKey | null;
-  /** The user as fetched while opening the session, so APIClient needn't fetch it again. */
-  readonly initialUser: User | null;
+  /** The user as fetched while opening the session; see takeInitialUser. */
+  private initialUser: User | null;
   private invalidated = false;
   private onInvalidate: (() => void) | null = null;
 
@@ -54,6 +54,17 @@ export class Session {
     this.wrappingKey = wrappingKey;
     this.privateKey = privateKey;
     this.initialUser = initialUser;
+  }
+
+  /**
+   * The user fetched while opening this session, handed out once so the first APIClient
+   * needn't fetch it again. Any later client gets null and fetches its own, so none is
+   * seeded with a copy older than the moment the session opened.
+   */
+  takeInitialUser(): User | null {
+    const user = this.initialUser;
+    this.initialUser = null;
+    return user;
   }
 
   static async fromLogin(email: string, password: string): Promise<Session> {
