@@ -99,6 +99,8 @@ export function InviteAccept() {
                 </p>
                 {saveError && <Alert variant="error">{saveError}</Alert>}
                 <SegmentedControl
+                  class="email-link-frequency"
+                  size="tall"
                   segments={FREQUENCY_SEGMENTS}
                   value={frequency}
                   onChange={(value) => setFrequency(value as 'daily' | 'weekly')}
