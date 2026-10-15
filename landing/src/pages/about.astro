@@ -54,6 +54,31 @@ import { APP_URL } from '../lib/app-url';
         >help@virtueinitiative.org</a
       > or join our <a href="https://discord.gg/4kNsbRuzQD">Discord server</a>.
     </p>
+
+    <h2>How can you help?</h2>
+
+    <p>We are still early in the project, and there are a few practical things you can do to help.</p>
+
+    <ol>
+      <li>
+        <strong><a href={`${APP_URL}/signup`}>Install the app</a></strong>. Even if you don&apos;t
+        struggle with this, installing the app and giving us feedback is one of the most helpful
+        things right now. We need to know what works well and what doesn&apos;t so that we can
+        improve it.
+      </li>
+      <li>
+        <strong><a href="/donate">Donate</a></strong>. We are not a 501(c)(3) yet, so donations are
+        not tax deductible. We are working toward 501(c)(3) status, but getting it is expensive
+        (lawyers, filing fees, etc.). If you want and are able to support our mission, we could use
+        some money to help get this off the ground.
+      </li>
+      <li>
+        <strong>Tell others about the app</strong>. The core app is already mostly built. The
+        biggest challenge is likely going to be helping people learn that there is a free option.
+        We do not want cost to be the reason people do not take the first step, so tell them about
+        it! Spread the word!
+      </li>
+    </ol>
   </section>
 </SiteLayout>
 
@@ -76,6 +101,23 @@ import { APP_URL } from '../lib/app-url';
 
   #about p + p {
     margin-top: 1rem;
+  }
+
+  #about h2 + p {
+    margin-top: 1rem;
+  }
+
+  #about p + h2 {
+    margin-top: 2.25rem;
+  }
+
+  #about ol {
+    margin: 1rem 0 0;
+    padding-left: 1.5rem;
+  }
+
+  #about li + li {
+    margin-top: 0.5rem;
   }
 
   .about-callout {
