@@ -711,19 +711,39 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
 
-export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, limit: number) {
-  const result = await db
-    .prepare(
-      // batches is keyed by (user_id, created_at, id), so the delete names the whole
-      // key. The subquery is answered from idx_batches_created_at alone.
-      `DELETE FROM batches WHERE (user_id, created_at, id) IN (
-         SELECT user_id, created_at, id FROM batches
-         WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
-       )`,
-    )
-    .bind(cutoff, limit)
-    .run();
-  return result.meta.changes;
+// Deletes the expired batches of the next `userLimit` users after `afterUserId`, in id
+// order, and returns the id to continue after (null once every user is covered).
+export async function deleteExpiredBatchesForUsers(
+  db: D1Database,
+  afterUserId: Uint8Array,
+  userLimit: number,
+  cutoff: number,
+) {
+  const [deleted, next] = await db.batch([
+    db
+      .prepare(
+        // batches has no created_at index, since one cost a written row per batch.
+        // Each user's batches sit in created_at order under the (user_id, created_at,
+        // id) primary key, so their expired ones are the front of that range and the
+        // delete seeks straight to them, reading only the rows it removes.
+        `DELETE FROM batches WHERE user_id IN (
+           SELECT id FROM users WHERE id > ?1 ORDER BY id LIMIT ?2
+         ) AND created_at < ?3`,
+      )
+      .bind(afterUserId, userLimit, cutoff),
+    db
+      .prepare('SELECT id FROM users WHERE id > ? ORDER BY id LIMIT 1 OFFSET ?')
+      .bind(afterUserId, userLimit - 1),
+  ]);
+  const last = (next.results as { id: ArrayBuffer | number[] }[])[0]?.id;
+  return {
+    deleted: deleted.meta.changes,
+    nextUserId: last
+      ? last instanceof ArrayBuffer
+        ? new Uint8Array(last)
+        : Uint8Array.from(last)
+      : null,
+  };
 }
 
 export async function deleteExpiredEmailTokensChunk(db: D1Database, cutoff: number, limit: number) {

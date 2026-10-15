@@ -43,7 +43,6 @@ CREATE TABLE IF NOT EXISTS batches (
   PRIMARY KEY (user_id, created_at, id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,

@@ -68,7 +68,7 @@ wrangler d1 execute DB --env staging --remote --command "..."
 wrangler d1 execute DB --env prod --remote --command "..."
 ```
 
-`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day; the `5 * * * *` cron keeps doing the hourly notification/retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
+`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day and deletes expired batches; the `5 * * * *` cron keeps doing the hourly notification and other retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
 
 ```bash
 # against a running `bun run dev` / scripts/launch.sh API (port varies under launch.sh)

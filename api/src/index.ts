@@ -25,7 +25,7 @@ import { Env, Variables } from './types/bindings';
 // Must match wrangler.json "triggers.crons". Each tick runs only its own case,
 // so the daily snapshot never displaces hourly work: 00:05 still fires hourly.
 const HOURLY_CRON = '5 * * * *';
-const ANALYTICS_CRON = '20 0 * * *';
+const DAILY_CRON = '20 0 * * *';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
   getPath: (request, options) => {
@@ -106,13 +106,14 @@ export default {
   fetch: app.fetch,
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     switch (controller.cron) {
-      case ANALYTICS_CRON:
+      case DAILY_CRON:
         // api/SPEC.md API-051: one metrics snapshot per UTC day.
         ctx.waitUntil(snapshotAnalytics(env, controller.scheduledTime));
+        // Visits every user, so once a day rather than hourly (see lib/retention.ts).
+        ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
         break;
       case HOURLY_CRON:
         ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
-        ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));

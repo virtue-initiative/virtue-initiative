@@ -100,7 +100,7 @@ describe('pruneExpiredBatches', () => {
     expect(await batchCount()).toBe(1);
   });
 
-  it('drains a backlog larger than the per-round-trip chunk limit', async () => {
+  it('deletes a large backlog for one user in one pass', async () => {
     const now = Date.UTC(2026, 0, 6, 0, 0, 0);
     const { userId } = await signupAndGetCookie('retention-backlog@example.com', 'pw');
     await signupAndGetCookie('retention-backlog-login@example.com', 'pw');
@@ -111,7 +111,7 @@ describe('pruneExpiredBatches', () => {
       'linux',
     );
 
-    const backlogSize = 620; // exceeds the 500-row PRUNE_CHUNK_LIMIT
+    const backlogSize = 620;
     await insertBatches(
       Array.from({ length: backlogSize }, (_, i) => ({
         id: `00000000-0000-4000-9000-${i.toString(16).padStart(12, '0')}`,
@@ -125,5 +125,42 @@ describe('pruneExpiredBatches', () => {
 
     expect(deleted).toBe(backlogSize);
     expect(await batchCount()).toBe(0);
+  });
+
+  it('covers every user when they span several chunks', async () => {
+    const now = Date.UTC(2026, 0, 6, 0, 0, 0);
+    const users = [];
+    for (let i = 0; i < 5; i++) {
+      users.push(await signupAndGetCookie(`retention-chunk-${i}@example.com`, 'pw'));
+    }
+    const device = await createDeviceForUser(
+      'retention-chunk-0@example.com',
+      'pw',
+      'Chunk Device',
+      'linux',
+    );
+
+    // Users 0, 2 and 4 each have an expired and a recent batch; 1 and 3 have none.
+    await insertBatches(
+      [0, 2, 4].flatMap((u) => [
+        {
+          id: `00000000-0000-4000-a000-${(u * 2).toString(16).padStart(12, '0')}`,
+          userId: users[u].userId,
+          deviceId: device.id,
+          createdAt: now - RETENTION_MS - DAY_MS,
+        },
+        {
+          id: `00000000-0000-4000-a000-${(u * 2 + 1).toString(16).padStart(12, '0')}`,
+          userId: users[u].userId,
+          deviceId: device.id,
+          createdAt: now - DAY_MS,
+        },
+      ]),
+    );
+
+    const deleted = await pruneExpiredBatches(env, now, 2);
+
+    expect(deleted).toBe(3);
+    expect(await batchCount()).toBe(3);
   });
 });

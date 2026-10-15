@@ -12,6 +12,10 @@
 --   foreign key would make every device delete scan the whole table for
 --   children, so deleteDeviceById removes a device's batches itself, through
 --   the owner's primary key range.
+-- * The index on created_at is not recreated. It too cost a written row on
+--   every batch. Retention cleanup now deletes each user's expired batches
+--   through the primary key, where they sit at the front of the user's range
+--   (lib/retention.ts).
 PRAGMA defer_foreign_keys = true;
 
 -- Stop here unless every stored url is exactly what the API will now derive.
@@ -61,5 +65,3 @@ FROM batches;
 
 DROP TABLE batches;
 ALTER TABLE batches_new RENAME TO batches;
-
-CREATE INDEX idx_batches_created_at ON batches(created_at);
