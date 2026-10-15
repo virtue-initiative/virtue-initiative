@@ -169,8 +169,9 @@ function AddDeviceButton() {
 
 // GET /device doesn't report last uploads (API-029), since the server would have to read
 // every batch to find them. The cache already holds this user's batches, so each device's
-// latest comes from there, after pulling in any new batch rows. Null until it answers, or
-// for good if this browser has no cache.
+// latest comes from there, after pulling in any new batch rows. Null while unknown: until
+// it answers, when the cache has never synced and can't now, or if this browser has no
+// cache. Cards then show "—" rather than claiming a device never uploaded.
 function useLastUploads(userId: string | null, devices: Device[]) {
   const [lastUploads, setLastUploads] = useState<Record<string, number> | null>(null);
 

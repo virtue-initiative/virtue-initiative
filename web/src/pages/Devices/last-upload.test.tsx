@@ -28,4 +28,15 @@ describe('Devices — last upload', () => {
     expect(screen.getByText('Never')).toBeInTheDocument();
     expect(getDeviceLastUploads).toHaveBeenCalledWith('user-1', 'user-1');
   });
+
+  it('shows "—" rather than "Never" when the cache cannot tell', async () => {
+    getDeviceLastUploads.mockResolvedValue(null);
+
+    renderWithClient(<Devices />);
+
+    await waitFor(() => expect(getDeviceLastUploads).toHaveBeenCalled());
+    await screen.findByText('My Laptop');
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByText('Never')).not.toBeInTheDocument();
+  });
 });

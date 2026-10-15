@@ -166,7 +166,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
 
   const [estimatedNextUpload, setEstimatedNextUpload] = useState<number | null>(null);
 
-  // Re-read when a sync finishes, since it may have brought in a newer batch.
+  // Re-read when a sync finishes or new logs arrive, since either may mean a newer batch.
   useEffect(() => {
     if (!userId || !activeTargetUserId || !selectedDevice) {
       setEstimatedNextUpload(null);
@@ -187,7 +187,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
         }
       })
       .catch(() => {});
-  }, [userId, activeTargetUserId, selectedDevice, logResult.complete]);
+  }, [userId, activeTargetUserId, selectedDevice, logResult.complete, logResult.logs.length]);
 
   const activeDevices = useMemo(
     () => deviceList.filter((d) => d.owner === (activeTargetUserId ?? '')),

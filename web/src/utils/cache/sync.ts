@@ -9,6 +9,50 @@ export function isSyncFresh(syncedAt: number | undefined, now: number, force: bo
   return !force && syncedAt !== undefined && now - syncedAt < SYNC_FRESH_MS;
 }
 
+// Syncs of batch rows alone (no download or decrypt), one per viewer and target at a time.
+// A sync only runs when it hits the network, so one already running for this session
+// serves a forced request too; one from an earlier session (see `epoch`) doesn't, and its
+// late finish doesn't mark the target fresh. A target synced within SYNC_FRESH_MS is left
+// alone unless forced.
+export function createRowSync(options: {
+  fetchRows: (viewerId: string, targetUserId: string) => Promise<void>;
+  epoch: () => number;
+  now?: () => number;
+}) {
+  const now = options.now ?? Date.now;
+  const inFlight = new Map<string, { promise: Promise<void>; epoch: number }>();
+  const syncedAt = new Map<string, number>();
+  const key = (viewerId: string, targetUserId: string) => `${viewerId}:${targetUserId}`;
+
+  return {
+    sync(viewerId: string, targetUserId: string, force: boolean): Promise<void> {
+      const k = key(viewerId, targetUserId);
+      const running = inFlight.get(k);
+      if (running && running.epoch === options.epoch()) return running.promise;
+      if (isSyncFresh(syncedAt.get(k), now(), force)) return Promise.resolve();
+      const entry = { epoch: options.epoch(), promise: Promise.resolve() };
+      entry.promise = options
+        .fetchRows(viewerId, targetUserId)
+        .then(() => {
+          if (entry.epoch === options.epoch()) syncedAt.set(k, now());
+        })
+        .finally(() => {
+          if (inFlight.get(k) === entry) inFlight.delete(k);
+        });
+      inFlight.set(k, entry);
+      return entry.promise;
+    },
+    // A new session syncs every target again.
+    forgetSynced() {
+      syncedAt.clear();
+    },
+    reset() {
+      inFlight.clear();
+      syncedAt.clear();
+    },
+  };
+}
+
 // What a running fetch for a target was started with.
 export type RunningFetch = { forced: boolean; epoch: number; hadKey: boolean };
 

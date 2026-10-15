@@ -11,8 +11,8 @@ import type { FeedLog } from '../../pages/Logs/types';
 import { CACHE_SCHEMA_VERSION, CACHE_TABLES, findSchemaDrift } from './schema';
 import type { CacheQueryError } from './client';
 import {
+  createRowSync,
   createSharedFetch,
-  isSyncFresh,
   needsDeviceOwners,
   needsRerun,
   scopeBatchesToTarget,
@@ -453,6 +453,16 @@ function sqlGetDeviceBatchEndTimes(
   return times;
 }
 
+// Whether /data has ever been merged for this viewer and target (a feeds row exists).
+function sqlHasSynced(viewerId: string, targetUserId: string): boolean {
+  return (
+    db.selectValue('SELECT 1 FROM feeds WHERE viewer_id=? AND target_user_id=?', [
+      viewerId,
+      targetUserId,
+    ]) !== undefined
+  );
+}
+
 // Latest batch end_time per device. GET /device doesn't report it (API-029), since the
 // server would have to read every batch to find it.
 function sqlGetDeviceLastUploads(viewerId: string, targetUserId: string): Record<string, number> {
@@ -594,17 +604,13 @@ type InFlightFetch = RunningFetch & {
 };
 const fetchInFlight = new Map<string, InFlightFetch>();
 
-// targetUserId → when its last successful /data sync finished. Every query starts a sync,
-// and a query within SYNC_FRESH_MS of the last sync skips the request (isSyncFresh).
-// setSession and refetch always sync.
-const lastSyncedAt = new Map<string, number>();
-
 // Bumped when setSession switches user, so a fetch from the previous session that
 // finishes late doesn't mark the new session's targets as freshly synced.
 let sessionEpoch = 0;
 
-// targetUserId → in-flight /data sync of batch rows alone (see syncBatchRows)
-const rowSyncInFlight = new Map<string, { promise: Promise<void>; epoch: number }>();
+// Syncs of batch rows from /data (createRowSync). Every query starts one, and one within
+// SYNC_FRESH_MS of the last skips the request. setSession and refetch always sync.
+const rowSync = createRowSync({ fetchRows: fetchBatchRows, epoch: () => sessionEpoch });
 
 // all target user IDs ever seen (so refetch can cover them all)
 const knownTargetUserIds = new Set<string>();
@@ -740,24 +746,8 @@ async function fetchDeviceOwners(): Promise<Map<string, string>> {
 // Core fetch + decrypt loop
 
 // Pull the batch rows added since the last sync into SQLite, without downloading or
-// decrypting anything. A target that has only just synced is left alone unless `force`,
-// and a call made while another is running for the same target shares its request.
-function syncBatchRows(viewerId: string, targetUserId: string, force: boolean): Promise<void> {
-  // A row sync only runs when it hits the network, so one already running for this session
-  // serves a forced request too. One from an earlier session doesn't.
-  const running = rowSyncInFlight.get(targetUserId);
-  if (running && running.epoch === sessionEpoch) return running.promise;
-  // A target that has only just synced is answered from SQLite alone.
-  if (isSyncFresh(lastSyncedAt.get(targetUserId), Date.now(), force)) return Promise.resolve();
-  const entry = { epoch: sessionEpoch, promise: Promise.resolve() };
-  entry.promise = fetchBatchRows(viewerId, targetUserId, entry.epoch).finally(() => {
-    if (rowSyncInFlight.get(targetUserId) === entry) rowSyncInFlight.delete(targetUserId);
-  });
-  rowSyncInFlight.set(targetUserId, entry);
-  return entry.promise;
-}
-
-async function fetchBatchRows(viewerId: string, targetUserId: string, epoch: number) {
+// decrypting anything. Called through rowSync, which decides when it runs.
+async function fetchBatchRows(viewerId: string, targetUserId: string) {
   const since = sqlGetSince(viewerId, targetUserId);
   console.log('[cache-worker] fetching /data since=', since, 'for', targetUserId);
   const page = await fetchDataShared(since);
@@ -774,8 +764,6 @@ async function fetchBatchRows(viewerId: string, targetUserId: string, epoch: num
     targetUserId,
   );
   sqlMergeDataPage(viewerId, targetUserId, { ...page, batches: scopedBatches });
-  // A fetch from a previous session mustn't mark the new session's target as fresh.
-  if (epoch === sessionEpoch) lastSyncedAt.set(targetUserId, Date.now());
 }
 
 async function fetchAndDecrypt(targetUserId: string, force: boolean): Promise<void> {
@@ -799,7 +787,7 @@ async function fetchAndDecrypt(targetUserId: string, force: boolean): Promise<vo
   };
 
   try {
-    await syncBatchRows(viewerId, targetUserId, force);
+    await rowSync.sync(viewerId, targetUserId, force);
   } catch (err) {
     console.warn('[cache-worker] fetch failed for', targetUserId, err);
     // Still serve what's cached, but say the sync didn't happen rather than reporting it
@@ -963,7 +951,7 @@ async function handleStreaming(
     );
     if (session?.userId !== req.userId) sessionEpoch++;
     session = { userId: req.userId, privateKey: req.privateKey };
-    lastSyncedAt.clear();
+    rowSync.forgetSynced();
     const targets = new Set([req.userId, ...knownTargetUserIds]);
     console.log('[cache-worker] setSession kicking off fetch for targets:', [...targets]);
     for (const targetId of targets) {
@@ -1025,13 +1013,19 @@ async function dispatchOneShot(req: CacheRequest): Promise<unknown> {
     return sqlGetDeviceBatchEndTimes(req.viewerId, req.targetUserId, req.deviceId);
   }
   if (req.method === 'getDeviceLastUploads') {
-    // Sync first so the answer includes the latest uploads, but answer from what's cached
-    // if the sync fails.
+    // Sync first so the answer includes the latest uploads. If that can't happen, what's
+    // cached still answers, as of the last sync; with no sync ever, the cache can't tell
+    // a device that never uploaded from one it hasn't heard about, so the answer is null.
+    let synced = false;
     if (session?.userId === req.viewerId) {
-      await syncBatchRows(req.viewerId, req.targetUserId, false).catch((err) =>
-        console.warn('[cache-worker] last-upload sync failed for', req.targetUserId, err),
-      );
+      try {
+        await rowSync.sync(req.viewerId, req.targetUserId, false);
+        synced = true;
+      } catch (err) {
+        console.warn('[cache-worker] last-upload sync failed for', req.targetUserId, err);
+      }
     }
+    if (!synced && !sqlHasSynced(req.viewerId, req.targetUserId)) return null;
     return sqlGetDeviceLastUploads(req.viewerId, req.targetUserId);
   }
   if (req.method === 'getDecryptionStats') {
@@ -1061,7 +1055,7 @@ self.onmessage = async (e: MessageEvent<CacheRequest>) => {
       await hardReset();
       activeQueries.clear();
       fetchInFlight.clear();
-      rowSyncInFlight.clear();
+      rowSync.reset();
       knownTargetUserIds.clear();
       initPromise = Promise.resolve();
       response = { id: req.id, result: 0 };
