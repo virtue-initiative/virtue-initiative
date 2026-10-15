@@ -47,6 +47,16 @@
   font-size: var(--text-sm);
 }
 
+/* Centered under a blog post, so the signup reads as the end of the article. */
+.help-doc .newsletter-centered {
+  margin-inline: auto;
+  text-align: center;
+}
+
+.newsletter-centered .newsletter-form {
+  text-align: left;
+}
+
 @media (max-width: 480px) {
   .newsletter-row {
     flex-direction: column;
