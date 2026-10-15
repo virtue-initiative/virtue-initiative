@@ -489,15 +489,13 @@ function PartnerCard({
       </CardHeader>
       {!isWatching && (
         <dl class="partner-details">
-          <div>
-            <dt class="eyebrow">Email</dt>
-            <dd title={partner.user.email}>{partner.user.email}</dd>
-          </div>
+          <dt>Email</dt>
+          <dd title={partner.user.email}>{partner.user.email}</dd>
           {partner.created_at !== undefined && (
-            <div>
-              <dt class="eyebrow">Can view your activity since</dt>
+            <>
+              <dt>Added</dt>
               <dd>{formatDate(partner.created_at)}</dd>
-            </div>
+            </>
           )}
         </dl>
       )}

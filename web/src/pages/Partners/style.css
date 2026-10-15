@@ -228,15 +228,18 @@
   width: 100%;
 }
 
+/* Label/value pairs in two columns, so the card reads as a small table
+   rather than a stack of tiny headings. */
 .partner-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin: var(--space-4) 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
   font-size: 0.85rem;
 
   & dt {
-    margin: 0 0 var(--space-1);
+    color: var(--text-muted);
+    font-weight: 500;
   }
 
   & dd {
