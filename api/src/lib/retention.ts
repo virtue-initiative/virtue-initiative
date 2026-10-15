@@ -11,8 +11,10 @@ const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 // api/SPEC.md API-047: soft-deleted locked passwords are hard-deleted after 7 days.
 const LOCKED_PASSWORD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const PRUNE_CHUNK_LIMIT = 500; // cap per DB round-trip so one cron tick can't stall
-// Users whose expired batches one round-trip deletes. A day of uploads is about 16
-// batches per user, so a chunk deletes some 8,000 rows.
+// Users with batches whose expired ones one round-trip deletes. A day of uploads is about
+// 16 batches per user, so a chunk deletes some 8,000 rows. A chunk is two of the 1,000
+// queries D1 allows one Worker invocation, so one daily run covers up to about 250,000
+// users who uploaded in the last 30 days. Users who haven't cost nothing.
 const PRUNE_USERS_PER_CHUNK = 500;
 
 // R2 objects for expired batches are pruned separately by an R2 bucket lifecycle

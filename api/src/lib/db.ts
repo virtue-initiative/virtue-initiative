@@ -717,38 +717,51 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
 
-// Deletes the expired batches of the next `userLimit` users after `afterUserId`, in id
-// order, and returns the id to continue after (null once every user is covered).
+// The next ?2 user ids after ?1 that have batches, in id order. SQLite can't list the
+// distinct values of an index's first column without reading every row, so each step
+// seeks to the first batch past the previous user, one row read per user. Users without
+// batches, who haven't uploaded in 30 days, are never visited.
+const NEXT_USERS_WITH_BATCHES = `WITH RECURSIVE next_user(id, n) AS (
+  SELECT (SELECT user_id FROM batches WHERE user_id > ?1 ORDER BY user_id LIMIT 1), 1
+  UNION ALL
+  SELECT (SELECT user_id FROM batches WHERE user_id > next_user.id ORDER BY user_id LIMIT 1), n + 1
+  FROM next_user WHERE next_user.id IS NOT NULL AND n < ?2
+)`;
+
+// Deletes the expired batches of the next `userLimit` users after `afterUserId` that have
+// any, and returns the id to continue after (null once every user is covered).
 export async function deleteExpiredBatchesForUsers(
   db: D1Database,
   afterUserId: Uint8Array,
   userLimit: number,
   cutoff: number,
 ) {
-  const [deleted, next] = await db.batch([
+  const [next, deleted] = await db.batch([
+    // Taken before the delete, which can remove a user's last batch.
+    db
+      .prepare(`${NEXT_USERS_WITH_BATCHES} SELECT max(id) AS id, count(id) AS users FROM next_user`)
+      .bind(afterUserId, userLimit),
     db
       .prepare(
         // batches has no created_at index, since one cost a written row per batch.
         // Each user's batches sit in created_at order under the (user_id, created_at,
         // id) primary key, so their expired ones are the front of that range and the
-        // delete seeks straight to them, reading only the rows it removes.
-        `DELETE FROM batches WHERE user_id IN (
-           SELECT id FROM users WHERE id > ?1 ORDER BY id LIMIT ?2
-         ) AND created_at < ?3`,
+        // delete seeks straight to them.
+        `${NEXT_USERS_WITH_BATCHES}
+         DELETE FROM batches WHERE user_id IN (SELECT id FROM next_user WHERE id IS NOT NULL)
+           AND created_at < ?3`,
       )
       .bind(afterUserId, userLimit, cutoff),
-    db
-      .prepare('SELECT id FROM users WHERE id > ? ORDER BY id LIMIT 1 OFFSET ?')
-      .bind(afterUserId, userLimit - 1),
   ]);
-  const last = (next.results as { id: ArrayBuffer | number[] }[])[0]?.id;
+  const row = (next.results as { id: ArrayBuffer | number[] | null; users: number }[])[0];
   return {
     deleted: deleted.meta.changes,
-    nextUserId: last
-      ? last instanceof ArrayBuffer
-        ? new Uint8Array(last)
-        : Uint8Array.from(last)
-      : null,
+    nextUserId:
+      row?.id && row.users === userLimit
+        ? row.id instanceof ArrayBuffer
+          ? new Uint8Array(row.id)
+          : Uint8Array.from(row.id)
+        : null,
   };
 }
 

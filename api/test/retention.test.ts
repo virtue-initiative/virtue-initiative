@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:test';
 import { pruneExpiredBatches } from '../src/lib/retention';
+import { Env } from '../src/types/bindings';
 import { clearDB, createDeviceForUser, signupAndGetCookie, uuidToBytes } from './helpers';
 
 beforeEach(clearDB);
@@ -162,5 +163,60 @@ describe('pruneExpiredBatches', () => {
 
     expect(deleted).toBe(3);
     expect(await batchCount()).toBe(3);
+  });
+
+  it('reads nothing for users without batches', async () => {
+    const now = Date.UTC(2026, 0, 6, 0, 0, 0);
+    const { userId } = await signupAndGetCookie('retention-active@example.com', 'pw');
+    const device = await createDeviceForUser(
+      'retention-active@example.com',
+      'pw',
+      'Active Device',
+      'linux',
+    );
+
+    // Counts the rows the prune reads, which is what D1 bills.
+    let rowsRead = 0;
+    const counted = {
+      ...env,
+      DB: {
+        prepare: (sql: string) => env.DB.prepare(sql),
+        batch: async (statements: D1PreparedStatement[]) => {
+          const results = await env.DB.batch(statements);
+          for (const result of results) rowsRead += result.meta.rows_read;
+          return results;
+        },
+      } as unknown as D1Database,
+    } as Env;
+
+    async function prune() {
+      await insertBatches([
+        {
+          id: crypto.randomUUID(),
+          userId,
+          deviceId: device.id,
+          createdAt: now - RETENTION_MS - DAY_MS,
+        },
+        { id: crypto.randomUUID(), userId, deviceId: device.id, createdAt: now - DAY_MS },
+      ]);
+      rowsRead = 0;
+      const deleted = await pruneExpiredBatches(counted, now, 2);
+      await env.DB.exec('DELETE FROM batches');
+      return { deleted, rowsRead };
+    }
+
+    const alone = await prune();
+    await env.DB.batch(
+      Array.from({ length: 300 }, (_, i) =>
+        env.DB.prepare(
+          `INSERT INTO users (id, email, password_hash, password_salt, created_at)
+           VALUES (?, ?, 'x', x'00', 0)`,
+        ).bind(uuidToBytes(crypto.randomUUID()), `retention-inactive-${i}@example.com`),
+      ),
+    );
+    const withInactive = await prune();
+
+    expect(alone.deleted).toBe(1);
+    expect(withInactive).toEqual(alone);
   });
 });
