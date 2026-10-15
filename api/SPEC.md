@@ -836,6 +836,8 @@ The client MUST send a multipart form request:
 
 The server MUST upload the file to object storage and store the metadata in the database.
 
+The server MUST clamp an `end_time` later than the time it received the batch to that time, and a `start_time` later than the resulting `end_time` to it, and SHOULD log a warning when it does. Both come from the device clock, and a batch is uploaded after the period it covers.
+
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
 
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:

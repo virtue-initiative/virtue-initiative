@@ -773,8 +773,9 @@ export async function deleteExpiredDeviceSessionsChunk(
   return result.meta.changes;
 }
 
-// How far ahead of the server a device's clock may run before its batches can
-// be missed by listBatchWindowsForUser.
+// Margin on listBatchWindowsForUser's created_at bound. POST /d/batch clamps
+// end_time to created_at (API-038), so new batches need none; it covers rows
+// stored before that clamp, from devices whose clock ran ahead.
 const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 
 export async function listBatchWindowsForUser(
@@ -793,8 +794,8 @@ export async function listBatchWindowsForUser(
   }>(
     db
       .prepare(
-        // A batch is stored after the period it covers ends, so its created_at is at
-        // or after its end_time, give or take device clock skew. The created_at
+        // A batch is stored after the period it covers ends, and POST /d/batch clamps
+        // end_time to the time it was stored, so created_at >= end_time. The created_at
         // bound lets the (user_id, created_at, id) primary key skip everything well
         // before the window instead of reading the user's whole retention period.
         `SELECT id, device_id, start_time, end_time, high_risk_count, medium_risk_count

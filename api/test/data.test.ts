@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
@@ -22,6 +22,38 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Data and device API routes', () => {
+  it('clamps batch times from a device clock running ahead, and logs a warning', async () => {
+    await signupAndGetCookie('skew@example.com');
+    const device = await createDeviceForUser('skew@example.com', 'password123', 'Laptop', 'linux');
+    seedHashState(device.id, { hash: '07'.repeat(32), seq: 1, last_received: 1000 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const before = Date.now();
+    const twoDays = 2 * 24 * 60 * 60 * 1000;
+
+    const res = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
+      body: batchMetadataForm({
+        start_time: before + twoDays - 3_600_000,
+        end_time: before + twoDays,
+        access_keys: {},
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const batch = (await res.json()) as { id: string; start_time: number; end_time: number };
+    const stored = await env.DB.prepare(
+      'SELECT start_time, end_time, created_at FROM batches WHERE id = ?',
+    )
+      .bind(uuidToBytes(batch.id))
+      .first<{ start_time: number; end_time: number; created_at: number }>();
+    expect(stored!.end_time).toBe(stored!.created_at);
+    expect(stored!.start_time).toBe(stored!.created_at);
+    expect(batch.end_time).toBe(stored!.end_time);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('clamped'));
+    warn.mockRestore();
+  });
+
   it('handles device registration, settings, batch upload, and data listing', async () => {
     const { cookie: userCookie, userId } = await signupAndGetCookie('alice@example.com');
     const device = await createDeviceForUser('alice@example.com', 'password123', 'Phone', 'ios');
