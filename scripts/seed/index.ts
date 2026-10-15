@@ -19,7 +19,7 @@ import { getPlatformProxy } from 'wrangler';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { encodeAccessKeys } from '../../api/src/lib/access-keys';
-import { batchObjectKey } from '../../api/src/lib/batch-url';
+import { batchObject } from '../../api/src/lib/batch-url';
 import { CURRENT_API_VERSION } from '../../shared-web/api-version';
 import { deriveAccount, PASSWORD, type AccountMaterial } from './accounts';
 import { buildBatch } from './batch';
@@ -29,7 +29,7 @@ import { hexToBytes, hexToUuid } from './util';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const usersOnly = process.argv.includes('--users-only');
 
-type Env = { DB: D1Database; BUCKET: R2Bucket };
+type Env = { DB: D1Database; BUCKET: R2Bucket; R2_URL: string };
 
 const accounts = new Map<string, AccountMaterial>();
 for (const user of USERS) {
@@ -121,8 +121,10 @@ try {
     )
       .bind(...deviceIds)
       .all<{ id: string; user_id: string; version: string }>();
-    const oldKeys = old.results.map((row) =>
-      batchObjectKey({ ...row, id: hexToUuid(row.id), user_id: hexToUuid(row.user_id) }),
+    const oldKeys = old.results.map(
+      (row) =>
+        batchObject(proxy.env, { ...row, id: hexToUuid(row.id), user_id: hexToUuid(row.user_id) })
+          .key,
     );
     for (let i = 0; i < oldKeys.length; i += 500) {
       await BUCKET.delete(oldKeys.slice(i, i + 500));
@@ -145,7 +147,11 @@ try {
       const owner = batch.device.owner.idHex;
       const built = await buildBatch(batch.events, recipientsFor(owner));
       const id = crypto.randomUUID();
-      const key = batchObjectKey({ id, user_id: hexToUuid(owner), version: CURRENT_API_VERSION });
+      const { key } = batchObject(proxy.env, {
+        id,
+        user_id: hexToUuid(owner),
+        version: CURRENT_API_VERSION,
+      });
       await BUCKET.put(key, built.blob, {
         httpMetadata: { contentType: 'application/octet-stream' },
       });

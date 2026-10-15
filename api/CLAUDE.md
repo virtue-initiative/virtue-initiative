@@ -43,7 +43,7 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 - `src/lib/hash-server.ts` — client for the standalone hash server (`GET`/`DELETE /hash`), used by `device-only.ts`, `devices.ts`
 - `src/lib/credentials.ts` — `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`
 - `src/lib/app-url.ts` — `getAppUrl`, shared by every route that links back to the web app in an email
-- `src/lib/batch-url.ts` — derives a batch's R2 key and URL from its version, owner and id (API-038); nothing stores the URL
+- `src/lib/batch-url.ts` — `batchObject` derives a batch's R2 key and URL from its version, owner and id (API-038); nothing stores the URL
 - `src/lib/access-keys.ts` — msgpack encoding of `batches.access_keys`
 - `src/middleware/auth.ts` — JWT verification, sets `c.get('sub')`
 - `src/middleware/validation.ts` — Zod validation wrapper

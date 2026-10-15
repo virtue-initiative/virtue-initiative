@@ -17,7 +17,7 @@ import {
   markDeviceDeleted,
 } from '../lib/db';
 import { encodeAccessKeys } from '../lib/access-keys';
-import { batchObjectKey, batchUrl } from '../lib/batch-url';
+import { batchObject } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
@@ -312,14 +312,9 @@ deviceOnly.post(
     const endHash = hashState.hash;
     const batchId = uuidv4();
     const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
-    const url = batchUrl(c.env, stored);
+    const { key, url } = batchObject(c.env, stored);
 
-    await putObject(
-      c.env,
-      batchObjectKey(stored),
-      await file.arrayBuffer(),
-      'application/octet-stream',
-    );
+    await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
     await createBatch(c.env.DB, {
       ...stored,
       device_id: device.id,

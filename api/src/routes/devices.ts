@@ -11,7 +11,7 @@ import {
   listVisibleOwnerIds,
   updateDevice,
 } from '../lib/db';
-import { batchObjectKey } from '../lib/batch-url';
+import { batchObject } from '../lib/batch-url';
 import { hashGetMany } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
@@ -93,7 +93,7 @@ devices.delete('/:id', authenticateWebSession(), async (c) => {
   const batches = await listBatchesForDevice(c.env.DB, deviceId, device.owner);
   await deleteDeviceById(c.env.DB, deviceId, device.owner);
 
-  await Promise.all(batches.map((batch) => deleteObject(c.env, batchObjectKey(batch))));
+  await Promise.all(batches.map((batch) => deleteObject(c.env, batchObject(c.env, batch).key)));
 
   if (owner) {
     const email = renderDeviceDeletedTemplate({

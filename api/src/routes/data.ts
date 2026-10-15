@@ -9,7 +9,7 @@ import {
   listVisibleOwnerIds,
 } from '../lib/db';
 import { wrappedKeyForUser } from '../lib/access-keys';
-import { batchUrl } from '../lib/batch-url';
+import { batchObject } from '../lib/batch-url';
 import { encodeHex } from '../lib/encoding';
 import { serializeUser, serializeWatchers, serializeWatching } from '../lib/serializers';
 import { validateZ } from '../middleware/validation';
@@ -61,7 +61,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
           end_time: batch.end_time,
           end_hash: endHashHex(batch.end_hash),
           version: batch.version,
-          url: batchUrl(c.env, batch),
+          url: batchObject(c.env, batch).url,
           encrypted_key: encryptedKey,
           created_at: batch.created_at,
         };
