@@ -438,10 +438,26 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// need this; it exists for platforms like Android where the same
     /// `Daemon` instance's loop can be stopped and resumed without a fresh
     /// `Daemon::new` in between.
+    ///
+    /// Blocks on the loop's reply, so it must only be called while the loop
+    /// is running. A caller that is about to start the loop itself must use
+    /// `queue_note_user_start` instead (CORE-022).
     pub fn note_user_start(&self) {
         if let Err(err) = self.call(|reply| DaemonRequest::NoteUserStart { reply }) {
             log_warning("note_user_start: daemon loop unreachable", Some(&err));
         }
+    }
+
+    /// `note_user_start` without the wait: enqueues the request and returns
+    /// immediately. The loop applies it ahead of anything queued afterward,
+    /// including a `login`, as soon as it next runs. For a caller that is
+    /// about to run `run_forever` itself, where the blocking form would sit
+    /// out its whole timeout waiting on a loop that has not started
+    /// (CORE-022).
+    pub fn queue_note_user_start(&self) {
+        // Nobody waits on this reply; the fire's send just fails quietly.
+        let (reply, _) = mpsc::channel();
+        let _ = self.request_tx.send(DaemonRequest::NoteUserStart { reply });
     }
 
     pub fn queue_upload(&self, upload: Upload) {
@@ -945,7 +961,7 @@ fn record_capture_failure(errors: &mut ErrorState, outcome: Option<&CaptureOutco
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crate::testing::Scenario;
 
@@ -971,5 +987,39 @@ mod tests {
                 handle.join().expect("run_forever must not panic");
             }
         });
+    }
+
+    /// Android restarts the loop from the thread that is about to run it.
+    /// `note_user_start` blocks on a reply that only the loop can send, so it
+    /// sat out its whole request timeout there and delayed everything queued
+    /// behind it, `login` included (CORE-022). The queued form must return
+    /// immediately with no loop running, and the loop must apply it once it
+    /// does run.
+    #[test]
+    fn queue_note_user_start_does_not_wait_for_a_loop_and_is_applied_by_it() {
+        let scenario = Scenario::new();
+        let daemon = &scenario.daemon;
+        daemon.test_note_user_stop("test");
+        assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
+
+        let started = Instant::now();
+        daemon.queue_note_user_start();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "queue_note_user_start must not wait for the loop"
+        );
+        // Still queued, not yet applied: nothing is servicing the channel.
+        assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
+
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(|| daemon.run_forever());
+            // A blocking request behind it is served in order, so once this
+            // returns the queued resume has been applied too.
+            daemon.flush_batch_now();
+            daemon.request_stop();
+            handle.join().expect("run_forever must not panic");
+        });
+
+        assert!(!daemon.state_snapshot().lifecycle.monitoring_stopped);
     }
 }

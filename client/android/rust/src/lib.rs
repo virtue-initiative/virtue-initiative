@@ -447,8 +447,11 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
         // — each resume needs its own `note_user_start` to clear a prior
         // `note_user_stop`, or tamper detection would stay suspended for
         // the rest of the process's life. A no-op when not currently
-        // stopped. See CORE-002.
-        core.daemon.note_user_start();
+        // stopped. Queued rather than awaited: this thread is the one about
+        // to run the loop, so a blocking request would only time out after
+        // 30s and delay a `nativeLogin` queued behind it. See CORE-002,
+        // CORE-022.
+        core.daemon.queue_note_user_start();
 
         core.daemon.run_forever();
 

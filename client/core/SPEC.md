@@ -130,6 +130,12 @@ Every field except `is_running` MUST be derivable from persisted state plus the 
 
 MUST record that the user explicitly stopped monitoring while it was expected to be running (see §2's `user_stop` alert).
 
+### CORE-022 note_user_start
+
+`note_user_start()`
+
+MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes. A no-op when no stop is active. The core MUST also offer a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
+
 ### CORE-012 queue_upload
 
 `queue_upload(upload)`
