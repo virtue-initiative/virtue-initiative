@@ -765,9 +765,12 @@ The client MUST send
   "email": "user@example.com",
   "password_auth": Base64,
   "name": "My Laptop",
-  "platform": "linux"
+  "platform": "linux",
+  "app_transaction_id": "..." | undefined
 }
 ```
+
+`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-057).
 
 The server MUST validate the login (see `POST /login`) and create a long lived refresh token.
 
@@ -904,6 +907,36 @@ When the server sends an email for an email token, it SHOULD tag the message wit
 The server MUST NOT send any email to an address that has a permanent bounce. If that email was for an email token, the server MUST instead set that bounce on the token immediately.
 
 The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
+
+### API-057 `POST /app-store/notifications`
+
+The server MUST accept App Store Server Notifications V2, which Apple sends as
+
+```js
+{ "signedPayload": JWS }
+```
+
+The server MUST reject a request with **HTTP 400** if the body is not this shape, and with **HTTP 403** if the JWS does not verify. A JWS verifies only if:
+
+- its `alg` is `ES256` and its `x5c` header holds exactly three certificates
+- the SHA-256 of the last certificate is the fingerprint of Apple Root CA - G3 (`63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179`)
+- the first certificate is signed by the second and the second by the third
+- the first certificate carries the extension OID `1.2.840.113635.100.6.11.1` and the second `1.2.840.113635.100.6.2.1`
+- every certificate is valid at the payload's `signedDate`
+- the JWS signature verifies against the first certificate's key
+
+Tests MAY pin a different root through the `APP_STORE_ROOT_SHA256` binding. Production MUST NOT set it.
+
+The server MUST ignore a notification whose bundle ID is not the iOS app's, and MUST respond **HTTP 200** to every notification type it does not act on, since Apple retries any other status.
+
+For `RESCIND_CONSENT`, which Apple sends when a parent or guardian withdraws consent for a minor in a region that requires it, the server MUST verify `appData.signedAppTransactionInfo` the same way and read its `appTransactionId`. It MUST then log out every device whose `app_transaction_id` matches, exactly as `POST /d/logout` does (see API-037). Apple stops the app from launching, but the Safari extension runs in Safari, so revoking the device is what stops its uploads.
+
+For an accepted notification the server MUST respond **HTTP 200** with
+
+```js
+{ "ok": true, "devices": Number } // RESCIND_CONSENT, devices logged out
+{ "ok": true }                     // ignored notification
+```
 
 ### API-042 `POST /bug-report`
 

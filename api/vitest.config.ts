@@ -1,4 +1,5 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { TEST_APP_STORE_ROOT_SHA256 } from './test/app-store-test-keys';
 import { TEST_JWT_PRIVATE_KEY, TEST_JWT_PUBLIC_KEY } from './test/jwt-test-keys';
 
 export default defineWorkersConfig({
@@ -16,6 +17,8 @@ export default defineWorkersConfig({
             EMAIL_DELIVERY_MODE: 'log',
             SNS_TOPIC_ARNS:
               'arn:aws:sns:us-east-1:111111111111:old-ses-events, arn:aws:sns:us-east-1:222222222222:ses-events',
+            // Pins the test chain in test/app-store-test-keys.ts instead of Apple's root.
+            APP_STORE_ROOT_SHA256: TEST_APP_STORE_ROOT_SHA256,
             // Intercepted by fetchMock's hash-server test double — see test/hash-server-mock.ts.
             HASH_SERVER_URL: 'https://example.com',
           },

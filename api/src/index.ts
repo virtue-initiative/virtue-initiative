@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import admin from './routes/admin';
+import appStore from './routes/app-store';
 import auth from './routes/auth';
 import bugReport from './routes/bug-report';
 import data from './routes/data';
@@ -72,6 +73,7 @@ app.route('/', auth);
 app.route('/', bugReport);
 app.route('/', partners);
 app.route('/', emailWebhooks);
+app.route('/', appStore);
 app.route('/device', devices);
 app.route('/locked-password', lockedPasswords);
 app.route('/data', data);

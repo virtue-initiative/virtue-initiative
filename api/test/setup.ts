@@ -25,9 +25,11 @@ CREATE TABLE IF NOT EXISTS devices (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
+  app_transaction_id TEXT,
   FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
+CREATE INDEX IF NOT EXISTS idx_devices_app_transaction_id ON devices(app_transaction_id);
 
 CREATE TABLE IF NOT EXISTS batches (
   id BLOB PRIMARY KEY,

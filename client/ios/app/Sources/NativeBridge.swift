@@ -10,7 +10,8 @@ private func virtue_ios_native_init(
 private func virtue_ios_native_login(
     _ email: UnsafePointer<CChar>?,
     _ password: UnsafePointer<CChar>?,
-    _ deviceName: UnsafePointer<CChar>?
+    _ deviceName: UnsafePointer<CChar>?,
+    _ appTransactionID: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_ios_native_logout")
@@ -136,13 +137,22 @@ enum NativeBridge {
         }
     }
 
-    static func login(email: String, password: String, deviceName: String) -> String? {
+    /// `appTransactionID` lets the API sign this device out when a parent
+    /// withdraws App Store consent (API-057). Empty when there isn't one.
+    static func login(email: String, password: String, deviceName: String, appTransactionID: String) -> String? {
         withDaemonLoop {
             callReturningError {
                 email.withCString { emailCString in
                     password.withCString { passwordCString in
                         deviceName.withCString { deviceNameCString in
-                            virtue_ios_native_login(emailCString, passwordCString, deviceNameCString)
+                            appTransactionID.withCString { appTransactionIDCString in
+                                virtue_ios_native_login(
+                                    emailCString,
+                                    passwordCString,
+                                    deviceNameCString,
+                                    appTransactionIDCString
+                                )
+                            }
                         }
                     }
                 }
