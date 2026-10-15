@@ -18,9 +18,12 @@
 
 ## Uninstall
 
-1. Go to Settings
+1. Go to Settings.
+
 2. Click "Apps" then "Installed Apps".
    ![settings apps](./win-uninstall-1.png)
-3. Search for "Virtue"
-4. Click "Uninstall"
+3. Search for "Virtue".
+
+4. Click "Uninstall".
+
    ![uninstall virtue](./win-uninstall-2.png)

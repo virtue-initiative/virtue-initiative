@@ -62,11 +62,9 @@ download the "coated" screenshots from our server, you have the right
 ## Handling passwords
 
 You might have noticed that we use the password to generate the public/private
-keys, which might make you question why the server couldn't just use the
-password you sent them to login to get your private ("dissolving") key.
+keys, which might make you question why the server couldn't just use the password you sent when you log in to get your private ("dissolving") key.
 
-The server could **if** we actually sent your password to the server, but we
-**don't** and here's how. Imagine you have a secret recipe for an amazing
+The server could, if we actually sent it your password, but we **don't**. Here's how. Imagine you have a secret recipe for an amazing
 chocolate cake. Let's say you got it from your great-grandma. Now, let's
 say you find a long-lost distant relative who also claims to have the secret
 recipe from your great-grandma. You're skeptical, but neither of you is willing

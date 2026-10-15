@@ -53,6 +53,6 @@ iOS got a major user interface overhaul with styling polish and uniformity with 
 - [Simple max batch size fix](https://github.com/virtue-initiative/virtue-initiative/pull/364)
   - [Batch upload is limited to 25 items](https://github.com/virtue-initiative/virtue-initiative/issues/325)
 - [Added a basic hash server](https://github.com/virtue-initiative/virtue-initiative/pull/367)
-  - [Create seperate hashing server](https://github.com/virtue-initiative/virtue-initiative/issues/30)
+  - [Create separate hashing server](https://github.com/virtue-initiative/virtue-initiative/issues/30)
 - [Post 2026-05-16: How our security works](https://github.com/virtue-initiative/virtue-initiative/pull/353)
 - [Better core test harness](https://github.com/virtue-initiative/virtue-initiative/pull/380)
