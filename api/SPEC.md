@@ -268,7 +268,7 @@ The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note
 
 The server MUST return a `refresh_token` cookie containing the refresh token.
 
-The server MUST create an account for the user and return **HTTP 200** with this shape.
+The server MUST create an account for the user, with `settings.email_frequency` set to `weekly` and `settings.timezone` set to `UTC`, and return **HTTP 200** with this shape.
 
 ```js
 {

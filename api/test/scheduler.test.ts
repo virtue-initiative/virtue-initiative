@@ -37,6 +37,11 @@ describe('Notification scheduler', () => {
       'pw',
     );
     await markUserEmailVerified(partnerUserId);
+    await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(partnerCookie),
+      body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
+    });
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -151,6 +156,11 @@ describe('Notification scheduler', () => {
       'pw',
     );
     await markUserEmailVerified(partnerUserId);
+    await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(partnerCookie),
+      body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
+    });
 
     const inviteRes = await SELF.fetch(`${BASE}/partner`, {
       method: 'POST',
@@ -237,6 +247,11 @@ describe('Notification scheduler', () => {
       'Partner',
     );
     await markUserEmailVerified(partnerUserId);
+    await SELF.fetch(`${BASE}/user`, {
+      method: 'PATCH',
+      headers: authHeaders(partnerCookie),
+      body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
+    });
 
     for (const ownerCookie of [ownerOneCookie, ownerTwoCookie]) {
       const inviteRes = await SELF.fetch(`${BASE}/partner`, {

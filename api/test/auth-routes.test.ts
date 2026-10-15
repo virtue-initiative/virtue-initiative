@@ -429,7 +429,7 @@ describe('Auth routes', () => {
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(true);
-    expect(body.settings).toMatchObject({ email_frequency: 'daily', timezone: 'UTC' });
+    expect(body.settings).toMatchObject({ email_frequency: 'weekly', timezone: 'UTC' });
     // API-020: a web session alone must not be able to swap the key pair.
     expect(body.pub_key).toBe(originalPubKey);
     expect(body.encrypted_priv_key).toBe(originalPrivKey);
