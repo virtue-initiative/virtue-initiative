@@ -445,12 +445,41 @@ export async function changeUserPassword(
 
 export async function createDevice(
   db: D1Database,
-  input: { id: string; owner: string; name: string; platform: string },
+  input: {
+    id: string;
+    owner: string;
+    name: string;
+    platform: string;
+    app_transaction_id?: string | null;
+  },
 ) {
   return db
-    .prepare('INSERT INTO devices (id, owner, name, platform, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(uuidToBytes(input.id), uuidToBytes(input.owner), input.name, input.platform, Date.now())
+    .prepare(
+      'INSERT INTO devices (id, owner, name, platform, app_transaction_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    .bind(
+      uuidToBytes(input.id),
+      uuidToBytes(input.owner),
+      input.name,
+      input.platform,
+      input.app_transaction_id ?? null,
+      Date.now(),
+    )
     .run();
+}
+
+/** API-057: the devices still signed in from one App Store download. */
+export async function listLiveDeviceIdsByAppTransactionId(
+  db: D1Database,
+  appTransactionId: string,
+) {
+  const rows = await allWithUuidFields<{ id: string }>(
+    db
+      .prepare('SELECT id FROM devices WHERE app_transaction_id = ? AND deleted_at IS NULL')
+      .bind(appTransactionId),
+    ['id'],
+  );
+  return rows.map((row) => row.id);
 }
 
 export async function findDeviceById(db: D1Database, deviceId: string) {

@@ -86,9 +86,9 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 ### CORE-008 login
 
-`login(email, password, device_name?) -> device_id`
+`login(email, password, device_name?, app_transaction_id?) -> device_id`
 
-MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used. `app_transaction_id` is optional and only an App Store client has one; when present it MUST be sent with the registration (see `api/SPEC.md` API-035).
 
 ### CORE-009 logout
 

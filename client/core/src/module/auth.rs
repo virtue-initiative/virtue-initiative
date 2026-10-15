@@ -20,6 +20,7 @@ pub fn login<A: ApiTransport>(
     email: &str,
     password: &str,
     device_name_override: Option<&str>,
+    app_transaction_id: Option<&str>,
     now_ms: i64,
 ) -> CoreResult<String> {
     if let Some(creds) = auth.device_credentials.take() {
@@ -31,7 +32,13 @@ pub fn login<A: ApiTransport>(
         .filter(|name| !name.is_empty())
         .unwrap_or(device_name);
 
-    match api.register_device(email, password, resolved_name, platform_name) {
+    match api.register_device(
+        email,
+        password,
+        resolved_name,
+        platform_name,
+        app_transaction_id,
+    ) {
         Ok(registered) => {
             let device_id = registered.credentials.device_id.clone();
             auth.device_credentials = Some(registered.credentials.clone());
@@ -87,6 +94,7 @@ mod tests {
             "alice@example.org",
             "secret",
             None,
+            None,
             1_000,
         );
         assert!(result.is_ok());
@@ -118,6 +126,7 @@ mod tests {
             "alice@example.org",
             "secret",
             None,
+            None,
             1_000,
         );
         let result = login(
@@ -129,6 +138,7 @@ mod tests {
             "p",
             "bob@example.org",
             "secret2",
+            None,
             None,
             2_000,
         );
@@ -152,9 +162,37 @@ mod tests {
             "alice@example.org",
             "secret",
             Some("  My Laptop  "),
+            None,
             1_000,
         );
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
+    }
+
+    #[test]
+    fn login_registers_app_transaction_id_when_present() {
+        let mut auth = AuthState::default();
+        let mut screenshot = ScreenshotState::default();
+        let mut upload = UploadState::default();
+        let api = MockApiClient::new();
+        let _ = login(
+            &mut auth,
+            &mut screenshot,
+            &mut upload,
+            &api,
+            "d",
+            "p",
+            "alice@example.org",
+            "secret",
+            None,
+            Some("2000000123456789"),
+            1_000,
+        );
+        assert_eq!(
+            api.state().register_device_calls[0]
+                .app_transaction_id
+                .as_deref(),
+            Some("2000000123456789")
+        );
     }
 
     #[test]
@@ -173,6 +211,7 @@ mod tests {
             "p",
             "alice@example.org",
             "wrong",
+            None,
             None,
             1_000,
         );
@@ -206,6 +245,7 @@ mod tests {
             "p",
             "alice@example.org",
             "secret",
+            None,
             None,
             1_000,
         );

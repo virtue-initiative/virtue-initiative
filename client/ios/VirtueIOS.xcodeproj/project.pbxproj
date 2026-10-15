@@ -30,6 +30,7 @@
 		EFF31FC58844CC7C06BF2C67 /* icon-512.png in Resources */ = {isa = PBXBuildFile; fileRef = 45C29AD806137A862D8A86D1 /* icon-512.png */; };
 		90CE0103690AC97246503827 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8C6FD50058E81A6A50D43946 /* PrivacyInfo.xcprivacy */; };
 		4512270D92435375F83FB745 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 082EF4B3AE7AE7B345AA200C /* PrivacyInfo.xcprivacy */; };
+		F94A8AC9B59CF0A3CED0D4FE /* AgeAssurance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C4D38913419FB0FE0625B20 /* AgeAssurance.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -82,6 +83,7 @@
 		F2360D5FD87E7DDC76809DCF /* VirtueIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtueIOSApp.swift; sourceTree = "<group>"; };
 		8C6FD50058E81A6A50D43946 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		082EF4B3AE7AE7B345AA200C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1C4D38913419FB0FE0625B20 /* AgeAssurance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgeAssurance.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -131,6 +133,7 @@
 		DDEAC77C25DAC6787ACDF8BC /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				1C4D38913419FB0FE0625B20 /* AgeAssurance.swift */,
 				6EB2097040279F2D68D63571 /* CaptureCallbacks.swift */,
 				35759B57C5B754C19376FDAE /* MonitoringCoordinator.swift */,
 				EC5C926E46F575E39B52F4F5 /* NativeBridge.swift */,
@@ -308,6 +311,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F94A8AC9B59CF0A3CED0D4FE /* AgeAssurance.swift in Sources */,
 				B99E69BF65320433BEB44DFE /* CaptureCallbacks.swift in Sources */,
 				2B519D76DE9CC56A244D58F9 /* MonitoringCoordinator.swift in Sources */,
 				0AFE31F0286592AC45E0F760 /* NativeBridge.swift in Sources */,
@@ -348,6 +352,10 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lvirtue_ios_rust",
+					"-weak_framework",
+					DeclaredAgeRange,
+					"-weak_framework",
+					PermissionKit,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
 				PRODUCT_NAME = VirtueIOS;
@@ -407,6 +415,10 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lvirtue_ios_rust",
+					"-weak_framework",
+					DeclaredAgeRange,
+					"-weak_framework",
+					PermissionKit,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
 				PRODUCT_NAME = VirtueIOS;

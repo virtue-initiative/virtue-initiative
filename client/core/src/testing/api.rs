@@ -57,6 +57,7 @@ pub struct RegisterDeviceCall {
     pub password: String,
     pub name: String,
     pub platform: String,
+    pub app_transaction_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +173,7 @@ impl ApiTransport for MockApiClient {
         password: &str,
         name: &str,
         platform: &str,
+        app_transaction_id: Option<&str>,
     ) -> CoreResult<RegisteredDevice> {
         let mut state = self.state();
         state.register_device_calls.push(RegisterDeviceCall {
@@ -179,6 +181,7 @@ impl ApiTransport for MockApiClient {
             password: password.to_string(),
             name: name.to_string(),
             platform: platform.to_string(),
+            app_transaction_id: app_transaction_id.map(str::to_string),
         });
         if let Some(canned) = state.register_device_responses.pop_front() {
             canned

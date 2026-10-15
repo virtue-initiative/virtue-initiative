@@ -139,12 +139,13 @@ export async function createDeviceForUser(
   password = 'password123',
   name = 'Laptop',
   platform = 'linux',
+  app_transaction_id?: string,
 ) {
   const password_auth = await passwordAuthFor(password);
   const res = await SELF.fetch(`${BASE}/d/device`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password_auth, name, platform }),
+    body: JSON.stringify({ email, password_auth, name, platform, app_transaction_id }),
   });
 
   if (!res.ok) {

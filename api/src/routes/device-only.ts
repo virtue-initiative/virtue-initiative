@@ -38,6 +38,8 @@ const registerDeviceSchema = z.object({
   password_auth: z.base64(),
   name: z.string().min(1),
   platform: z.string().min(1),
+  // API-035: only an App Store client sends this.
+  app_transaction_id: z.string().min(1).max(64).optional(),
 });
 
 const notifyEntrySchema = z.object({
@@ -130,7 +132,7 @@ async function buildDeviceSettings(
  * this is the device's first call, made before it has any session of its own.
  */
 deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) => {
-  const { email, password_auth, name, platform } = c.req.valid('json');
+  const { email, password_auth, name, platform, app_transaction_id } = c.req.valid('json');
   const result = await verifyUserCredentials(c.env.DB, email, password_auth);
 
   if (result.status === 'invalid') {
@@ -144,7 +146,7 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
   const owner = result.user.id;
   const id = uuidv4();
 
-  await createDevice(c.env.DB, { id, owner, name, platform });
+  await createDevice(c.env.DB, { id, owner, name, platform, app_transaction_id });
   const refreshToken = await createDeviceSession(c, id);
 
   const settings = await buildDeviceSettings(c, { id, owner, name, platform });
@@ -186,48 +188,54 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
  * best-effort: the logout itself is already committed.
  */
 deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
-  const deviceId = c.get('sub');
+  await logOutDevice(c.env, c.get('sub'));
+  return c.body(null, 204);
+});
+
+/**
+ * API-037's logout, also run for every device a RESCIND_CONSENT notification
+ * names (API-057).
+ */
+export async function logOutDevice(env: Env, deviceId: string) {
   const now = Date.now();
 
-  const device = await findDeviceById(c.env.DB, deviceId);
+  const device = await findDeviceById(env.DB, deviceId);
 
-  await deleteDeviceSessionsByDeviceId(c.env.DB, deviceId);
-  await markDeviceDeleted(c.env.DB, deviceId, now);
+  await deleteDeviceSessionsByDeviceId(env.DB, deviceId);
+  await markDeviceDeleted(env.DB, deviceId, now);
 
   try {
-    await hashReset(c.env, deviceId);
+    await hashReset(env, deviceId);
   } catch {
     // Non-fatal — logout/soft-delete already committed; hash state is best-effort.
   }
 
   if (device) {
     try {
-      await notifyAboutDeviceLogout(c, device);
+      await notifyAboutDeviceLogout(env, device);
     } catch {
       // Best-effort — the logout itself already committed successfully.
     }
   }
-
-  return c.body(null, 204);
-});
+}
 
 async function notifyAboutDeviceLogout(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
+  env: Env,
   device: { id: string; owner: string; name: string; platform: string },
 ) {
-  const owner = await findUserById(c.env.DB, device.owner);
+  const owner = await findUserById(env.DB, device.owner);
 
   if (owner) {
     const email = renderDeviceLoggedOutTemplate({
-      appName: c.env.APP_NAME,
-      appUrl: c.env.APP_URL,
+      appName: env.APP_NAME,
+      appUrl: env.APP_URL,
       recipientName: owner.name,
       deviceName: device.name,
       devicePlatform: device.platform,
     });
     await sendEmail({
-      env: c.env,
-      db: c.env.DB,
+      env,
+      db: env.DB,
       kind: 'device_logout',
       recipient: owner.email,
       allowUnverified: true,
@@ -239,15 +247,15 @@ async function notifyAboutDeviceLogout(
     });
   }
 
-  const targets = await listAcceptedNotificationTargetsForUser(c.env.DB, device.owner);
+  const targets = await listAcceptedNotificationTargetsForUser(env.DB, device.owner);
   for (const target of targets) {
     if (target.settings.email_frequency === 'none') {
       continue;
     }
 
     const email = renderDeviceLoggedOutTemplate({
-      appName: c.env.APP_NAME,
-      appUrl: c.env.APP_URL,
+      appName: env.APP_NAME,
+      appUrl: env.APP_URL,
       recipientName: target.watcher_name,
       deviceName: device.name,
       devicePlatform: device.platform,
@@ -256,8 +264,8 @@ async function notifyAboutDeviceLogout(
       forPartner: true,
     });
     await sendEmail({
-      env: c.env,
-      db: c.env.DB,
+      env,
+      db: env.DB,
       kind: 'device_logout',
       recipient: target.watcher_email,
       allowUnverified: true,

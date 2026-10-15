@@ -4,13 +4,34 @@ import UIKit
 @main
 struct VirtueIOSApp: App {
     @StateObject private var coordinator = MonitoringCoordinator()
+    @StateObject private var ageAssurance = AgeAssurance()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
-            ContentView(coordinator: coordinator)
-                .onOpenURL { coordinator.handleOpenURL($0) }
-                .tint(VirtueBrand.accent)
-                .preferredColorScheme(.light)
+            Group {
+                if ageAssurance.gate == .allowed {
+                    ContentView(coordinator: coordinator)
+                } else {
+                    AgeGateView(ageAssurance: ageAssurance)
+                }
+            }
+            .onOpenURL { coordinator.handleOpenURL($0) }
+            .tint(VirtueBrand.accent)
+            .preferredColorScheme(.light)
+            .task { await ageAssurance.check() }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active && ageAssurance.gate != .allowed && ageAssurance.gate != .checking {
+                    Task { await ageAssurance.check() }
+                }
+            }
+            .onChange(of: ageAssurance.gate) { gate in
+                // The Terms of Use don't allow this account, so stop monitoring
+                // as well as hiding the app.
+                if gate == .underMinimumAge && coordinator.loggedIn {
+                    coordinator.logout()
+                }
+            }
         }
     }
 }
