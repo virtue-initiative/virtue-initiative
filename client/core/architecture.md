@@ -428,7 +428,9 @@ endpoint. On the wire the token rides as `settings.hash_token` (part of the embe
 persisted — no longer `Instant`-based) is refreshed from whichever of those
 responses arrived most recently and only triggers a `GET /d/device` call
 (inside `execute_hash_retries`, unlocked) when that cache goes stale (110
-minutes, against the token's 2 hour lifetime) without a batch having refreshed it in the meantime. `Daemon::new`
+minutes, against the token's 2 hour lifetime) without a batch having refreshed it in the meantime,
+or when the hash server answered 401, which clears the cache (a wall clock set back can make an
+expired token look fresh). `Daemon::new`
 also performs one such refresh at startup if already authenticated (CORE-005's
 "refreshed on process startup" requirement).
 

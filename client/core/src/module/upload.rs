@@ -346,6 +346,8 @@ pub struct HashRetryOutcome {
     next_hash_seq: u32,
     had_failure: bool,
     refreshed: Option<(String, DeviceSettings)>, // (hash_token, settings) from a GET /d/device refresh
+    /// The hash server answered 401, so the token must be refreshed before the next try.
+    token_rejected: bool,
     permanent_failures: Vec<(LogEntry, CoreError)>,
     /// `(context, message)` pairs for everything that went wrong this pass,
     /// handed to the daemon for the status page's recent-errors ring
@@ -391,6 +393,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     next_hash_seq,
                     had_failure: true,
                     refreshed: None,
+                    token_rejected: false,
                     permanent_failures: Vec::new(),
                     errors: vec![(
                         "settings_refresh".to_string(),
@@ -407,6 +410,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut permanent_failures = Vec::new();
     let mut errors: Vec<(String, String)> = Vec::new();
     let mut had_failure = false;
+    let mut token_rejected = false;
     let mut retried = 0usize;
     let mut stop = false;
 
@@ -475,6 +479,23 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                 still_pending.push(event);
                 stop = true;
             }
+            Err(err) if err.is_unauthorized() => {
+                // CORE-005: the token has expired or is otherwise refused. Its age is
+                // judged by the local wall clock, which can be set back and make an
+                // expired token look fresh, so drop it and fetch a new one next pass.
+                had_failure = true;
+                token_rejected = true;
+                log_warning(
+                    "hash server rejected the token, refreshing it before retrying",
+                    Some(&err),
+                );
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("hash server rejected the token, will refresh: {err}"),
+                ));
+                still_pending.push(event);
+                stop = true;
+            }
             Err(err) => {
                 had_failure = true;
                 log_warning("hash upload failed, will retry", Some(&err));
@@ -495,6 +516,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         next_hash_seq,
         had_failure,
         refreshed,
+        token_rejected,
         permanent_failures,
         errors,
     }
@@ -525,6 +547,9 @@ pub fn commit_hash_retries(state: &mut UploadState, outcome: HashRetryOutcome, n
     if let Some((hash_token, settings)) = outcome.refreshed {
         state.hash_token_cache = Some((hash_token, now_ms));
         state.settings = Some(settings);
+    }
+    if outcome.token_rejected {
+        state.hash_token_cache = None;
     }
 
     for (_, err) in &outcome.permanent_failures {
@@ -853,6 +878,34 @@ mod tests {
             is_screenshot: false,
             notify: None,
         }
+    }
+
+    /// CORE-005: a token the hash server refuses is dropped, so the next pass
+    /// fetches a new one even though the cached one doesn't look old yet.
+    #[test]
+    fn rejected_hash_token_is_refreshed_before_the_next_try() {
+        let mut state = authenticated_state();
+        state.hash_token_cache = Some(("token".into(), 1_000));
+        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+        let api = MockApiClient::new();
+        api.program_hash(Err(CoreError::HttpStatus {
+            status: 401,
+            message: "token expired".into(),
+        }));
+
+        let plan = plan_hash_retries(&mut state, 2_000, true).expect("an event to hash");
+        let outcome = execute_hash_retries(plan, &api);
+        commit_hash_retries(&mut state, outcome, 2_000);
+        assert!(api.state().get_device_settings_calls.is_empty());
+        assert!(state.hash_token_cache.is_none());
+        assert_eq!(state.pending_hash_events.len(), 1);
+
+        let plan = plan_hash_retries(&mut state, 3_000, true).expect("the event is still pending");
+        let outcome = execute_hash_retries(plan, &api);
+        commit_hash_retries(&mut state, outcome, 3_000);
+        assert_eq!(api.state().get_device_settings_calls.len(), 1);
+        assert!(state.hash_token_cache.is_some());
+        assert!(state.pending_hash_events.is_empty());
     }
 
     /// CORE-005: hashing stops at the batch cap, so a batch always holds

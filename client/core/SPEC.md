@@ -72,7 +72,7 @@ A batch MUST hold every event hashed since the last batch, in the order they wer
 
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 
-The hash server token returned with the device settings is valid for 2 hours (see /api/SPEC.md API-002). The daemon SHOULD keep using it until shortly before it expires, and MUST NOT refresh it on a schedule shorter than the batch interval.
+The hash server token returned with the device settings is valid for 2 hours (see /api/SPEC.md API-002). The daemon SHOULD keep using it until shortly before it expires, and MUST NOT refresh it on a schedule shorter than the batch interval. If the hash server rejects the token as unauthorized, the daemon MUST fetch a new one before its next hash upload.
 
 ## CORE-006 Other events
 
