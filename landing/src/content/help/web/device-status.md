@@ -6,7 +6,7 @@ sidebar_position: 5
 
 Every device on the Devices page or listed on a partner's card carries a
 status tag to indicate if the device is still sending information, and if
-it still set up at all.
+it is still set up at all.
 
 ## Online
 
