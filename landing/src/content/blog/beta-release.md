@@ -5,8 +5,7 @@ pubDate: 2026-10-15
 author: Andrew Baumes, President
 ---
 
-Our app is in public beta! We have developed a free accountability app. You can
-install it on your phone, laptop, or other devices. It takes screenshots at
+Our app is in public beta! You can install it on your phone, laptop, or other devices. It takes screenshots at
 random, runs them through a classifier, blurs them, and then sends them to your
 partners, who can follow up if needed. Our app is ready for beta testing on all
 the main platforms: Windows, Mac, Linux, iOS, and Android. We need your
@@ -49,7 +48,7 @@ do to help.
    > tax deductible yet (which only matters if you do not take the standard
    > deduction).
 
-3. **Tell others about the app**. The app is already mostly built. The biggest
+3. **Tell others about the app**. The core app is already mostly built. The biggest
    challenge is likely going to be helping people learn that there is a free
    option. We do not want cost to be the reason people do not take the first
    step, so tell them about it! Spread the word!
