@@ -6,8 +6,7 @@ sidebar_position: 2
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
 routine activity (screenshots, sign-ins). A few are **alerts** that flag an
-interruption in monitoring and sometimes indicate a follow-up communication to
-your partner may be needed.
+interruption in monitoring. Some of these may call for a follow-up conversation with your partner.
 
 Open any entry to see its details, the device it came from, and a link back to
 this page.

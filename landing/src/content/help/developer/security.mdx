@@ -170,8 +170,7 @@ The verification hash looks like this:
 SHA256(SHA256(log_n) || SHA256(SHA256(log_n-1) || SHA256(....)))
 ```
 
-Every log the client uploads `SHA256(log)` and it is combined on
-the server with the hash like above. The partner can verify that the batch is
+For every log the client uploads, it also sends `SHA256(log)`, and the server combines it with the running hash as shown above. The partner can verify that the batch is
 correct by doing the same process on their end when downloading and decrypting
 the batch.
 
@@ -187,12 +186,11 @@ the batch.
   the ID (which is unpredictable, ≥128 bits entropy) and the random encryption key which are both
   stored in the database and only accessible to partners.
 - Metadata about the batches is unencrypted. We consider this acceptable since
-  it is only accessible to the server and the partners. Additionally, the
-  batching makes it fairly low time resolution.
+  it is only accessible to the server and the partners. Additionally, because logs are batched, the time resolution is fairly coarse.
 
 ## Possible weaknesses or improvements
 
-- Emails might currently be able to be guessed, either in the login flow or in
+- Email addresses might currently be guessable, either in the login flow or in
   the invite flow.
 - Devices should use the keychain eventually.
 
