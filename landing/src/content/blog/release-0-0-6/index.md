@@ -9,9 +9,9 @@ Our sixth release! And our first published release notes.
 
 ## Overview
 
-We currently have clients in development for all platforms that can upload screenshots. The Linux, Mac and Windows clients should be installable and testable, but there are still some major bugs (and installation instructions are likely out of date). The andriod and iOS clients are a bit harder to get set up at the moment but we hope to improve that soon.
+We currently have clients in development for all platforms that can upload screenshots. The Linux, Mac and Windows clients should be installable and testable, but there are still some major bugs (and installation instructions are likely out of date). The Android and iOS clients are a bit harder to get set up at the moment, but we hope to improve that soon.
 
-The web app implements end to end encryption for sharing screenshots with any number of partners which can be invited by email.
+The web app implements end-to-end encryption for sharing screenshots with any number of partners which can be invited by email.
 
 ## Improvements
 

@@ -44,7 +44,7 @@ devices to partners.
 Passwords are used for authentication and encryption.
 
 When a user signs up, they make a request to get the current hash parameters
-which is currently set to (t=5, m=128MB, p=1) and then generate a random salt
+which are currently set to (t=5, m=128MB, p=1) and then generate a random salt
 (16 bytes, CSPRNG). They then hash the plaintext password using Argon2id with
 those parameters and the salt. They upload
 
@@ -83,8 +83,8 @@ partners. They are stored in plaintext.
 
 ### Private key
 
-This key is created on signup using X25519 and encrypted with the password
-based key (see **Passwords**) before being sent to the server. It is stored in
+This key is created on signup using X25519 and encrypted with the password-based
+key (see **Passwords**) before being sent to the server. It is stored in
 the browser for decrypting screenshot batch decryption keys.
 
 On login, the browser downloads the encrypted key from the server and decrypts
@@ -135,7 +135,7 @@ Batches and the batch items are deleted after 30 days.
 
 ### Batches
 
-Encrypted batches are stored in publically accessible object storage. Their
+Encrypted batches are stored in publicly accessible object storage. Their
 URLs look like `/[user]/[batch id]`.
 
 They are encrypted with a random key (32 bytes, CSPRNG) which is stored (encrypted) in the
@@ -162,7 +162,7 @@ itself.
 
 The verification hash is used to verify that the content of the final batch is
 the same as what the client had been tracking (to prevent locally deleting
-screenshots before they are uploaded)
+screenshots before they are uploaded).
 
 The verification hash looks like this:
 

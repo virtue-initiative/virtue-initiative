@@ -8,7 +8,7 @@ One of the first lines of defense is removing access. There are a few main ways
 of restricting or removing access to porn.
 
 Firstly, you can physically remove access. This could be unplugging your WiFi
-router at night, or replace your smart phone with a dumb phone with no internet
+router at night, or replacing your smart phone with a dumb phone with no internet
 capabilities. This is the most extreme (and most effective) form of removing access.
 
 Secondly, you can remove access on the software side. This could be a

@@ -19,17 +19,17 @@ The Mac client has been rewritten from scratch, moving from Rust/AppKit to Swift
 
 ## Screenshot classification and text detection & redaction
 
-We added a small on device model that assigns a score to each screenshot based on how likely it is to contain NSFW content.
+We added a small on-device model that assigns a score to each screenshot based on how likely it is to contain NSFW content.
 
-![image classifcation](./nsfw-image-detection.png)
+![image classification](./nsfw-image-detection.png)
 
-We also added a OCR library for detecting text in screenshots. Currently, we use this for redacting text in screenshots, but eventually we would like to run the on-screen text through a classifer so that NSFW text (such as an explict story) is detected as well.
+We also added an OCR library for detecting text in screenshots. Currently, we use this for redacting text in screenshots, but eventually we would like to run the on-screen text through a classifier so that NSFW text (such as an explicit story) is detected as well.
 
 ![text redaction example](./text-redaction.png)
 
 ## Donations page
 
-We added a donations page powered by Stripe Checkout, making it easy to support the project directly. Donations are not currently tax-deductable, but we are working towards 501(c)3 status.
+We added a donations page powered by Stripe Checkout, making it easy to support the project directly. Donations are not currently tax-deductible, but we are working towards 501(c)(3) status.
 
 ![donations page](./donations-page.png)
 
@@ -39,7 +39,7 @@ Devices are now marked as deleted in the UI (but screenshots are still visible) 
 
 ## Better lifecycle & login handling
 
-We worked on improving our model for detecting unexpected gaps in monitoring. Our new model works on the assumption that a session begins when a user logs into their computer and ends when a user logs out of/shuts down their computer. Any gap in between (except suspend, i.e. closing the laptop lid), is detected as an unexpected gap and creates an alert that partners can see.
+We worked on improving our model for detecting unexpected gaps in monitoring. Our new model works on the assumption that a session begins when a user logs into their computer and ends when a user logs out of/shuts down their computer. Any gap in between (except suspend, i.e. closing the laptop lid) is detected as an unexpected gap and creates an alert that partners can see.
 
 We also allow you to set your device name when logging in (previously it could only be changed from the website).
 
