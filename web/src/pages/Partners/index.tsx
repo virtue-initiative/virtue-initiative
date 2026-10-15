@@ -203,11 +203,13 @@ function bouncedMessage(email: string) {
 function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
     setEmail('');
+    setError('');
     dialogRef.current?.showModal();
   }
 
@@ -218,13 +220,14 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   async function handleSubmit(e: Event) {
     e.preventDefault();
     setLoading(true);
+    setError('');
     try {
       const status = await onInvitePartner(email);
       close();
       if (status === 'invite_failed') pushToast(bouncedMessage(email), 'error');
     } catch (err) {
       const message = describeError(err, 'Failed to send invite');
-      if (message) pushToast(message, 'error');
+      if (message) setError(message);
     } finally {
       setLoading(false);
     }
@@ -242,7 +245,7 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
           uploaded <b>after</b> you add them as a partner and they set up their account.
         </p>
         <form onSubmit={handleSubmit}>
-          <Field label="Partner's email">
+          <Field label="Partner's email" error={error}>
             <Input
               type="email"
               value={email}
@@ -281,6 +284,7 @@ function PendingPartnerCard({
 }) {
   const [action, setAction] = useState<'remove' | 'resend' | null>(null);
   const [resendEmail, setResendEmail] = useState(partner.user.email);
+  const [resendError, setResendError] = useState('');
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const resendRef = useRef<HTMLDialogElement>(null);
@@ -291,6 +295,7 @@ function PendingPartnerCard({
 
   function openResend() {
     setResendEmail(partner.user.email);
+    setResendError('');
     resendRef.current?.showModal();
   }
 
@@ -298,6 +303,7 @@ function PendingPartnerCard({
     e.preventDefault();
     if (!onInvitePartner) return;
     setAction('resend');
+    setResendError('');
     try {
       // Resending replaces this invite, so this card goes away with it.
       const status = await onInvitePartner(resendEmail, partner.id);
@@ -305,7 +311,7 @@ function PendingPartnerCard({
       if (status === 'invite_failed') pushToast(bouncedMessage(resendEmail), 'error');
     } catch (err) {
       const message = describeError(err, 'Failed to resend invite');
-      if (message) pushToast(message, 'error');
+      if (message) setResendError(message);
     } finally {
       setAction(null);
     }
@@ -357,7 +363,7 @@ function PendingPartnerCard({
             address and send the invite again.
           </p>
           <form onSubmit={resend}>
-            <Field label="Partner's email">
+            <Field label="Partner's email" error={resendError}>
               <Input
                 type="email"
                 value={resendEmail}

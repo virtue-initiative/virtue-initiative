@@ -208,6 +208,26 @@ describe('Partners — Invite partner dialog', () => {
       expect((inviteBody as { email: string }).email).toBe('alice@example.com');
     });
   });
+
+  it('shows an invite error inline in the dialog', async () => {
+    server.use(
+      http.post(`${BASE}/partner`, () =>
+        HttpResponse.json({ error: 'Already a partner' }, { status: 409 }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Partners />);
+
+    await user.click(await screen.findByRole('button', { name: /invite partner/i }));
+    await user.type(screen.getByPlaceholderText('partner@example.com'), 'alice@example.com');
+    await user.click(screen.getByRole('button', { name: /send invite/i }));
+
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(dialog.querySelector('.vi-field__error')).toBeInTheDocument();
+    });
+  });
 });
 
 describe('Partners — failed invites', () => {
