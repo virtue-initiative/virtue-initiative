@@ -26,7 +26,11 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
+import {
+  formatCompactRelativeTimestamp,
+  formatDate,
+  formatRelativeTimestamp,
+} from '../../utils/time';
 import './style.css';
 
 const MAX_LISTED_DEVICES = 4;
@@ -477,12 +481,26 @@ function PartnerCard({
   }
 
   return (
-    <Card class={isWatching ? undefined : 'partner-card-compact'}>
+    <Card>
       <CardHeader>
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
       </CardHeader>
+      {!isWatching && (
+        <dl class="partner-details">
+          <div>
+            <dt class="eyebrow">Email</dt>
+            <dd title={partner.user.email}>{partner.user.email}</dd>
+          </div>
+          {partner.created_at !== undefined && (
+            <div>
+              <dt class="eyebrow">Can view your activity since</dt>
+              <dd>{formatDate(partner.created_at)}</dd>
+            </div>
+          )}
+        </dl>
+      )}
       {isWatching && (
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
