@@ -92,6 +92,7 @@ export class APIClient {
   constructor(session: Session) {
     this.session = session;
     this.userId = session.userId;
+    this.userCache = session.takeInitialUser();
     cacheClient?.setSession(session.userId, session.privateKey ?? null);
     session.onTokenRefreshFailed(() => {
       this.fireLogoutOnce();
@@ -133,6 +134,8 @@ export class APIClient {
     await this.session.changePassword(user.email, currentPassword, newPassword);
     // The key pair is unchanged, so the cache only needs the key if it never had one.
     if (!hadPrivateKey) cacheClient?.setSession(this.session.userId, this.session.privateKey);
+    // The private key is now wrapped with the new password, so the cached user's copy is stale.
+    await this.fetchUser(true);
   }
 
   async deleteUser(confirmEmail: string): Promise<void> {

@@ -50,6 +50,9 @@ export type Device = z.infer<typeof deviceSchema>;
 
 export const batchSchema = z.object({
   id: z.string(),
+  // The batch's owner. Optional until every deployed API sends it; the web cache falls back
+  // to looking the owner up through the batch's device.
+  user_id: z.string().optional(),
   device_id: z.string(),
   start_time: z.number(),
   end_time: z.number(),

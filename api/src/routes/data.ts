@@ -53,6 +53,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         }
 
         return {
+          user_id: batch.user_id,
           device_id: batch.device_id,
           id: batch.id,
           start_time: batch.start_time,

@@ -10,7 +10,7 @@ Two kinds of credential exist: **opaque session refresh tokens** (looked up in t
 | -------------------- | ------ | ---------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                                                                                                                |
 | device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                                                                                                                  |
-| `device`             | JWT    | 1 hour     | `Bearer <jwt>`          | `POST /hash` on the standalone hash server (see `../hash-server/SPEC.md`), not this API; minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
+| `device`             | JWT    | 2 hours    | `Bearer <jwt>`          | `POST /hash` on the standalone hash server (see `../hash-server/SPEC.md`), not this API; minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
 | `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | `GET /hash` / `DELETE /hash` on the standalone hash server; minted by this API, `sub` ignored                                                         |
 
 ¹ The web refresh token is also accepted as `Bearer <token>` (used by the cache worker).

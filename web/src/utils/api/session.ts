@@ -39,13 +39,32 @@ export class Session {
   userId: string;
   wrappingKey: CryptoKey;
   privateKey: CryptoKey | null;
+  /** The user as fetched while opening the session; see takeInitialUser. */
+  private initialUser: User | null;
   private invalidated = false;
   private onInvalidate: (() => void) | null = null;
 
-  private constructor(userId: string, wrappingKey: CryptoKey, privateKey: CryptoKey | null) {
+  private constructor(
+    userId: string,
+    wrappingKey: CryptoKey,
+    privateKey: CryptoKey | null,
+    initialUser: User | null = null,
+  ) {
     this.userId = userId;
     this.wrappingKey = wrappingKey;
     this.privateKey = privateKey;
+    this.initialUser = initialUser;
+  }
+
+  /**
+   * The user fetched while opening this session, handed out once so the first APIClient
+   * needn't fetch it again. Any later client gets null and fetches its own, so none is
+   * seeded with a copy older than the moment the session opened.
+   */
+  takeInitialUser(): User | null {
+    const user = this.initialUser;
+    this.initialUser = null;
+    return user;
   }
 
   static async fromLogin(email: string, password: string): Promise<Session> {
@@ -63,7 +82,7 @@ export class Session {
     await saveWrappingKey(wrappingKey);
     const user = await api.getUser();
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey);
+    const session = new Session(user.id, wrappingKey, privateKey, user);
     session.installUnauthorizedHandler();
     return session;
   }
@@ -109,7 +128,7 @@ export class Session {
       return null;
     }
     const privateKey = await decryptStoredPrivateKey(user, wrappingKey);
-    const session = new Session(user.id, wrappingKey, privateKey);
+    const session = new Session(user.id, wrappingKey, privateKey, user);
     session.installUnauthorizedHandler();
     return session;
   }

@@ -30,7 +30,8 @@ import { verifyUserCredentials } from '../lib/credentials';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-const HASH_TOKEN_TTL_SECONDS = 60 * 60;
+// API-002: outlives the hourly batch upload, which mints the next one.
+const HASH_TOKEN_TTL_SECONDS = 2 * 60 * 60;
 const DEVICE_REFRESH_TOKEN_TTL_SECONDS = 1000 * 365 * 24 * 60 * 60;
 
 const registerDeviceSchema = z.object({
@@ -293,12 +294,23 @@ deviceOnly.post(
     const { metadata, file } = c.req.valid('form');
     const { start_time, end_time, access_keys, event_counts, notifications } = metadata;
 
+    const createdAt = Date.now();
+    // API-038: the times come from the device clock, and a batch is uploaded after the
+    // period it covers, so an end_time past now means the clock runs ahead. Clamping it
+    // keeps end_time <= created_at, which listBatchWindowsForUser relies on.
+    const endTime = Math.min(end_time, createdAt);
+    const startTime = Math.min(start_time, endTime);
+    if (endTime !== end_time) {
+      console.warn(
+        `[batch] device ${device.id} sent end_time ${end_time - createdAt} ms in the future; clamped`,
+      );
+    }
+
     const hashState = await hashGet(c.env, device.id);
     const endHash = hashState.hash;
     const batchId = uuidv4();
     const key = `user/${device.owner}/batches/${batchId}.enc`;
     const url = `${c.env.R2_URL}/${key}`;
-    const createdAt = Date.now();
 
     await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
     await createBatch(c.env.DB, {
@@ -306,8 +318,8 @@ deviceOnly.post(
       user_id: device.owner,
       device_id: device.id,
       url,
-      start_time,
-      end_time,
+      start_time: startTime,
+      end_time: endTime,
       end_hash: endHash,
       access_keys: JSON.stringify(access_keys),
       version: CURRENT_API_VERSION,
@@ -345,7 +357,10 @@ deviceOnly.post(
       return c.json({ error: 'Hash server not configured' }, 500);
     }
 
-    return c.json({ id: batchId, start_time, end_time, end_hash: endHash, url, settings }, 200);
+    return c.json(
+      { id: batchId, start_time: startTime, end_time: endTime, end_hash: endHash, url, settings },
+      200,
+    );
   },
 );
 

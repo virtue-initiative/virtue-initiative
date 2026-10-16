@@ -13,7 +13,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`. It MUST be valid for 2 hours, so that a device uploading a batch every hour does not need `GET /d/device` in between
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -69,6 +69,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```js
 {
   "id": UUID,
+  "user_id": UUID, // the owner of the device
   "device_id": UUID,
   "start_time": DateTime,
   "end_time": DateTime,
@@ -834,6 +835,8 @@ The client MUST send a multipart form request:
 - `file`: encrypted batch blob
 
 The server MUST upload the file to object storage and store the metadata in the database.
+
+The server MUST clamp an `end_time` later than the time it received the batch to that time, and a `start_time` later than the resulting `end_time` to it, and SHOULD log a warning when it does. Both come from the device clock, and a batch is uploaded after the period it covers.
 
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
 

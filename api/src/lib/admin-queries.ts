@@ -70,11 +70,14 @@ export const ADMIN_QUERY_PRESETS: Record<string, AdminQueryPreset> = {
   devices_by_platform: {
     label: 'Devices by platform',
     description: 'Live devices per platform, with how many uploaded in the last 7 days.',
+    // Naming the owner lets the (user_id, created_at, id) primary key seek straight to
+    // the last 7 days; device_id alone would walk each device's whole 30 days.
     sql: `SELECT d.platform,
                  COUNT(*) AS devices,
                  SUM(CASE WHEN EXISTS (
                    SELECT 1 FROM batches b
-                   WHERE b.device_id = d.id AND b.created_at > (unixepoch() - 7 * 86400) * 1000
+                   WHERE b.user_id = d.owner AND b.device_id = d.id
+                     AND b.created_at > (unixepoch() - 7 * 86400) * 1000
                  ) THEN 1 ELSE 0 END) AS active_7d
           FROM devices d
           WHERE d.deleted_at IS NULL
