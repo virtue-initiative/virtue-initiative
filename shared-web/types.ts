@@ -84,6 +84,7 @@ export const partnerInfoSchema = z.object({
   // 'invite_failed' is a pending invite whose email bounced (api/SPEC.md API-056).
   status: z.enum(['pending', 'accepted', 'invite_failed']),
   created_at: z.number().optional(),
+  accepted_at: z.number().optional(),
 });
 export type PartnerInfo = z.infer<typeof partnerInfoSchema>;
 

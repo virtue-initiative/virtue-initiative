@@ -932,12 +932,13 @@ export async function acceptPartner(
     .prepare(
       `UPDATE partners
        SET watcher_user_id = ?, watcher_email = ?,
-           status = 'accepted', updated_at = ?
+           status = 'accepted', accepted_at = ?, updated_at = ?
        WHERE id = ?`,
     )
     .bind(
       uuidToBytes(input.watcherUserId),
       input.watcherEmail,
+      input.updated_at,
       input.updated_at,
       uuidToBytes(input.id),
     )
@@ -949,6 +950,7 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
     id: string;
     status: string;
     created_at: number;
+    accepted_at: number | null;
     watcher_email: string;
     watcher_id: string | null;
     watcher_name: string | null;
@@ -956,7 +958,7 @@ export async function listOwnedPartners(db: D1Database, ownerId: string) {
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.created_at, p.watcher_email,
+        `SELECT p.id, p.status, p.created_at, p.accepted_at, p.watcher_email,
                  u.id AS watcher_id, u.name AS watcher_name,
                  et.bounce_id IS NOT NULL AS invite_bounced
            FROM partners p
@@ -975,13 +977,14 @@ export async function listIncomingPartners(db: D1Database, partnerUserId: string
     id: string;
     status: string;
     created_at: number;
+    accepted_at: number | null;
     watching_user_id: string;
     watching_user_email: string;
     watching_user_name: string | null;
   }>(
     db
       .prepare(
-        `SELECT p.id, p.status, p.created_at,
+        `SELECT p.id, p.status, p.created_at, p.accepted_at,
                 u.id AS watching_user_id, u.email AS watching_user_email, u.name AS watching_user_name
           FROM partners p
           JOIN users u ON u.id = p.watching_user_id

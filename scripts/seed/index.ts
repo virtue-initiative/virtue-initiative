@@ -104,9 +104,17 @@ try {
           watcher.email,
         ),
         DB.prepare(
-          `INSERT INTO partners (id, watching_user_id, watcher_user_id, watcher_email, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'accepted', ?, ?)`,
-        ).bind(blob(idHex), blob(watching.idHex), blob(watcher.idHex), watcher.email, now, now),
+          `INSERT INTO partners (id, watching_user_id, watcher_user_id, watcher_email, status, created_at, updated_at, accepted_at)
+           VALUES (?, ?, ?, ?, 'accepted', ?, ?, ?)`,
+        ).bind(
+          blob(idHex),
+          blob(watching.idHex),
+          blob(watcher.idHex),
+          watcher.email,
+          now,
+          now,
+          now,
+        ),
       );
     }
   }

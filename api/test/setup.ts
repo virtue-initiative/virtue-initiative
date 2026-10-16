@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS partners (
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  accepted_at INTEGER,
   FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (watcher_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,

@@ -501,10 +501,10 @@ function PartnerCard({
         <dl class="partner-details">
           <dt>Email</dt>
           <dd title={partner.user.email}>{partner.user.email}</dd>
-          {partner.created_at !== undefined && (
+          {partner.accepted_at !== undefined && (
             <>
               <dt>Added</dt>
-              <dd>{formatDate(partner.created_at)}</dd>
+              <dd>{formatDate(partner.accepted_at)}</dd>
             </>
           )}
         </dl>
