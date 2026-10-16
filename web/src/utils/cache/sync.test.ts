@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createRowSync,
   createSharedFetch,
   isSyncFresh,
   needsDeviceOwners,
@@ -109,5 +110,79 @@ describe('createSharedFetch', () => {
     await shared(1_000);
     await shared(1_000);
     expect(fetchSince).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('createRowSync', () => {
+  function setup() {
+    let epoch = 1;
+    let clock = 1_000_000;
+    const resolvers: (() => void)[] = [];
+    const fetchRows = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const rowSync = createRowSync({ fetchRows, epoch: () => epoch, now: () => clock });
+    return {
+      rowSync,
+      fetchRows,
+      finishAll: async () => {
+        resolvers.splice(0).forEach((resolve) => resolve());
+        await Promise.resolve();
+        await Promise.resolve();
+      },
+      setEpoch: (value: number) => (epoch = value),
+      advance: (ms: number) => (clock += ms),
+    };
+  }
+
+  it('reuses a running sync for the same viewer and target, even when forced', async () => {
+    const { rowSync, fetchRows, finishAll } = setup();
+    const first = rowSync.sync('viewer', 'target', true);
+    const second = rowSync.sync('viewer', 'target', true);
+    expect(second).toBe(first);
+    expect(fetchRows).toHaveBeenCalledTimes(1);
+    await finishAll();
+  });
+
+  it('makes no request within the fresh window unless forced', async () => {
+    const { rowSync, fetchRows, finishAll, advance } = setup();
+    void rowSync.sync('viewer', 'target', false);
+    await finishAll();
+    advance(SYNC_FRESH_MS - 1);
+    await rowSync.sync('viewer', 'target', false);
+    expect(fetchRows).toHaveBeenCalledTimes(1);
+    void rowSync.sync('viewer', 'target', true);
+    expect(fetchRows).toHaveBeenCalledTimes(2);
+    await finishAll();
+  });
+
+  it('keeps viewers apart', async () => {
+    const { rowSync, fetchRows, finishAll } = setup();
+    void rowSync.sync('alice', 'target', false);
+    void rowSync.sync('bob', 'target', false);
+    expect(fetchRows).toHaveBeenCalledTimes(2);
+    await finishAll();
+  });
+
+  it("doesn't share a sync still running from an earlier session", async () => {
+    const { rowSync, fetchRows, finishAll, setEpoch } = setup();
+    void rowSync.sync('viewer', 'target', false);
+    setEpoch(2);
+    void rowSync.sync('viewer', 'target', false);
+    expect(fetchRows).toHaveBeenCalledTimes(2);
+    await finishAll();
+  });
+
+  it("doesn't count a sync that finished after the session changed as fresh", async () => {
+    const { rowSync, fetchRows, finishAll, setEpoch } = setup();
+    void rowSync.sync('viewer', 'target', false);
+    setEpoch(2);
+    await finishAll();
+    void rowSync.sync('viewer', 'target', false);
+    expect(fetchRows).toHaveBeenCalledTimes(2);
+    await finishAll();
   });
 });

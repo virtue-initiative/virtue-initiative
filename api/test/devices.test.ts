@@ -9,7 +9,6 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetCookie,
-  uuidToBytes,
 } from './helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 
@@ -56,37 +55,34 @@ describe('Main device routes', () => {
     expect(found?.last_hash_at).toBe(1_700_000_000_000);
   });
 
-  it("reports each device's latest batch end_time as last_upload_at", async () => {
-    const { cookie, userId } = await signupAndGetCookie('dave@example.com');
-    const active = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
-    const idle = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
-
-    for (const [index, endTime] of [1_000, 3_000, 2_000].entries()) {
-      await env.DB.prepare(
-        `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-        .bind(
-          uuidToBytes(`00000000-0000-4000-8000-00000000000${index}`),
-          uuidToBytes(userId),
-          uuidToBytes(active.id),
-          endTime - 500,
-          endTime,
-          '0'.repeat(64),
-          '{}',
-          endTime,
-        )
-        .run();
-    }
+  it('derives status from last_hash_at, not from batches', async () => {
+    const { cookie } = await signupAndGetCookie('dave@example.com');
+    const recent = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
+    const stale = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
+    const silent = await createDeviceForUser('dave@example.com', 'password123', 'Tablet', 'ios');
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    seedHashState(recent.id, { hash: '0a'.repeat(32), seq: 1, last_received: nowSeconds - 600 });
+    seedHashState(stale.id, {
+      hash: '0b'.repeat(32),
+      seq: 1,
+      last_received: nowSeconds - 3 * 60 * 60,
+    });
 
     const res = await SELF.fetch(`${BASE}/device`, {
       headers: authHeaders(cookie),
     });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ id: string; last_upload_at: number | null }>;
-    expect(body.find((item) => item.id === active.id)?.last_upload_at).toBe(3_000);
-    expect(body.find((item) => item.id === idle.id)?.last_upload_at).toBeNull();
+    const body = (await res.json()) as Array<{
+      id: string;
+      status: string;
+      last_hash_at: number | null;
+    }>;
+    const byId = new Map(body.map((item) => [item.id, item]));
+    expect(byId.get(recent.id)?.status).toBe('online');
+    expect(byId.get(stale.id)?.status).toBe('offline');
+    expect(byId.get(silent.id)).toMatchObject({ status: 'offline', last_hash_at: null });
+    expect(body[0]).not.toHaveProperty('last_upload_at');
   });
 
   it('updates an owned device', async () => {

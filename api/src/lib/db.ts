@@ -569,54 +569,19 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     name: string;
     platform: string;
     created_at: number;
-    last_upload_at: number | null;
     deleted_at: number | null;
   }>(
     db
       .prepare(
-        // batches has no index on device_id, so the subquery names the owner too
-        // and reads that owner's range of the (user_id, created_at, id) primary
-        // key: at most the batches they uploaded in the 30-day retention window.
-        // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
-        // server now — see hashGetMany in lib/hash-server.ts — not in D1.
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                (SELECT MAX(b.end_time) FROM batches b
-                 WHERE b.user_id = d.owner AND b.device_id = d.id) AS last_upload_at
+        // No batches here (API-029): a device's last upload is derived by the web
+        // app from the batches /data already sends it, and status comes from the
+        // hash server's last_received (hashGetMany in lib/hash-server.ts).
+        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at
          FROM devices d
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
       )
       .bind(...ownerIds.map(uuidToBytes)),
-    ['id', 'owner'],
-  );
-}
-
-export async function listDevicesWithLastUpload(db: D1Database) {
-  return allWithUuidFields<{
-    id: string;
-    owner: string;
-    name: string;
-    platform: string;
-    created_at: number;
-    last_upload_at: number | null;
-    owner_email: string;
-    owner_name: string | null;
-  }>(
-    db.prepare(
-      // Aggregate batches per device in a single grouped pass, then join, so the
-      // batches table is scanned once instead of being exploded across the join.
-      `SELECT d.id, d.owner, d.name, d.platform, d.created_at,
-              lu.last_upload_at,
-              u.email AS owner_email, u.name AS owner_name
-       FROM devices d
-       JOIN users u ON u.id = d.owner
-       LEFT JOIN (
-         SELECT device_id, MAX(end_time) AS last_upload_at
-         FROM batches
-         GROUP BY device_id
-       ) lu ON lu.device_id = d.id
-       ORDER BY d.created_at DESC`,
-    ),
     ['id', 'owner'],
   );
 }

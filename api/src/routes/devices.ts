@@ -39,21 +39,24 @@ devices.get('/', authenticateWebSession(), async (c) => {
   return c.json(
     rows.map((device) => {
       const hi = hashInfo.get(device.id);
+      // hash-server's last_received is unix *seconds* (hash-server/SPEC.md's
+      // unix_time is a u32, so it can only be seconds); last_hash_at is a
+      // DateTime (millisecond Unix timestamp) per SPEC.md, like every other
+      // timestamp this API returns. The hash server reports 0 for a device it
+      // has never heard from.
+      const lastHashAt = hi?.last_received ? hi.last_received * 1000 : null;
       return {
         id: device.id,
         owner: device.owner,
         name: device.name,
         platform: device.platform,
-        last_upload_at: device.last_upload_at,
-        // hash-server's last_received is unix *seconds* (hash-server/SPEC.md's
-        // unix_time is a u32, so it can only be seconds); last_hash_at is a
-        // DateTime (millisecond Unix timestamp) per SPEC.md, like every other
-        // timestamp this API returns.
-        last_hash_at: hi ? hi.last_received * 1000 : null,
+        last_hash_at: lastHashAt,
         pending_count: hi ? hi.seq : 0,
+        // API-029: a device posts a hash on every capture, so last_hash_at is
+        // its most recent sign of life.
         status: device.deleted_at
           ? 'logged_out'
-          : device.last_upload_at && Date.now() - device.last_upload_at < ONLINE_WINDOW_MS
+          : lastHashAt && Date.now() - lastHashAt < ONLINE_WINDOW_MS
             ? 'online'
             : 'offline',
       };
