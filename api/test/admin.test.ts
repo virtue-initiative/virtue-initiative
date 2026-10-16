@@ -292,7 +292,7 @@ describe('Admin query cost guard', () => {
     const { cookie } = await adminCookie();
 
     const indexed = await query(cookie, {
-      sql: 'SELECT b.id FROM batches b WHERE b.created_at > 0',
+      sql: "SELECT b.id FROM batches b WHERE b.user_id = x'00' AND b.created_at > 0",
     });
     expect(indexed.status).toBe(200);
 

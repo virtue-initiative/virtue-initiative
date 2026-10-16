@@ -11,11 +11,6 @@
 // to the current time. Re-run it (`just seed`) whenever the sample week gets
 // stale, then use "Clear cache" in the web app so it drops the old batches.
 //
-// Restart scripts/launch.sh afterwards if it's running. Batch URLs are written
-// with R2_URL from api/.dev.vars, and launch.sh only rewrites stored batch URLs
-// to its current (random) API port when it starts, so until then the seeded
-// batches point at a port nothing is listening on.
-//
 // Writes go straight to the same local state `wrangler dev --env staging
 // --local` reads (api/.wrangler/state/v3), through wrangler's platform proxy,
 // so no servers need to be running.
@@ -23,6 +18,9 @@ import type { D1Database, D1PreparedStatement, R2Bucket } from '@cloudflare/work
 import { getPlatformProxy } from 'wrangler';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { encodeAccessKeys } from '../../api/src/lib/access-keys';
+import { batchObject } from '../../api/src/lib/batch-url';
+import { CURRENT_API_VERSION } from '../../shared-web/api-version';
 import { deriveAccount, PASSWORD, type AccountMaterial } from './accounts';
 import { buildBatch } from './batch';
 import { DEV, DEVICES, generateBatches, PARTNERSHIPS, USERS } from './scenario';
@@ -43,7 +41,7 @@ const proxy = await getPlatformProxy<Env>({
   environment: 'staging',
   persist: { path: join(ROOT, 'api', '.wrangler', 'state', 'v3') },
 });
-const { DB, BUCKET, R2_URL } = proxy.env;
+const { DB, BUCKET } = proxy.env;
 const blob = (hex: string) => hexToBytes(hex);
 const now = Date.now();
 
@@ -117,12 +115,17 @@ try {
     // Drop the previous run's batches (D1 rows and R2 blobs) for seeded devices.
     const deviceIds = DEVICES.map((d) => blob(d.idHex));
     const placeholders = deviceIds.map(() => '?').join(', ');
-    const old = await DB.prepare(`SELECT url FROM batches WHERE device_id IN (${placeholders})`)
+    const old = await DB.prepare(
+      `SELECT lower(hex(id)) AS id, lower(hex(user_id)) AS user_id, version
+       FROM batches WHERE device_id IN (${placeholders})`,
+    )
       .bind(...deviceIds)
-      .all<{ url: string }>();
-    const oldKeys = old.results
-      .map((row) => row.url.split('/r2/')[1])
-      .filter((key): key is string => !!key);
+      .all<{ id: string; user_id: string; version: string }>();
+    const oldKeys = old.results.map(
+      (row) =>
+        batchObject(proxy.env, { ...row, id: hexToUuid(row.id), user_id: hexToUuid(row.user_id) })
+          .key,
+    );
     for (let i = 0; i < oldKeys.length; i += 500) {
       await BUCKET.delete(oldKeys.slice(i, i + 500));
     }
@@ -144,24 +147,28 @@ try {
       const owner = batch.device.owner.idHex;
       const built = await buildBatch(batch.events, recipientsFor(owner));
       const id = crypto.randomUUID();
-      const key = `user/${hexToUuid(owner)}/batches/${id}.enc`;
+      const { key } = batchObject(proxy.env, {
+        id,
+        user_id: hexToUuid(owner),
+        version: CURRENT_API_VERSION,
+      });
       await BUCKET.put(key, built.blob, {
         httpMetadata: { contentType: 'application/octet-stream' },
       });
       inserts.push(
         DB.prepare(
-          `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
+          `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys,
                                 version, high_risk_count, medium_risk_count, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'v0.1', ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           blob(id.replace(/-/g, '')),
           blob(owner),
           blob(batch.device.idHex),
-          `${R2_URL}/${key}`,
           batch.startTime,
           batch.endTime,
-          built.endHashHex,
-          JSON.stringify(built.accessKeys),
+          blob(built.endHashHex),
+          encodeAccessKeys(built.accessKeys),
+          CURRENT_API_VERSION,
           built.highRiskCount,
           built.mediumRiskCount,
           // Uploaded shortly after the last event, like a real client.
@@ -185,9 +192,6 @@ try {
     for (const { watching, watcher } of PARTNERSHIPS) {
       console.log(`  ${watcher.email} watches ${watching.email}`);
     }
-    console.log(
-      'If scripts/launch.sh is running, restart it so the new batch URLs point at its API port.',
-    );
     console.log('If the web app was already open, use "Clear cache" so it drops the old batches.');
   }
 } finally {

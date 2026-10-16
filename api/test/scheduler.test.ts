@@ -83,14 +83,13 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, high_risk_count, medium_risk_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, high_risk_count, medium_risk_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(DAILY_BATCH_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
-        'https://example.com/batch-1.enc',
         withinWindowBatchStart,
         withinWindowBatchEnd,
         'hash-1',
@@ -102,14 +101,13 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(OLD_DAILY_BATCH_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
-        'https://example.com/old-batch.enc',
         oldBatchStart,
         oldBatchEnd,
         'hash-old',
@@ -190,14 +188,13 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(DAILY_BATCH_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
-        'https://example.com/batch-only.enc',
         batchStart,
         batchEnd,
         'hash-batch-only',
@@ -278,14 +275,13 @@ describe('Notification scheduler', () => {
     );
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes('00000000-0000-4000-8000-000000000011'),
         uuidToBytes(ownerOneId),
         uuidToBytes(ownerOneDevice.id),
-        'https://example.com/multi-batch-1.enc',
         previousDayStart,
         previousDayMid,
         'hash-multi-1',
@@ -295,14 +291,13 @@ describe('Notification scheduler', () => {
       .run();
 
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes('00000000-0000-4000-8000-000000000012'),
         uuidToBytes(ownerTwoId),
         uuidToBytes(ownerTwoDevice.id),
-        'https://example.com/multi-batch-2.enc',
         previousDayStart,
         previousDayMid,
         'hash-multi-2',
@@ -374,14 +369,13 @@ describe('Notification scheduler', () => {
       'linux',
     );
     await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         uuidToBytes(WEEKLY_BATCH_ID),
         uuidToBytes(ownerId),
         uuidToBytes(device.id),
-        'https://example.com/batch-twice.enc',
         previousWeekStart,
         sundayMid,
         'hash-twice',

@@ -1,4 +1,4 @@
-type SqlValue = string | number | ArrayBuffer | null;
+type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
 function parseUserSettings(json: string | null): { email_frequency: string; timezone: string } {
   try {
@@ -519,28 +519,26 @@ export async function deleteDeviceSessionsByDeviceId(db: D1Database, deviceId: s
     .run();
 }
 
-export async function listBatchUrlsForDevice(db: D1Database, deviceId: string) {
-  const result = await db
-    .prepare('SELECT url FROM batches WHERE device_id = ?')
-    .bind(uuidToBytes(deviceId))
-    .all<{ url: string }>();
-
-  return result.results;
-}
-
-export async function listBatchUrlsForUser(db: D1Database, userId: string) {
-  const result = await db
-    .prepare('SELECT url FROM batches WHERE user_id = ?')
-    .bind(uuidToBytes(userId))
-    .all<{ url: string }>();
-
-  return result.results;
-}
-
-export async function deleteDeviceById(db: D1Database, deviceId: string) {
+// batches has no index on device_id. These two name the owner as well, so they
+// read the owner's primary key range instead of the whole table.
+// batches.device_id has no foreign key, so nothing cascades from the device row:
+// the device's batches are deleted here, in one transaction with the device. Returns
+// the batches it deleted, so the caller can remove their R2 objects once that commits.
+export async function deleteDeviceById(db: D1Database, deviceId: string, ownerId: string) {
   const deviceIdBytes = uuidToBytes(deviceId);
-  await db.prepare('DELETE FROM batches WHERE device_id = ?').bind(deviceIdBytes).run();
-  return db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes).run();
+  const [deleted] = await db.batch([
+    db
+      .prepare(
+        'DELETE FROM batches WHERE user_id = ? AND device_id = ? RETURNING id, user_id, version',
+      )
+      .bind(uuidToBytes(ownerId), deviceIdBytes),
+    db.prepare('DELETE FROM devices WHERE id = ?').bind(deviceIdBytes),
+  ]);
+  return (deleted.results as { id: unknown; user_id: unknown; version: string }[]).map((row) => ({
+    id: bytesToUuid(row.id),
+    user_id: bytesToUuid(row.user_id),
+    version: row.version,
+  }));
 }
 
 export async function deleteUserById(db: D1Database, userId: string) {
@@ -576,13 +574,14 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
   }>(
     db
       .prepare(
-        // The MAX(end_time) subquery is answered from the last entry of
-        // idx_batches_device_id_end_time, so it reads one row per device instead
-        // of every batch the device has uploaded.
+        // batches has no index on device_id, so the subquery names the owner too
+        // and reads that owner's range of the (user_id, created_at, id) primary
+        // key: at most the batches they uploaded in the 30-day retention window.
         // Hash-chain state (last_hash_at/pending_count) lives entirely in the hash
         // server now — see hashGetMany in lib/hash-server.ts — not in D1.
         `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at,
-                (SELECT MAX(b.end_time) FROM batches b WHERE b.device_id = d.id) AS last_upload_at
+                (SELECT MAX(b.end_time) FROM batches b
+                 WHERE b.user_id = d.owner AND b.device_id = d.id) AS last_upload_at
          FROM devices d
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
@@ -648,29 +647,32 @@ export async function createBatch(
     id: string;
     user_id: string;
     device_id: string;
-    url: string;
     start_time: number;
     end_time: number;
-    end_hash: string;
-    access_keys: string;
+    end_hash: ArrayBuffer;
+    access_keys: Uint8Array;
     version: string;
     high_risk_count?: number;
     medium_risk_count?: number;
     created_at: number;
   },
 ) {
+  const deviceIdBytes = uuidToBytes(input.device_id);
   return db
     .prepare(
+      // batches.device_id has no foreign key, so the insert checks the device still
+      // exists itself; otherwise a device deleted mid-upload would leave an orphan row.
       `INSERT INTO batches (
-         id, user_id, device_id, url, start_time, end_time, end_hash, access_keys,
+         id, user_id, device_id, start_time, end_time, end_hash, access_keys,
          version, high_risk_count, medium_risk_count, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       )
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?)`,
     )
     .bind(
       uuidToBytes(input.id),
       uuidToBytes(input.user_id),
-      uuidToBytes(input.device_id),
-      input.url,
+      deviceIdBytes,
       input.start_time,
       input.end_time,
       input.end_hash,
@@ -679,6 +681,7 @@ export async function createBatch(
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
+      deviceIdBytes,
     )
     .run();
 }
@@ -689,7 +692,7 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
   }
 
   const params: SqlValue[] = ownerIds.map(uuidToBytes);
-  let query = `SELECT id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, version, created_at
+  let query = `SELECT id, user_id, device_id, start_time, end_time, end_hash, access_keys, version, created_at
                FROM batches
                WHERE user_id IN (${placeholders(ownerIds.length)})`;
 
@@ -704,29 +707,62 @@ export async function listBatches(db: D1Database, ownerIds: string[], filters: {
     id: string;
     user_id: string;
     device_id: string;
-    url: string;
     start_time: number;
     end_time: number;
-    end_hash: string;
-    access_keys: string;
+    // BLOBs. access_keys is still JSON text on rows from before it became msgpack.
+    end_hash: unknown;
+    access_keys: unknown;
     version: string;
     created_at: number;
   }>(db.prepare(query).bind(...params), ['id', 'user_id', 'device_id']);
 }
 
-export async function deleteExpiredBatchesChunk(db: D1Database, cutoff: number, limit: number) {
-  const result = await db
-    .prepare(
-      // batches is keyed by (user_id, created_at, id), so the delete names the whole
-      // key. The subquery is answered from idx_batches_created_at alone.
-      `DELETE FROM batches WHERE (user_id, created_at, id) IN (
-         SELECT user_id, created_at, id FROM batches
-         WHERE created_at < ? ORDER BY created_at ASC LIMIT ?
-       )`,
-    )
-    .bind(cutoff, limit)
-    .run();
-  return result.meta.changes;
+// The next ?2 user ids after ?1 that have batches, in id order. SQLite can't list the
+// distinct values of an index's first column without reading every row, so each step
+// seeks to the first batch past the previous user, one row read per user. Users without
+// batches, who haven't uploaded in 30 days, are never visited.
+const NEXT_USERS_WITH_BATCHES = `WITH RECURSIVE next_user(id, n) AS (
+  SELECT (SELECT user_id FROM batches WHERE user_id > ?1 ORDER BY user_id LIMIT 1), 1
+  UNION ALL
+  SELECT (SELECT user_id FROM batches WHERE user_id > next_user.id ORDER BY user_id LIMIT 1), n + 1
+  FROM next_user WHERE next_user.id IS NOT NULL AND n < ?2
+)`;
+
+// Deletes the expired batches of the next `userLimit` users after `afterUserId` that have
+// any, and returns the id to continue after (null once every user is covered).
+export async function deleteExpiredBatchesForUsers(
+  db: D1Database,
+  afterUserId: Uint8Array,
+  userLimit: number,
+  cutoff: number,
+) {
+  const [next, deleted] = await db.batch([
+    // Taken before the delete, which can remove a user's last batch.
+    db
+      .prepare(`${NEXT_USERS_WITH_BATCHES} SELECT max(id) AS id, count(id) AS users FROM next_user`)
+      .bind(afterUserId, userLimit),
+    db
+      .prepare(
+        // batches has no created_at index, since one cost a written row per batch.
+        // Each user's batches sit in created_at order under the (user_id, created_at,
+        // id) primary key, so their expired ones are the front of that range and the
+        // delete seeks straight to them.
+        `${NEXT_USERS_WITH_BATCHES}
+         DELETE FROM batches WHERE user_id IN (SELECT id FROM next_user WHERE id IS NOT NULL)
+           AND created_at < ?3`,
+      )
+      .bind(afterUserId, userLimit, cutoff),
+  ]);
+  const row = (next.results as { id: ArrayBuffer | number[] | null; users: number }[])[0];
+  return {
+    deleted: deleted.meta.changes,
+    nextUserId:
+      row?.id && row.users === userLimit
+        ? row.id instanceof ArrayBuffer
+          ? new Uint8Array(row.id)
+          : Uint8Array.from(row.id)
+        : null,
+  };
 }
 
 export async function deleteExpiredEmailTokensChunk(db: D1Database, cutoff: number, limit: number) {

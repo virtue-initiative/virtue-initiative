@@ -16,13 +16,15 @@ import {
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
 } from '../lib/db';
+import { encodeAccessKeys } from '../lib/access-keys';
+import { batchObject } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
-import { encodeBase64 } from '../lib/encoding';
+import { decodeHex, encodeBase64 } from '../lib/encoding';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
-import { putObject } from '../lib/r2';
+import { deleteObject, putObject } from '../lib/r2';
 import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
@@ -308,25 +310,33 @@ deviceOnly.post(
 
     const hashState = await hashGet(c.env, device.id);
     const endHash = hashState.hash;
+    // end_hash is stored as its 32 raw bytes, and decodeHex would silently truncate a
+    // malformed value, so hold the hash server to its 64-hex-character contract.
+    if (!/^[0-9a-f]{64}$/i.test(endHash)) {
+      console.error(`[batch] hash server returned a malformed hash for device ${device.id}`);
+      return c.json({ error: 'Hash server returned an invalid hash' }, 502);
+    }
     const batchId = uuidv4();
-    const key = `user/${device.owner}/batches/${batchId}.enc`;
-    const url = `${c.env.R2_URL}/${key}`;
+    const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
+    const { key, url } = batchObject(c.env, stored);
 
     await putObject(c.env, key, await file.arrayBuffer(), 'application/octet-stream');
-    await createBatch(c.env.DB, {
-      id: batchId,
-      user_id: device.owner,
+    const inserted = await createBatch(c.env.DB, {
+      ...stored,
       device_id: device.id,
-      url,
       start_time: startTime,
       end_time: endTime,
-      end_hash: endHash,
-      access_keys: JSON.stringify(access_keys),
-      version: CURRENT_API_VERSION,
+      end_hash: decodeHex(endHash),
+      access_keys: encodeAccessKeys(access_keys),
       high_risk_count: event_counts.high,
       medium_risk_count: event_counts.medium,
       created_at: createdAt,
     });
+    if (inserted.meta.changes === 0) {
+      // The device was deleted while this upload was in flight.
+      await deleteObject(c.env, key);
+      return c.json({ error: 'Not found' }, 404);
+    }
     await hashReset(c.env, device.id);
 
     for (const notification of notifications) {

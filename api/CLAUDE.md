@@ -43,6 +43,8 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 - `src/lib/hash-server.ts` — client for the standalone hash server (`GET`/`DELETE /hash`), used by `device-only.ts`, `devices.ts`
 - `src/lib/credentials.ts` — `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`
 - `src/lib/app-url.ts` — `getAppUrl`, shared by every route that links back to the web app in an email
+- `src/lib/batch-url.ts` — `batchObject` derives a batch's R2 key and URL from its version, owner and id (API-038); nothing stores the URL
+- `src/lib/access-keys.ts` — msgpack encoding of `batches.access_keys`
 - `src/middleware/auth.ts` — JWT verification, sets `c.get('sub')`
 - `src/middleware/validation.ts` — Zod validation wrapper
 - `src/routes/device-only.ts` — device registration, settings, and batch upload endpoints
@@ -66,7 +68,7 @@ wrangler d1 execute DB --env staging --remote --command "..."
 wrangler d1 execute DB --env prod --remote --command "..."
 ```
 
-`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day; the `5 * * * *` cron keeps doing the hourly notification/retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
+`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day and deletes expired batches; the `5 * * * *` cron keeps doing the hourly notification and other retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
 
 ```bash
 # against a running `bun run dev` / scripts/launch.sh API (port varies under launch.sh)
