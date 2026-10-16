@@ -134,7 +134,7 @@ MUST record that the user explicitly stopped monitoring while it was expected to
 
 `note_user_start()`
 
-MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes. A no-op when no stop is active. The core MUST also offer a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
+MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes. A no-op when no stop is active. The core MUST also offer `queue_note_user_start()`, a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
 
 ### CORE-012 queue_upload
 
@@ -152,7 +152,7 @@ MUST force the next tick to upload the current batch immediately rather than wai
 
 `request_stop()`
 
-MUST stop the loop after its current tick. The loop MAY be started again afterward.
+MUST stop the loop after its current tick. The loop MAY be started again afterward. The request stays queued until a loop consumes it, so a caller MUST NOT send it while no loop is running: the next loop to start would stop immediately.
 
 ### CORE-015 tick_once
 

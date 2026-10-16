@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -34,10 +34,45 @@ const CAPTURE_STATUS_SESSION_UNAVAILABLE: i32 = 2;
 
 type AndroidDaemon = Daemon<AndroidPlatformHooks, HttpApiClient>;
 
+/// How long `nativeRunDaemonLoop` waits for a previous loop that is still
+/// shutting down (its final flush uploads over the network) before giving up.
+const LOOP_EXIT_WAIT: Duration = Duration::from_secs(15);
+
+/// Where the daemon loop is in its lifecycle. Kotlin starts and stops the
+/// loop from different threads without waiting on each other, so this is
+/// what keeps a restart from racing the previous loop's shutdown and a
+/// `Stop` from outliving the loop it was meant for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopState {
+    Idle,
+    Running,
+    /// A `Stop` has been sent; the loop is still flushing before it exits.
+    Stopping,
+}
+
 struct AndroidCore {
     state_dir: PathBuf,
     daemon: Arc<AndroidDaemon>,
-    daemon_running: Mutex<bool>,
+    loop_state: Mutex<LoopState>,
+    /// Notified whenever `loop_state` returns to `Idle`.
+    loop_idle: Condvar,
+}
+
+/// Returns `loop_state` to `Idle` when the loop thread leaves
+/// `nativeRunDaemonLoop`, including by panic, so the next start isn't left
+/// waiting on a loop that no longer exists.
+struct LoopStateReset<'a>(&'a AndroidCore);
+
+impl Drop for LoopStateReset<'_> {
+    fn drop(&mut self) {
+        let mut guard = self
+            .0
+            .loop_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = LoopState::Idle;
+        self.0.loop_idle.notify_all();
+    }
 }
 
 #[derive(Clone)]
@@ -353,7 +388,8 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeInit<
             CORE.set(AndroidCore {
                 state_dir,
                 daemon: Arc::new(daemon),
-                daemon_running: Mutex::new(false),
+                loop_state: Mutex::new(LoopState::Idle),
+                loop_idle: Condvar::new(),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
         }
@@ -431,15 +467,24 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
     native_result(&mut unowned_env, |_env| -> Result<()> {
         let core = core()?;
         {
-            let mut guard = core
-                .daemon_running
+            let guard = core
+                .loop_state
                 .lock()
                 .map_err(|_| anyhow!("daemon state lock poisoned"))?;
-            if *guard {
+            // Sign Out stops the loop and a quick Sign In restarts it before
+            // the old loop has finished its final flush. Wait for it rather
+            // than failing, or no loop would run and `nativeLogin` would
+            // time out with "daemon loop unresponsive".
+            let (mut guard, _) = core
+                .loop_idle
+                .wait_timeout_while(guard, LOOP_EXIT_WAIT, |state| *state != LoopState::Idle)
+                .map_err(|_| anyhow!("daemon state lock poisoned"))?;
+            if *guard != LoopState::Idle {
                 return Err(anyhow!("daemon already running"));
             }
-            *guard = true;
+            *guard = LoopState::Running;
         }
+        let _reset = LoopStateReset(core);
 
         // `Daemon::new` (in `nativeInit`) already does this once, but the
         // accessibility service can stop and resume this same loop many
@@ -454,10 +499,6 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRunDa
         core.daemon.queue_note_user_start();
 
         core.daemon.run_forever();
-
-        if let Ok(mut guard) = core.daemon_running.lock() {
-            *guard = false;
-        }
         Ok(())
     })
 }
@@ -468,7 +509,19 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeStopD
     _class: JClass<'l>,
 ) -> jstring {
     native_result(&mut unowned_env, |_env| -> Result<()> {
-        core()?.daemon.request_stop();
+        let core = core()?;
+        let mut guard = core
+            .loop_state
+            .lock()
+            .map_err(|_| anyhow!("daemon state lock poisoned"))?;
+        // Kotlin stops unconditionally (e.g. `onDestroy` after a pause), but
+        // a `Stop` with no loop to consume it would sit in the queue and end
+        // the next loop the moment it starts (CORE-014). One already on its
+        // way is enough, too.
+        if *guard == LoopState::Running {
+            core.daemon.request_stop();
+            *guard = LoopState::Stopping;
+        }
         Ok(())
     })
 }

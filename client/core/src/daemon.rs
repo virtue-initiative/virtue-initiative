@@ -993,33 +993,50 @@ mod tests {
     /// `note_user_start` blocks on a reply that only the loop can send, so it
     /// sat out its whole request timeout there and delayed everything queued
     /// behind it, `login` included (CORE-022). The queued form must return
-    /// immediately with no loop running, and the loop must apply it once it
-    /// does run.
+    /// immediately with no loop running, the loop must apply it first when it
+    /// does run, and a `login` queued behind it must be served promptly,
+    /// across repeated restarts.
     #[test]
-    fn queue_note_user_start_does_not_wait_for_a_loop_and_is_applied_by_it() {
+    fn queue_note_user_start_does_not_wait_for_a_loop_and_is_applied_first() {
         let scenario = Scenario::new();
         let daemon = &scenario.daemon;
-        daemon.test_note_user_stop("test");
-        assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
-
-        let started = Instant::now();
-        daemon.queue_note_user_start();
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "queue_note_user_start must not wait for the loop"
-        );
-        // Still queued, not yet applied: nothing is servicing the channel.
-        assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
 
         std::thread::scope(|scope| {
-            let handle = scope.spawn(|| daemon.run_forever());
-            // A blocking request behind it is served in order, so once this
-            // returns the queued resume has been applied too.
-            daemon.flush_batch_now();
-            daemon.request_stop();
-            handle.join().expect("run_forever must not panic");
-        });
+            for round in 0..2 {
+                daemon.test_note_user_stop("test");
+                assert!(
+                    daemon.state_snapshot().lifecycle.monitoring_stopped,
+                    "round {round}: stop must be recorded before the restart"
+                );
 
-        assert!(!daemon.state_snapshot().lifecycle.monitoring_stopped);
+                let started = Instant::now();
+                daemon.queue_note_user_start();
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "round {round}: queue_note_user_start must not wait for the loop"
+                );
+                // Still queued, not yet applied: nothing is servicing the channel.
+                assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
+
+                let handle = scope.spawn(|| daemon.run_forever());
+
+                // The request the platform queues right after starting the
+                // loop. Its result doesn't matter here, only that it isn't
+                // held up waiting out `REQUEST_TIMEOUT`.
+                let started = Instant::now();
+                let _ = daemon.login("user@example.com", "password", None);
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "round {round}: login was delayed by the loop start"
+                );
+                assert!(
+                    !daemon.state_snapshot().lifecycle.monitoring_stopped,
+                    "round {round}: the queued resume must be applied by the loop"
+                );
+
+                daemon.request_stop();
+                handle.join().expect("run_forever must not panic");
+            }
+        });
     }
 }
