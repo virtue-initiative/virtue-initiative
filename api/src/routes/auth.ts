@@ -66,6 +66,16 @@ const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
 // API-056: shown when an email was not sent because the address has a permanent bounce.
 const EMAIL_BOUNCED_ERROR =
   'Email to this address bounced, so we did not send another one. Use a different email address.';
+function isValidTimezone(timezone: string | undefined): timezone is string {
+  if (!timezone) return false;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function buildHashParamsResponse() {
   return {
     version: CURRENT_HASH_PARAMS.version,
@@ -444,6 +454,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     encrypted_priv_key,
     name,
     newsletter_opt_in,
+    timezone,
   } = c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
@@ -485,6 +496,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     encrypted_priv_key: decoded.data.encrypted_priv_key,
     name,
     email_verified: true,
+    timezone: isValidTimezone(timezone) ? timezone : undefined,
   });
 
   await consumeEmailToken(c.env.DB, record, Date.now());

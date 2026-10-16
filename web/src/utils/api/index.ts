@@ -11,6 +11,14 @@ export async function requestSignup(email: string, to?: string): Promise<void> {
   await api.signupRequest(email, to);
 }
 
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
 export async function finishSignup(
   verificationToken: string,
   name: string | undefined,
@@ -22,6 +30,7 @@ export async function finishSignup(
     name,
     password,
     newsletterOptIn,
+    detectTimezone(),
   );
   return new APIClient(session);
 }

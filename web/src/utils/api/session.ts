@@ -92,6 +92,7 @@ export class Session {
     name: string | undefined,
     password: string,
     newsletterOptIn = false,
+    timezone?: string,
   ): Promise<Session> {
     const params = await api.getCurrentHashParams();
     const passwordSalt = generateRandomKeyBytes(params.salt_length);
@@ -110,6 +111,7 @@ export class Session {
       encrypted_priv_key: encryptedPrivateKey.toBase64(),
       ...(name ? { name } : {}),
       ...(newsletterOptIn ? { newsletter_opt_in: true } : {}),
+      timezone: timezone || 'UTC',
     });
     await saveWrappingKey(wrappingKey);
     const privateKey = await importUserPrivateKey(keyPair.privateKey);

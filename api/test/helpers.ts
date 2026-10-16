@@ -69,6 +69,7 @@ export async function signupAndGetCookie(
   email: string,
   password = 'password123',
   name?: string,
+  timezone?: string,
 ): Promise<{ cookie: string; userId: string }> {
   const password_auth = await passwordAuthFor(password);
   const password_salt = await passwordSaltFor(email);
@@ -111,6 +112,7 @@ export async function signupAndGetCookie(
       pub_key,
       encrypted_priv_key: priv_key,
       ...(name ? { name } : {}),
+      ...(timezone ? { timezone } : {}),
     }),
   });
 

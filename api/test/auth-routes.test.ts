@@ -396,6 +396,28 @@ describe('Auth routes', () => {
     expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
+  it('stores the timezone sent at signup and falls back to UTC when it is missing or invalid', async () => {
+    const readTimezone = async (cookie: string) => {
+      const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
+      const body = (await res.json()) as { settings: { timezone: string } };
+      return body.settings.timezone;
+    };
+
+    const berlin = await signupAndGetCookie(
+      'tz-berlin@example.com',
+      'pw',
+      undefined,
+      'Europe/Berlin',
+    );
+    expect(await readTimezone(berlin.cookie)).toBe('Europe/Berlin');
+
+    const invalid = await signupAndGetCookie('tz-bad@example.com', 'pw', undefined, 'Not/AZone');
+    expect(await readTimezone(invalid.cookie)).toBe('UTC');
+
+    const missing = await signupAndGetCookie('tz-none@example.com', 'pw');
+    expect(await readTimezone(missing.cookie)).toBe('UTC');
+  });
+
   it('returns the current user and allows updating profile fields but not key material', async () => {
     const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 
@@ -429,7 +451,7 @@ describe('Auth routes', () => {
     };
     expect(body.name).toBe('Updated Carol');
     expect(body.email_verified).toBe(true);
-    expect(body.settings).toMatchObject({ email_frequency: 'daily', timezone: 'UTC' });
+    expect(body.settings).toMatchObject({ email_frequency: 'weekly', timezone: 'UTC' });
     // API-020: a web session alone must not be able to swap the key pair.
     expect(body.pub_key).toBe(originalPubKey);
     expect(body.encrypted_priv_key).toBe(originalPrivKey);
