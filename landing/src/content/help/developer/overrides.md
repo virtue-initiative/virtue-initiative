@@ -1,6 +1,6 @@
 # Developer overrides
 
-To overwrite the default settings for development create a config file with the
+To overwrite the default settings for development, create a config file with the
 following content.
 
 ```json
@@ -17,7 +17,7 @@ testing.
 ## Where to set them
 
 - Android: login screen under `Runtime overrides (optional)` or `context.filesDir/core-config/config.json`.
-- iOS: app runtime override UI. or `<app group container>/virtue/config/config.json`
+- iOS: app runtime override UI, or `<app group container>/virtue/config/config.json`
 - Linux: `~/.config/virtue/config.json`.
 - macOS: `~/Library/Application Support/virtue/config.json`.
 - Windows: `%PROGRAMDATA%\\Virtue\\config\\config.json`.

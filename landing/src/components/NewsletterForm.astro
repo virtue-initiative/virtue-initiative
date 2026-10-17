@@ -6,9 +6,14 @@ import { Button, Input } from '@virtueinitiative/shared-web';
 // is what makes this safe to accept from anyone. Accounts opt in from the signup form
 // instead (API-010).
 const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/virtueinitiative';
+
+interface Props {
+  centered?: boolean;
+}
+const { centered = false } = Astro.props;
 ---
 
-<section class="newsletter" aria-labelledby="newsletter-heading">
+<section class:list={['newsletter', { 'newsletter-centered': centered }]} aria-labelledby="newsletter-heading">
   <div class="eyebrow">Newsletter</div>
   <h2 id="newsletter-heading">Get project updates</h2>
   <p>

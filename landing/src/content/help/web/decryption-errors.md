@@ -40,5 +40,4 @@ the old format may still fail.
 
 A handful of permanently failed batches is normal after a password reset and
 not a cause for concern. If failures aren't explained by a recent password
-reset or a known version mismatch, report a problem using the mechanism in the
-app or website with the error message shown in the dialog so we can investigate.
+reset or a known version mismatch, report a problem from the app or website and include the error message shown in the dialog, so we can investigate.

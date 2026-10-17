@@ -9,9 +9,9 @@ Our sixth release! And our first published release notes.
 
 ## Overview
 
-We currently have clients in development for all platforms that can upload screenshots. The Linux, Mac and Windows clients should be installable and testable, but there are still some major bugs (and installation instructions are likely out of date). The andriod and iOS clients are a bit harder to get set up at the moment but we hope to improve that soon.
+We currently have clients in development for all platforms that can upload screenshots. The Linux, Mac and Windows clients should be installable and testable, but there are still some major bugs (and installation instructions are likely out of date). The Android and iOS clients are a bit harder to get set up at the moment, but we hope to improve that soon.
 
-The web app implements end to end encryption for sharing screenshots with any number of partners which can be invited by email.
+The web app implements end-to-end encryption for sharing screenshots with any number of partners which can be invited by email.
 
 ## Improvements
 
@@ -53,6 +53,6 @@ iOS got a major user interface overhaul with styling polish and uniformity with 
 - [Simple max batch size fix](https://github.com/virtue-initiative/virtue-initiative/pull/364)
   - [Batch upload is limited to 25 items](https://github.com/virtue-initiative/virtue-initiative/issues/325)
 - [Added a basic hash server](https://github.com/virtue-initiative/virtue-initiative/pull/367)
-  - [Create seperate hashing server](https://github.com/virtue-initiative/virtue-initiative/issues/30)
+  - [Create separate hashing server](https://github.com/virtue-initiative/virtue-initiative/issues/30)
 - [Post 2026-05-16: How our security works](https://github.com/virtue-initiative/virtue-initiative/pull/353)
 - [Better core test harness](https://github.com/virtue-initiative/virtue-initiative/pull/380)
