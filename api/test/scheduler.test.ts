@@ -128,7 +128,7 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.recipient_email).toBe('digest-partner@example.com');
     expect(digestDelivery?.status).toBe('sent');
     expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
-    expect(digestDelivery?.text).toContain('Critical tamper alerts: 1');
+    expect(digestDelivery?.text).toContain('High risk alerts and screenshots: 1');
     expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
     expect(digestDelivery?.text).toContain(`${env.APP_URL}/settings`);
     // Links to the report for the covered day in the recipient's timezone
