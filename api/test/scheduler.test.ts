@@ -592,14 +592,85 @@ describe('Notification scheduler', () => {
     const activity = await listDigestActivity(
       env.DB,
       userIds,
-      Date.UTC(2026, 0, 5, 0, 0, 0),
-      Date.UTC(2026, 0, 6, 0, 0, 0),
+      { start: Date.UTC(2026, 0, 5, 0, 0, 0), end: Date.UTC(2026, 0, 6, 0, 0, 0) },
+      300_000,
     );
 
-    expect(activity.batches.map((batch) => [batch.user_id, batch.device_id])).toEqual([
-      [ownerId, device.id],
+    // A one-minute batch still counts as one screenshot.
+    expect(activity.totals).toEqual([
+      { user_id: ownerId, screenshots: 1, critical: 0, warning: 0 },
     ]);
-    expect(activity.devices.map((d) => [d.id, d.owner])).toEqual([[device.id, ownerId]]);
+    // The device was created after this window, so it has no days in it.
+    expect(activity.devices.map((d) => [d.id, d.owner, d.first_day, d.last_day])).toEqual([
+      [device.id, ownerId, null, null],
+    ]);
+  });
+
+  it('sums digest activity in SQL and reports the days each device has logs on', async () => {
+    const { userId: ownerId } = await signupAndGetCookie('days-owner@example.com', 'pw');
+    const device = await createDeviceForUser('days-owner@example.com', 'pw', 'Days', 'linux');
+    const deviceCreatedAt = Date.UTC(2026, 0, 7, 12, 0, 0);
+    await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id = ?')
+      .bind(deviceCreatedAt, uuidToBytes(device.id))
+      .run();
+    const insertBatch = (id: string, start: number, end: number, high: number, medium: number) =>
+      env.DB.prepare(
+        `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, high_risk_count, medium_risk_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          uuidToBytes(id),
+          uuidToBytes(ownerId),
+          uuidToBytes(device.id),
+          start,
+          end,
+          'hash',
+          EMPTY_ACCESS_KEYS,
+          high,
+          medium,
+          end,
+        )
+        .run();
+    // Days count from the device's creation (Jan 7 12:00), so this crosses from
+    // day 0 into day 1: 2 hours, 24 screenshots.
+    await insertBatch(
+      '00000000-0000-4000-8000-000000000021',
+      Date.UTC(2026, 0, 8, 11),
+      Date.UTC(2026, 0, 8, 13),
+      1,
+      2,
+    );
+    // Day 3: 10 minutes, 2 screenshots.
+    await insertBatch(
+      '00000000-0000-4000-8000-000000000022',
+      Date.UTC(2026, 0, 10, 12, 30),
+      Date.UTC(2026, 0, 10, 12, 40),
+      0,
+      1,
+    );
+    // Before the device existed: counted in the totals, but on no day.
+    await insertBatch(
+      '00000000-0000-4000-8000-000000000023',
+      Date.UTC(2026, 0, 6, 10),
+      Date.UTC(2026, 0, 6, 10, 10),
+      3,
+      0,
+    );
+
+    const activity = await listDigestActivity(
+      env.DB,
+      [ownerId],
+      { start: Date.UTC(2026, 0, 5), end: Date.UTC(2026, 0, 12) },
+      300_000,
+    );
+
+    expect(activity.totals).toEqual([
+      { user_id: ownerId, screenshots: 28, critical: 4, warning: 3 },
+    ]);
+    expect(activity.devices.map((d) => [d.first_day, d.last_day])).toEqual([
+      [0, 1],
+      [3, 3],
+    ]);
   });
 
   it('bounds the digest batch query by created_at', async () => {
@@ -626,9 +697,14 @@ describe('Notification scheduler', () => {
       )
       .run();
 
-    const activity = await listDigestActivity(env.DB, [ownerId], windowStart, windowEnd);
+    const activity = await listDigestActivity(
+      env.DB,
+      [ownerId],
+      { start: windowStart, end: windowEnd },
+      300_000,
+    );
 
-    expect(activity.batches).toEqual([]);
+    expect(activity.totals).toEqual([]);
   });
 });
 

@@ -26,66 +26,31 @@ const DIGEST_LOAD_USERS = 900;
 type DigestPartnership = Awaited<ReturnType<typeof listDigestEligiblePartnerships>>[number];
 type DigestActivity = Awaited<ReturnType<typeof listDigestActivity>>;
 
-function countApproximateScreenshots(
-  batches: Array<{ start_time: number; end_time: number }>,
-  captureIntervalMs: number,
-  window: { start: number; end: number },
-) {
-  return batches.reduce((total, batch) => {
-    const overlapMs =
-      Math.min(batch.end_time, window.end) - Math.max(batch.start_time, window.start);
-
-    if (overlapMs <= 0) {
-      return total;
-    }
-
-    return total + Math.max(1, Math.round(overlapMs / captureIntervalMs));
-  }, 0);
-}
-
-// High-risk events now live inside end-to-end encrypted batches, so the server can
-// no longer read individual event risks. Each batch instead reports how many of its
-// events fell in the high (>= 0.7) and medium (0.4–0.7) risk bands; those map to the
-// `critical` and `warning` tamper severities respectively.
-function summarizeTamperCounts(
-  batches: Array<{ high_risk_count: number; medium_risk_count: number }>,
-) {
-  const counts: Record<TamperSeverity, number> = { info: 0, warning: 0, critical: 0 };
-  for (const batch of batches) {
-    counts.critical += batch.high_risk_count;
-    counts.warning += batch.medium_risk_count;
-  }
-  return counts;
-}
-
-function batchOverlapsWindow(
-  batch: { start_time: number; end_time: number },
-  windowStart: number,
-  windowEnd: number,
-) {
-  return batch.end_time > windowStart && batch.start_time < windowEnd;
-}
-
-function hasActivityInWindow(
-  deviceId: string,
-  batches: Array<{ device_id: string; start_time: number; end_time: number }>,
-  windowStart: number,
-  windowEnd: number,
-) {
-  return batches.some(
-    (batch) => batch.device_id === deviceId && batchOverlapsWindow(batch, windowStart, windowEnd),
-  );
-}
-
+// Lists the days each device has no logs on, from listDigestActivity's rows:
+// one per device and run of days covered, counted from the later of the window
+// start and the device's created_at.
 function collectMissingLogPeriods(
   cadence: DigestFrequency,
-  devices: Array<{ id: string; name: string; created_at: number }>,
-  batches: Array<{ device_id: string; start_time: number; end_time: number }>,
+  deviceDays: DigestActivity['devices'],
   windowStart: number,
   windowEnd: number,
 ) {
+  const devices = new Map<string, { name: string; created_at: number; days: Set<number> }>();
+  for (const row of deviceDays) {
+    let device = devices.get(row.id);
+    if (!device) {
+      device = { name: row.name, created_at: row.created_at, days: new Set() };
+      devices.set(row.id, device);
+    }
+    if (row.first_day !== null && row.last_day !== null) {
+      for (let day = row.first_day; day <= row.last_day; day++) {
+        device.days.add(day);
+      }
+    }
+  }
+
   const missing: string[] = [];
-  for (const device of devices) {
+  for (const device of devices.values()) {
     const firstRelevantTime = Math.max(windowStart, device.created_at);
 
     if (firstRelevantTime >= windowEnd) {
@@ -93,15 +58,18 @@ function collectMissingLogPeriods(
     }
 
     if (cadence === 'daily') {
-      if (!hasActivityInWindow(device.id, batches, firstRelevantTime, windowEnd)) {
+      if (device.days.size === 0) {
         missing.push(`${device.name}: no logs in the last 24 hours`);
       }
       continue;
     }
 
-    for (let bucketStart = firstRelevantTime; bucketStart < windowEnd; bucketStart += DAY_MS) {
-      const bucketEnd = Math.min(bucketStart + DAY_MS, windowEnd);
-      if (!hasActivityInWindow(device.id, batches, bucketStart, bucketEnd)) {
+    for (
+      let day = 0, bucketStart = firstRelevantTime;
+      bucketStart < windowEnd;
+      day++, bucketStart += DAY_MS
+    ) {
+      if (!device.days.has(day)) {
         missing.push(`${device.name}: no logs on ${formatUtcDate(bucketStart)}`);
       }
     }
@@ -156,26 +124,31 @@ function findDueDigest(watcherPartnerships: DigestPartnership[], now: number): D
   return window ? { cadence, timezone, window, partnerships: watcherPartnerships } : null;
 }
 
-interface CadenceActivity {
-  batchesByUser: Map<string, DigestActivity['batches']>;
+interface WindowActivity {
+  totalsByUser: Map<string, DigestActivity['totals'][number]>;
   devicesByUser: Map<string, DigestActivity['devices']>;
   // Watched users whose activity failed to load, with the error.
   loadErrors: Map<string, unknown>;
 }
 
-// Loads the activity for every due digest at once (API-057). The digests due
-// in one run all end within the same hour, so each cadence reads one range
-// covering all of its windows, and reads each watched user once however many
-// watchers they have. sendDigest then keeps the batches in its own window.
+function windowKey(digest: DueDigest) {
+  return `${digest.window.start}-${digest.window.end}`;
+}
+
+// Loads the activity for every due digest at once (API-057). Digests whose
+// timezones share an offset share a window, so a run has only a few distinct
+// windows. Each is summed up in SQL over all its watched users, reading each
+// user once however many watchers they have, and returns totals rather than
+// batch rows.
 async function loadDigestActivity(env: Env, due: DueDigest[]) {
-  const byCadence = new Map<DigestFrequency, CadenceActivity>();
-  for (const [cadence, digests] of groupBy(due, (digest) => digest.cadence)) {
-    const activity: CadenceActivity = {
-      batchesByUser: new Map(),
+  const byWindow = new Map<string, WindowActivity>();
+  for (const [key, digests] of groupBy(due, windowKey)) {
+    const activity: WindowActivity = {
+      totalsByUser: new Map(),
       devicesByUser: new Map(),
       loadErrors: new Map(),
     };
-    byCadence.set(cadence, activity);
+    byWindow.set(key, activity);
 
     const userIds = Array.from(
       new Set(
@@ -184,29 +157,36 @@ async function loadDigestActivity(env: Env, due: DueDigest[]) {
         ),
       ),
     );
-    const start = digests.reduce((min, digest) => Math.min(min, digest.window.start), Infinity);
-    const end = digests.reduce((max, digest) => Math.max(max, digest.window.end), -Infinity);
 
     for (let i = 0; i < userIds.length; i += DIGEST_LOAD_USERS) {
       const slice = userIds.slice(i, i + DIGEST_LOAD_USERS);
       try {
-        const loaded = await listDigestActivity(env.DB, slice, start, end);
-        for (const [userId, batches] of groupBy(loaded.batches, (batch) => batch.user_id)) {
-          activity.batchesByUser.set(userId, batches);
+        const loaded = await listDigestActivity(
+          env.DB,
+          slice,
+          digests[0].window,
+          DEFAULT_CAPTURE_INTERVAL_MS,
+        );
+        for (const totals of loaded.totals) {
+          activity.totalsByUser.set(totals.user_id, totals);
         }
         for (const [userId, devices] of groupBy(loaded.devices, (device) => device.owner)) {
           activity.devicesByUser.set(userId, devices);
         }
       } catch (error) {
         // Only the digests that cover these users fail; sendDigest throws for them.
-        console.error('digest activity load failed', { cadence, users: slice.length, error });
+        console.error('digest activity load failed', {
+          window: digests[0].window,
+          users: slice.length,
+          error,
+        });
         for (const userId of slice) {
           activity.loadErrors.set(userId, error);
         }
       }
     }
   }
-  return byCadence;
+  return byWindow;
 }
 
 // Builds and sends one due digest from the loaded activity. Returns whether
@@ -215,7 +195,7 @@ async function loadDigestActivity(env: Env, due: DueDigest[]) {
 async function sendDigest(
   env: Env,
   digest: DueDigest,
-  activity: CadenceActivity,
+  activity: WindowActivity,
   permanentBounce: { id: string } | null | undefined,
   pace: () => Promise<void>,
 ) {
@@ -243,30 +223,26 @@ async function sendDigest(
       ),
     )
     .map((partnership) => {
-      // The load covered every digest's window, so keep only this one's.
-      const batches = (activity.batchesByUser.get(partnership.watching_user_id) ?? []).filter(
-        (batch) => batchOverlapsWindow(batch, window.start, window.end),
-      );
+      const totals = activity.totalsByUser.get(partnership.watching_user_id);
       const devices = activity.devicesByUser.get(partnership.watching_user_id) ?? [];
+      // High-risk events live inside end-to-end encrypted batches, so the server
+      // can't read individual event risks. Each batch instead reports how many of
+      // its events fell in the high (>= 0.7) and medium (0.4–0.7) risk bands; those
+      // map to the `critical` and `warning` tamper severities respectively.
+      const tamperCounts: Record<TamperSeverity, number> = {
+        info: 0,
+        warning: totals?.warning ?? 0,
+        critical: totals?.critical ?? 0,
+      };
 
       return {
         partnershipId: partnership.partnership_id,
         ownerName: partnership.watching_user_name,
         ownerEmail: partnership.watching_user_email,
         reportUrl: `${env.APP_URL}/report/${partnership.watching_user_id}?${reportQuery}`,
-        approxScreenshotCount: countApproximateScreenshots(
-          batches,
-          DEFAULT_CAPTURE_INTERVAL_MS,
-          window,
-        ),
-        tamperCounts: summarizeTamperCounts(batches),
-        missingLogDays: collectMissingLogPeriods(
-          emailFrequency,
-          devices,
-          batches,
-          window.start,
-          window.end,
-        ),
+        approxScreenshotCount: totals?.screenshots ?? 0,
+        tamperCounts,
+        missingLogDays: collectMissingLogPeriods(emailFrequency, devices, window.start, window.end),
       };
     });
 
@@ -343,7 +319,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
   // digests it owed.
   console.info('digest run started', { due: due.length });
 
-  const activityByCadence = await loadDigestActivity(env, due);
+  const activityByWindow = await loadDigestActivity(env, due);
   // One lookup for every recipient. If it fails, sendEmail checks each one itself.
   let bounceFor: ((email: string) => { id: string } | null) | undefined;
   try {
@@ -363,7 +339,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
       const skippedBySend = await sendDigest(
         env,
         digest,
-        activityByCadence.get(digest.cadence)!,
+        activityByWindow.get(windowKey(digest))!,
         bounceFor?.(digest.partnerships[0].watcher_email),
         pace,
       );

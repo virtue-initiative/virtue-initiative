@@ -790,47 +790,61 @@ export async function deleteExpiredDeviceSessionsChunk(
   return result.meta.changes;
 }
 
-// D1 allows at most 100 bound parameters per statement.
+// D1 allows at most 100 bound parameters per statement, and the digest
+// statements bind up to 10 besides the user IDs.
 const DIGEST_ACTIVITY_CHUNK = 90;
 // Margin on listDigestActivity's created_at bound. POST /d/batch clamps
 // end_time to created_at (API-038), so new batches need none; it covers rows
 // stored before that clamp, from devices whose clock ran ahead.
 const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 
-type DigestBatchWindow = {
+const DIGEST_DAY_MS = 24 * 60 * 60 * 1000;
+
+export type DigestUserTotals = {
   user_id: string;
-  device_id: string;
-  start_time: number;
-  end_time: number;
-  high_risk_count: number;
-  medium_risk_count: number;
+  screenshots: number;
+  critical: number;
+  warning: number;
 };
 
-type DigestDevice = {
+export type DigestDeviceDays = {
   id: string;
   owner: string;
   name: string;
   created_at: number;
+  // A run of days the device has batches on, or both null for a device with
+  // none. Day 0 starts at the later of the window start and created_at.
+  first_day: number | null;
+  last_day: number | null;
 };
 
 /**
- * Loads what digests need about a set of watched users (API-057): their
- * devices, and their batches that overlap the window. Every statement goes in a
- * single D1 batch, so one round trip covers all the users.
+ * Sums up, in SQL, what digests need about a set of watched users over one
+ * window (API-057), so no batch rows come back however many there are:
+ *
+ * - per user, the approximate screenshot count (each batch counts its overlap
+ *   with the window in capture intervals, rounded, and at least 1) and the
+ *   batches' high and medium risk counts;
+ * - per device, the days it has batches on. Days are counted from the later of
+ *   the window start and the device's created_at, which is how a digest reports
+ *   missing days, and a batch covers every day it overlaps.
+ *
+ * Every statement goes in a single D1 batch, so one round trip covers all the users.
  */
 export async function listDigestActivity(
   db: D1Database,
   userIds: string[],
-  windowStart: number,
-  windowEnd: number,
+  window: { start: number; end: number },
+  captureIntervalMs: number,
 ) {
   const chunks: ArrayBuffer[][] = [];
   for (let i = 0; i < userIds.length; i += DIGEST_ACTIVITY_CHUNK) {
     chunks.push(userIds.slice(i, i + DIGEST_ACTIVITY_CHUNK).map(uuidToBytes));
   }
   if (chunks.length === 0) {
-    return { batches: [], devices: [] };
+    return { totals: [], devices: [] };
   }
+  const createdAfter = window.start - BATCH_CLOCK_SKEW_MS;
 
   const results = await db.batch<Record<string, unknown>>([
     ...chunks.map((ids) =>
@@ -840,36 +854,71 @@ export async function listDigestActivity(
           // end_time to the time it was stored, so created_at >= end_time. The created_at
           // bound lets the (user_id, created_at, id) primary key skip everything well
           // before the window instead of reading each user's whole retention period.
-          `SELECT user_id, device_id, start_time, end_time, high_risk_count, medium_risk_count
+          `SELECT user_id,
+                  CAST(SUM(MAX(1, ROUND((MIN(end_time, ?) - MAX(start_time, ?)) * 1.0 / ?)))
+                       AS INTEGER) AS screenshots,
+                  SUM(high_risk_count) AS critical,
+                  SUM(medium_risk_count) AS warning
            FROM batches
            WHERE user_id IN (${placeholders(ids.length)})
-             AND created_at > ? AND end_time > ? AND start_time < ?`,
+             AND created_at > ? AND end_time > ? AND start_time < ?
+           GROUP BY user_id`,
         )
-        .bind(...ids, windowStart - BATCH_CLOCK_SKEW_MS, windowStart, windowEnd),
+        .bind(
+          window.end,
+          window.start,
+          captureIntervalMs,
+          ...ids,
+          createdAfter,
+          window.start,
+          window.end,
+        ),
     ),
     ...chunks.map((ids) =>
       db
         .prepare(
-          `SELECT id, owner, name, created_at
-           FROM devices
-           WHERE owner IN (${placeholders(ids.length)})
-           ORDER BY created_at DESC`,
+          // first_day and last_day are the first and last whole days, counted from
+          // MAX(window start, d.created_at), that the batch overlaps. A device with no
+          // batches in its part of the window gets one row with both null.
+          `SELECT d.id, d.owner, d.name, d.created_at,
+                  CAST((MAX(b.start_time, MAX(?, d.created_at)) - MAX(?, d.created_at)) / ?
+                       AS INTEGER) AS first_day,
+                  CAST((MIN(b.end_time, ?) - 1 - MAX(?, d.created_at)) / ?
+                       AS INTEGER) AS last_day
+           FROM devices d
+           LEFT JOIN batches b
+             ON b.user_id = d.owner AND b.device_id = d.id
+            AND b.created_at > ? AND b.end_time > MAX(?, d.created_at) AND b.start_time < ?
+           WHERE d.owner IN (${placeholders(ids.length)})
+           GROUP BY d.id, first_day, last_day
+           ORDER BY d.created_at DESC, d.id, first_day`,
         )
-        .bind(...ids),
+        .bind(
+          window.start,
+          window.start,
+          DIGEST_DAY_MS,
+          window.end,
+          window.start,
+          DIGEST_DAY_MS,
+          createdAfter,
+          window.start,
+          window.end,
+          ...ids,
+        ),
     ),
   ]);
 
-  const batchResults = results.slice(0, chunks.length);
+  const totalResults = results.slice(0, chunks.length);
   const deviceResults = results.slice(chunks.length);
   return {
-    batches: batchResults.flatMap((result) =>
+    totals: totalResults.flatMap((result) =>
       result.results.map((row) =>
-        decodeUuidFields(row as unknown as DigestBatchWindow, ['user_id', 'device_id']),
+        decodeUuidFields(row as unknown as DigestUserTotals, ['user_id']),
       ),
     ),
     devices: deviceResults.flatMap((result) =>
       result.results.map((row) =>
-        decodeUuidFields(row as unknown as DigestDevice, ['id', 'owner']),
+        decodeUuidFields(row as unknown as DigestDeviceDays, ['id', 'owner']),
       ),
     ),
   };
