@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { listDigestActivity } from '../src/lib/db';
-import { runNotificationSchedule } from '../src/lib/scheduler';
+import {
+  createSendPacer,
+  forEachConcurrently,
+  runNotificationSchedule,
+} from '../src/lib/scheduler';
 import {
   authHeaders,
   BASE,
@@ -14,6 +18,10 @@ import {
 } from './helpers';
 
 beforeEach(clearDB);
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 const DAILY_BATCH_ID = '00000000-0000-4000-8000-000000000001';
 const WEEKLY_BATCH_ID = '00000000-0000-4000-8000-000000000003';
@@ -476,7 +484,9 @@ describe('Notification scheduler', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await runNotificationSchedule({ ...env, EMAIL_DELIVERY_MODE: 'ses' }, now);
+      await expect(
+        runNotificationSchedule({ ...env, EMAIL_DELIVERY_MODE: 'ses' }, now),
+      ).rejects.toThrow('1 digest email(s) failed');
     } finally {
       fetchMock.deactivate();
     }
@@ -489,7 +499,6 @@ describe('Notification scheduler', () => {
       [rejected, 'failed'],
     ]);
     expect(errors).toHaveBeenCalledWith('digest email failed', expect.anything());
-    errors.mockRestore();
   });
 
   it('keeps sending digests to other watchers when one fails to build', async () => {
@@ -506,14 +515,13 @@ describe('Notification scheduler', () => {
       .run();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await runNotificationSchedule(env, now);
+    await expect(runNotificationSchedule(env, now)).rejects.toThrow('1 digest email(s) failed');
 
     const digests = (await listEmailDeliveries()).filter(
       (delivery) => delivery.kind === 'daily_digest',
     );
     expect(digests.map((digest) => digest.recipient_email)).toEqual(['build-ok@example.com']);
     expect(errors).toHaveBeenCalledWith('digest email failed', expect.anything());
-    errors.mockRestore();
   });
 
   it('skips watchers whose email is not verified', async () => {
@@ -529,6 +537,33 @@ describe('Notification scheduler', () => {
     expect((await listEmailDeliveries()).some((delivery) => delivery.kind === 'daily_digest')).toBe(
       false,
     );
+  });
+
+  it('counts a digest to a bounced address as skipped, not sent', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const { cookie: ownerCookie } = await signupAndGetCookie('bounce-owner@example.com', 'pw');
+    await addVerifiedWatcher(ownerCookie, 'bounce-watcher@example.com');
+    await addVerifiedWatcher(ownerCookie, 'bounce-ok@example.com');
+    await env.DB.prepare(
+      `INSERT INTO email_bounces (id, email, bounced_at, reason) VALUES (?, ?, ?, 'permanent')`,
+    )
+      .bind(uuidToBytes(crypto.randomUUID()), 'bounce-watcher@example.com', now - 60_000)
+      .run();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    await runNotificationSchedule(env, now);
+
+    const digests = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    expect(digests.map((digest) => digest.recipient_email)).toEqual(['bounce-ok@example.com']);
+    expect(info).toHaveBeenCalledWith('digest run started', { due: 2 });
+    expect(info).toHaveBeenCalledWith('digest run finished', {
+      due: 2,
+      sent: 1,
+      skipped: 1,
+      failed: 0,
+    });
   });
 
   it('loads digest activity for more watched users than fit in one statement', async () => {
@@ -565,5 +600,86 @@ describe('Notification scheduler', () => {
       [ownerId, device.id],
     ]);
     expect(activity.devices.map((d) => [d.id, d.owner])).toEqual([[device.id, ownerId]]);
+  });
+
+  it('bounds the digest batch query by created_at', async () => {
+    const { userId: ownerId } = await signupAndGetCookie('bound-owner@example.com', 'pw');
+    const device = await createDeviceForUser('bound-owner@example.com', 'pw', 'Bound', 'linux');
+    const windowStart = Date.UTC(2026, 0, 5, 0, 0, 0);
+    const windowEnd = Date.UTC(2026, 0, 6, 0, 0, 0);
+    // POST /d/batch keeps end_time <= created_at, so a batch overlapping the
+    // window can't have been stored over a day before it. This row breaks that
+    // on purpose: it is only left out if the query bounds created_at.
+    await env.DB.prepare(
+      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        uuidToBytes(DAILY_BATCH_ID),
+        uuidToBytes(ownerId),
+        uuidToBytes(device.id),
+        windowStart + 60_000,
+        windowStart + 120_000,
+        'hash-bound',
+        EMPTY_ACCESS_KEYS,
+        windowStart - 2 * 24 * 60 * 60 * 1000,
+      )
+      .run();
+
+    const activity = await listDigestActivity(env.DB, [ownerId], windowStart, windowEnd);
+
+    expect(activity.batches).toEqual([]);
+  });
+});
+
+describe('createSendPacer', () => {
+  it('spaces sends at least the interval apart', async () => {
+    vi.useFakeTimers();
+    const pace = createSendPacer(100);
+    const releasedAt: number[] = [];
+    const start = Date.now();
+
+    const waits = [0, 1, 2].map(() => pace().then(() => releasedAt.push(Date.now() - start)));
+    await vi.advanceTimersByTimeAsync(99);
+    expect(releasedAt).toEqual([0]);
+    await vi.advanceTimersByTimeAsync(101);
+    await Promise.all(waits);
+
+    expect(releasedAt).toEqual([0, 100, 200]);
+  });
+
+  it('does not wait when the last send was long enough ago', async () => {
+    vi.useFakeTimers();
+    const pace = createSendPacer(100);
+    await pace();
+    await vi.advanceTimersByTimeAsync(500);
+
+    let released = false;
+    void pace().then(() => (released = true));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(released).toBe(true);
+  });
+});
+
+describe('forEachConcurrently', () => {
+  it('runs every item with at most the given number in flight', async () => {
+    vi.useFakeTimers();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const done: number[] = [];
+
+    const run = forEachConcurrently([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4, async (item) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10 * item));
+      inFlight--;
+      done.push(item);
+    });
+    await vi.runAllTimersAsync();
+    await run;
+
+    expect(maxInFlight).toBe(4);
+    expect(done.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 });

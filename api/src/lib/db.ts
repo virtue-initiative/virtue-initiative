@@ -1378,13 +1378,15 @@ export async function deleteExpiredLockedPasswordsChunk(
 }
 
 // Unverified watchers are left out, since sendEmail would skip their digest
-// anyway (API-057), and this saves building it.
+// anyway (API-057), and this saves building it. watcher_email_verified is still
+// returned so sendEmail can check it without looking the watcher up again.
 export async function listDigestEligiblePartnerships(db: D1Database) {
   const rows = await allWithUuidFields<{
     partnership_id: string;
     watching_user_id: string;
     watcher_user_id: string;
     watcher_email: string;
+    watcher_email_verified: number;
     watching_user_email: string;
     watching_user_name: string | null;
     settings: string;
@@ -1394,6 +1396,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
               p.watching_user_id,
               recipient.id AS watcher_user_id,
               recipient.email AS watcher_email,
+              recipient.email_verified AS watcher_email_verified,
               recipient.settings,
               owner.email AS watching_user_email,
               owner.name AS watching_user_name

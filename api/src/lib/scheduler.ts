@@ -103,7 +103,7 @@ function collectMissingLogPeriods(
 
 // Returns a function that resolves once the caller may send, spacing calls at
 // least `intervalMs` apart however many callers are waiting.
-function createSendPacer(intervalMs: number) {
+export function createSendPacer(intervalMs: number) {
   let nextSlot = 0;
   return async () => {
     const now = Date.now();
@@ -115,7 +115,7 @@ function createSendPacer(intervalMs: number) {
   };
 }
 
-async function forEachConcurrently<T>(
+export async function forEachConcurrently<T>(
   items: T[],
   concurrency: number,
   run: (item: T) => Promise<void>,
@@ -129,28 +129,28 @@ async function forEachConcurrently<T>(
   await Promise.all(workers);
 }
 
-// Builds and sends one watcher's digest if it is due this run. Returns whether
-// a digest was due.
-async function sendDigestIfDue(
-  env: Env,
-  watcherPartnerships: DigestPartnership[],
-  now: number,
-  pace: () => Promise<void>,
-) {
-  const recipient = watcherPartnerships[0];
-  const { email_frequency: emailFrequency, timezone } = recipient.settings;
-  if (emailFrequency !== 'daily' && emailFrequency !== 'weekly') {
-    return false;
+interface DueDigest {
+  cadence: DigestFrequency;
+  timezone: string;
+  window: { start: number; end: number };
+  partnerships: DigestPartnership[];
+}
+
+// Returns the digest a watcher is due this run, if any.
+function findDueDigest(watcherPartnerships: DigestPartnership[], now: number): DueDigest | null {
+  const { email_frequency: cadence, timezone } = watcherPartnerships[0].settings;
+  if (cadence !== 'daily' && cadence !== 'weekly') {
+    return null;
   }
 
-  const window = getDigestWindowForRun({
-    cadence: emailFrequency,
-    now,
-    timezone,
-  });
-  if (!window) {
-    return false;
-  }
+  const window = getDigestWindowForRun({ cadence, now, timezone });
+  return window ? { cadence, timezone, window, partnerships: watcherPartnerships } : null;
+}
+
+// Builds and sends one due digest. Returns whether sendEmail skipped it.
+async function sendDigest(env: Env, digest: DueDigest, pace: () => Promise<void>) {
+  const { cadence: emailFrequency, timezone, window, partnerships: watcherPartnerships } = digest;
+  const recipient = watcherPartnerships[0];
 
   const reportQuery = new URLSearchParams({
     period: emailFrequency === 'weekly' ? 'week' : 'day',
@@ -205,14 +205,13 @@ async function sendDigestIfDue(
     appUrl: env.APP_URL,
   });
 
-  await pace();
-  await sendEmail({
+  const result = await sendEmail({
     env,
     db: env.DB,
     kind: emailFrequency === 'weekly' ? 'weekly_digest' : 'daily_digest',
     recipient: recipient.watcher_email,
-    // listDigestEligiblePartnerships only returns verified watchers.
-    recipientEmailVerified: 1,
+    recipientEmailVerified: recipient.watcher_email_verified,
+    beforeDeliver: pace,
     subject: email.subject,
     text: email.text,
     html: email.html,
@@ -226,7 +225,7 @@ async function sendDigestIfDue(
       watchedUserIds: watcherPartnerships.map((partnership) => partnership.watching_user_id),
     },
   });
-  return true;
+  return Boolean(result.skipped);
 }
 
 function groupBy<T>(items: T[], key: (item: T) => string) {
@@ -245,30 +244,51 @@ function groupBy<T>(items: T[], key: (item: T) => string) {
 export async function runNotificationSchedule(env: Env, now = Date.now()) {
   const partnerships = await listDigestEligiblePartnerships(env.DB);
   const partnershipsByWatcher = groupBy(partnerships, (partnership) => partnership.watcher_user_id);
-  const pace = createSendPacer(1000 / DIGEST_SENDS_PER_SECOND);
 
-  let sent = 0;
   let failed = 0;
-  await forEachConcurrently(
-    [...partnershipsByWatcher.values()],
-    DIGEST_CONCURRENCY,
-    async (watcherPartnerships) => {
-      // API-057: one watcher's failure must not stop the rest.
-      try {
-        if (await sendDigestIfDue(env, watcherPartnerships, now, pace)) {
-          sent++;
-        }
-      } catch (error) {
-        failed++;
-        console.error('digest email failed', {
-          watcher_user_id: watcherPartnerships[0].watcher_user_id,
-          error,
-        });
-      }
-    },
-  );
+  const logFailure = (watcherUserId: string, error: unknown) => {
+    failed++;
+    console.error('digest email failed', { watcher_user_id: watcherUserId, error });
+  };
 
-  if (sent > 0 || failed > 0) {
-    console.info('digest run finished', { sent, failed });
+  // API-057: one watcher's failure must not stop the rest, here or below.
+  const due: DueDigest[] = [];
+  for (const [watcherUserId, watcherPartnerships] of partnershipsByWatcher) {
+    try {
+      const digest = findDueDigest(watcherPartnerships, now);
+      if (digest) {
+        due.push(digest);
+      }
+    } catch (error) {
+      logFailure(watcherUserId, error);
+    }
+  }
+  if (due.length === 0 && failed === 0) {
+    return;
+  }
+  // Logged up front, so a run cut off by a platform limit still shows how many
+  // digests it owed.
+  console.info('digest run started', { due: due.length });
+
+  const pace = createSendPacer(1000 / DIGEST_SENDS_PER_SECOND);
+  let sent = 0;
+  let skipped = 0;
+  await forEachConcurrently(due, DIGEST_CONCURRENCY, async (digest) => {
+    try {
+      if (await sendDigest(env, digest, pace)) {
+        skipped++;
+      } else {
+        sent++;
+      }
+    } catch (error) {
+      logFailure(digest.partnerships[0].watcher_user_id, error);
+    }
+  });
+
+  console.info('digest run finished', { due: due.length, sent, skipped, failed });
+  // Fail the invocation so it shows as an error in Cloudflare, rather than
+  // completing cleanly when, say, every send was rejected.
+  if (failed > 0) {
+    throw new Error(`${failed} digest email(s) failed; see the logged errors`);
   }
 }

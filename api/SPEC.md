@@ -930,7 +930,7 @@ The server MUST run a digest job every hour. It MUST send each verified watcher 
 
 A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
 
-A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure.
+A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
 
 The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
 

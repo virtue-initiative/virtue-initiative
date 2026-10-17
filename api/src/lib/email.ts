@@ -45,6 +45,10 @@ interface SendEmailInput extends EmailContent {
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
   recipientEmailVerified?: number;
+  // Awaited just before the email is handed off for delivery, after the bounce
+  // and verification checks, so a skipped email never waits on it. Lets a bulk
+  // sender pace its sends (API-057).
+  beforeDeliver?: () => Promise<void>;
 }
 
 let sesClient: SESv2Client | null = null;
@@ -57,6 +61,8 @@ export interface SendEmailResult {
   id: string;
   // Set when the email was not sent because the recipient has a permanent bounce.
   bounce_id?: string;
+  // Set when the email was not sent, with the reason.
+  skipped?: 'bounced' | 'unverified';
 }
 
 function withDisplayName(fromEmail: string) {
@@ -94,7 +100,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `bounced-${id}`, bounce_id: bounce.id };
+    return { id: `bounced-${id}`, bounce_id: bounce.id, skipped: 'bounced' };
   }
 
   const recipientEmailVerified =
@@ -112,8 +118,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `skipped-${id}` };
+    return { id: `skipped-${id}`, skipped: 'unverified' };
   }
+
+  await input.beforeDeliver?.();
 
   const attachmentFileNames = (input.attachments ?? []).map((a) => a.fileName);
 
