@@ -26,7 +26,11 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
+import {
+  formatCompactRelativeTimestamp,
+  formatDate,
+  formatRelativeTimestamp,
+} from '../../utils/time';
 import './style.css';
 
 const MAX_LISTED_DEVICES = 4;
@@ -483,12 +487,34 @@ function PartnerCard({
   }
 
   return (
-    <Card class={isWatching ? undefined : 'partner-card-compact'}>
+    <Card>
       <CardHeader>
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
+        {!isWatching && (
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
+          </Button>
+        )}
       </CardHeader>
+      {!isWatching && (
+        <dl class="partner-details">
+          <dt>Email</dt>
+          <dd title={partner.user.email}>{partner.user.email}</dd>
+          {partner.accepted_at !== undefined && (
+            <>
+              <dt>Added</dt>
+              <dd>{formatDate(partner.accepted_at)}</dd>
+            </>
+          )}
+        </dl>
+      )}
       {isWatching && (
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
@@ -513,21 +539,23 @@ function PartnerCard({
           )}
         </div>
       )}
-      <CardActions>
-        {isWatching && partner.user.id && (
-          <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
-            View logs
+      {isWatching && (
+        <CardActions>
+          {partner.user.id && (
+            <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
+              View logs
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
           </Button>
-        )}
-        <Button
-          variant="danger"
-          type="button"
-          onClick={() => confirmRef.current?.showModal()}
-          disabled={action !== null}
-        >
-          {action === 'remove' ? 'Removing…' : 'Remove'}
-        </Button>
-      </CardActions>
+        </CardActions>
+      )}
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">

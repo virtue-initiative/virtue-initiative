@@ -91,9 +91,12 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     "name": "Partner Name" | undefined
   },
   "status": "pending" | "accepted" | "invite_failed",
-  "created_at": DateTime
+  "created_at": DateTime,
+  "accepted_at": DateTime | undefined
 }
 ```
+
+`created_at` is when the invite was sent. `accepted_at` MUST be set when the invite is accepted (API-025) and MUST be omitted for a partnership that has not been accepted.
 
 `invite_failed` MUST only be reported in `watchers`, for a pending partnership whose invite token has a bounce (see API-056).
 
