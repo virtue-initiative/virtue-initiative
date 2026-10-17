@@ -45,6 +45,10 @@ interface SendEmailInput extends EmailContent {
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
   recipientEmailVerified?: number;
+  // Likewise for the recipient's latest permanent bounce, or null for none, when
+  // a bulk sender looked bounces up for all its recipients at once
+  // (listPermanentEmailBounces).
+  recipientPermanentBounce?: { id: string } | null;
   // Awaited just before the email is handed off for delivery, after the bounce
   // and verification checks, so a skipped email never waits on it. Lets a bulk
   // sender pace its sends (API-057).
@@ -87,7 +91,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const id = uuidv4();
 
   // API-056: never send to an address with a permanent bounce.
-  const bounce = await findPermanentEmailBounce(input.db, input.recipient);
+  const bounce =
+    input.recipientPermanentBounce !== undefined
+      ? input.recipientPermanentBounce
+      : await findPermanentEmailBounce(input.db, input.recipient);
   if (bounce) {
     if (input.email_token_id) {
       await setEmailTokenBounce(input.db, {

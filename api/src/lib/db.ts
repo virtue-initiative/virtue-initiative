@@ -229,6 +229,41 @@ export async function findPermanentEmailBounce(db: D1Database, email: string) {
   );
 }
 
+// Looks up the permanent bounces for many emails at once, for a bulk send that
+// passes each recipient's to sendEmail (API-056). D1 allows at most 100 bound
+// parameters per statement, so the emails go in statements of 100, all in one
+// batch. Returns a lookup that gives an email's latest permanent bounce, or null.
+export async function listPermanentEmailBounces(db: D1Database, emails: string[]) {
+  const normalized = Array.from(
+    new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean)),
+  );
+  const chunks: string[][] = [];
+  for (let i = 0; i < normalized.length; i += 100) {
+    chunks.push(normalized.slice(i, i + 100));
+  }
+
+  const bounces = new Map<string, { id: string }>();
+  if (chunks.length > 0) {
+    const results = await db.batch<{ id: ArrayBuffer; email: string }>(
+      chunks.map((chunk) =>
+        db
+          .prepare(
+            `SELECT id, email FROM email_bounces
+             WHERE reason = 'permanent' AND email IN (${placeholders(chunk.length)})
+             ORDER BY bounced_at ASC`,
+          )
+          .bind(...chunk),
+      ),
+    );
+    // Oldest first, so each email ends up with its latest bounce.
+    for (const row of results.flatMap((result) => result.results)) {
+      bounces.set(row.email, { id: bytesToUuid(row.id) });
+    }
+  }
+
+  return (email: string) => bounces.get(email.trim().toLowerCase()) ?? null;
+}
+
 export async function deleteEmailBouncesByEmail(db: D1Database, email: string) {
   return db.prepare('DELETE FROM email_bounces WHERE email = ?').bind(email).run();
 }
@@ -779,9 +814,9 @@ type DigestDevice = {
 };
 
 /**
- * Loads what a digest needs about a set of watched users (API-057): their
+ * Loads what digests need about a set of watched users (API-057): their
  * devices, and their batches that overlap the window. Every statement goes in a
- * single D1 batch, so a digest costs one round trip however many users it covers.
+ * single D1 batch, so one round trip covers all the users.
  */
 export async function listDigestActivity(
   db: D1Database,

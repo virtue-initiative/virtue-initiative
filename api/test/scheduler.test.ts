@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
-import { listDigestActivity } from '../src/lib/db';
+import { listDigestActivity, listPermanentEmailBounces } from '../src/lib/db';
 import {
   createSendPacer,
   forEachConcurrently,
@@ -629,6 +629,170 @@ describe('Notification scheduler', () => {
     const activity = await listDigestActivity(env.DB, [ownerId], windowStart, windowEnd);
 
     expect(activity.batches).toEqual([]);
+  });
+});
+
+describe('Notification scheduler D1 use', () => {
+  // Counts the statements a run prepares and the round trips it makes.
+  function countingEnv() {
+    const counts = { statements: 0, roundTrips: 0 };
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop) as unknown;
+        if (typeof value !== 'function') return value;
+        return (...args: unknown[]) => {
+          if (prop === 'prepare') counts.statements++;
+          if (prop === 'batch') counts.roundTrips++;
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+    return { counts, env: { ...env, DB: db } };
+  }
+
+  it('makes the same D1 queries however many digests are due', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const owners = [];
+    for (const email of ['load-owner-a@example.com', 'load-owner-b@example.com']) {
+      owners.push(await signupAndGetCookie(email, 'pw'));
+    }
+    const watcherEmails = [1, 2, 3, 4, 5].map((n) => `load-watcher-${n}@example.com`);
+    for (const email of watcherEmails) {
+      const { cookie, userId } = await signupAndGetCookie(email, 'pw');
+      await markUserEmailVerified(userId);
+      await SELF.fetch(`${BASE}/user`, {
+        method: 'PATCH',
+        headers: authHeaders(cookie),
+        body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
+      });
+      // Every watcher watches both owners.
+      for (const owner of owners) {
+        await SELF.fetch(`${BASE}/partner`, {
+          method: 'POST',
+          headers: authHeaders(owner.cookie),
+          body: JSON.stringify({ email }),
+        });
+      }
+      for (const delivery of await listEmailDeliveries()) {
+        if (delivery.kind !== 'partner_invite' || delivery.recipient_email !== email) continue;
+        const { inviteToken } = JSON.parse(delivery.metadata) as { inviteToken: string };
+        await SELF.fetch(`${BASE}/partner/accept`, {
+          method: 'POST',
+          headers: authHeaders(cookie),
+          body: JSON.stringify({ token: inviteToken }),
+        });
+      }
+    }
+    const { counts, env: countedEnv } = countingEnv();
+
+    await runNotificationSchedule(countedEnv, now);
+
+    const digests = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    expect(digests.map((digest) => digest.recipient_email).sort()).toEqual(watcherEmails);
+    for (const digest of digests) {
+      expect(digest.text).toContain('Monitored accounts: 2');
+    }
+    // The partnerships, the recipients' bounces, and the watched users' batches
+    // and devices. Per digest, this was 3 statements before.
+    expect(counts).toEqual({ statements: 4, roundTrips: 2 });
+  });
+
+  it("counts only each digest's own window when one run covers several", async () => {
+    // At 01:05 UTC, 06:00 local has just passed in Asia/Kathmandu (00:15 UTC)
+    // and Asia/Karachi (01:00 UTC), so both daily digests are due in this run.
+    const now = Date.UTC(2026, 0, 6, 1, 5, 0);
+    const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
+      'window-owner@example.com',
+      'pw',
+    );
+    const kathmanduId = await addVerifiedWatcher(ownerCookie, 'window-kathmandu@example.com');
+    const karachiId = await addVerifiedWatcher(ownerCookie, 'window-karachi@example.com');
+    for (const [id, timezone] of [
+      [kathmanduId, 'Asia/Kathmandu'],
+      [karachiId, 'Asia/Karachi'],
+    ]) {
+      await env.DB.prepare('UPDATE users SET settings = ? WHERE id = ?')
+        .bind(JSON.stringify({ email_frequency: 'daily', timezone }), uuidToBytes(id))
+        .run();
+    }
+    const device = await createDeviceForUser('window-owner@example.com', 'pw', 'W', 'linux');
+    const insertBatch = (id: string, start: number, end: number, critical: number) =>
+      env.DB.prepare(
+        `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, high_risk_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+        .bind(
+          uuidToBytes(id),
+          uuidToBytes(ownerId),
+          uuidToBytes(device.id),
+          start,
+          end,
+          'hash',
+          EMPTY_ACCESS_KEYS,
+          critical,
+          end,
+        )
+        .run();
+    const MIN = 60_000;
+    // Only in Kathmandu's window (from Jan 5 00:15 UTC): 2 screenshots, 1 critical.
+    await insertBatch(
+      DAILY_BATCH_ID,
+      Date.UTC(2026, 0, 5, 0, 30),
+      Date.UTC(2026, 0, 5, 0, 30) + 10 * MIN,
+      1,
+    );
+    // Only in Karachi's window (to Jan 6 01:00 UTC): 4 screenshots, 2 critical.
+    await insertBatch(
+      WEEKLY_BATCH_ID,
+      Date.UTC(2026, 0, 6, 0, 30),
+      Date.UTC(2026, 0, 6, 0, 30) + 20 * MIN,
+      2,
+    );
+
+    await runNotificationSchedule(env, now);
+
+    const digests = (await listEmailDeliveries()).filter(
+      (delivery) => delivery.kind === 'daily_digest',
+    );
+    const textFor = (email: string) =>
+      digests.find((digest) => digest.recipient_email === email)?.text;
+    expect(textFor('window-kathmandu@example.com')).toContain(
+      'Approximate screenshots available: 2',
+    );
+    expect(textFor('window-karachi@example.com')).toContain('Approximate screenshots available: 4');
+    // Tamper counts add up every batch they are given, so these show each
+    // digest kept only its own window's batches.
+    expect(textFor('window-kathmandu@example.com')).toContain(
+      'High risk alerts and screenshots: 1',
+    );
+    expect(textFor('window-karachi@example.com')).toContain('High risk alerts and screenshots: 2');
+  });
+
+  it('looks up permanent bounces for more emails than fit in one statement', async () => {
+    const emails = Array.from({ length: 150 }, (_, i) => `bulk-${i}@example.com`);
+    const insertBounce = (email: string, reason: string, bouncedAt: number) =>
+      env.DB.prepare(
+        'INSERT INTO email_bounces (id, email, bounced_at, reason) VALUES (?, ?, ?, ?)',
+      )
+        .bind(uuidToBytes(crypto.randomUUID()), email, bouncedAt, reason)
+        .run();
+    const older = crypto.randomUUID();
+    await env.DB.prepare(
+      'INSERT INTO email_bounces (id, email, bounced_at, reason) VALUES (?, ?, ?, ?)',
+    )
+      .bind(uuidToBytes(older), 'bulk-120@example.com', 1_000, 'permanent')
+      .run();
+    await insertBounce('bulk-120@example.com', 'permanent', 2_000);
+    await insertBounce('bulk-7@example.com', 'temporary', 2_000);
+
+    const bounceFor = await listPermanentEmailBounces(env.DB, [...emails, 'BULK-120@example.com']);
+
+    expect(bounceFor(' Bulk-120@Example.com')).not.toBeNull();
+    expect(bounceFor('bulk-120@example.com')?.id).not.toBe(older);
+    expect(bounceFor('bulk-7@example.com')).toBeNull();
+    expect(bounceFor('bulk-0@example.com')).toBeNull();
   });
 });
 
