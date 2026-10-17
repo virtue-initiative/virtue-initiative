@@ -1,6 +1,6 @@
 import { DigestFrequency } from './email-domain';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+export const DAY_MS = 24 * 60 * 60 * 1000;
 const DIGEST_RUN_TOLERANCE_MS = 60 * 60 * 1000;
 
 function get6amUtcMs(timezone: string, referenceMs: number): number {

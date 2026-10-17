@@ -45,14 +45,8 @@ interface SendEmailInput extends EmailContent {
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
   recipientEmailVerified?: number;
-  // Likewise for the recipient's latest permanent bounce, or null for none, when
-  // a bulk sender looked bounces up for all its recipients at once
-  // (listPermanentEmailBounces).
+  // Likewise for the recipient's latest permanent bounce, or null for none.
   recipientPermanentBounce?: { id: string } | null;
-  // Awaited just before the email is handed off for delivery, after the bounce
-  // and verification checks, so a skipped email never waits on it. Lets a bulk
-  // sender pace its sends (API-057).
-  beforeDeliver?: () => Promise<void>;
 }
 
 let sesClient: SESv2Client | null = null;
@@ -127,8 +121,6 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     });
     return { id: `skipped-${id}`, skipped: 'unverified' };
   }
-
-  await input.beforeDeliver?.();
 
   const attachmentFileNames = (input.attachments ?? []).map((a) => a.fileName);
 

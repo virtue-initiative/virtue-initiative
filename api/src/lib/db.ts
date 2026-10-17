@@ -1,3 +1,5 @@
+import { DAY_MS } from './digest-schedule';
+
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
 function parseUserSettings(json: string | null): { email_frequency: string; timezone: string } {
@@ -103,6 +105,22 @@ async function allWithUuidFields<T extends Record<string, unknown>>(
 
 function placeholders(count: number) {
   return Array.from({ length: count }, () => '?').join(', ');
+}
+
+// `?first, ?first+1, ...` for `count` values, for a statement that also binds
+// numbered parameters before them.
+function numberedPlaceholders(first: number, count: number) {
+  return Array.from({ length: count }, (_, i) => `?${first + i}`).join(', ');
+}
+
+// Splits items into groups of `size`, e.g. to stay under D1's 100 bound
+// parameters per statement.
+export function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 export type SessionType = 'web' | 'device';
@@ -227,41 +245,6 @@ export async function findPermanentEmailBounce(db: D1Database, email: string) {
       .bind(email.trim().toLowerCase()),
     ['id'],
   );
-}
-
-// Looks up the permanent bounces for many emails at once, for a bulk send that
-// passes each recipient's to sendEmail (API-056). D1 allows at most 100 bound
-// parameters per statement, so the emails go in statements of 100, all in one
-// batch. Returns a lookup that gives an email's latest permanent bounce, or null.
-export async function listPermanentEmailBounces(db: D1Database, emails: string[]) {
-  const normalized = Array.from(
-    new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean)),
-  );
-  const chunks: string[][] = [];
-  for (let i = 0; i < normalized.length; i += 100) {
-    chunks.push(normalized.slice(i, i + 100));
-  }
-
-  const bounces = new Map<string, { id: string }>();
-  if (chunks.length > 0) {
-    const results = await db.batch<{ id: ArrayBuffer; email: string }>(
-      chunks.map((chunk) =>
-        db
-          .prepare(
-            `SELECT id, email FROM email_bounces
-             WHERE reason = 'permanent' AND email IN (${placeholders(chunk.length)})
-             ORDER BY bounced_at ASC`,
-          )
-          .bind(...chunk),
-      ),
-    );
-    // Oldest first, so each email ends up with its latest bounce.
-    for (const row of results.flatMap((result) => result.results)) {
-      bounces.set(row.email, { id: bytesToUuid(row.id) });
-    }
-  }
-
-  return (email: string) => bounces.get(email.trim().toLowerCase()) ?? null;
 }
 
 export async function deleteEmailBouncesByEmail(db: D1Database, email: string) {
@@ -791,45 +774,30 @@ export async function deleteExpiredDeviceSessionsChunk(
 }
 
 // D1 allows at most 100 bound parameters per statement, and the digest
-// statements bind up to 10 besides the user IDs.
+// statement binds 5 besides the user IDs.
 const DIGEST_ACTIVITY_CHUNK = 90;
 // Margin on listDigestActivity's created_at bound. POST /d/batch clamps
 // end_time to created_at (API-038), so new batches need none; it covers rows
 // stored before that clamp, from devices whose clock ran ahead.
 const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 
-const DIGEST_DAY_MS = 24 * 60 * 60 * 1000;
-
-export type DigestUserTotals = {
-  user_id: string;
-  screenshots: number;
-  critical: number;
-  warning: number;
-};
-
-export type DigestDeviceDays = {
-  id: string;
-  owner: string;
-  name: string;
-  created_at: number;
-  // A run of days the device has batches on, or both null for a device with
-  // none. Day 0 starts at the later of the window start and created_at.
-  first_day: number | null;
-  last_day: number | null;
-};
-
 /**
  * Sums up, in SQL, what digests need about a set of watched users over one
- * window (API-057), so no batch rows come back however many there are:
+ * window (API-057), so no batch rows come back however many there are. There
+ * is one row per device and run of days its batches cover:
  *
- * - per user, the approximate screenshot count (each batch counts its overlap
- *   with the window in capture intervals, rounded, and at least 1) and the
- *   batches' high and medium risk counts;
- * - per device, the days it has batches on. Days are counted from the later of
- *   the window start and the device's created_at, which is how a digest reports
- *   missing days, and a batch covers every day it overlaps.
+ * - screenshots: each batch counts its overlap with the window in capture
+ *   intervals, rounded, and at least 1. With critical and warning (the
+ *   batches' high and medium risk counts), these add up to the user's totals.
+ * - first_day, last_day: the whole days the batches overlap, counted from the
+ *   later of the window start and the device's created_at, which is how a
+ *   digest reports missing days. Both are null for batches from before the
+ *   device existed, and the sums are null too for a device with no batches.
  *
- * Every statement goes in a single D1 batch, so one round trip covers all the users.
+ * The statement is driven from devices because most users have one, and the
+ * batches primary key can't seek on device_id: each device reads the user's
+ * batches in the window once. Every statement goes in a single D1 batch, so one
+ * round trip covers all the users.
  */
 export async function listDigestActivity(
   db: D1Database,
@@ -837,91 +805,65 @@ export async function listDigestActivity(
   window: { start: number; end: number },
   captureIntervalMs: number,
 ) {
-  const chunks: ArrayBuffer[][] = [];
-  for (let i = 0; i < userIds.length; i += DIGEST_ACTIVITY_CHUNK) {
-    chunks.push(userIds.slice(i, i + DIGEST_ACTIVITY_CHUNK).map(uuidToBytes));
-  }
+  const chunks = chunk(userIds.map(uuidToBytes), DIGEST_ACTIVITY_CHUNK);
   if (chunks.length === 0) {
-    return { totals: [], devices: [] };
+    return [];
   }
-  const createdAfter = window.start - BATCH_CLOCK_SKEW_MS;
 
-  const results = await db.batch<Record<string, unknown>>([
-    ...chunks.map((ids) =>
+  const results = await db.batch<{
+    id: string;
+    owner: string;
+    name: string;
+    created_at: number;
+    screenshots: number | null;
+    critical: number | null;
+    warning: number | null;
+    first_day: number | null;
+    last_day: number | null;
+  }>(
+    chunks.map((ids) =>
       db
         .prepare(
           // A batch is stored after the period it covers ends, and POST /d/batch clamps
           // end_time to the time it was stored, so created_at >= end_time. The created_at
           // bound lets the (user_id, created_at, id) primary key skip everything well
           // before the window instead of reading each user's whole retention period.
-          `SELECT user_id,
-                  CAST(SUM(MAX(1, ROUND((MIN(end_time, ?) - MAX(start_time, ?)) * 1.0 / ?)))
+          // ?1 window end, ?2 window start, ?3 capture interval, ?4 one day,
+          // ?5 created_at bound, then the user IDs.
+          `SELECT d.id, d.owner, d.name, d.created_at,
+                  CAST(SUM(MAX(1, ROUND((MIN(b.end_time, ?1) - MAX(b.start_time, ?2)) * 1.0 / ?3)))
                        AS INTEGER) AS screenshots,
-                  SUM(high_risk_count) AS critical,
-                  SUM(medium_risk_count) AS warning
-           FROM batches
-           WHERE user_id IN (${placeholders(ids.length)})
-             AND created_at > ? AND end_time > ? AND start_time < ?
-           GROUP BY user_id`,
+                  SUM(b.high_risk_count) AS critical,
+                  SUM(b.medium_risk_count) AS warning,
+                  CASE WHEN b.end_time > MAX(?2, d.created_at)
+                       THEN CAST((MAX(b.start_time, MAX(?2, d.created_at)) - MAX(?2, d.created_at))
+                                 / ?4 AS INTEGER)
+                  END AS first_day,
+                  CASE WHEN b.end_time > MAX(?2, d.created_at)
+                       THEN CAST((MIN(b.end_time, ?1) - 1 - MAX(?2, d.created_at)) / ?4 AS INTEGER)
+                  END AS last_day
+           FROM devices d
+           LEFT JOIN batches b
+             ON b.user_id = d.owner AND b.device_id = d.id
+            AND b.created_at > ?5 AND b.end_time > ?2 AND b.start_time < ?1
+           WHERE d.owner IN (${numberedPlaceholders(6, ids.length)})
+           GROUP BY d.id, first_day, last_day
+           ORDER BY d.created_at DESC, d.id`,
         )
         .bind(
           window.end,
           window.start,
           captureIntervalMs,
-          ...ids,
-          createdAfter,
-          window.start,
-          window.end,
-        ),
-    ),
-    ...chunks.map((ids) =>
-      db
-        .prepare(
-          // first_day and last_day are the first and last whole days, counted from
-          // MAX(window start, d.created_at), that the batch overlaps. A device with no
-          // batches in its part of the window gets one row with both null.
-          `SELECT d.id, d.owner, d.name, d.created_at,
-                  CAST((MAX(b.start_time, MAX(?, d.created_at)) - MAX(?, d.created_at)) / ?
-                       AS INTEGER) AS first_day,
-                  CAST((MIN(b.end_time, ?) - 1 - MAX(?, d.created_at)) / ?
-                       AS INTEGER) AS last_day
-           FROM devices d
-           LEFT JOIN batches b
-             ON b.user_id = d.owner AND b.device_id = d.id
-            AND b.created_at > ? AND b.end_time > MAX(?, d.created_at) AND b.start_time < ?
-           WHERE d.owner IN (${placeholders(ids.length)})
-           GROUP BY d.id, first_day, last_day
-           ORDER BY d.created_at DESC, d.id, first_day`,
-        )
-        .bind(
-          window.start,
-          window.start,
-          DIGEST_DAY_MS,
-          window.end,
-          window.start,
-          DIGEST_DAY_MS,
-          createdAfter,
-          window.start,
-          window.end,
+          DAY_MS,
+          window.start - BATCH_CLOCK_SKEW_MS,
           ...ids,
         ),
     ),
-  ]);
+  );
 
-  const totalResults = results.slice(0, chunks.length);
-  const deviceResults = results.slice(chunks.length);
-  return {
-    totals: totalResults.flatMap((result) =>
-      result.results.map((row) =>
-        decodeUuidFields(row as unknown as DigestUserTotals, ['user_id']),
-      ),
-    ),
-    devices: deviceResults.flatMap((result) =>
-      result.results.map((row) =>
-        decodeUuidFields(row as unknown as DigestDeviceDays, ['id', 'owner']),
-      ),
-    ),
-  };
+  return results.flatMap((result) =>
+    result.results.map((row) => decodeUuidFields(row, ['id', 'owner'])),
+  );
 }
 
 export async function findPartnerInviteForOwner(db: D1Database, ownerId: string, email: string) {
@@ -1462,8 +1404,9 @@ export async function deleteExpiredLockedPasswordsChunk(
 }
 
 // Unverified watchers are left out, since sendEmail would skip their digest
-// anyway (API-057), and this saves building it. watcher_email_verified is still
-// returned so sendEmail can check it without looking the watcher up again.
+// anyway (API-057), and this saves building it. watcher_email_verified and
+// watcher_permanent_bounce_id are still returned so sendEmail can make both of
+// its checks (API-056) without looking the watcher up again.
 export async function listDigestEligiblePartnerships(db: D1Database) {
   const rows = await allWithUuidFields<{
     partnership_id: string;
@@ -1471,6 +1414,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
     watcher_user_id: string;
     watcher_email: string;
     watcher_email_verified: number;
+    watcher_permanent_bounce_id: string | null;
     watching_user_email: string;
     watching_user_name: string | null;
     settings: string;
@@ -1481,6 +1425,10 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
               recipient.id AS watcher_user_id,
               recipient.email AS watcher_email,
               recipient.email_verified AS watcher_email_verified,
+              (SELECT b.id FROM email_bounces b
+               WHERE b.email = lower(trim(recipient.email)) AND b.reason = 'permanent'
+               ORDER BY b.bounced_at DESC
+               LIMIT 1) AS watcher_permanent_bounce_id,
               recipient.settings,
               owner.email AS watching_user_email,
               owner.name AS watching_user_name
@@ -1489,7 +1437,7 @@ export async function listDigestEligiblePartnerships(db: D1Database) {
         JOIN users recipient ON recipient.id = p.watcher_user_id
         WHERE p.status = 'accepted' AND recipient.email_verified = 1`,
     ),
-    ['partnership_id', 'watching_user_id', 'watcher_user_id'],
+    ['partnership_id', 'watching_user_id', 'watcher_user_id', 'watcher_permanent_bounce_id'],
   );
   return rows.map((row) => ({ ...row, settings: parseUserSettings(row.settings) }));
 }
