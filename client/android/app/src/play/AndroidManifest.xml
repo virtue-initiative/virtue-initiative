@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into src/main/AndroidManifest.xml for the Google Play build only. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Google Play's stalkerware policy requires monitoring apps to declare
+         this flag, directly under <manifest>. Virtue is neither a parental
+         control (child_monitoring) nor an enterprise tool
+         (enterprise_management): people install it on their own device and
+         choose who sees their activity. `other` sends the app to Play's
+         reviewers to assess against the policy's exemptions, which is the
+         honest answer, so don't change it to get past review. -->
+    <meta-data
+        android:name="isMonitoringTool"
+        android:value="other" />
+
+</manifest>

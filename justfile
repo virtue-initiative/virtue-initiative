@@ -209,11 +209,11 @@ android-build release="false":
 android-install release="false":
     ./client/android/scripts/install.sh {{ if release == "true" { "--release" } else { "" } }}
 
-# Lint the debug build (closest thing Android has to a typecheck).
+# Lint the debug build of both flavors (closest thing Android has to a typecheck).
 [group('android')]
 [working-directory: 'client/android']
 android-lint:
-    ./gradlew --no-daemon :app:lintDebug
+    ./gradlew --no-daemon :app:lintDirectDebug :app:lintPlayDebug
 
 # Start the emulator and wait for boot.
 [group('android')]

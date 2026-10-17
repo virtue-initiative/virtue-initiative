@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Virtue "V" (images/logo.svg) as a single-color status bar icon, so the
+     "Monitoring active" notification is identifiable as Virtue's. Google Play
+     requires monitoring apps to show a persistent notification with an icon
+     that clearly identifies the app. The group translate undoes the layer
+     offset in the source SVG. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="60"
+    android:viewportHeight="60">
+    <group
+        android:translateX="-18.45851"
+        android:translateY="-195.68394">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="0.4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="m 22.333852,203.13976 19.617861,46.49865 6.207601,-14.75956 -12.019272,-31.74121 z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="0.4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="m 64.839239,203.1606 -21.288034,49.2949 c 0,0 6.922226,8.9725 12.372314,-4.64125 6.834393,-17.43578 13.178419,-27.2295 18.632133,-44.65905 z" />
+    </group>
+</vector>
