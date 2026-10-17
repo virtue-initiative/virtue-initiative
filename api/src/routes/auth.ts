@@ -43,6 +43,7 @@ import {
   passwordResetValidateSchema,
   passwordResetSchema,
   updateUserSchema,
+  isValidTimezone,
   changePasswordSchema,
   deleteUserSchema,
   type SignupResponse,
@@ -66,15 +67,6 @@ const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
 // API-056: shown when an email was not sent because the address has a permanent bounce.
 const EMAIL_BOUNCED_ERROR =
   'Email to this address bounced, so we did not send another one. Use a different email address.';
-function isValidTimezone(timezone: string | undefined): timezone is string {
-  if (!timezone) return false;
-  try {
-    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function buildHashParamsResponse() {
   return {
@@ -560,7 +552,8 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 
   const { user } = result;
 
-  if (timezone) {
+  // API-016: an unknown timezone is ignored rather than failing the login.
+  if (isValidTimezone(timezone)) {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 

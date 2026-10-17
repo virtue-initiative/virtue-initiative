@@ -414,6 +414,8 @@ If that verification email was not sent because the email has a permanent bounce
 
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
+If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
+
 ### API-017 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.
@@ -465,9 +467,14 @@ The client MUST provide a request in this shape.
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined
+  "settings": {
+    "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
+    "timezone": "America/New_York" | undefined
+  } | undefined
 }
 ```
+
+If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
 The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
 

@@ -418,6 +418,53 @@ describe('Auth routes', () => {
     expect(await readTimezone(missing.cookie)).toBe('UTC');
   });
 
+  it('saves a valid timezone sent at login and ignores an invalid one', async () => {
+    const { cookie } = await signupAndGetCookie('tz-login@example.com', 'pw', undefined, 'UTC');
+    const readTimezone = async () => {
+      const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
+      return ((await res.json()) as { settings: { timezone: string } }).settings.timezone;
+    };
+    const login = async (timezone: string) =>
+      SELF.fetch(`${BASE}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'tz-login@example.com',
+          password_auth: await passwordAuthFor('pw'),
+          timezone,
+        }),
+      });
+
+    expect((await login('Asia/Tokyo')).status).toBe(204);
+    expect(await readTimezone()).toBe('Asia/Tokyo');
+
+    // API-016: the login still succeeds, and the saved timezone is kept.
+    expect((await login('Not/AZone')).status).toBe(204);
+    expect(await readTimezone()).toBe('Asia/Tokyo');
+  });
+
+  it('rejects an invalid timezone in PATCH /user and changes nothing', async () => {
+    const { cookie } = await signupAndGetCookie('tz-patch@example.com', 'pw', undefined, 'UTC');
+    const patch = (settings: Record<string, string>) =>
+      SELF.fetch(`${BASE}/user`, {
+        method: 'PATCH',
+        headers: authHeaders(cookie),
+        body: JSON.stringify({ settings }),
+      });
+    const readSettings = async () => {
+      const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
+      return ((await res.json()) as { settings: Record<string, string> }).settings;
+    };
+
+    const bad = await patch({ email_frequency: 'daily', timezone: 'Not/AZone' });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: 'Invalid request data' });
+    expect(await readSettings()).toMatchObject({ email_frequency: 'weekly', timezone: 'UTC' });
+
+    expect((await patch({ timezone: 'America/Chicago' })).status).toBe(200);
+    expect(await readSettings()).toMatchObject({ timezone: 'America/Chicago' });
+  });
+
   it('returns the current user and allows updating profile fields but not key material', async () => {
     const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 

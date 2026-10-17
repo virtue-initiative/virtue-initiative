@@ -179,6 +179,19 @@ export const passwordResetSchema = z.object({
 });
 export type PasswordResetPayload = z.infer<typeof passwordResetSchema>;
 
+// Whether `timezone` is an IANA time zone name this runtime knows, which is
+// what the digest schedule needs to work out a user's 06:00 (api/SPEC.md
+// API-010, API-016, API-020).
+export function isValidTimezone(timezone: string | undefined): timezone is string {
+  if (!timezone) return false;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const updateUserSchema = z
   .object({
     email: z.email().optional(),
@@ -186,7 +199,10 @@ export const updateUserSchema = z
     settings: z
       .object({
         email_frequency: emailFrequencySchema.optional(),
-        timezone: z.string().optional(),
+        timezone: z
+          .string()
+          .refine(isValidTimezone, { message: 'Not a valid time zone' })
+          .optional(),
       })
       .optional(),
   })
