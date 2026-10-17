@@ -128,12 +128,12 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.recipient_email).toBe('digest-partner@example.com');
     expect(digestDelivery?.status).toBe('sent');
     expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
-    expect(digestDelivery?.text).toContain('Critical tamper alerts: 1');
+    expect(digestDelivery?.text).toContain('High risk alerts and screenshots: 1');
     expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
     expect(digestDelivery?.text).toContain(`${env.APP_URL}/settings`);
-    // Links to the report for the covered day in the recipient's timezone
-    // (06:05 America/New_York on Jan 6 covers Jan 5).
-    const reportUrl = `${env.APP_URL}/report/${ownerId}?period=day&date=2026-01-05`;
+    // Links to the report for the day the window ends in the recipient's timezone
+    // (11:05 UTC on Jan 6 = 06:05 America/New_York on Jan 6).
+    const reportUrl = `${env.APP_URL}/report/${ownerId}?period=day&date=2026-01-06`;
     expect(digestDelivery?.text).toContain(`Read digest-owner@example.com's report: ${reportUrl}`);
     expect(digestDelivery?.html).toContain(`href="${reportUrl.replace('&', '&amp;')}"`);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
@@ -404,9 +404,9 @@ describe('Notification scheduler', () => {
     const deliveries = await listEmailDeliveries();
     const digestDelivery = deliveries.find((delivery) => delivery.kind === 'weekly_digest');
     expect(digestDelivery?.recipient_email).toBe('twice-partner@example.com');
-    // The Monday 06:00 run covers the week ending Sunday, Jan 4.
+    // The Monday 06:00 run covers the week from the previous Monday through this Monday morning.
     expect(digestDelivery?.text).toContain(
-      `${env.APP_URL}/report/${ownerId}?period=week&date=2026-01-04`,
+      `${env.APP_URL}/report/${ownerId}?period=week&date=2026-01-05`,
     );
   });
 });

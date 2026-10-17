@@ -647,8 +647,8 @@ export function renderPartnerDigestTemplate(input: {
       '',
       owner,
       `Approximate screenshots available: ${summary.approxScreenshotCount}`,
-      `Critical tamper alerts: ${summary.tamperCounts.critical}`,
-      `Warning tamper alerts: ${summary.tamperCounts.warning}`,
+      `High risk alerts and screenshots: ${summary.tamperCounts.critical}`,
+      `Medium risk alerts and screenshots: ${summary.tamperCounts.warning}`,
       `Info-only tamper events: ${summary.tamperCounts.info}`,
       ...(summary.missingLogDays.length > 0
         ? [missingLogHeading, ...summary.missingLogDays.map((line) => `- ${line}`)]
@@ -668,8 +668,8 @@ export function renderPartnerDigestTemplate(input: {
     '',
     `Monitored accounts: ${accountCount}`,
     `Approximate screenshots available: ${totalScreenshots}`,
-    `Critical tamper alerts: ${totalTamperCounts.critical}`,
-    `Warning tamper alerts: ${totalTamperCounts.warning}`,
+    `High risk alerts and screenshots: ${totalTamperCounts.critical}`,
+    `Medium risk alerts and screenshots: ${totalTamperCounts.warning}`,
     `Info-only tamper events: ${totalTamperCounts.info}`,
     ...partnerSections,
   ];
@@ -677,8 +677,8 @@ export function renderPartnerDigestTemplate(input: {
   const summaryItems = [
     listItem(`Monitored accounts: ${accountCount}`),
     listItem(`Approximate screenshots available: ${totalScreenshots}`),
-    listItem(`Critical tamper alerts: ${totalTamperCounts.critical}`),
-    listItem(`Warning tamper alerts: ${totalTamperCounts.warning}`),
+    listItem(`High risk alerts and screenshots: ${totalTamperCounts.critical}`),
+    listItem(`Medium risk alerts and screenshots: ${totalTamperCounts.warning}`),
     listItem(`Info-only tamper events: ${totalTamperCounts.info}`),
   ].join('');
 
@@ -715,8 +715,8 @@ export function renderPartnerDigestTemplate(input: {
           padding: '0',
         })}">
           ${listItem(`Approximate screenshots available: ${summary.approxScreenshotCount}`)}
-          ${listItem(`Critical tamper alerts: ${summary.tamperCounts.critical}`)}
-          ${listItem(`Warning tamper alerts: ${summary.tamperCounts.warning}`)}
+          ${listItem(`High risk alerts and screenshots: ${summary.tamperCounts.critical}`)}
+          ${listItem(`Medium risk alerts and screenshots: ${summary.tamperCounts.warning}`)}
           ${listItem(`Info-only tamper events: ${summary.tamperCounts.info}`)}
           ${missingLogHtml}
         </ul>

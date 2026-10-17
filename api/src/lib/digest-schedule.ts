@@ -69,11 +69,11 @@ export function formatUtcDate(timestamp: number) {
 
 /**
  * The date the web app's report should open on for a digest window, as
- * YYYY-MM-DD in the recipient's timezone. Windows end at 06:00 local, so the
- * day (or last day of the week) they cover is the day before `end`.
+ * YYYY-MM-DD in the recipient's timezone. Windows end at 06:00 local, which
+ * is the start of the day being reported.
  */
 export function reportDateForWindow(window: { end: number }, timezone: string) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(
-    new Date(window.end - DAY_MS / 2),
+    new Date(window.end),
   );
 }
