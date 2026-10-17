@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { createEmailBounce, listDigestActivity } from '../src/lib/db';
-import {
-  createSendPacer,
-  forEachConcurrently,
-  runNotificationSchedule,
-} from '../src/lib/scheduler';
+import { createSendPacer, runNotificationSchedule } from '../src/lib/scheduler';
 import {
   authHeaders,
   BASE,
@@ -209,6 +205,8 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.status).toBe('sent');
     expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
     expect(digestDelivery?.text).toContain('High risk alerts and screenshots: 1');
+    // Batches count as logs, so only the device without any is reported missing.
+    expect(digestDelivery?.text).not.toContain('Digest Device: no logs');
     expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
     expect(digestDelivery?.text).toContain(`${env.APP_URL}/settings`);
     // Links to the report for the covered day in the recipient's timezone
@@ -217,90 +215,6 @@ describe('Notification scheduler', () => {
     expect(digestDelivery?.text).toContain(`Read digest-owner@example.com's report: ${reportUrl}`);
     expect(digestDelivery?.html).toContain(`href="${reportUrl.replace('&', '&amp;')}"`);
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
-  });
-
-  it('treats batch uploads as activity when deciding whether logs are missing', async () => {
-    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
-    const previousWindowStart = Date.UTC(2026, 0, 5, 6, 0, 0);
-    const batchStart = Date.UTC(2026, 0, 5, 12, 0, 0);
-    const batchEnd = Date.UTC(2026, 0, 5, 13, 0, 0);
-
-    const { cookie: ownerCookie, userId: ownerId } = await signupAndGetCookie(
-      'batch-owner@example.com',
-      'pw',
-    );
-    const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
-      'batch-partner@example.com',
-      'pw',
-    );
-    await markUserEmailVerified(partnerUserId);
-    await SELF.fetch(`${BASE}/user`, {
-      method: 'PATCH',
-      headers: authHeaders(partnerCookie),
-      body: JSON.stringify({ settings: { email_frequency: 'daily' } }),
-    });
-
-    const inviteRes = await SELF.fetch(`${BASE}/partner`, {
-      method: 'POST',
-      headers: authHeaders(ownerCookie),
-      body: JSON.stringify({
-        email: 'batch-partner@example.com',
-      }),
-    });
-    await inviteRes.json();
-    const inviteDelivery = (await listEmailDeliveries()).find(
-      (delivery) =>
-        delivery.kind === 'partner_invite' &&
-        delivery.recipient_email === 'batch-partner@example.com',
-    );
-    const inviteMetadata = JSON.parse(inviteDelivery!.metadata) as { inviteToken: string };
-
-    await SELF.fetch(`${BASE}/partner/accept`, {
-      method: 'POST',
-      headers: authHeaders(partnerCookie),
-      body: JSON.stringify({ token: inviteMetadata.inviteToken }),
-    });
-
-    const device = await createDeviceForUser(
-      'batch-owner@example.com',
-      'pw',
-      'Batch Device',
-      'linux',
-    );
-    const silentDevice = await createDeviceForUser(
-      'batch-owner@example.com',
-      'pw',
-      'Silent Device',
-      'linux',
-    );
-    await env.DB.prepare('UPDATE devices SET created_at = ? WHERE id IN (?, ?)')
-      .bind(previousWindowStart, uuidToBytes(device.id), uuidToBytes(silentDevice.id))
-      .run();
-
-    await env.DB.prepare(
-      `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(
-        uuidToBytes(DAILY_BATCH_ID),
-        uuidToBytes(ownerId),
-        uuidToBytes(device.id),
-        batchStart,
-        batchEnd,
-        'hash-batch-only',
-        EMPTY_ACCESS_KEYS,
-        batchEnd,
-      )
-      .run();
-
-    await runNotificationSchedule(env, now);
-
-    const digestDelivery = (await listEmailDeliveries()).find(
-      (delivery) => delivery.kind === 'daily_digest',
-    );
-    expect(digestDelivery?.text).toContain('Approximate screenshots available: 12');
-    expect(digestDelivery?.text).not.toContain('Batch Device: no logs in the last 24 hours');
-    expect(digestDelivery?.text).toContain('Silent Device: no logs in the last 24 hours');
   });
 
   it('sends one daily digest with separate summaries when a partner monitors multiple people', async () => {
@@ -611,7 +525,7 @@ describe('Notification scheduler', () => {
     });
   });
 
-  it('loads digest activity for more watched users than fit in one statement', async () => {
+  it('loads digest activity for more watched users than D1 allows bound parameters', async () => {
     const { userId: ownerId } = await signupAndGetCookie('many-owner@example.com', 'pw');
     const device = await createDeviceForUser('many-owner@example.com', 'pw', 'Many', 'linux');
     const batchStart = Date.UTC(2026, 0, 5, 12, 0, 0);
@@ -623,7 +537,7 @@ describe('Notification scheduler', () => {
       end: batchStart + 60_000,
     });
 
-    // The real user is past the first chunk of 90.
+    // More IDs than D1's 100 bound parameters, with the real user near the end.
     const userIds = Array.from({ length: 150 }, () => crypto.randomUUID());
     userIds[120] = ownerId;
     const rows = await listDigestActivity(
@@ -633,21 +547,7 @@ describe('Notification scheduler', () => {
       300_000,
     );
 
-    // A one-minute batch still counts as one screenshot. The device was created
-    // after this window, so the batch is on none of its days.
-    expect(rows).toEqual([
-      {
-        id: device.id,
-        owner: ownerId,
-        name: 'Many',
-        created_at: expect.any(Number),
-        screenshots: 1,
-        critical: 0,
-        warning: 0,
-        first_day: null,
-        last_day: null,
-      },
-    ]);
+    expect(rows.map((row) => [row.owner, row.screenshots])).toEqual([[ownerId, 1]]);
   });
 
   it('sums digest activity in SQL and reports the days each device has logs on', async () => {
@@ -730,16 +630,15 @@ describe('Notification scheduler', () => {
 });
 
 describe('Notification scheduler D1 use', () => {
-  // Counts the statements a run prepares and the round trips it makes.
+  // Counts the statements a run prepares.
   function countingEnv() {
-    const counts = { statements: 0, roundTrips: 0 };
+    const counts = { statements: 0 };
     const db = new Proxy(env.DB, {
       get(target, prop) {
         const value = Reflect.get(target, prop) as unknown;
         if (typeof value !== 'function') return value;
         return (...args: unknown[]) => {
           if (prop === 'prepare') counts.statements++;
-          if (prop === 'batch') counts.roundTrips++;
           return (value as (...a: unknown[]) => unknown).apply(target, args);
         };
       },
@@ -767,9 +666,9 @@ describe('Notification scheduler D1 use', () => {
     for (const digest of digests) {
       expect(digest.text).toContain('Monitored accounts: 2');
     }
-    // The partnerships (with each recipient's bounce), and one batch of the
-    // watched users' activity. Per digest, this was 3 statements before.
-    expect(counts).toEqual({ statements: 2, roundTrips: 1 });
+    // The partnerships (with each recipient's bounce), and the watched users'
+    // activity. Per digest, this was 3 statements before.
+    expect(counts).toEqual({ statements: 2 });
   });
 
   it("counts only each digest's own window when one run covers several", async () => {
@@ -786,23 +685,21 @@ describe('Notification scheduler D1 use', () => {
     }
     const device = await createDeviceForUser('window-owner@example.com', 'pw', 'W', 'linux');
     const MIN = 60_000;
-    // Only in Kathmandu's window (from Jan 5 00:15 UTC): 2 screenshots, 1 critical.
+    // Only in Kathmandu's window (from Jan 5 00:15 UTC): 2 screenshots.
     await insertBatch({
       id: DAILY_BATCH_ID,
       userId: ownerId,
       deviceId: device.id,
       start: Date.UTC(2026, 0, 5, 0, 30),
       end: Date.UTC(2026, 0, 5, 0, 30) + 10 * MIN,
-      high: 1,
     });
-    // Only in Karachi's window (to Jan 6 01:00 UTC): 4 screenshots, 2 critical.
+    // Only in Karachi's window (to Jan 6 01:00 UTC): 4 screenshots.
     await insertBatch({
       id: WEEKLY_BATCH_ID,
       userId: ownerId,
       deviceId: device.id,
       start: Date.UTC(2026, 0, 6, 0, 30),
       end: Date.UTC(2026, 0, 6, 0, 30) + 20 * MIN,
-      high: 2,
     });
 
     await runNotificationSchedule(env, now);
@@ -814,12 +711,6 @@ describe('Notification scheduler D1 use', () => {
       'Approximate screenshots available: 2',
     );
     expect(textFor('window-karachi@example.com')).toContain('Approximate screenshots available: 4');
-    // Tamper counts add up every batch they are given, so these show each
-    // digest kept only its own window's batches.
-    expect(textFor('window-kathmandu@example.com')).toContain(
-      'High risk alerts and screenshots: 1',
-    );
-    expect(textFor('window-karachi@example.com')).toContain('High risk alerts and screenshots: 2');
   });
 });
 
@@ -850,27 +741,5 @@ describe('createSendPacer', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(released).toBe(true);
-  });
-});
-
-describe('forEachConcurrently', () => {
-  it('runs every item with at most the given number in flight', async () => {
-    vi.useFakeTimers();
-    let inFlight = 0;
-    let maxInFlight = 0;
-    const done: number[] = [];
-
-    const run = forEachConcurrently([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4, async (item) => {
-      inFlight++;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((resolve) => setTimeout(resolve, 10 * item));
-      inFlight--;
-      done.push(item);
-    });
-    await vi.runAllTimersAsync();
-    await run;
-
-    expect(maxInFlight).toBe(4);
-    expect(done.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 });

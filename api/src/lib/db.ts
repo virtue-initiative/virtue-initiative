@@ -107,22 +107,6 @@ function placeholders(count: number) {
   return Array.from({ length: count }, () => '?').join(', ');
 }
 
-// `?first, ?first+1, ...` for `count` values, for a statement that also binds
-// numbered parameters before them.
-function numberedPlaceholders(first: number, count: number) {
-  return Array.from({ length: count }, (_, i) => `?${first + i}`).join(', ');
-}
-
-// Splits items into groups of `size`, e.g. to stay under D1's 100 bound
-// parameters per statement.
-export function chunk<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
-}
-
 export type SessionType = 'web' | 'device';
 
 export async function findUserByEmail(db: D1Database, email: string) {
@@ -773,9 +757,6 @@ export async function deleteExpiredDeviceSessionsChunk(
   return result.meta.changes;
 }
 
-// D1 allows at most 100 bound parameters per statement, and the digest
-// statement binds 5 besides the user IDs.
-const DIGEST_ACTIVITY_CHUNK = 90;
 // Margin on listDigestActivity's created_at bound. POST /d/batch clamps
 // end_time to created_at (API-038), so new batches need none; it covers rows
 // stored before that clamp, from devices whose clock ran ahead.
@@ -796,8 +777,8 @@ const BATCH_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
  *
  * The statement is driven from devices because most users have one, and the
  * batches primary key can't seek on device_id: each device reads the user's
- * batches in the window once. Every statement goes in a single D1 batch, so one
- * round trip covers all the users.
+ * batches in the window once. The user IDs are bound as one JSON array, since
+ * D1 allows only 100 bound parameters, so one statement covers any number.
  */
 export async function listDigestActivity(
   db: D1Database,
@@ -805,12 +786,7 @@ export async function listDigestActivity(
   window: { start: number; end: number },
   captureIntervalMs: number,
 ) {
-  const chunks = chunk(userIds.map(uuidToBytes), DIGEST_ACTIVITY_CHUNK);
-  if (chunks.length === 0) {
-    return [];
-  }
-
-  const results = await db.batch<{
+  return allWithUuidFields<{
     id: string;
     owner: string;
     name: string;
@@ -821,48 +797,43 @@ export async function listDigestActivity(
     first_day: number | null;
     last_day: number | null;
   }>(
-    chunks.map((ids) =>
-      db
-        .prepare(
-          // A batch is stored after the period it covers ends, and POST /d/batch clamps
-          // end_time to the time it was stored, so created_at >= end_time. The created_at
-          // bound lets the (user_id, created_at, id) primary key skip everything well
-          // before the window instead of reading each user's whole retention period.
-          // ?1 window end, ?2 window start, ?3 capture interval, ?4 one day,
-          // ?5 created_at bound, then the user IDs.
-          `SELECT d.id, d.owner, d.name, d.created_at,
-                  CAST(SUM(MAX(1, ROUND((MIN(b.end_time, ?1) - MAX(b.start_time, ?2)) * 1.0 / ?3)))
-                       AS INTEGER) AS screenshots,
-                  SUM(b.high_risk_count) AS critical,
-                  SUM(b.medium_risk_count) AS warning,
-                  CASE WHEN b.end_time > MAX(?2, d.created_at)
-                       THEN CAST((MAX(b.start_time, MAX(?2, d.created_at)) - MAX(?2, d.created_at))
-                                 / ?4 AS INTEGER)
-                  END AS first_day,
-                  CASE WHEN b.end_time > MAX(?2, d.created_at)
-                       THEN CAST((MIN(b.end_time, ?1) - 1 - MAX(?2, d.created_at)) / ?4 AS INTEGER)
-                  END AS last_day
-           FROM devices d
-           LEFT JOIN batches b
-             ON b.user_id = d.owner AND b.device_id = d.id
-            AND b.created_at > ?5 AND b.end_time > ?2 AND b.start_time < ?1
-           WHERE d.owner IN (${numberedPlaceholders(6, ids.length)})
-           GROUP BY d.id, first_day, last_day
-           ORDER BY d.created_at DESC, d.id`,
-        )
-        .bind(
-          window.end,
-          window.start,
-          captureIntervalMs,
-          DAY_MS,
-          window.start - BATCH_CLOCK_SKEW_MS,
-          ...ids,
-        ),
-    ),
-  );
-
-  return results.flatMap((result) =>
-    result.results.map((row) => decodeUuidFields(row, ['id', 'owner'])),
+    db
+      .prepare(
+        // A batch is stored after the period it covers ends, and POST /d/batch clamps
+        // end_time to the time it was stored, so created_at >= end_time. The created_at
+        // bound lets the (user_id, created_at, id) primary key skip everything well
+        // before the window instead of reading each user's whole retention period.
+        // ?1 window end, ?2 window start, ?3 capture interval, ?4 one day,
+        // ?5 created_at bound, ?6 the user IDs as a JSON array of hex strings.
+        `SELECT d.id, d.owner, d.name, d.created_at,
+                CAST(SUM(MAX(1, ROUND((MIN(b.end_time, ?1) - MAX(b.start_time, ?2)) * 1.0 / ?3)))
+                     AS INTEGER) AS screenshots,
+                SUM(b.high_risk_count) AS critical,
+                SUM(b.medium_risk_count) AS warning,
+                CASE WHEN b.end_time > MAX(?2, d.created_at)
+                     THEN CAST((MAX(b.start_time, MAX(?2, d.created_at)) - MAX(?2, d.created_at))
+                               / ?4 AS INTEGER)
+                END AS first_day,
+                CASE WHEN b.end_time > MAX(?2, d.created_at)
+                     THEN CAST((MIN(b.end_time, ?1) - 1 - MAX(?2, d.created_at)) / ?4 AS INTEGER)
+                END AS last_day
+         FROM devices d
+         LEFT JOIN batches b
+           ON b.user_id = d.owner AND b.device_id = d.id
+          AND b.created_at > ?5 AND b.end_time > ?2 AND b.start_time < ?1
+         WHERE d.owner IN (SELECT unhex(value) FROM json_each(?6))
+         GROUP BY d.id, first_day, last_day
+         ORDER BY d.created_at DESC, d.id`,
+      )
+      .bind(
+        window.end,
+        window.start,
+        captureIntervalMs,
+        DAY_MS,
+        window.start - BATCH_CLOCK_SKEW_MS,
+        JSON.stringify(userIds.map((id) => normalizeUuidString(id).replace(/-/g, ''))),
+      ),
+    ['id', 'owner'],
   );
 }
 

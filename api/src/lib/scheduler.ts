@@ -5,7 +5,7 @@ import {
   getDigestWindowForRun,
   reportDateForWindow,
 } from './digest-schedule';
-import { chunk, listDigestActivity, listDigestEligiblePartnerships } from './db';
+import { listDigestActivity, listDigestEligiblePartnerships } from './db';
 import { sendEmail } from './email';
 import { renderPartnerDigestTemplate } from './email/templates';
 import { Env } from '../types/bindings';
@@ -15,13 +15,6 @@ const DEFAULT_CAPTURE_INTERVAL_MS = 300 * 1000;
 // account emails sent while a digest run is going. Pacing digests below that
 // leaves those room.
 const DIGEST_SENDS_PER_SECOND = 10;
-// How many digests are sent at once. Building one needs no I/O, so this only
-// overlaps the SES round trips, which lets sends reach the paced rate.
-const DIGEST_CONCURRENCY = 4;
-// Watched users whose activity loads in one D1 batch call. listDigestActivity
-// splits them into statements of 90, so a call is 10 statements, well inside
-// D1's 30 second limit for a batch.
-const DIGEST_LOAD_USERS = 900;
 
 type DigestPartnership = Awaited<ReturnType<typeof listDigestEligiblePartnerships>>[number];
 type DigestActivityRow = Awaited<ReturnType<typeof listDigestActivity>>[number];
@@ -97,7 +90,7 @@ function collectMissingLogPeriods(
 }
 
 // Returns a function that resolves once the caller may send, spacing calls at
-// least `intervalMs` apart however many callers are waiting.
+// least `intervalMs` apart.
 export function createSendPacer(intervalMs: number) {
   let nextSlot = 0;
   return async () => {
@@ -108,20 +101,6 @@ export function createSendPacer(intervalMs: number) {
       await new Promise((resolve) => setTimeout(resolve, slot - now));
     }
   };
-}
-
-export async function forEachConcurrently<T>(
-  items: T[],
-  concurrency: number,
-  run: (item: T) => Promise<void>,
-) {
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (next < items.length) {
-      await run(items[next++]);
-    }
-  });
-  await Promise.all(workers);
 }
 
 interface DueDigest {
@@ -147,58 +126,35 @@ function findDueDigest(watcherPartnerships: DigestPartnership[], now: number): D
     : null;
 }
 
-interface WindowActivity {
-  byUser: Map<string, UserActivity>;
-  // Watched users whose activity failed to load, with the error.
-  loadErrors: Map<string, unknown>;
-}
-
 function windowKey(digest: DueDigest) {
   return `${digest.window.start}-${digest.window.end}`;
 }
 
-// Loads the activity for every due digest at once (API-057). Digests whose
-// timezones share an offset share a window, so a run has only a few distinct
-// windows, loaded concurrently. Each is summed up in SQL over all its watched
-// users, reading each user once however many watchers they have.
+// Loads the activity for every due digest at once (API-057), keyed by window
+// and then by watched user. Digests whose timezones share an offset share a
+// window, so a run has only a few distinct windows, loaded concurrently. Each
+// is summed up in SQL over all its watched users, reading each user once
+// however many watchers they have.
 async function loadDigestActivity(env: Env, due: DueDigest[]) {
-  const byWindow = new Map<string, WindowActivity>();
+  const byWindow = new Map<string, Map<string, UserActivity>>();
   await Promise.all(
     Array.from(groupBy(due, windowKey), async ([key, digests]) => {
-      const activity: WindowActivity = { byUser: new Map(), loadErrors: new Map() };
-      byWindow.set(key, activity);
-
-      const userIds = Array.from(
-        new Set(
-          digests.flatMap((digest) =>
-            digest.partnerships.map((partnership) => partnership.watching_user_id),
-          ),
+      const userIds = new Set(
+        digests.flatMap((digest) =>
+          digest.partnerships.map((partnership) => partnership.watching_user_id),
         ),
       );
-
-      for (const slice of chunk(userIds, DIGEST_LOAD_USERS)) {
-        try {
-          const rows = await listDigestActivity(
-            env.DB,
-            slice,
-            digests[0].window,
-            DEFAULT_CAPTURE_INTERVAL_MS,
-          );
-          for (const [userId, userRows] of groupBy(rows, (row) => row.owner)) {
-            activity.byUser.set(userId, summarizeUserActivity(userRows));
-          }
-        } catch (error) {
-          // Only the digests that cover these users fail; sendDigest throws for them.
-          console.error('digest activity load failed', {
-            window: digests[0].window,
-            users: slice.length,
-            error,
-          });
-          for (const userId of slice) {
-            activity.loadErrors.set(userId, error);
-          }
-        }
+      const rows = await listDigestActivity(
+        env.DB,
+        Array.from(userIds),
+        digests[0].window,
+        DEFAULT_CAPTURE_INTERVAL_MS,
+      );
+      const byUser = new Map<string, UserActivity>();
+      for (const [userId, userRows] of groupBy(rows, (row) => row.owner)) {
+        byUser.set(userId, summarizeUserActivity(userRows));
       }
+      byWindow.set(key, byUser);
     }),
   );
   return byWindow;
@@ -206,21 +162,8 @@ async function loadDigestActivity(env: Env, due: DueDigest[]) {
 
 // Builds and sends one due digest from the loaded activity. Returns whether
 // sendEmail skipped it.
-async function sendDigest(
-  env: Env,
-  digest: DueDigest,
-  activity: WindowActivity,
-  pace: () => Promise<void>,
-) {
+async function sendDigest(env: Env, digest: DueDigest, activity: Map<string, UserActivity>) {
   const { cadence: emailFrequency, timezone, window, recipient } = digest;
-
-  for (const partnership of digest.partnerships) {
-    if (activity.loadErrors.has(partnership.watching_user_id)) {
-      throw new Error('activity for a watched user failed to load', {
-        cause: activity.loadErrors.get(partnership.watching_user_id),
-      });
-    }
-  }
 
   const reportQuery = new URLSearchParams({
     period: emailFrequency === 'weekly' ? 'week' : 'day',
@@ -235,7 +178,7 @@ async function sendDigest(
       ),
     )
     .map((partnership) => {
-      const user = activity.byUser.get(partnership.watching_user_id);
+      const user = activity.get(partnership.watching_user_id);
       // High-risk events live inside end-to-end encrypted batches, so the server
       // can't read individual event risks. Each batch instead reports how many of
       // its events fell in the high (>= 0.7) and medium (0.4–0.7) risk bands; those
@@ -270,10 +213,6 @@ async function sendDigest(
   });
 
   const bounceId = recipient.watcher_permanent_bounce_id;
-  // A digest sendEmail will skip for the bounce takes no send slot.
-  if (!bounceId) {
-    await pace();
-  }
   const result = await sendEmail({
     env,
     db: env.DB,
@@ -339,13 +278,15 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
   // digests it owed.
   console.info('digest run started', { due: due.length });
 
+  // If this fails, no digest can be built, so the run fails before sending any.
   const activityByWindow = await loadDigestActivity(env, due);
   const pace = createSendPacer(1000 / DIGEST_SENDS_PER_SECOND);
   let sent = 0;
   let skipped = 0;
-  await forEachConcurrently(due, DIGEST_CONCURRENCY, async (digest) => {
+  for (const digest of due) {
     try {
-      if (await sendDigest(env, digest, activityByWindow.get(windowKey(digest))!, pace)) {
+      await pace();
+      if (await sendDigest(env, digest, activityByWindow.get(windowKey(digest))!)) {
         skipped++;
       } else {
         sent++;
@@ -353,7 +294,7 @@ export async function runNotificationSchedule(env: Env, now = Date.now()) {
     } catch (error) {
       logFailure(digest.recipient.watcher_user_id, error);
     }
-  });
+  }
 
   console.info('digest run finished', { due: due.length, sent, skipped, failed });
   // Fail the invocation so it shows as an error in Cloudflare, rather than
