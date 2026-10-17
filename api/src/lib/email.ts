@@ -45,6 +45,8 @@ interface SendEmailInput extends EmailContent {
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
   recipientEmailVerified?: number;
+  // Likewise for the recipient's latest permanent bounce, or null for none.
+  recipientPermanentBounce?: { id: string } | null;
 }
 
 let sesClient: SESv2Client | null = null;
@@ -57,6 +59,8 @@ export interface SendEmailResult {
   id: string;
   // Set when the email was not sent because the recipient has a permanent bounce.
   bounce_id?: string;
+  // Set when the email was not sent, with the reason.
+  skipped?: 'bounced' | 'unverified';
 }
 
 function withDisplayName(fromEmail: string) {
@@ -81,7 +85,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const id = uuidv4();
 
   // API-056: never send to an address with a permanent bounce.
-  const bounce = await findPermanentEmailBounce(input.db, input.recipient);
+  const bounce =
+    input.recipientPermanentBounce !== undefined
+      ? input.recipientPermanentBounce
+      : await findPermanentEmailBounce(input.db, input.recipient);
   if (bounce) {
     if (input.email_token_id) {
       await setEmailTokenBounce(input.db, {
@@ -94,7 +101,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `bounced-${id}`, bounce_id: bounce.id };
+    return { id: `bounced-${id}`, bounce_id: bounce.id, skipped: 'bounced' };
   }
 
   const recipientEmailVerified =
@@ -112,7 +119,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `skipped-${id}` };
+    return { id: `skipped-${id}`, skipped: 'unverified' };
   }
 
   const attachmentFileNames = (input.attachments ?? []).map((a) => a.fileName);

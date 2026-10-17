@@ -299,7 +299,7 @@ deviceOnly.post(
     const createdAt = Date.now();
     // API-038: the times come from the device clock, and a batch is uploaded after the
     // period it covers, so an end_time past now means the clock runs ahead. Clamping it
-    // keeps end_time <= created_at, which listBatchWindowsForUser relies on.
+    // keeps end_time <= created_at, which listDigestActivity relies on.
     const endTime = Math.min(end_time, createdAt);
     const startTime = Math.min(start_time, endTime);
     if (endTime !== end_time) {
