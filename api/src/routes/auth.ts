@@ -27,6 +27,7 @@ import {
   renderEmailVerificationTemplate,
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
+  HELP_EMAIL,
 } from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
@@ -537,8 +538,7 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
     if (sent.bounce_id) {
       return c.json(
         {
-          error:
-            'Email to your address bounced, so we could not send a verification email. Email help@virtueinitiative.org for help.',
+          error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
           code: 'email_bounced',
         },
         403,

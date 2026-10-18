@@ -17,7 +17,11 @@ import {
   listIncomingPartners,
   listOwnedPartners,
 } from '../lib/db';
-import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
+import {
+  renderPartnerAcceptedTemplate,
+  renderPartnerInviteTemplate,
+  renderPartnerRemovedTemplate,
+} from '../lib/email/templates';
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import {
   createPartnerSchema,
@@ -291,6 +295,51 @@ partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
   }
 
   await deletePartnerById(c.env.DB, partnerId);
+
+  // Only an accepted partnership has anything to tell the other side about;
+  // a withdrawn or declined invite never gave them access.
+  if (partnership.status === 'accepted') {
+    try {
+      const removedByOwner = partnership.watching_user_id === userId;
+      const [owner, watcher] = await Promise.all([
+        findUserById(c.env.DB, partnership.watching_user_id),
+        partnership.watcher_user_id ? findUserById(c.env.DB, partnership.watcher_user_id) : null,
+      ]);
+      const recipient = removedByOwner
+        ? { name: watcher?.name, email: partnership.watcher_email }
+        : owner && { name: owner.name, email: owner.email };
+      const other = removedByOwner
+        ? owner && { name: owner.name, email: owner.email }
+        : { name: watcher?.name ?? currentUser.name, email: partnership.watcher_email };
+      if (recipient && other) {
+        const removedEmail = renderPartnerRemovedTemplate({
+          recipientName: recipient.name,
+          otherName: other.name,
+          otherEmail: other.email,
+          forOwner: !removedByOwner,
+          appName: c.env.APP_NAME,
+          appUrl: c.env.APP_URL,
+        });
+        await sendEmail({
+          env: c.env,
+          db: c.env.DB,
+          kind: 'partner_removed',
+          recipient: recipient.email,
+          subject: removedEmail.subject,
+          text: removedEmail.text,
+          html: removedEmail.html,
+          related_user_id:
+            (removedByOwner ? partnership.watcher_user_id : partnership.watching_user_id) ??
+            undefined,
+          related_partnership_id: partnership.id,
+          metadata: { removedBy: currentUser.email },
+        });
+      }
+    } catch (error) {
+      console.error('failed to send partner-removed email', error);
+    }
+  }
+
   return c.body(null, 204);
 });
 

@@ -42,6 +42,17 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#39;');
 }
 
+export const HELP_EMAIL = 'help@virtueinitiative.org';
+const HELP_LINE = `If you need help, reach out to ${HELP_EMAIL}.`;
+
+const ENCOURAGEMENT_NOTE =
+  'Remember, the goal is not to bring shame, but to bring encouragement to live with integrity.';
+
+const DIGEST_NOTE =
+  'If you need to reach out to your partner, remember the goal is not to bring shame, but to bring encouragement to live with integrity.';
+
+const ALERT_NOTE = `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
+
 function paragraph(text: string) {
   return `<p style="${inlineStyle({
     margin: '0 0 16px 0',
@@ -297,11 +308,12 @@ export function renderPasswordChangedTemplate(input: {
       summary,
       '',
       `If you did not do this, reset your password now: ${input.forgotPasswordUrl}`,
+      HELP_LINE,
     ],
     htmlSections: [
       paragraph(greeting),
       paragraph(summary),
-      paragraph('If you did not do this, reset your password now.'),
+      paragraph(`If you did not do this, reset your password now. ${HELP_LINE}`),
       actionButton(input.forgotPasswordUrl, 'Reset password'),
     ],
   });
@@ -334,7 +346,7 @@ export function renderAccountExistsTemplate(input: {
       `If this was you, log in instead: ${input.loginUrl}`,
       `Forgot your password? Reset it here: ${input.forgotPasswordUrl}`,
       '',
-      'If you did not expect this, you can safely ignore this email.',
+      `If you did not expect this, you can safely ignore this email. ${HELP_LINE}`,
     ],
     htmlSections: [
       paragraph(greeting),
@@ -348,7 +360,7 @@ export function renderAccountExistsTemplate(input: {
         'font-size': '13px',
         'line-height': '1.5',
       })}">Forgot your password? ${themedLink(input.forgotPasswordUrl, 'Reset it here')}.</p>`,
-      paragraph('If you did not expect this, you can safely ignore this email.'),
+      paragraph(`If you did not expect this, you can safely ignore this email. ${HELP_LINE}`),
     ],
   });
 
@@ -378,7 +390,7 @@ export function renderEmailInUseTemplate(input: {
       '',
       `If you forgot your password, you can reset it here: ${input.forgotPasswordUrl}`,
       '',
-      'If you did not expect this, you can safely ignore this email.',
+      `If you did not expect this, you can safely ignore this email. ${HELP_LINE}`,
     ],
     htmlSections: [
       paragraph(greeting),
@@ -386,7 +398,7 @@ export function renderEmailInUseTemplate(input: {
         `Someone tried to change a ${appName} account's email address to this one, but it's already associated with your account.`,
       ),
       actionButton(input.forgotPasswordUrl, 'Reset password'),
-      paragraph('If you did not expect this, you can safely ignore this email.'),
+      paragraph(`If you did not expect this, you can safely ignore this email. ${HELP_LINE}`),
     ],
   });
 
@@ -458,6 +470,44 @@ export function renderPartnerAcceptedTemplate(input: {
   };
 }
 
+export function renderPartnerRemovedTemplate(input: {
+  recipientName?: string | null;
+  otherName?: string | null;
+  otherEmail: string;
+  /** True when the recipient is the monitored account that the partner left. */
+  forOwner: boolean;
+  appName: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const other = input.otherName?.trim() || input.otherEmail;
+  const summary = input.forOwner
+    ? `${other} is no longer your accountability partner on ${appName}. They will no longer receive your alerts or reports.`
+    : `${other} removed you as their accountability partner on ${appName}. You will no longer receive their alerts or reports.`;
+  const followup = input.forOwner
+    ? `Reach out to ${other} if this was unexpected. ${HELP_LINE}`
+    : `Reach out to ${other} if you have questions.`;
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Partnership ended',
+    textLines: [greeting, '', summary, followup, '', `Open your dashboard: ${input.appUrl}`],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(summary),
+      paragraph(followup),
+      actionButton(input.appUrl, 'Open dashboard'),
+    ],
+  });
+
+  return {
+    subject: `${other} and you are no longer accountability partners`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderDeviceDeletedTemplate(input: {
   appName: string;
   appUrl: string;
@@ -475,8 +525,8 @@ export function renderDeviceDeletedTemplate(input: {
     ? `${owner ?? 'One of your monitored accounts'} deleted the device "${input.deviceName}" (${input.devicePlatform}) from ${appName}.`
     : `Your device "${input.deviceName}" (${input.devicePlatform}) was deleted from ${appName}.`;
   const followup = input.forPartner
-    ? 'If you did not expect this, review the account dashboard and recent partner activity.'
-    : 'If you did not expect this change, review your account and reconnect any trusted clients.';
+    ? `Reach out to ${owner ?? 'the owner of the device'} if this was unexpected.`
+    : `If this was unexpected, check your account activity. ${HELP_LINE}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
@@ -514,8 +564,8 @@ export function renderDeviceLoggedOutTemplate(input: {
     ? `${owner ?? 'One of your monitored accounts'} logged out of the device "${input.deviceName}" (${input.devicePlatform}), so ${appName} is no longer monitoring it.`
     : `Your device "${input.deviceName}" (${input.devicePlatform}) logged out of ${appName} and is no longer being monitored.`;
   const followup = input.forPartner
-    ? 'If you did not expect this, review the account dashboard and recent activity.'
-    : 'If you did not expect this, review your account and sign the device back in.';
+    ? `Reach out to ${owner ?? 'the owner of the device'} if this was unexpected.`
+    : `If this was unexpected, check your account activity. ${HELP_LINE}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
@@ -536,6 +586,12 @@ export function renderDeviceLoggedOutTemplate(input: {
   };
 }
 
+const alertSeverityLabels: Record<TamperSeverity, string> = {
+  critical: 'High risk',
+  warning: 'Medium risk',
+  info: 'Low risk',
+};
+
 export function renderTamperAlertTemplate(input: {
   severity: TamperSeverity;
   ownerName?: string | null;
@@ -550,29 +606,33 @@ export function renderTamperAlertTemplate(input: {
   const owner = input.ownerName?.trim() || input.ownerEmail;
   const detailText = input.details?.trim();
   const deviceLine = `Device: ${input.deviceName}`;
+  const alertLabel = `${alertSeverityLabels[input.severity]} alert`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: `${input.severity} tamper alert`,
+    headline: alertLabel,
     textLines: [
-      `${owner} triggered a ${input.severity} tamper alert.`,
+      `${owner} has a new ${alertLabel.toLowerCase()}.`,
       deviceLine,
       input.title,
       ...(detailText ? ['', detailText] : []),
       '',
+      ALERT_NOTE,
+      '',
       `Review recent screenshots and logs: ${input.appUrl}`,
     ],
     htmlSections: [
-      paragraph(`${owner} triggered a ${input.severity} tamper alert.`),
+      paragraph(`${owner} has a new ${alertLabel.toLowerCase()}.`),
       paragraph(deviceLine),
       paragraph(input.title),
       ...(detailText ? [paragraph(detailText)] : []),
+      paragraph(ALERT_NOTE),
       actionButton(input.appUrl, 'Review screenshots and logs'),
     ],
   });
 
   return {
-    subject: `[${input.severity}] ${owner}: ${input.title}`,
+    subject: `${alertLabel}: ${owner}: ${input.title}`,
     text: footer.text,
     html: footer.html,
   };
@@ -592,8 +652,12 @@ export function renderLockedPasswordAccessedTemplate(input: {
     appName,
     appUrl: input.appUrl,
     headline: 'Locked password accessed',
-    textLines: [line, '', `Review the account: ${input.appUrl}`],
-    htmlSections: [paragraph(line), actionButton(input.appUrl, 'Review account')],
+    textLines: [line, '', ENCOURAGEMENT_NOTE, '', `Review the account: ${input.appUrl}`],
+    htmlSections: [
+      paragraph(line),
+      paragraph(ENCOURAGEMENT_NOTE),
+      actionButton(input.appUrl, 'Review account'),
+    ],
   });
 
   return {
@@ -670,6 +734,8 @@ export function renderPartnerDigestTemplate(input: {
     `High risk alerts and screenshots: ${totalTamperCounts.critical}`,
     `Medium risk alerts and screenshots: ${totalTamperCounts.warning}`,
     ...partnerSections,
+    '',
+    DIGEST_NOTE,
   ];
 
   const summaryItems = [
@@ -733,6 +799,7 @@ export function renderPartnerDigestTemplate(input: {
         padding: '0',
       })}">${summaryItems}</ul>`,
       partnerSummarySections,
+      paragraph(DIGEST_NOTE),
       ...(singleSummary
         ? [actionButton(singleSummary.reportUrl, `Read ${singleOwner}'s report`)]
         : []),
@@ -769,7 +836,7 @@ export function renderBugReportTemplate(input: {
   const text = [...details, '', input.message].join('\n');
 
   return {
-    subject: `Bug report: ${input.message.slice(0, 80)}`,
+    subject: `Issue report: ${input.message.slice(0, 80)}`,
     text,
     html: `<pre>${escapeHtml(text)}</pre>`,
   };
@@ -780,18 +847,18 @@ export function renderBugReportTemplate(input: {
 // text (API-042); otherwise the endpoint would relay arbitrary content.
 export function renderBugReportConfirmationTemplate(input: { appName: string; appUrl: string }) {
   const appName = normalizeAppName(input.appName);
-  const received = 'We received your bug report.';
+  const received = 'We received your issue report.';
   const addMore = 'Reply to this email to add details or screenshots.';
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: 'We received your bug report',
+    headline: 'We received your issue report',
     textLines: ['Hi,', '', received, '', addMore],
     htmlSections: [paragraph('Hi,'), paragraph(received), paragraph(addMore)],
   });
 
   return {
-    subject: 'We received your bug report',
+    subject: 'We received your issue report',
     text: footer.text,
     html: footer.html,
   };
