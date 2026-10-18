@@ -539,8 +539,11 @@ export function renderDeviceLoggedOutTemplate(input: {
   };
 }
 
+const ENCOURAGEMENT_NOTE =
+  'Remember, the goal is not to bring shame, but to bring encouragement to live with integrity.';
+
 const ALERT_NOTE =
-  'This email was sent because our automated checks found something. Please review the activity and talk with your partner. Remember, the goal is not to bring shame, but to bring encouragement.';
+  `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
 
 const alertSeverityLabels: Record<TamperSeverity, string> = {
   critical: 'High risk',
@@ -588,7 +591,7 @@ export function renderTamperAlertTemplate(input: {
   });
 
   return {
-    subject: `[${input.severity}] ${owner}: ${input.title}`,
+    subject: `${alertLabel}: ${owner}: ${input.title}`,
     text: footer.text,
     html: footer.html,
   };
@@ -686,6 +689,8 @@ export function renderPartnerDigestTemplate(input: {
     `High risk alerts and screenshots: ${totalTamperCounts.critical}`,
     `Medium risk alerts and screenshots: ${totalTamperCounts.warning}`,
     ...partnerSections,
+    '',
+    ENCOURAGEMENT_NOTE,
   ];
 
   const summaryItems = [
@@ -749,6 +754,7 @@ export function renderPartnerDigestTemplate(input: {
         padding: '0',
       })}">${summaryItems}</ul>`,
       partnerSummarySections,
+      paragraph(ENCOURAGEMENT_NOTE),
       ...(singleSummary
         ? [actionButton(singleSummary.reportUrl, `Read ${singleOwner}'s report`)]
         : []),
