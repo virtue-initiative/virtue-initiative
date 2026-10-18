@@ -42,6 +42,8 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#39;');
 }
 
+const HELP_LINE = 'If you need help, reach out to help@virtueinitiative.org.';
+
 function paragraph(text: string) {
   return `<p style="${inlineStyle({
     margin: '0 0 16px 0',
@@ -297,11 +299,12 @@ export function renderPasswordChangedTemplate(input: {
       summary,
       '',
       `If you did not do this, reset your password now: ${input.forgotPasswordUrl}`,
+      HELP_LINE,
     ],
     htmlSections: [
       paragraph(greeting),
       paragraph(summary),
-      paragraph('If you did not do this, reset your password now.'),
+      paragraph(`If you did not do this, reset your password now. ${HELP_LINE}`),
       actionButton(input.forgotPasswordUrl, 'Reset password'),
     ],
   });
@@ -475,8 +478,8 @@ export function renderDeviceDeletedTemplate(input: {
     ? `${owner ?? 'One of your monitored accounts'} deleted the device "${input.deviceName}" (${input.devicePlatform}) from ${appName}.`
     : `Your device "${input.deviceName}" (${input.devicePlatform}) was deleted from ${appName}.`;
   const followup = input.forPartner
-    ? 'If you did not expect this, review the account dashboard and recent partner activity.'
-    : 'If you did not expect this change, review your account and reconnect any trusted clients.';
+    ? `Reach out to ${owner ?? 'the owner of the device'} if this was unexpected.`
+    : `If this was unexpected, check your account activity. ${HELP_LINE}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
@@ -514,8 +517,8 @@ export function renderDeviceLoggedOutTemplate(input: {
     ? `${owner ?? 'One of your monitored accounts'} logged out of the device "${input.deviceName}" (${input.devicePlatform}), so ${appName} is no longer monitoring it.`
     : `Your device "${input.deviceName}" (${input.devicePlatform}) logged out of ${appName} and is no longer being monitored.`;
   const followup = input.forPartner
-    ? `If this was unexpected, reach out to ${owner ?? 'the owner of the device'}.`
-    : 'If you did not expect this, check your account activity. If you need more help, reach out to help@virtueinitiative.org.';
+    ? `Reach out to ${owner ?? 'the owner of the device'} if this was unexpected.`
+    : `If this was unexpected, check your account activity. ${HELP_LINE}`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
@@ -536,6 +539,15 @@ export function renderDeviceLoggedOutTemplate(input: {
   };
 }
 
+const ALERT_NOTE =
+  'This email was sent because our automated checks found something. Please review the activity and talk with your partner. Remember, the goal is not to bring shame, but to bring encouragement.';
+
+const alertSeverityLabels: Record<TamperSeverity, string> = {
+  critical: 'High risk',
+  warning: 'Medium risk',
+  info: 'Low risk',
+};
+
 export function renderTamperAlertTemplate(input: {
   severity: TamperSeverity;
   ownerName?: string | null;
@@ -550,23 +562,27 @@ export function renderTamperAlertTemplate(input: {
   const owner = input.ownerName?.trim() || input.ownerEmail;
   const detailText = input.details?.trim();
   const deviceLine = `Device: ${input.deviceName}`;
+  const alertLabel = `${alertSeverityLabels[input.severity]} alert`;
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: `${input.severity} tamper alert`,
+    headline: alertLabel,
     textLines: [
-      `${owner} triggered a ${input.severity} tamper alert.`,
+      `${owner} triggered a ${alertLabel.toLowerCase()}.`,
       deviceLine,
       input.title,
       ...(detailText ? ['', detailText] : []),
       '',
+      ALERT_NOTE,
+      '',
       `Review recent screenshots and logs: ${input.appUrl}`,
     ],
     htmlSections: [
-      paragraph(`${owner} triggered a ${input.severity} tamper alert.`),
+      paragraph(`${owner} triggered a ${alertLabel.toLowerCase()}.`),
       paragraph(deviceLine),
       paragraph(input.title),
       ...(detailText ? [paragraph(detailText)] : []),
+      paragraph(ALERT_NOTE),
       actionButton(input.appUrl, 'Review screenshots and logs'),
     ],
   });
@@ -769,7 +785,7 @@ export function renderBugReportTemplate(input: {
   const text = [...details, '', input.message].join('\n');
 
   return {
-    subject: `Bug report: ${input.message.slice(0, 80)}`,
+    subject: `Issue report: ${input.message.slice(0, 80)}`,
     text,
     html: `<pre>${escapeHtml(text)}</pre>`,
   };
@@ -780,18 +796,18 @@ export function renderBugReportTemplate(input: {
 // text (API-042); otherwise the endpoint would relay arbitrary content.
 export function renderBugReportConfirmationTemplate(input: { appName: string; appUrl: string }) {
   const appName = normalizeAppName(input.appName);
-  const received = 'We received your bug report.';
+  const received = 'We received your issue report.';
   const addMore = 'Reply to this email to add details or screenshots.';
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
-    headline: 'We received your bug report',
+    headline: 'We received your issue report',
     textLines: ['Hi,', '', received, '', addMore],
     htmlSections: [paragraph('Hi,'), paragraph(received), paragraph(addMore)],
   });
 
   return {
-    subject: 'We received your bug report',
+    subject: 'We received your issue report',
     text: footer.text,
     html: footer.html,
   };
