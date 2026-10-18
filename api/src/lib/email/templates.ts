@@ -48,6 +48,9 @@ const HELP_LINE = `If you need help, reach out to ${HELP_EMAIL}.`;
 const ENCOURAGEMENT_NOTE =
   'Remember, the goal is not to bring shame, but to bring encouragement to live with integrity.';
 
+const DIGEST_NOTE =
+  'If you need to reach out to your partner, remember the goal is not to bring shame, but to bring encouragement to live with integrity.';
+
 const ALERT_NOTE =
   `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
 
@@ -729,7 +732,7 @@ export function renderPartnerDigestTemplate(input: {
     `Medium risk alerts and screenshots: ${totalTamperCounts.warning}`,
     ...partnerSections,
     '',
-    ENCOURAGEMENT_NOTE,
+    DIGEST_NOTE,
   ];
 
   const summaryItems = [
@@ -793,7 +796,7 @@ export function renderPartnerDigestTemplate(input: {
         padding: '0',
       })}">${summaryItems}</ul>`,
       partnerSummarySections,
-      paragraph(ENCOURAGEMENT_NOTE),
+      paragraph(DIGEST_NOTE),
       ...(singleSummary
         ? [actionButton(singleSummary.reportUrl, `Read ${singleOwner}'s report`)]
         : []),
