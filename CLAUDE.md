@@ -145,3 +145,5 @@ Checklist for user-facing text (website, help docs, app UI copy):
 ## Pull requests
 
 When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
+
+For UI or copy changes, attach screenshots with `gh pr create --attach` (see `AGENTS.md`).
