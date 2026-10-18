@@ -50,10 +50,11 @@ out is not something that happens by accident or through a bad connection, so
 a device that's moved from Online to Deactivated has been signed out by whoever
 has access to it.
 
-You and your partners are emailed when a device logs out (partners who have turned
-emails off are skipped), so this status shouldn't be the first you hear of it. If you didn't expect it, check your account
-activity, and reach out to help@virtueinitiative.org if you need help. Partners should reach
-out to the device owner.
+You and your partners are emailed when a device logs out (partners who have
+turned emails off are skipped), so this status shouldn't be the first you hear
+of it. If you didn't expect it, check your account activity, and reach out to
+help@virtueinitiative.org if you need help. Partners should reach out to the
+device owner.
 
 To start monitoring on a computer or phone that has been deactivated, log in on it.
 That registers it as a **new** device on the website, listed separately.
