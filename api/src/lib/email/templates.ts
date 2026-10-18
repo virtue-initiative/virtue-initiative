@@ -514,8 +514,8 @@ export function renderDeviceLoggedOutTemplate(input: {
     ? `${owner ?? 'One of your monitored accounts'} logged out of the device "${input.deviceName}" (${input.devicePlatform}), so ${appName} is no longer monitoring it.`
     : `Your device "${input.deviceName}" (${input.devicePlatform}) logged out of ${appName} and is no longer being monitored.`;
   const followup = input.forPartner
-    ? 'If you did not expect this, review the account dashboard and recent activity.'
-    : 'If you did not expect this, review your account and sign the device back in.';
+    ? `If this was unexpected, reach out to ${owner ?? 'the owner of the device'}.`
+    : 'If you did not expect this, check your account activity. If you need more help, reach out to help@virtueinitiative.org.';
   const footer = withFooter({
     appName,
     appUrl: input.appUrl,
