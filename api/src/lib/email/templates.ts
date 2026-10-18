@@ -42,7 +42,14 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#39;');
 }
 
-const HELP_LINE = 'If you need help, reach out to help@virtueinitiative.org.';
+export const HELP_EMAIL = 'help@virtueinitiative.org';
+const HELP_LINE = `If you need help, reach out to ${HELP_EMAIL}.`;
+
+const ENCOURAGEMENT_NOTE =
+  'Remember, the goal is not to bring shame, but to bring encouragement to live with integrity.';
+
+const ALERT_NOTE =
+  `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
 
 function paragraph(text: string) {
   return `<p style="${inlineStyle({
@@ -337,7 +344,7 @@ export function renderAccountExistsTemplate(input: {
       `If this was you, log in instead: ${input.loginUrl}`,
       `Forgot your password? Reset it here: ${input.forgotPasswordUrl}`,
       '',
-      'If you did not expect this, you can safely ignore this email.',
+      `If you did not expect this, you can safely ignore this email. ${HELP_LINE}`,
     ],
     htmlSections: [
       paragraph(greeting),
@@ -351,7 +358,7 @@ export function renderAccountExistsTemplate(input: {
         'font-size': '13px',
         'line-height': '1.5',
       })}">Forgot your password? ${themedLink(input.forgotPasswordUrl, 'Reset it here')}.</p>`,
-      paragraph('If you did not expect this, you can safely ignore this email.'),
+      paragraph(`If you did not expect this, you can safely ignore this email. ${HELP_LINE}`),
     ],
   });
 
@@ -381,7 +388,7 @@ export function renderEmailInUseTemplate(input: {
       '',
       `If you forgot your password, you can reset it here: ${input.forgotPasswordUrl}`,
       '',
-      'If you did not expect this, you can safely ignore this email.',
+      `If you did not expect this, you can safely ignore this email. ${HELP_LINE}`,
     ],
     htmlSections: [
       paragraph(greeting),
@@ -389,7 +396,7 @@ export function renderEmailInUseTemplate(input: {
         `Someone tried to change a ${appName} account's email address to this one, but it's already associated with your account.`,
       ),
       actionButton(input.forgotPasswordUrl, 'Reset password'),
-      paragraph('If you did not expect this, you can safely ignore this email.'),
+      paragraph(`If you did not expect this, you can safely ignore this email. ${HELP_LINE}`),
     ],
   });
 
@@ -539,12 +546,6 @@ export function renderDeviceLoggedOutTemplate(input: {
   };
 }
 
-const ENCOURAGEMENT_NOTE =
-  'Remember, the goal is not to bring shame, but to bring encouragement to live with integrity.';
-
-const ALERT_NOTE =
-  `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
-
 const alertSeverityLabels: Record<TamperSeverity, string> = {
   critical: 'High risk',
   warning: 'Medium risk',
@@ -571,7 +572,7 @@ export function renderTamperAlertTemplate(input: {
     appUrl: input.appUrl,
     headline: alertLabel,
     textLines: [
-      `${owner} triggered a ${alertLabel.toLowerCase()}.`,
+      `${owner} has a new ${alertLabel.toLowerCase()}.`,
       deviceLine,
       input.title,
       ...(detailText ? ['', detailText] : []),
@@ -581,7 +582,7 @@ export function renderTamperAlertTemplate(input: {
       `Review recent screenshots and logs: ${input.appUrl}`,
     ],
     htmlSections: [
-      paragraph(`${owner} triggered a ${alertLabel.toLowerCase()}.`),
+      paragraph(`${owner} has a new ${alertLabel.toLowerCase()}.`),
       paragraph(deviceLine),
       paragraph(input.title),
       ...(detailText ? [paragraph(detailText)] : []),
@@ -611,8 +612,8 @@ export function renderLockedPasswordAccessedTemplate(input: {
     appName,
     appUrl: input.appUrl,
     headline: 'Locked password accessed',
-    textLines: [line, '', `Review the account: ${input.appUrl}`],
-    htmlSections: [paragraph(line), actionButton(input.appUrl, 'Review account')],
+    textLines: [line, '', ENCOURAGEMENT_NOTE, '', `Review the account: ${input.appUrl}`],
+    htmlSections: [paragraph(line), paragraph(ENCOURAGEMENT_NOTE), actionButton(input.appUrl, 'Review account')],
   });
 
   return {
