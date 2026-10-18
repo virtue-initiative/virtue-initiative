@@ -58,15 +58,15 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         tokens, and similar session data needed to keep you signed in and connect devices to your account.
       </li>
       <li>
-        <strong>Bug reports</strong> - if you choose to report a bug, we receive the description you write,
+        <strong>Issue reports</strong> - if you choose to report an issue, we receive the description you write,
         an optional contact email address, and the platform, app version, and operating system details
         of the device you reported from. From a client app you may also choose to attach a recent excerpt
         of that device's operational log; the app tells you before it does so. These logs describe how
-        the software behaved - they do not contain your screenshots. Bug reports are delivered to us by
+        the software behaved - they do not contain your screenshots. Issue reports are delivered to us by
         email and are not linked to your monitoring data.
       </li>
       <li>
-        <strong>Who a bug report identifies</strong> - a report you send while signed in always tells
+        <strong>Who an issue report identifies</strong> - a report you send while signed in always tells
         us which account it came from, and a report sent from a client app signed in to your account always
         identifies that device by name and platform along with the account that owns it. Your account
         email address is included and is used as the address we reply to, whether or not you fill in the
@@ -135,7 +135,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         available, derived from how long each device was reporting - not from reading your data.
       </li>
       <li>
-        Bug reports are used to diagnose and fix problems, and to reply to you if you gave us a way
+        Issue reports are used to diagnose and fix problems, and to reply to you if you gave us a way
         to reach you.
       </li>
       <li>
@@ -143,7 +143,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         clients, and manage sharing permissions.
       </li>
       <li>
-        We do not use your screenshots, events, or bug reports for advertising, profiling, or model
+        We do not use your screenshots, events, or issue reports for advertising, profiling, or model
         training.
       </li>
     </ul>
@@ -186,7 +186,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       Account, device, and partner records are retained for as long as your account exists. Deleting
       your account removes those records, along with your devices, sessions, and batch metadata,
       immediately; the encrypted batch blobs themselves are removed by the normal 30-day cycle.
-      Donation records are retained as long as we need them for accounting and tax purposes. Bug
+      Donation records are retained as long as we need them for accounting and tax purposes. Issue
       reports live in our support mailbox and are retained as long as they are useful for diagnosis.
     </p>
     <p>
@@ -212,7 +212,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       <li>
         <strong>Amazon Web Services</strong> - delivers our outgoing email (Simple Email Service) and
         reports bounces and complaints back to us. Email we send - alerts, digests, invitations, and account
-        mail - passes through AWS, as do bug reports you submit.
+        mail - passes through AWS, as do issue reports you submit.
       </li>
       <li>
         <strong>Stripe</strong> - processes donations. Payment card details go directly to Stripe and
@@ -244,7 +244,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       relevant encryption keys. Batch metadata, alert details, account records, partner records, and
       other service metadata are stored server-side unencrypted and are intended to be accessible
       only through authorized account access. Passwords are hashed and are not stored in plaintext.
-      Before a client attaches a log excerpt to a bug report, it scrubs anything that looks like a
+      Before a client attaches a log excerpt to an issue report, it scrubs anything that looks like a
       session token from the text. When you choose a new password, your browser sends the first five
       characters of a hash of that password to Have I Been Pwned to warn you if it appears in a
       known breach. Your password itself never leaves your device.

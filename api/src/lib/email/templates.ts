@@ -468,6 +468,44 @@ export function renderPartnerAcceptedTemplate(input: {
   };
 }
 
+export function renderPartnerRemovedTemplate(input: {
+  recipientName?: string | null;
+  otherName?: string | null;
+  otherEmail: string;
+  /** True when the recipient is the monitored account that the partner left. */
+  forOwner: boolean;
+  appName: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const greeting = input.recipientName ? `Hi ${input.recipientName},` : 'Hi,';
+  const other = input.otherName?.trim() || input.otherEmail;
+  const summary = input.forOwner
+    ? `${other} is no longer your accountability partner on ${appName}. They will no longer receive your alerts or reports.`
+    : `${other} removed you as their accountability partner on ${appName}. You will no longer receive their alerts or reports.`;
+  const followup = input.forOwner
+    ? `Reach out to ${other} if this was unexpected. ${HELP_LINE}`
+    : `Reach out to ${other} if you have questions.`;
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Partnership ended',
+    textLines: [greeting, '', summary, followup, '', `Open your dashboard: ${input.appUrl}`],
+    htmlSections: [
+      paragraph(greeting),
+      paragraph(summary),
+      paragraph(followup),
+      actionButton(input.appUrl, 'Open dashboard'),
+    ],
+  });
+
+  return {
+    subject: `${other} and you are no longer accountability partners`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 export function renderDeviceDeletedTemplate(input: {
   appName: string;
   appUrl: string;
