@@ -247,16 +247,17 @@ Run these on a machine with Java 17, Android SDK, NDK `26.1.10909125`, and Rust 
 From `client/android/`:
 
 ```bash
-./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+./gradlew --no-daemon :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest :app:lintDirectDebug :app:lintPlayDebug :app:assembleDebug
 ```
 
 Notes:
 
 - CI also installs `cargo-ndk`.
+- The app has two product flavors: `direct` (the sideloaded APK, with self-update) and `play` (the Google Play build, without self-update or the battery-optimization exemption permission). Check both.
 - Release packaging in CI additionally runs:
 
 ```bash
-./gradlew --no-daemon :app:assembleRelease
+./gradlew --no-daemon :app:lintDirectRelease :app:lintPlayRelease :app:assembleDirectRelease :app:bundlePlayRelease
 ```
 
 ### iOS client CI (`.github/workflows/client-ios.yml`)

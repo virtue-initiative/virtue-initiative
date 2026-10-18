@@ -68,12 +68,14 @@ val updateManifestUrl = (project.findProperty("updateManifestUrl") as String?)
 
 android {
     namespace = "org.virtueinitiative.virtue"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "org.virtueinitiative.virtue"
         minSdk = 29
-        targetSdk = 35
+        // Google Play requires API 36 for new apps and updates from
+        // 2026-08-31.
+        targetSdk = 36
         // -PversionCodeOverride lets a local build stand in for a newer
         // release when testing self-update.
         versionCode = (project.findProperty("versionCodeOverride") as String?)?.toInt()
@@ -94,6 +96,24 @@ android {
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
             }
+        }
+    }
+
+    // `direct` is the sideloaded APK published to GitHub releases, which
+    // updates itself (AppUpdater). `play` is the Google Play build: Play
+    // forbids self-updates and restricts the battery-optimization exemption
+    // prompt, so it leaves out the permissions in src/direct/AndroidManifest.xml
+    // and swaps AppUpdater for a no-op.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("direct") {
+            dimension = "distribution"
+            isDefault = true
+            buildConfigField("boolean", "PLAY_STORE", "false")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "PLAY_STORE", "true")
         }
     }
 

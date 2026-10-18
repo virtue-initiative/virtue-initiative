@@ -25,7 +25,10 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing tool: $1 (check $SCRIPT
 gradle() { ( cd "$ANDROID_DIR" && "$GRADLEW" "$@" ); }
 
 # Maps a --release flag onto Gradle task name casing.
-variant_suffix() { [ "${RELEASE:-0}" = 1 ] && echo "Release" || echo "Debug"; }
+# Flavor + build type, e.g. DirectDebug. PLAY=1 picks the Google Play flavor.
+variant_flavor() { [ "${PLAY:-0}" = 1 ] && echo "Play" || echo "Direct"; }
+variant_type() { [ "${RELEASE:-0}" = 1 ] && echo "Release" || echo "Debug"; }
+variant_suffix() { echo "$(variant_flavor)$(variant_type)"; }
 
 emulator_running() { adb devices | grep -q '^emulator-.*device$'; }
 
