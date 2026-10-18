@@ -51,8 +51,7 @@ const ENCOURAGEMENT_NOTE =
 const DIGEST_NOTE =
   'If you need to reach out to your partner, remember the goal is not to bring shame, but to bring encouragement to live with integrity.';
 
-const ALERT_NOTE =
-  `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
+const ALERT_NOTE = `This email was sent because our automated checks found something possibly questionable. Please review the activity and talk with your partner. ${ENCOURAGEMENT_NOTE}`;
 
 function paragraph(text: string) {
   return `<p style="${inlineStyle({
@@ -654,7 +653,11 @@ export function renderLockedPasswordAccessedTemplate(input: {
     appUrl: input.appUrl,
     headline: 'Locked password accessed',
     textLines: [line, '', ENCOURAGEMENT_NOTE, '', `Review the account: ${input.appUrl}`],
-    htmlSections: [paragraph(line), paragraph(ENCOURAGEMENT_NOTE), actionButton(input.appUrl, 'Review account')],
+    htmlSections: [
+      paragraph(line),
+      paragraph(ENCOURAGEMENT_NOTE),
+      actionButton(input.appUrl, 'Review account'),
+    ],
   });
 
   return {

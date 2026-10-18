@@ -328,7 +328,9 @@ partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
           subject: removedEmail.subject,
           text: removedEmail.text,
           html: removedEmail.html,
-          related_user_id: (removedByOwner ? partnership.watcher_user_id : partnership.watching_user_id) ?? undefined,
+          related_user_id:
+            (removedByOwner ? partnership.watcher_user_id : partnership.watching_user_id) ??
+            undefined,
           related_partnership_id: partnership.id,
           metadata: { removedBy: currentUser.email },
         });
