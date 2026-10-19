@@ -68,7 +68,11 @@ See /api/SPEC.md and /hash-server/SPEC.md for details on the format.
 
 Both hash server uploads and batch uploads MUST be stored in the state object and retried with exponentional backoff on each wakeup.
 
+A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
+
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
+
+The hash server token returned with the device settings is valid for 2 hours (see /api/SPEC.md API-002). The daemon SHOULD keep using it until shortly before it expires, and MUST NOT refresh it on a schedule shorter than the batch interval. If the hash server rejects the token as unauthorized, the daemon MUST fetch a new one before its next hash upload.
 
 ## CORE-006 Other events
 
@@ -128,6 +132,12 @@ Every field except `is_running` MUST be derivable from persisted state plus the 
 
 MUST record that the user explicitly stopped monitoring while it was expected to be running (see §2's `user_stop` alert).
 
+### CORE-022 note_user_start
+
+`note_user_start()`
+
+MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes. A no-op when no stop is active. The core MUST also offer `queue_note_user_start()`, a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
+
 ### CORE-012 queue_upload
 
 `queue_upload(upload)`
@@ -144,7 +154,7 @@ MUST force the next tick to upload the current batch immediately rather than wai
 
 `request_stop()`
 
-MUST stop the loop after its current tick. The loop MAY be started again afterward.
+MUST stop the loop after its current tick. The loop MAY be started again afterward. The request stays queued until a loop consumes it, so a caller MUST NOT send it while no loop is running: the next loop to start would stop immediately.
 
 ### CORE-015 tick_once
 

@@ -45,7 +45,7 @@
     <string name="open_log_chooser">Open Virtue log</string>
     <string name="open_log_unavailable">No log file has been written yet.</string>
     <string name="open_log_no_viewer">No app on this device can open a text file.</string>
-    <string name="btn_report_bug">Report a Bug</string>
+    <string name="btn_report_bug">Report an Issue</string>
     <string name="btn_send_report">Send Report</string>
     <string name="btn_install_update">Install Update %1$s</string>
 
@@ -77,7 +77,7 @@
     <string name="dialog_accessibility_title">Turn on Screen Monitoring</string>
     <string name="dialog_cancel">Cancel</string>
     <string name="dialog_confirm">Confirm</string>
-    <string name="dialog_report_bug_title">Report a Bug</string>
+    <string name="dialog_report_bug_title">Report an Issue</string>
     <string name="report_bug_description_hint">Describe the issue</string>
     <string name="report_bug_contact_email_hint">Contact email (optional)</string>
     <string name="report_bug_include_logs">Include the last day of diagnostic logs</string>

@@ -74,7 +74,7 @@ export const handlers = [
     HttpResponse.json({ watchers: [TEST_WATCHER], watching: [TEST_WATCHING] }),
   ),
   http.post(`${BASE}/partner`, () =>
-    HttpResponse.json({ id: 'new-watching-1', invite_token: 'tok123' }),
+    HttpResponse.json({ id: 'new-watching-1', status: 'pending' }),
   ),
   http.post(`${BASE}/partner/validate`, () =>
     HttpResponse.json({ owner: { id: 'some-user', name: 'Some User', email: 'some@example.com' } }),

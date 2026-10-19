@@ -13,7 +13,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`. It MUST be valid for 2 hours, so that a device uploading a batch every hour does not need `GET /d/device` in between
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -57,7 +57,6 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "owner": UUID,
   "name": "My Laptop",
   "platform": "linux",
-  "last_upload_at": DateTime | null,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
   "status": "online" | "offline" | "logged_out"
@@ -69,6 +68,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```js
 {
   "id": UUID,
+  "user_id": UUID, // the owner of the device
   "device_id": UUID,
   "start_time": DateTime,
   "end_time": DateTime,
@@ -90,10 +90,15 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     "email": "partner@example.com",
     "name": "Partner Name" | undefined
   },
-  "status": "pending" | "accepted",
-  "created_at": DateTime
+  "status": "pending" | "accepted" | "invite_failed",
+  "created_at": DateTime,
+  "accepted_at": DateTime | undefined
 }
 ```
+
+`created_at` is when the invite was sent. `accepted_at` MUST be set when the invite is accepted (API-025) and MUST be omitted for a partnership that has not been accepted.
+
+`invite_failed` MUST only be reported in `watchers`, for a pending partnership whose invite token has a bounce (see API-056).
 
 **DeviceSettings**
 
@@ -235,6 +240,12 @@ If a user at that email already exists, the server MUST send a notification to t
 
 In BOTH cases, the server MUST respond **HTTP 204**.
 
+If the email has a permanent bounce (see API-056), the server MUST NOT send either email. It MUST respond **HTTP 422** with this shape, whether or not a user exists at that email.
+
+```js
+{ "error": "...", "code": "email_bounced" }
+```
+
 ### API-010 `POST /signup`
 
 The client MUST provide this request shape.
@@ -248,7 +259,8 @@ The client MUST provide this request shape.
   "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
   "email_digest_minutes_utc": Number | undefined,
-  "newsletter_opt_in": Boolean | undefined
+  "newsletter_opt_in": Boolean | undefined,
+  "timezone": "America/New_York" | undefined
 }
 ```
 
@@ -260,7 +272,9 @@ The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note
 
 The server MUST return a `refresh_token` cookie containing the refresh token.
 
-The server MUST create an account for the user and return **HTTP 200** with this shape.
+If `timezone` is absent or is not a valid IANA time zone name, the server MUST use `UTC` instead and MUST NOT reject the signup.
+
+The server MUST create an account for the user, with `settings.email_frequency` set to `weekly` and `settings.timezone` set to the provided `timezone`, and return **HTTP 200** with this shape.
 
 ```js
 {
@@ -392,7 +406,15 @@ If the email has been marked as unverified, the server SHOULD send a verificatio
   { "error": "Please verify your email before logging in. A verification email has been sent." }
 ```
 
+If that verification email was not sent because the email has a permanent bounce (see API-056), the server MUST instead return `403` with
+
+```js
+{ "error": "...", "code": "email_bounced" }
+```
+
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
+
+If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
 
 ### API-017 `POST /email-verification/validate`
 
@@ -445,9 +467,14 @@ The client MUST provide a request in this shape.
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined
+  "settings": {
+    "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
+    "timezone": "America/New_York" | undefined
+  } | undefined
 }
 ```
+
+If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
 The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
 
@@ -461,9 +488,12 @@ The server MUST return this response shape.
 {
   "ok": true,
   "email_verification_required": true | undefined,
-  "pending_email": "new@example.com" | undefined
+  "pending_email": "new@example.com" | undefined,
+  "email_bounced": true | undefined
 }
 ```
+
+The server MUST set `email_bounced` when the `email_change` email was not sent because the new email has a permanent bounce (see API-056).
 
 ### API-021 `DELETE /user?confirm_email=[email]`
 
@@ -512,20 +542,25 @@ The client MUST authenticate with a **Web Token** and send
 
 ```js
 {
-  "email": "partner@example.com"
+  "email": "partner@example.com",
+  "replace_id": UUID | undefined
 }
 ```
 
 The server SHOULD send a partner request email to the provided email address.
+
+If `replace_id` is provided, it MUST name a partnership the user owns that has not been accepted, otherwise the server MUST respond **HTTP 404**. The server MUST delete that partnership and its invite token before creating the new one. This is how a failed invite is resent.
 
 The server SHOULD then respond **HTTP 200**
 
 ```js
 {
   "id": UUID,
-  "status": "pending"
+  "status": "pending" | "invite_failed"
 }
 ```
+
+`invite_failed` means the invite was not sent because the email has a permanent bounce (see API-056).
 
 ### API-024 `POST /partner/validate`
 
@@ -681,6 +716,8 @@ The client MUST be authenticated with a **Web Token**.
 
 The server SHOULD fetch the count from the hash server and the last updated from the hash server.
 
+The server MUST report `status` as `logged_out` for a logged-out device, `online` when `last_hash_at` is within the last 2 hours, and `offline` otherwise, including when the hash server cannot be reached. The server SHOULD NOT read batches to build this response. A client that needs a device's last upload SHOULD derive it from the batches returned by `GET /data` (API-033).
+
 The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
 
 ```js
@@ -813,7 +850,11 @@ The client MUST send a multipart form request:
 
 The server MUST upload the file to object storage and store the metadata in the database.
 
+The server MUST clamp an `end_time` later than the time it received the batch to that time, and a `start_time` later than the resulting `end_time` to it, and SHOULD log a warning when it does. Both come from the device clock, and a batch is uploaded after the period it covers.
+
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
+
+The server SHOULD NOT store a batch's `url`. It MUST derive the `url` from the batch's stored version, its owner and its `id`, so that a later change to the object storage layout leaves batches uploaded under an earlier version resolving to where they were stored.
 
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
 
@@ -836,19 +877,62 @@ This forwards to R2. Only used in dev. It SHOULD be disabled in production.
 
 ### API-041 `POST /email/sns`
 
-The server MUST handle any AWS SNS webhook.
+The server MUST handle AWS SNS webhooks for the topics listed in `SNS_TOPIC_ARNS`, a comma-separated list of topic ARNs.
 
-The server MUST confirm the subscription (`SubscriptionConfirmation`)
+The server MUST reject a request with **HTTP 400** if the body is not an SNS message, and with **HTTP 403** if:
 
-The server SHOULD process `Bounce`/`Complaint` notifications by marking the users' emails as bounced and unverified.
+- `TopicArn` is not in `SNS_TOPIC_ARNS` (an unset or empty list rejects every request)
+- `SigningCertURL` is not an HTTPS URL on an `sns.<region>.amazonaws.com` host
+- the SNS message signature (`SignatureVersion` `1` or `2`) does not verify against that certificate
 
-The server MUST respond **HTTP 200** with this shape.
+The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
+
+The server MUST confirm the subscription (`SubscriptionConfirmation`) by fetching `SubscribeURL`, and MUST reject the request with **HTTP 403** if that is not an HTTPS URL on an `sns.<region>.amazonaws.com` host.
+
+The server MUST record every recipient of a `Bounce` notification as an email bounce (see API-056). It SHOULD mark users at a permanently bounced email as bounced and unverified. A temporary bounce MUST NOT mark a user unverified.
+
+The server SHOULD process `Complaint` notifications by marking the users' emails as unverified.
+
+For an accepted message the server MUST respond **HTTP 200** with this shape.
 
 ```js
 { "ok": true, "subscribed": true }   // SubscriptionConfirmation
 { "ok": true, "updated": Number }    // Bounce/Complaint notification
 { "ok": true }                        // ignored event
 ```
+
+### API-056 Email bounces
+
+The server MUST keep a record of each bounce with this shape.
+
+```js
+{
+  "id": UUID,
+  "email": "user@example.com",
+  "bounced_at": DateTime,
+  "reason": "permanent" | "temporary"
+}
+```
+
+A `Bounce` notification with `bounceType` `Permanent` is `permanent`. Any other `bounceType` is `temporary`.
+
+Every email token MUST have a nullable reference to an email bounce. A token with a bounce is one whose email was not delivered. The token itself stays valid.
+
+When the server sends an email for an email token, it SHOULD tag the message with the token's id, so a later `Bounce` notification can be matched to that token. On a bounce, the server MUST set the bounce on the token the notification names. On a permanent bounce, it MUST also set the bounce on every other unconsumed token for that email that has none.
+
+The server MUST NOT send any email to an address that has a permanent bounce. If that email was for an email token, the server MUST instead set that bounce on the token immediately.
+
+The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
+
+### API-057 Digest emails
+
+The server MUST run a digest job every hour. It MUST send each verified watcher whose `email_frequency` is `daily` or `weekly` one digest email that summarizes every user they watch.
+
+A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
+
+A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
+
+The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
 
 ### API-042 `POST /bug-report`
 

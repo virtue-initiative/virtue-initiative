@@ -152,7 +152,7 @@ struct ContentView: View {
                     }
 
                     HStack(spacing: 10) {
-                        Button("Report a Bug") {
+                        Button("Report an Issue") {
                             showReportBugSheet = true
                         }
                         .buttonStyle(VirtueButtonStyle())
@@ -223,6 +223,7 @@ struct ContentView: View {
                         email: $coordinator.email,
                         password: $coordinator.password,
                         deviceName: $coordinator.deviceName,
+                        deviceNamePlaceholder: "Device name (default \"\(NativeBridge.defaultDeviceName())\")",
                         isSigningIn: coordinator.isSigningIn,
                         loginError: coordinator.loginError,
                         onSubmit: coordinator.login

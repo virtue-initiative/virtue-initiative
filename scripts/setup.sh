@@ -82,6 +82,14 @@ fi
 # Web deps
 setdir "." && bun install
 
+# Rust build cache — only if this machine has opted in (see scripts/cow-cache.sh).
+# Without the mount or a base build, cargo just uses plain target/ dirs as usual.
+COW_DIR="${VIRTUE_COW_DIR:-/mnt/virtue-cow}"
+if mountpoint -q "$COW_DIR" 2> /dev/null && [ -f "$COW_DIR/base/info" ]; then
+  "$ROOT/scripts/cow-cache.sh" link \
+    || echo "Warning: couldn't link the shared Rust build cache; using plain target/ dirs" >&2
+fi
+
 # Shared config that's identical across worktrees (secrets, machine-local
 # paths), then .env (repo root, per-worktree overrides) on top of it. See
 # AGENTS.md for the recognized keys.

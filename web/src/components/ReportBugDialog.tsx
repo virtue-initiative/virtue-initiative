@@ -53,7 +53,7 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
 
   return (
     <Dialog dialogRef={dialogRef} onClose={handleClose}>
-      <DialogHeader>Report a bug</DialogHeader>
+      <DialogHeader>Report an issue</DialogHeader>
       <form onSubmit={handleSubmit}>
         <Alert variant="info">
           If this is about your monitoring logs or screenshots, report it from the Virtue client app

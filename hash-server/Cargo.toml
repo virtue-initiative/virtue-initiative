@@ -27,3 +27,10 @@ rand = "0.8"
 pkcs8 = { version = "0.10", features = ["pem"] }
 tracing-test = "0.2"
 tower = { version = "0.5", features = ["util"] }
+
+# No debug info for dependencies (`*` matches only non-workspace crates), so
+# linked binaries don't each embed all of their dependencies' DWARF. Keeps
+# worktree copies of the shared build cache (scripts/cow-cache.sh) small and
+# linking fast; hash-server's own code keeps full debug info.
+[profile.dev.package."*"]
+debug = false

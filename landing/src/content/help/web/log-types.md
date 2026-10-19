@@ -15,13 +15,15 @@ this page.
 ## Screenshot
 
 A screenshot was captured on the device. This is the most common entry. The
-monitoring app captures the screen on a regular interval while it is running.
+monitoring app captures the screen at random moments, about every five
+minutes on average, while it is running.
 
 ## Screenshot Skipped
 
 Monitoring was active but no screenshot was uploaded. Either the screen had
-not changed since the last capture, or the device was locked or asleep. This
-keeps the timeline continuous without storing redundant images.
+not changed since the last capture, or the screen was locked, showing the
+screensaver, or turned off. This keeps the timeline continuous without storing
+redundant images.
 
 ## System Login
 
@@ -35,10 +37,12 @@ The user logged out of this computer, or the computer was shut down.
 ## Screenshot Missed
 
 A scheduled screenshot was noticeably late, or several recent ones added up to
-a longer-than-expected delay, and it wasn't explained by a nearby sign-in or
-sign-out. This can happen when the device was offline, under heavy load, or
-asleep without recording a sleep event. An occasional one is normal; frequent
-ones are worth investigating.
+a longer-than-expected delay, and it wasn't explained by a nearby sign-in,
+sign-out, or the device being asleep. Time spent asleep does not create this
+event. It usually means the monitoring app was not running for a while, for
+example because it was killed or frozen, or the device was too busy to run it
+on time. Being offline does not cause it. An occasional one is normal; frequent ones are
+worth investigating.
 
 ## Monitoring Stopped by User
 
@@ -51,17 +55,10 @@ A user resumed monitoring after previously stopping it.
 
 ## Repeated Restarts
 
-The monitoring process was started, stopped, or killed and relaunched an
-unusually high number of times in a short span. This can indicate someone is
-repeatedly trying to disable monitoring by killing the process, or a genuine
-crash loop. Investigate if you see this.
-
-## Repeated Restarts
-
-The monitoring process was started, stopped, or killed and relaunched an
-unusually high number of times in a short span. This can indicate someone is
-repeatedly trying to disable monitoring by killing the process, or a genuine
-crash loop. Investigate if you see this.
+The monitoring process started many times in a short span (more than 20 times
+within 10 minutes). This can indicate someone is repeatedly trying to disable
+monitoring by killing the process, or a genuine crash loop. Updates can also
+cause a few restarts, but not this many. Investigate if you see this.
 
 ## Alert
 
@@ -69,8 +66,8 @@ A general alert was raised. Open the entry to read the alert message.
 
 ## Capture Failed
 
-Screenshot capture failed repeatedly on the device. This usually points to a
-configuration or permissions problem with screen capture — see the
+Screenshot capture failed several times in a row on the device (5 failures
+within 30 minutes). This usually points to a configuration or permissions problem with screen capture — see the
 [installation guide](/download) for your platform.
 
 ## Developer

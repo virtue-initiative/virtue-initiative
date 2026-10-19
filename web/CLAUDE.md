@@ -9,7 +9,7 @@ These two files implement the TypeScript side of contracts shared with the Rust 
 - `src/utils/api/crypto.ts` — AES-256-GCM decrypt, HPKE unwrap, argon2id password derivation, hash-chain verification
 - `src/utils/api/batch-materializer.ts` — fetches and decrypts the batch blob produced by the Rust client; decodes the msgpack event array
 
-Changes to the encryption format, nonce layout, msgpack schema, or hash algorithm must mirror the Rust implementation in `client/core/src/crypto.rs` and `client/core/src/batch.rs`.
+Changes to the encryption format, nonce layout, msgpack schema, or hash algorithm must mirror the Rust implementation in `client/core/src/crypto.rs` and `client/core/src/module/upload/batch.rs`.
 
 ## Code map
 
@@ -22,18 +22,18 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 
 ### API / data layer (`src/utils/api/`)
 
-| File                    | What's here                                                                                                                                                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `api.ts`                | Raw `req()` fetch wrapper (auto-reauth on 401), `api` object with every typed endpoint call, re-exports all shared types from `@virtueinitiative/shared-web/types`                                                       |
-| `session.ts`            | `Session` class — `fromLogin`, `fromFinishSignup`, `restore`; wrapping-key localStorage persistence; token-refresh handler                                                                                               |
-| `client.ts`             | `APIClient` — observable caches for user / partners / devices; `queryLogs` entry point with concurrent batch-decryption workers                                                                                          |
-| `hooks.tsx`             | `APIProvider`, `useAPIContext`, `useSetAPIClient`, `useUser`, `usePartners`, `useDevices`                                                                                                                                |
-| `index.ts`              | Public re-exports: `login`, `requestSignup`, `finishSignup` convenience wrappers + everything from hooks                                                                                                                 |
-| `crypto.ts`             | `derivePasswordMaterial` (argon2id+HKDF), `encryptData`/`decryptBatch` (AES-256-GCM), `generateUserKeyPair`/`importUserPrivateKey`/`unwrapBatchKey`/`encryptForPublicKey` (HPKE X25519), `decompressGzip`, `verifyBatch` |
-| `batch-materializer.ts` | `decryptAndFlattenBatch` — fetch URL → unwrap key → AES-GCM decrypt → gzip decompress → msgpack decode → `verifyBatch` → return `FeedLog[]`                                                                              |
-| `../cache/client.ts`    | `cacheClient` — leader-elected wrapper around the cache worker (BroadcastChannel fan-out); `cacheQuery`, `refetch`, `clearCache` (hard reset, with a direct-OPFS-wipe fallback), `getDecryptionStats`                    |
-| `../cache/worker.ts`    | Worker owning the OPFS-backed SQLite cache (`/cache.db`, `opfs-sahpool` VFS): opens and drift-checks the DB, fetches `/data`, decrypts batches, serves queries as streamed chunks                                        |
-| `../cache/schema.ts`    | Declared cache tables, `CACHE_SCHEMA_VERSION`, `findSchemaDrift` — a version or column mismatch rebuilds the cache instead of failing every query with `no such column`                                                  |
+| File                    | What's here                                                                                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api.ts`                | Raw `req()` fetch wrapper (auto-reauth on 401), `api` object with every typed endpoint call, re-exports all shared types from `@virtueinitiative/shared-web/types`                                                            |
+| `session.ts`            | `Session` class — `fromLogin`, `fromFinishSignup`, `restore`; wrapping-key localStorage persistence; token-refresh handler                                                                                                    |
+| `client.ts`             | `APIClient` — observable caches for user / partners / devices; `queryLogs` entry point with concurrent batch-decryption workers                                                                                               |
+| `hooks.tsx`             | `APIProvider`, `useAPIContext`, `useSetAPIClient`, `useUser`, `usePartners`, `useDevices`                                                                                                                                     |
+| `index.ts`              | Public re-exports: `login`, `requestSignup`, `finishSignup` convenience wrappers + everything from hooks                                                                                                                      |
+| `crypto.ts`             | `derivePasswordMaterial` (argon2id+HKDF), `encryptData`/`decryptBatch` (AES-256-GCM), `generateUserKeyPair`/`importUserPrivateKey`/`unwrapBatchKey`/`encryptForPublicKey` (HPKE X25519), `decompressGzip`, `verifyBatch`      |
+| `batch-materializer.ts` | `decryptAndFlattenBatch` — fetch URL → unwrap key → AES-GCM decrypt → gzip decompress → msgpack decode → `verifyBatch` → return `FeedLog[]`                                                                                   |
+| `../cache/client.ts`    | `cacheClient` — leader-elected wrapper around the cache worker (BroadcastChannel fan-out); `cacheQuery`, `refetch`, `clearCache` (hard reset, with a direct-OPFS-wipe fallback), `getDecryptionStats`, `getDeviceLastUploads` |
+| `../cache/worker.ts`    | Worker owning the OPFS-backed SQLite cache (`/cache.db`, `opfs-sahpool` VFS): opens and drift-checks the DB, fetches `/data`, decrypts batches, serves queries as streamed chunks                                             |
+| `../cache/schema.ts`    | Declared cache tables, `CACHE_SCHEMA_VERSION`, `findSchemaDrift` — a version or column mismatch rebuilds the cache instead of failing every query with `no such column`                                                       |
 
 ### Pages (`src/pages/`)
 

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/preact';
+import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
@@ -207,5 +207,78 @@ describe('Partners — Invite partner dialog', () => {
     await waitFor(() => {
       expect((inviteBody as { email: string }).email).toBe('alice@example.com');
     });
+  });
+
+  it('shows an invite error inline in the dialog', async () => {
+    server.use(
+      http.post(`${BASE}/partner`, () =>
+        HttpResponse.json({ error: 'Already a partner' }, { status: 409 }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Partners />);
+
+    await user.click(await screen.findByRole('button', { name: /invite partner/i }));
+    await user.type(screen.getByPlaceholderText('partner@example.com'), 'alice@example.com');
+    await user.click(screen.getByRole('button', { name: /send invite/i }));
+
+    const dialog = screen.getByRole('dialog');
+    await waitFor(() => {
+      expect(dialog.querySelector('.vi-field__error')).toBeInTheDocument();
+    });
+  });
+});
+
+describe('Partners — failed invites', () => {
+  const failedInvite = {
+    id: 'watcher-failed',
+    user: { email: 'typo@example.com' },
+    status: 'invite_failed' as const,
+  };
+
+  it('shows a failed invite and resends it to a corrected email', async () => {
+    const user = userEvent.setup();
+    let watchers: unknown[] = [failedInvite];
+    let resendBody: unknown;
+    server.use(
+      http.get(`${BASE}/partner`, () => HttpResponse.json({ watchers, watching: [] })),
+      http.post(`${BASE}/partner`, async ({ request }) => {
+        resendBody = await request.json();
+        watchers = [{ id: 'watcher-new', user: { email: 'right@example.com' }, status: 'pending' }];
+        return HttpResponse.json({ id: 'watcher-new', status: 'pending' });
+      }),
+    );
+    renderWithClient(<Partners />);
+
+    expect(await screen.findByText('Email invite failed')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resend invite' }));
+
+    const input = screen.getByDisplayValue('typo@example.com');
+    await user.clear(input);
+    await user.type(input, 'right@example.com');
+    const dialog = input.closest('dialog')!;
+    await user.click(within(dialog).getByRole('button', { name: 'Resend invite' }));
+
+    await waitFor(() => {
+      expect(resendBody).toEqual({ email: 'right@example.com', replace_id: 'watcher-failed' });
+      expect(screen.getByText('right@example.com')).toBeInTheDocument();
+      expect(screen.queryByText('Email invite failed')).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not offer a resend for an ordinary pending invite', async () => {
+    server.use(
+      http.get(`${BASE}/partner`, () =>
+        HttpResponse.json({
+          watchers: [{ ...failedInvite, status: 'pending' }],
+          watching: [],
+        }),
+      ),
+    );
+    renderWithClient(<Partners />);
+
+    expect(await screen.findByText('Pending')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resend invite' })).not.toBeInTheDocument();
   });
 });

@@ -14,6 +14,8 @@ export default defineWorkersConfig({
             AWS_ACCESS_KEY_ID: 'test-aws-key',
             AWS_SECRET_ACCESS_KEY: 'test-aws-secret',
             EMAIL_DELIVERY_MODE: 'log',
+            SNS_TOPIC_ARNS:
+              'arn:aws:sns:us-east-1:111111111111:old-ses-events, arn:aws:sns:us-east-1:222222222222:ses-events',
             // Intercepted by fetchMock's hash-server test double — see test/hash-server-mock.ts.
             HASH_SERVER_URL: 'https://example.com',
           },

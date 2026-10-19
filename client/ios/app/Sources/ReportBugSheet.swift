@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Report a Bug" form, ported from the Mac/Windows clients' report-issue
+/// "Report an Issue" form, ported from the Mac/Windows clients' report-issue
 /// dialogs: a message box, an optional contact email (pre-filled when signed
 /// in), and an opt-out "include logs" toggle with the same disclosure text.
 struct ReportBugSheet: View {
@@ -56,7 +56,7 @@ struct ReportBugSheet: View {
                     }
                 }
             }
-            .navigationTitle("Report a Bug")
+            .navigationTitle("Report an Issue")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

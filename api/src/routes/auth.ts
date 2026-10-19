@@ -10,9 +10,11 @@ import {
   createEmailToken,
   createSessionRecord,
   createUser,
+  deleteEmailBouncesByEmail,
   deleteUserById,
   deleteSessionByRefreshTokenHash,
   findEmailTokenByHash,
+  findPermanentEmailBounce,
   findUserByEmail,
   findUserById,
   invalidateEmailTokens,
@@ -25,6 +27,7 @@ import {
   renderEmailVerificationTemplate,
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
+  HELP_EMAIL,
 } from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
@@ -41,6 +44,7 @@ import {
   passwordResetValidateSchema,
   passwordResetSchema,
   updateUserSchema,
+  isValidTimezone,
   changePasswordSchema,
   deleteUserSchema,
   type SignupResponse,
@@ -61,6 +65,10 @@ import { subscribeToNewsletter } from '../lib/newsletter';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
+// API-056: shown when an email was not sent because the address has a permanent bounce.
+const EMAIL_BOUNCED_ERROR =
+  'Email to this address bounced, so we did not send another one. Use a different email address.';
+
 function buildHashParamsResponse() {
   return {
     version: CURRENT_HASH_PARAMS.version,
@@ -153,10 +161,11 @@ async function issueEmailToken(
 ) {
   await invalidateEmailTokens(db, user.id, purpose);
   const token = generateOpaqueToken(purpose);
+  const id = uuidv4();
   const now = Date.now();
 
   await createEmailToken(db, {
-    id: uuidv4(),
+    id,
     user_id: user.id,
     email: user.email,
     purpose,
@@ -165,13 +174,13 @@ async function issueEmailToken(
     created_at: now,
   });
 
-  return token;
+  return { id, token };
 }
 
 async function sendVerificationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
-  token: string,
+  { id: tokenId, token }: { id: string; token: string },
   purpose: 'email_change' | 'email_verification' = 'email_change',
 ) {
   const verifyUrl = `${c.env.APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
@@ -182,7 +191,7 @@ async function sendVerificationEmail(
     verifyUrl,
   });
 
-  await sendEmail({
+  return sendEmail({
     env: c.env,
     db: c.env.DB,
     kind: 'email_verification',
@@ -191,6 +200,7 @@ async function sendVerificationEmail(
     text: email.text,
     html: email.html,
     related_user_id: user.id,
+    email_token_id: tokenId,
     metadata: { purpose, verifyUrl },
   });
 }
@@ -198,7 +208,7 @@ async function sendVerificationEmail(
 async function sendSignupConfirmationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   recipient: { email: string; name?: string | null },
-  token: string,
+  { id: tokenId, token }: { id: string; token: string },
   options?: { to?: string },
 ) {
   const params = new URLSearchParams({ signup_token: token });
@@ -221,6 +231,7 @@ async function sendSignupConfirmationEmail(
     subject: email.subject,
     text: email.text,
     html: email.html,
+    email_token_id: tokenId,
     metadata: { purpose: 'signup', verifyUrl },
   });
 }
@@ -281,7 +292,12 @@ async function sendPasswordResetEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   user: { id: string; email: string; name?: string | null },
 ) {
-  const token = await issueEmailToken(c.env.DB, user, 'password_reset', PASSWORD_RESET_TTL_MS);
+  const { id: tokenId, token } = await issueEmailToken(
+    c.env.DB,
+    user,
+    'password_reset',
+    PASSWORD_RESET_TTL_MS,
+  );
   const resetUrl = `${c.env.APP_URL}/forgot-password?token=${encodeURIComponent(token)}`;
   const email = renderPasswordResetTemplate({
     appName: c.env.APP_NAME,
@@ -299,6 +315,7 @@ async function sendPasswordResetEmail(
     text: email.text,
     html: email.html,
     related_user_id: user.id,
+    email_token_id: tokenId,
     metadata: { purpose: 'password_reset', resetUrl },
   });
 }
@@ -367,6 +384,13 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) => {
   const { email, to } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
+
+  // API-009: checked before the account lookup so the answer is the same
+  // whether or not the address has an account.
+  if (await findPermanentEmailBounce(c.env.DB, normalizedEmail)) {
+    return c.json({ error: EMAIL_BOUNCED_ERROR, code: 'email_bounced' }, 422);
+  }
+
   const existingUser = await findUserByEmail(c.env.DB, normalizedEmail);
 
   if (existingUser) {
@@ -375,10 +399,11 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
   }
 
   const token = generateOpaqueToken('signup');
+  const tokenId = uuidv4();
   const now = Date.now();
 
   await createEmailToken(c.env.DB, {
-    id: uuidv4(),
+    id: tokenId,
     user_id: null,
     email: normalizedEmail,
     purpose: 'signup',
@@ -387,9 +412,12 @@ auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) =
     created_at: now,
   });
 
-  await sendSignupConfirmationEmail(c, { email: normalizedEmail }, token, {
-    to: to ?? undefined,
-  });
+  await sendSignupConfirmationEmail(
+    c,
+    { email: normalizedEmail },
+    { id: tokenId, token },
+    { to: to ?? undefined },
+  );
 
   return c.body(null, 204);
 });
@@ -419,6 +447,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     encrypted_priv_key,
     name,
     newsletter_opt_in,
+    timezone,
   } = c.req.valid('json');
 
   const record = await getValidTokenRecord(c.env.DB, verification_token, 'signup');
@@ -460,9 +489,11 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     encrypted_priv_key: decoded.data.encrypted_priv_key,
     name,
     email_verified: true,
+    timezone: isValidTimezone(timezone) ? timezone : undefined,
   });
 
   await consumeEmailToken(c.env.DB, record, Date.now());
+  await deleteEmailBouncesByEmail(c.env.DB, normalizedEmail);
 
   await createSession(c, userId);
 
@@ -498,7 +529,21 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
       'email_verification',
       EMAIL_VERIFICATION_TTL_MS,
     );
-    await sendVerificationEmail(c, result.user, verificationToken, 'email_verification');
+    const sent = await sendVerificationEmail(
+      c,
+      result.user,
+      verificationToken,
+      'email_verification',
+    );
+    if (sent.bounce_id) {
+      return c.json(
+        {
+          error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
+          code: 'email_bounced',
+        },
+        403,
+      );
+    }
     return c.json(
       { error: 'Please verify your email before logging in. A verification email has been sent.' },
       403,
@@ -507,7 +552,8 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 
   const { user } = result;
 
-  if (timezone) {
+  // API-016: an unknown timezone is ignored rather than failing the login.
+  if (isValidTimezone(timezone)) {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 
@@ -553,6 +599,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
   await updateUser(c.env.DB, userId, { name, settings });
 
   const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
+  let emailBounced = false;
   if (emailChanged) {
     const existingUser = await findUserByEmail(c.env.DB, normalizedEmail!);
     if (existingUser && existingUser.id !== userId) {
@@ -567,7 +614,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
         'email_change',
         EMAIL_VERIFICATION_TTL_MS,
       );
-      await sendVerificationEmail(
+      const sent = await sendVerificationEmail(
         c,
         {
           id: userId,
@@ -576,6 +623,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
         },
         verificationToken,
       );
+      emailBounced = Boolean(sent.bounce_id);
     }
   }
 
@@ -585,6 +633,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
       ? {
           email_verification_required: true,
           pending_email: normalizedEmail,
+          ...(emailBounced ? { email_bounced: true } : {}),
         }
       : {}),
   });
@@ -698,6 +747,8 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   }
 
   await consumeEmailToken(c.env.DB, record, Date.now());
+  // API-056: following the link proves the address receives mail.
+  await deleteEmailBouncesByEmail(c.env.DB, record.email);
 
   await createSession(c, userId);
 

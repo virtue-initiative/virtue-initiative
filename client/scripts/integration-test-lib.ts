@@ -211,30 +211,47 @@ export function run(
   }
 }
 
-/** `wrangler d1 execute --json`, parsed directly -- no shell-out needed to extract fields. */
+/**
+ * `wrangler d1 execute --json`, parsed directly -- no shell-out needed to extract fields.
+ * It opens the same local SQLite file as the running API, so it fails with SQLITE_BUSY
+ * if the daemon's upload is writing at that moment; that is retried.
+ */
 function d1QueryJson(
   apiDir: string,
   sql: string,
 ): Array<{ results?: Array<Record<string, unknown>> }> {
-  const result = Bun.spawnSync(
-    [
-      'bun',
-      'run',
-      'wrangler',
-      'd1',
-      'execute',
-      'staging-app-db',
-      '--local',
-      '--env',
-      'staging',
-      '--json',
-      '--command',
-      sql,
-    ],
-    { cwd: apiDir, stdout: 'pipe', stderr: 'inherit' },
-  );
-  if (!result.success) fail(`wrangler d1 execute failed for: ${sql}`);
-  return JSON.parse(result.stdout.toString());
+  for (let attempt = 1; ; attempt++) {
+    const result = Bun.spawnSync(
+      [
+        'bun',
+        'run',
+        'wrangler',
+        'd1',
+        'execute',
+        'staging-app-db',
+        '--local',
+        '--env',
+        'staging',
+        '--json',
+        '--command',
+        sql,
+      ],
+      { cwd: apiDir, stdout: 'pipe', stderr: 'pipe' },
+    );
+    const stderr = result.stderr.toString();
+    const output = stderr + result.stdout.toString();
+    if (result.success) {
+      process.stderr.write(stderr);
+      return JSON.parse(result.stdout.toString());
+    }
+    if (output.includes('SQLITE_BUSY') && attempt < 5) {
+      console.log(`integration-test: local D1 busy, retrying (${attempt}/4)`);
+      Bun.sleepSync(1000 * attempt);
+      continue;
+    }
+    process.stderr.write(output);
+    fail(`wrangler d1 execute failed for: ${sql}`);
+  }
 }
 
 function d1QueryCount(apiDir: string, sql: string): number {

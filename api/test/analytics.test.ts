@@ -14,14 +14,13 @@ const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
 async function insertBatch(userId: string, deviceId: string, createdAt: number) {
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       uuidToBytes(id),
       uuidToBytes(userId),
       uuidToBytes(deviceId),
-      `batches/${id}.enc`,
       createdAt,
       createdAt,
       `hash-${id}`,

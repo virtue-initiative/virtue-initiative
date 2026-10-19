@@ -1,8 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF } from 'cloudflare:test';
+import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  batchMetadataForm,
   clearDB,
   createDeviceForUser,
   listEmailDeliveries,
@@ -52,6 +53,36 @@ describe('Main device routes', () => {
     const body = (await res.json()) as Array<{ id: string; last_hash_at: number | null }>;
     const found = body.find((item) => item.id === device.id);
     expect(found?.last_hash_at).toBe(1_700_000_000_000);
+  });
+
+  it('derives status from last_hash_at, not from batches', async () => {
+    const { cookie } = await signupAndGetCookie('dave@example.com');
+    const recent = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
+    const stale = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
+    const silent = await createDeviceForUser('dave@example.com', 'password123', 'Tablet', 'ios');
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    seedHashState(recent.id, { hash: '0a'.repeat(32), seq: 1, last_received: nowSeconds - 600 });
+    seedHashState(stale.id, {
+      hash: '0b'.repeat(32),
+      seq: 1,
+      last_received: nowSeconds - 3 * 60 * 60,
+    });
+
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{
+      id: string;
+      status: string;
+      last_hash_at: number | null;
+    }>;
+    const byId = new Map(body.map((item) => [item.id, item]));
+    expect(byId.get(recent.id)?.status).toBe('online');
+    expect(byId.get(stale.id)?.status).toBe('offline');
+    expect(byId.get(silent.id)).toMatchObject({ status: 'offline', last_hash_at: null });
+    expect(body[0]).not.toHaveProperty('last_upload_at');
   });
 
   it('updates an owned device', async () => {
@@ -127,6 +158,33 @@ describe('Main device routes', () => {
     expect(beforeConfirmRes.status).toBe(200);
     const beforeConfirm = (await beforeConfirmRes.json()) as Array<{ id: string }>;
     expect(beforeConfirm.find((item) => item.id === device.id)).toBeTruthy();
+  });
+
+  it("deletes a device's batch objects from R2 along with the device", async () => {
+    const { cookie, userId } = await signupAndGetCookie('wipe@example.com');
+    const device = await createDeviceForUser('wipe@example.com', 'password123', 'Wipe Me', 'linux');
+
+    const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
+      body: batchMetadataForm({
+        start_time: 1_000,
+        end_time: 2_000,
+        access_keys: { [userId]: Buffer.from('envelope').toString('base64') },
+      }),
+    });
+    expect(batchRes.status).toBe(200);
+    const batch = (await batchRes.json()) as { id: string };
+    const key = `user/${userId}/batches/${batch.id}.enc`;
+    expect(await env.BUCKET.head(key)).not.toBeNull();
+
+    const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(204);
+    expect(await env.BUCKET.head(key)).toBeNull();
   });
 
   it('deletes an owned device and sends a notification email', async () => {

@@ -8,11 +8,12 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix | File                  |
-| ------ | --------------------- |
-| `API`  | `api/SPEC.md`         |
-| `HASH` | `hash-server/SPEC.md` |
-| `CORE` | `client/core/SPEC.md` |
+| Prefix  | File                   |
+| ------- | ---------------------- |
+| `API`   | `api/SPEC.md`          |
+| `HASH`  | `hash-server/SPEC.md`  |
+| `CORE`  | `client/core/SPEC.md`  |
+| `BATCH` | `batch-format/SPEC.md` |
 
 ## Repo map
 
@@ -30,7 +31,9 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 `./scripts/setup.sh` — one-time: installs deps, copies `.dev.vars`, runs local D1 migrations, seeds sample data, installs/trusts Caddy.
 
-`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then restart `launch.sh` if it's running and use "Clear cache" in the web app. The restart matters because seeded batch URLs use `R2_URL` from `api/.dev.vars`, and `launch.sh` only rewrites stored batch URLs to its current random API port when it starts. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
+`./scripts/cow-cache.sh` (`just cow-cache <cmd>`) — optional shared Rust build cache. `init` (one-time, sudo) mounts a loop-backed XFS image at `/mnt/virtue-cow`; `warm` builds `client` (including the Android JNI library, if the Android toolchain is installed) and `hash-server` from `origin/staging` there; `setup.sh` then makes each worktree's `client/target` and `hash-server/target` symlinks to instant reflinked copies of that base, so only the workspace's own crates rebuild. If the mount or base build is missing, `setup.sh` skips it and cargo uses plain `target/` dirs. Rerun `warm` after a toolchain upgrade, and `prune` to free the space of deleted worktrees. `warm-windows` and `prune-windows` do the same for the Windows VM, on a Dev Drive inside it (see `client/windows/VM_SETUP.md`, step 8); `remote-windows-build.sh` then gives each worktree its own build root there.
+
+`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then use "Clear cache" in the web app. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
 
 `./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, `landing`, and the standalone `hash-server` (see `hash-server/SPEC.md`) together (interleaved colored logs), each on a random free port. The hash server is minted a `JWT_PUBLIC_KEY` read from `api/.dev.vars` so it verifies tokens signed by the local API:
 
@@ -48,32 +51,33 @@ These five things are implemented independently in both Rust (`client/core/`) an
 
 ### 1. Batch wire format
 
-Rust produces, TypeScript consumes:
+Rust produces, TypeScript consumes. `batch-format/SPEC.md` is the source of truth:
 
 ```
-events → msgpack({events: [...]}) → gzip → AES-256-GCM(batchKey)
+event → msgpack({ts, risk?, type, data?})
+events → msgpack([event, ...]) → gzip → AES-256-GCM(batchKey)
 wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
 Key files:
 
-- Rust: `client/core/src/batch.rs`, `client/core/src/crypto.rs`
-- TypeScript: `web/src/batch-materializer.ts`, `web/src/crypto.ts`
+- Rust: `client/core/src/module/upload/batch.rs`, `client/core/src/crypto.rs`
+- TypeScript: `web/src/utils/api/batch-materializer.ts`, `web/src/utils/api/crypto.ts`
 
 ### 2. Per-event content hash
 
 Used to build the hash chain uploaded to `POST /hash`:
 
 ```
-contentHash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+contentHash = sha256(msgpack-encoded event bytes, exactly as they appear in the batch)
 ```
 
-Value encoding: strings → UTF-8, numbers → i64 LE, booleans → 0x00/0x01, bytes → raw.
+See BATCH-006.
 
 Key files:
 
-- Rust: `client/core/src/crypto.rs`
-- TypeScript: `web/src/crypto.ts` (`computeNewState`, `verifyBatch`)
+- Rust: `client/core/src/crypto.rs` (`compute_event_hash`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`verifyBatch`)
 
 ### 3. Rolling hash state
 
@@ -92,8 +96,8 @@ then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
 
 Key files:
 
-- Rust: `client/core/src/api.rs`
-- TypeScript: `web/src/crypto.ts` (`derivePasswordMaterial`)
+- Rust: `client/core/src/crypto.rs` (`derive_password_auth`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`derivePasswordMaterial`)
 
 ### 5. HPKE key wrapping
 
@@ -103,7 +107,7 @@ Wire format: `enc[kem.encSize bytes] || ciphertext`.
 Key files:
 
 - Rust: `client/core/src/crypto.rs`
-- TypeScript: `web/src/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
 
 The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
 the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
@@ -119,10 +123,10 @@ Read these before touching crypto, batch, or auth code:
 ## What not to change without full cross-component review
 
 - The AES-GCM nonce position or length (must be first 12 bytes)
-- The msgpack schema (`{events: [...]}` at the outer level, each event double-encoded)
+- The msgpack schema (an array at the outer level, each event double-encoded)
 - The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
 - The JWT token `type` claim values (`"device"`, `"server"`)
-- The hash chain input encoding rules (LE integers, sorted keys)
+- The hash chain input (the encoded event bytes, hashed as-is)
 
 ## Copy style
 
@@ -141,3 +145,5 @@ Checklist for user-facing text (website, help docs, app UI copy):
 ## Pull requests
 
 When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
+
+For UI or copy changes, attach screenshots with `gh pr create --attach` (see `AGENTS.md`).

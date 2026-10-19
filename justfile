@@ -17,6 +17,11 @@ setup *args:
 seed *args:
     bun scripts/seed/index.ts {{args}}
 
+# Shared copy-on-write Rust build cache across worktrees: init, warm, link, prune, status.
+[group('dev')]
+cow-cache cmd="status":
+    ./scripts/cow-cache.sh {{cmd}}
+
 # Start api, web, landing, and the standalone hash-server together.
 [group('dev')]
 dev domain="":

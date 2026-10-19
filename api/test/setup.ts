@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS users (
   encrypted_priv_key BLOB,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 CREATE TABLE IF NOT EXISTS devices (
   id BLOB PRIMARY KEY,
@@ -30,23 +29,20 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
 
 CREATE TABLE IF NOT EXISTS batches (
-  id BLOB PRIMARY KEY,
+  id BLOB NOT NULL,
   user_id BLOB NOT NULL,
   device_id BLOB NOT NULL,
-  url TEXT NOT NULL UNIQUE,
   start_time INTEGER NOT NULL,
   end_time INTEGER NOT NULL,
-  end_hash TEXT NOT NULL,
-  access_keys TEXT NOT NULL,
+  end_hash BLOB NOT NULL,
+  access_keys BLOB NOT NULL,
   version TEXT NOT NULL DEFAULT '',
   high_risk_count INTEGER NOT NULL DEFAULT 0,
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_batches_user_id_created_at ON batches(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
+  PRIMARY KEY (user_id, created_at, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,
@@ -57,6 +53,7 @@ CREATE TABLE IF NOT EXISTS partners (
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  accepted_at INTEGER,
   FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (watcher_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,
@@ -64,7 +61,14 @@ CREATE TABLE IF NOT EXISTS partners (
 );
 CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
-CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
+
+CREATE TABLE IF NOT EXISTS email_bounces (
+  id BLOB PRIMARY KEY,
+  email TEXT NOT NULL,
+  bounced_at INTEGER NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_bounces_email ON email_bounces(email);
 
 CREATE TABLE IF NOT EXISTS email_tokens (
   id BLOB PRIMARY KEY,
@@ -75,6 +79,7 @@ CREATE TABLE IF NOT EXISTS email_tokens (
   expires_at INTEGER NOT NULL,
   consumed_at INTEGER,
   created_at INTEGER NOT NULL,
+  bounce_id BLOB REFERENCES email_bounces(id) ON DELETE SET NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

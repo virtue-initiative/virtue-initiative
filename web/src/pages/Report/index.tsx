@@ -311,6 +311,23 @@ export function Report({ userId: routeUserId }: { userId?: string }) {
       <article class="report">
         <h2 class="report-title">{heading}</h2>
 
+        {isCurrent && (
+          <p class="report-syncing">
+            Note: {period === 'week' ? "this week's" : "today's"} report is incomplete. If your
+            partner reached out about something, it is likely about{' '}
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                setDate(shiftDateString(date, period === 'week' ? -7 : -1));
+              }}
+            >
+              {period === 'week' ? "last week's" : "yesterday's"} report
+            </a>
+            .
+          </p>
+        )}
+
         {loading && (
           <p class="report-syncing" role="status">
             {result.total > 0

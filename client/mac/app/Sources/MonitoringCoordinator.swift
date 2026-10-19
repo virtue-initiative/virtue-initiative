@@ -18,7 +18,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     @Published var email: String = ""
     @Published var password: String = ""
-    @Published var deviceName: String = NativeBridge.defaultDeviceName()
+    @Published var deviceName: String = ""
 
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var isSigningIn: Bool = false

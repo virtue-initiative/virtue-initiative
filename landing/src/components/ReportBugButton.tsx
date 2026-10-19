@@ -61,10 +61,10 @@ export function ReportBugButton() {
   return (
     <>
       <button type="button" class="footer-link-button" onClick={open}>
-        Report a Bug
+        Report an Issue
       </button>
       <Dialog dialogRef={dialogRef}>
-        <DialogHeader>Report a bug</DialogHeader>
+        <DialogHeader>Report an issue</DialogHeader>
         {sent ? (
           <>
             <p>Thanks for the report — we’ll take a look.</p>

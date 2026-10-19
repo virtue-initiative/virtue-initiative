@@ -59,6 +59,8 @@ pub enum StatusSkipReason {
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum UploadKind {
     Screenshot {
+        /// A msgpack `bin` value in the batch (BATCH-004).
+        #[serde(with = "serde_bytes")]
         image: Vec<u8>,
         content_type: String,
         /// Raw skin-tone heuristic score ∈ [0.0, 1.0] from the risk classifier (dev metadata).
@@ -89,7 +91,7 @@ pub enum UploadKind {
         details: Option<String>,
     },
     Heartbeat,
-    /// A single wakeup was more than a minute late, or the sum of recent
+    /// A single wakeup was more than two minutes late, or the sum of recent
     /// lateness (over the last 10 tracked wakeups) exceeded 5 minutes.
     /// Excused near a system login/logout. See CORE-002.
     ScreenshotMissed,

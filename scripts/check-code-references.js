@@ -17,7 +17,7 @@ const references = [
     title: "Browser password derivation",
     description:
       "Argon2id output is split into `passwordAuth` and the AES wrapping key with HKDF-SHA256.",
-    file: "web/src/crypto.ts",
+    file: "web/src/utils/api/crypto.ts",
     language: "ts",
     startMarker: "export async function derivePasswordMaterial(",
   },
@@ -25,7 +25,7 @@ const references = [
     title: "Browser private-key wrapping",
     description:
       "The web client encrypts the private key locally with AES-GCM before upload.",
-    file: "web/src/crypto.ts",
+    file: "web/src/utils/api/crypto.ts",
     language: "ts",
     startMarker: "export async function encryptData(",
   },
@@ -33,7 +33,7 @@ const references = [
     title: "Browser X25519 key generation",
     description:
       "The web app generates the user keypair from the HPKE suite's X25519 KEM.",
-    file: "web/src/crypto.ts",
+    file: "web/src/utils/api/crypto.ts",
     language: "ts",
     startMarker: "export async function generateUserKeyPair()",
   },
@@ -41,7 +41,7 @@ const references = [
     title: "Browser batch-key unwrapping",
     description:
       "Batch access envelopes are opened with HPKE and imported back into WebCrypto as AES keys.",
-    file: "web/src/crypto.ts",
+    file: "web/src/utils/api/crypto.ts",
     language: "ts",
     startMarker: "export async function unwrapBatchKey(",
   },
@@ -65,7 +65,7 @@ const references = [
     title: "Native client batch upload encryption",
     description:
       "Each batch gets a fresh AES key, then the client HPKE-wraps that key for every recipient.",
-    file: "client/core/src/batch.rs",
+    file: "client/core/src/module/upload/batch.rs",
     language: "rs",
     startMarker: "    pub fn build_upload(",
   },
@@ -206,7 +206,7 @@ function renderSection(baseUrl, ref) {
 function updateDocument() {
   const baseUrl = getGitHubBaseUrl();
   const ref = getRequestedRef();
-  const generatedSection = `${sectionStart}\n${renderSection(baseUrl, ref)}\n${sectionEnd}`;
+  const generatedSection = `${sectionStart}\n\n${renderSection(baseUrl, ref)}\n\n${sectionEnd}`;
   const existing = fs.readFileSync(docPath, "utf8");
 
   let next;

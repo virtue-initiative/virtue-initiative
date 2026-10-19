@@ -118,12 +118,30 @@ describe('Partner routes', () => {
       owner: { email: 'owner2@example.com' },
     });
 
+    const listWatchers = async () => {
+      const res = await SELF.fetch(`${BASE}/partner`, { headers: authHeaders(ownerCookie) });
+      const body = (await res.json()) as {
+        watchers: Array<{ id: string; created_at: number; accepted_at?: number }>;
+      };
+      return body.watchers.find((partner) => partner.id === created.id);
+    };
+
+    const pending = await listWatchers();
+    expect(pending?.created_at).toBeTypeOf('number');
+    expect(pending).not.toHaveProperty('accepted_at');
+
+    const beforeAccept = Date.now();
     const acceptRes = await SELF.fetch(`${BASE}/partner/accept`, {
       method: 'POST',
       headers: authHeaders(futureCookie),
       body: JSON.stringify({ token: inviteMetadata.inviteToken }),
     });
     expect(acceptRes.status).toBe(200);
+
+    // The accept date is separate from the invite date.
+    const accepted = await listWatchers();
+    expect(accepted?.created_at).toBe(pending?.created_at);
+    expect(accepted?.accepted_at).toBeGreaterThanOrEqual(beforeAccept);
 
     const ownerPartnersRes = await SELF.fetch(`${BASE}/partner`, {
       headers: authHeaders(ownerCookie),

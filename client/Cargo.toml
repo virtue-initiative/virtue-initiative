@@ -16,6 +16,15 @@ resolver = "2"
 # Always name the package: `cargo build -p virtue-core`, and for Android go
 # through `cargo ndk` (see client/android/app/build.gradle.kts).
 
+# No debug info for dependencies (`*` matches only non-workspace crates; the
+# named overrides below only set opt-level, so this still applies to them).
+# Otherwise every linked binary, test binaries included, embeds a few hundred MB
+# of dependency DWARF, which bloats each worktree's copy of the shared build
+# cache (scripts/cow-cache.sh) and slows linking. Workspace crates keep full
+# debug info; stepping into dependency code in a debugger is what's lost.
+[profile.dev.package."*"]
+debug = false
+
 # Optimize heavy dependencies even in debug builds. The workspace crates stay at
 # the dev profile's opt-level 0 (fast incremental rebuilds + good debugging); only
 # these compute-bound deps are compiled with optimizations. Their source rarely

@@ -96,7 +96,7 @@ struct ContentView: View {
                     Text("Build \(VirtueShared.buildLabel)")
                         .font(.footnote)
                         .foregroundStyle(VirtueBrand.textMuted)
-                    Button("Report a Bug") {
+                    Button("Report an Issue") {
                         showReportBugSheet = true
                     }
                     .font(.footnote)
@@ -126,15 +126,16 @@ struct ContentView: View {
                     }
                     .buttonStyle(VirtueButtonStyle())
 
-                    Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
-                        if coordinator.monitoringEnabled {
-                            showPauseConfirmation = true
-                        } else {
-                            coordinator.toggleMonitoring()
+                    if coordinator.loggedIn {
+                        Button(coordinator.monitoringEnabled ? "Pause Monitoring" : "Resume Monitoring") {
+                            if coordinator.monitoringEnabled {
+                                showPauseConfirmation = true
+                            } else {
+                                coordinator.toggleMonitoring()
+                            }
                         }
+                        .buttonStyle(VirtueButtonStyle(prominent: true))
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
-                    .disabled(!coordinator.loggedIn)
                 }
                 .padding(.top, 6)
 
@@ -158,7 +159,7 @@ struct ContentView: View {
                         Text(email)
                             .foregroundStyle(VirtueBrand.text)
                     }
-                    Text("Device: \(coordinator.deviceName)")
+                    Text("Device: \(coordinator.coreStatus?.deviceName ?? UIDevice.current.name)")
                         .foregroundStyle(VirtueBrand.textMuted)
 
                     Text("Add partners on the Virtue website. Open the Partners page and select \"Invite partner\".")
@@ -210,7 +211,7 @@ struct ContentView: View {
                             .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
                         }
 
-                        TextField("Device name", text: $coordinator.deviceName)
+                        TextField("Device name (default \"\(UIDevice.current.name)\")", text: $coordinator.deviceName)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
 

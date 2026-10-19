@@ -17,6 +17,8 @@ export interface Env {
   AWS_SES_FROM_EMAIL: string;
   EMAIL_DELIVERY_MODE: 'ses' | 'log';
   BUG_REPORT_EMAIL: string;
+  // Comma-separated SNS topic ARNs accepted by POST /email/sns (API-041). Unset rejects all.
+  SNS_TOPIC_ARNS?: string;
   // Unset in local dev, which skips newsletter signups (see lib/newsletter.ts).
   BUTTONDOWN_API_KEY?: string;
 }

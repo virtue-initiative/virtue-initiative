@@ -7,6 +7,7 @@ import {
   consumeEmailToken,
   createPartner,
   createEmailToken,
+  deleteEmailTokenById,
   deletePartnerById,
   findPartnerByInviteTokenHash,
   findPartnerById,
@@ -16,7 +17,11 @@ import {
   listIncomingPartners,
   listOwnedPartners,
 } from '../lib/db';
-import { renderPartnerAcceptedTemplate, renderPartnerInviteTemplate } from '../lib/email/templates';
+import {
+  renderPartnerAcceptedTemplate,
+  renderPartnerInviteTemplate,
+  renderPartnerRemovedTemplate,
+} from '../lib/email/templates';
 import { PARTNER_INVITE_TTL_MS } from '../lib/email-domain';
 import {
   createPartnerSchema,
@@ -37,7 +42,7 @@ partners.post(
   async (c) => {
     const userId = c.get('sub');
     const currentUser = await findUserById(c.env.DB, userId);
-    const { email } = c.req.valid('json');
+    const { email, replace_id: replaceId } = c.req.valid('json');
 
     if (!currentUser) {
       return c.json({ error: 'Not found' }, 404);
@@ -47,10 +52,26 @@ partners.post(
       return c.json({ error: 'Bad Request', details: { email: ['Cannot invite yourself'] } }, 400);
     }
 
+    // API-023: resending replaces an invite that was never accepted.
+    const replaced = replaceId ? await findPartnerById(c.env.DB, replaceId) : null;
+    if (
+      replaceId &&
+      (!replaced || replaced.watching_user_id !== userId || replaced.status !== 'pending')
+    ) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
     const existing = await findPartnerInviteForOwner(c.env.DB, userId, email);
 
-    if (existing) {
+    if (existing && existing.id !== replaced?.id) {
       return c.json({ error: 'Partnership already exists' }, 409);
+    }
+
+    if (replaced) {
+      await deletePartnerById(c.env.DB, replaced.id);
+      if (replaced.invite_token_id) {
+        await deleteEmailTokenById(c.env.DB, replaced.invite_token_id);
+      }
     }
 
     const id = uuidv4();
@@ -84,7 +105,7 @@ partners.post(
       appUrl: c.env.APP_URL,
       inviteUrl: `${c.env.APP_URL}/invite-accept?partner_token=${encodeURIComponent(inviteToken)}`,
     });
-    await sendEmail({
+    const sent = await sendEmail({
       env: c.env,
       db: c.env.DB,
       kind: 'partner_invite',
@@ -94,10 +115,14 @@ partners.post(
       html: inviteEmail.html,
       related_user_id: userId,
       related_partnership_id: id,
+      email_token_id: inviteTokenId,
       metadata: { partnerEmail: email, inviteToken },
     });
 
-    return c.json<CreatePartnerResponse>({ id, status: 'pending' }, 200);
+    return c.json<CreatePartnerResponse>(
+      { id, status: sent.bounce_id ? 'invite_failed' : 'pending' },
+      200,
+    );
   },
 );
 
@@ -270,6 +295,51 @@ partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
   }
 
   await deletePartnerById(c.env.DB, partnerId);
+
+  // Only an accepted partnership has anything to tell the other side about;
+  // a withdrawn or declined invite never gave them access.
+  if (partnership.status === 'accepted') {
+    try {
+      const removedByOwner = partnership.watching_user_id === userId;
+      const [owner, watcher] = await Promise.all([
+        findUserById(c.env.DB, partnership.watching_user_id),
+        partnership.watcher_user_id ? findUserById(c.env.DB, partnership.watcher_user_id) : null,
+      ]);
+      const recipient = removedByOwner
+        ? { name: watcher?.name, email: partnership.watcher_email }
+        : owner && { name: owner.name, email: owner.email };
+      const other = removedByOwner
+        ? owner && { name: owner.name, email: owner.email }
+        : { name: watcher?.name ?? currentUser.name, email: partnership.watcher_email };
+      if (recipient && other) {
+        const removedEmail = renderPartnerRemovedTemplate({
+          recipientName: recipient.name,
+          otherName: other.name,
+          otherEmail: other.email,
+          forOwner: !removedByOwner,
+          appName: c.env.APP_NAME,
+          appUrl: c.env.APP_URL,
+        });
+        await sendEmail({
+          env: c.env,
+          db: c.env.DB,
+          kind: 'partner_removed',
+          recipient: recipient.email,
+          subject: removedEmail.subject,
+          text: removedEmail.text,
+          html: removedEmail.html,
+          related_user_id:
+            (removedByOwner ? partnership.watcher_user_id : partnership.watching_user_id) ??
+            undefined,
+          related_partnership_id: partnership.id,
+          metadata: { removedBy: currentUser.email },
+        });
+      }
+    } catch (error) {
+      console.error('failed to send partner-removed email', error);
+    }
+  }
+
   return c.body(null, 204);
 });
 

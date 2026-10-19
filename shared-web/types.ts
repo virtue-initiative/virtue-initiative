@@ -41,7 +41,6 @@ export const deviceSchema = z.object({
   owner: z.string(),
   name: z.string(),
   platform: z.string(),
-  last_upload_at: z.number().nullable(),
   last_hash_at: z.number().nullable(),
   pending_count: z.number(),
   status: z.enum(['online', 'offline', 'logged_out']),
@@ -50,6 +49,9 @@ export type Device = z.infer<typeof deviceSchema>;
 
 export const batchSchema = z.object({
   id: z.string(),
+  // The batch's owner. Optional until every deployed API sends it; the web cache falls back
+  // to looking the owner up through the batch's device.
+  user_id: z.string().optional(),
   device_id: z.string(),
   start_time: z.number(),
   end_time: z.number(),
@@ -81,8 +83,10 @@ const partnerUserSchema = z.object({
 export const partnerInfoSchema = z.object({
   id: z.string(),
   user: partnerUserSchema.extend({ id: z.string().optional() }),
-  status: z.enum(['pending', 'accepted']),
+  // 'invite_failed' is a pending invite whose email bounced (api/SPEC.md API-056).
+  status: z.enum(['pending', 'accepted', 'invite_failed']),
   created_at: z.number().optional(),
+  accepted_at: z.number().optional(),
 });
 export type PartnerInfo = z.infer<typeof partnerInfoSchema>;
 
@@ -140,6 +144,7 @@ export const signupSchema = z.object({
   encrypted_priv_key: z.base64(),
   name: z.string().min(1).optional(),
   newsletter_opt_in: z.boolean().optional(),
+  timezone: z.string().optional(),
 });
 export type SignupPayload = z.infer<typeof signupSchema>;
 
@@ -174,6 +179,19 @@ export const passwordResetSchema = z.object({
 });
 export type PasswordResetPayload = z.infer<typeof passwordResetSchema>;
 
+// Whether `timezone` is an IANA time zone name this runtime knows, which is
+// what the digest schedule needs to work out a user's 06:00 (api/SPEC.md
+// API-010, API-016, API-020).
+export function isValidTimezone(timezone: string | undefined): timezone is string {
+  if (!timezone) return false;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const updateUserSchema = z
   .object({
     email: z.email().optional(),
@@ -181,7 +199,10 @@ export const updateUserSchema = z
     settings: z
       .object({
         email_frequency: emailFrequencySchema.optional(),
-        timezone: z.string().optional(),
+        timezone: z
+          .string()
+          .refine(isValidTimezone, { message: 'Not a valid time zone' })
+          .optional(),
       })
       .optional(),
   })
@@ -208,7 +229,10 @@ export const bugReportSchema = z.object({
 });
 export type BugReportPayload = z.infer<typeof bugReportSchema>;
 
-export const createPartnerSchema = z.object({ email: z.email() });
+export const createPartnerSchema = z.object({
+  email: z.email(),
+  replace_id: z.uuid().optional(),
+});
 export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
 
 export const inviteTokenSchema = z.object({ token: z.string().min(1) });
@@ -252,12 +276,13 @@ export const updateUserResponseSchema = z.object({
   ok: z.boolean(),
   email_verification_required: z.boolean().optional(),
   pending_email: z.string().optional(),
+  email_bounced: z.boolean().optional(),
 });
 export type UpdateUserResponse = z.infer<typeof updateUserResponseSchema>;
 
 export const createPartnerResponseSchema = z.object({
   id: z.string(),
-  status: z.literal('pending'),
+  status: z.enum(['pending', 'invite_failed']),
 });
 export type CreatePartnerResponse = z.infer<typeof createPartnerResponseSchema>;
 

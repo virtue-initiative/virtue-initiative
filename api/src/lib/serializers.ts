@@ -30,6 +30,7 @@ export function serializeWatching(incoming: IncomingPartnerRow[]) {
     },
     status: partner.status,
     created_at: partner.created_at,
+    ...(partner.accepted_at != null ? { accepted_at: partner.accepted_at } : {}),
   }));
 }
 
@@ -41,7 +42,9 @@ export function serializeWatchers(owned: OwnedPartnerRow[]) {
       email: partner.watcher_email,
       ...(partner.watcher_name ? { name: partner.watcher_name } : {}),
     },
-    status: partner.status,
+    status:
+      partner.status === 'pending' && partner.invite_bounced ? 'invite_failed' : partner.status,
     created_at: partner.created_at,
+    ...(partner.accepted_at != null ? { accepted_at: partner.accepted_at } : {}),
   }));
 }

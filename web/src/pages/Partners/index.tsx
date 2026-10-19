@@ -26,7 +26,11 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
+import {
+  formatCompactRelativeTimestamp,
+  formatDate,
+  formatRelativeTimestamp,
+} from '../../utils/time';
 import './style.css';
 
 const MAX_LISTED_DEVICES = 4;
@@ -65,8 +69,8 @@ export function Partners() {
     void api?.refreshDevices();
   }, [api]);
 
-  const invitePartner = (email: string) =>
-    api ? api.invitePartner(email) : Promise.reject(new Error('Not signed in'));
+  const invitePartner = (email: string, replaceId?: string) =>
+    api ? api.invitePartner(email, replaceId) : Promise.reject(new Error('Not signed in'));
   const removeWatching = (id: string) =>
     api ? api.stopWatching(id) : Promise.reject(new Error('Not signed in'));
   const removeWatcher = (id: string) =>
@@ -86,7 +90,7 @@ export function Partners() {
     [watching],
   );
   const pendingWatching = useMemo(
-    () => watching.filter((partner) => partner.status === 'pending'),
+    () => watching.filter((partner) => partner.status !== 'accepted'),
     [watching],
   );
   const acceptedWatchers = useMemo(
@@ -94,7 +98,7 @@ export function Partners() {
     [watchers],
   );
   const pendingWatchers = useMemo(
-    () => watchers.filter((partner) => partner.status === 'pending'),
+    () => watchers.filter((partner) => partner.status !== 'accepted'),
     [watchers],
   );
 
@@ -129,6 +133,7 @@ export function Partners() {
           partnerDevicesByOwner={devicesByOwner}
           onRemoveWatching={removeWatching}
           onRemoveWatcher={removeWatcher}
+          onInvitePartner={invitePartner}
         />
       </section>
     </div>
@@ -143,6 +148,7 @@ function PartnerArea({
   partnerDevicesByOwner,
   onRemoveWatching,
   onRemoveWatcher,
+  onInvitePartner,
 }: {
   kind: 'watching' | 'watcher';
   emptyLabel: string;
@@ -151,6 +157,7 @@ function PartnerArea({
   partnerDevicesByOwner: Map<string, Device[]>;
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
+  onInvitePartner?: InvitePartner;
 }) {
   const partners = [...pending, ...accepted];
   // Only the "watching" cards carry a device table, which needs room for three columns.
@@ -163,13 +170,14 @@ function PartnerArea({
       ) : (
         <CardGrid class={isWatchingPanel ? 'partners-grid--wide' : undefined}>
           {partners.map((partner) =>
-            partner.status === 'pending' ? (
+            partner.status !== 'accepted' ? (
               <PendingPartnerCard
                 key={partner.id}
                 kind={kind}
                 partner={partner}
                 onRemoveWatching={onRemoveWatching}
                 onRemoveWatcher={onRemoveWatcher}
+                onInvitePartner={onInvitePartner}
               />
             ) : (
               <PartnerCard
@@ -190,14 +198,22 @@ function PartnerArea({
   );
 }
 
-function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) => Promise<void> }) {
+type InvitePartner = (email: string, replaceId?: string) => Promise<'pending' | 'invite_failed'>;
+
+function bouncedMessage(email: string) {
+  return `Email to ${email} bounced, so the invite was not sent. Use a different email address.`;
+}
+
+function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
     setEmail('');
+    setError('');
     dialogRef.current?.showModal();
   }
 
@@ -208,12 +224,14 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) =>
   async function handleSubmit(e: Event) {
     e.preventDefault();
     setLoading(true);
+    setError('');
     try {
-      await onInvitePartner(email);
+      const status = await onInvitePartner(email);
       close();
+      if (status === 'invite_failed') pushToast(bouncedMessage(email), 'error');
     } catch (err) {
       const message = describeError(err, 'Failed to send invite');
-      if (message) pushToast(message, 'error');
+      if (message) setError(message);
     } finally {
       setLoading(false);
     }
@@ -231,7 +249,7 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: (email: string) =>
           uploaded <b>after</b> you add them as a partner and they set up their account.
         </p>
         <form onSubmit={handleSubmit}>
-          <Field label="Partner's email">
+          <Field label="Partner's email" error={error}>
             <Input
               type="email"
               value={email}
@@ -260,18 +278,48 @@ function PendingPartnerCard({
   partner,
   onRemoveWatching,
   onRemoveWatcher,
+  onInvitePartner,
 }: {
   kind: 'watching' | 'watcher';
   partner: WatchingPartner | WatcherPartner;
   onRemoveWatching: (id: string) => Promise<void>;
   onRemoveWatcher: (id: string) => Promise<void>;
+  onInvitePartner?: InvitePartner;
 }) {
-  const [action, setAction] = useState<'remove' | null>(null);
+  const [action, setAction] = useState<'remove' | 'resend' | null>(null);
+  const [resendEmail, setResendEmail] = useState(partner.user.email);
+  const [resendError, setResendError] = useState('');
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
+  const resendRef = useRef<HTMLDialogElement>(null);
   const partnerLabel = partner.user.name ?? partner.user.email;
   const partnerEmailTooltip = partner.user.name ? undefined : partner.user.email;
   const partnerName = partnerLabel;
+  const inviteFailed = partner.status === 'invite_failed';
+
+  function openResend() {
+    setResendEmail(partner.user.email);
+    setResendError('');
+    resendRef.current?.showModal();
+  }
+
+  async function resend(e: Event) {
+    e.preventDefault();
+    if (!onInvitePartner) return;
+    setAction('resend');
+    setResendError('');
+    try {
+      // Resending replaces this invite, so this card goes away with it.
+      const status = await onInvitePartner(resendEmail, partner.id);
+      resendRef.current?.close();
+      if (status === 'invite_failed') pushToast(bouncedMessage(resendEmail), 'error');
+    } catch (err) {
+      const message = describeError(err, 'Failed to resend invite');
+      if (message) setResendError(message);
+    } finally {
+      setAction(null);
+    }
+  }
 
   async function removeConfirmed() {
     setAction('remove');
@@ -290,9 +338,18 @@ function PendingPartnerCard({
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
-        <Badge variant="yellow">Pending</Badge>
+        {inviteFailed ? (
+          <Badge variant="red">Email invite failed</Badge>
+        ) : (
+          <Badge variant="yellow">Pending</Badge>
+        )}
       </CardHeader>
       <CardActions>
+        {inviteFailed && onInvitePartner && (
+          <Button variant="ghost" type="button" onClick={openResend} disabled={action !== null}>
+            Resend invite
+          </Button>
+        )}
         <Button
           variant="danger"
           type="button"
@@ -302,6 +359,40 @@ function PendingPartnerCard({
           {action === 'remove' ? 'Removing…' : 'Remove'}
         </Button>
       </CardActions>
+      {inviteFailed && (
+        <Dialog dialogRef={resendRef}>
+          <DialogHeader>Resend invite</DialogHeader>
+          <p class="invite-desc">
+            The invite email to <b>{partner.user.email}</b> could not be delivered. Check the
+            address and send the invite again.
+          </p>
+          <form onSubmit={resend}>
+            <Field label="Partner's email" error={resendError}>
+              <Input
+                type="email"
+                value={resendEmail}
+                onInput={(e) => setResendEmail((e.target as HTMLInputElement).value)}
+                placeholder="partner@example.com"
+                required
+                autoFocus
+              />
+            </Field>
+            <DialogActions>
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => resendRef.current?.close()}
+                disabled={action !== null}
+              >
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={action !== null}>
+                {action === 'resend' ? 'Sending…' : 'Resend invite'}
+              </Button>
+            </DialogActions>
+          </form>
+        </Dialog>
+      )}
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">This will cancel the pending partner relationship.</p>
@@ -396,12 +487,34 @@ function PartnerCard({
   }
 
   return (
-    <Card class={isWatching ? undefined : 'partner-card-compact'}>
+    <Card>
       <CardHeader>
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
+        {!isWatching && (
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
+          </Button>
+        )}
       </CardHeader>
+      {!isWatching && (
+        <dl class="partner-details">
+          <dt>Email</dt>
+          <dd title={partner.user.email}>{partner.user.email}</dd>
+          {partner.accepted_at !== undefined && (
+            <>
+              <dt>Added</dt>
+              <dd>{formatDate(partner.accepted_at)}</dd>
+            </>
+          )}
+        </dl>
+      )}
       {isWatching && (
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
@@ -426,21 +539,23 @@ function PartnerCard({
           )}
         </div>
       )}
-      <CardActions>
-        {isWatching && partner.user.id && (
-          <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
-            View logs
+      {isWatching && (
+        <CardActions>
+          {partner.user.id && (
+            <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
+              View logs
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
           </Button>
-        )}
-        <Button
-          variant="danger"
-          type="button"
-          onClick={() => confirmRef.current?.showModal()}
-          disabled={action !== null}
-        >
-          {action === 'remove' ? 'Removing…' : 'Remove'}
-        </Button>
-      </CardActions>
+        </CardActions>
+      )}
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">

@@ -117,7 +117,7 @@ shape has somewhere to branch migration logic, rather than relying solely on
 
 ### Responsiveness: a request channel, not a shared mutex
 
-`login`/`logout`/`note_user_stop`/`queue_upload`/`flush_batch_now`/`force_capture_now`
+`login`/`logout`/`note_user_stop`/`note_user_start`/`queue_upload`/`flush_batch_now`/`force_capture_now`
 build a `DaemonRequest` (each variant carries its own reply `Sender`), send it on the
 `mpsc` channel, and block on the reply — sending is itself the wakeup, since
 `run_forever` is blocked in `recv_timeout` waiting for exactly this. The loop
@@ -134,7 +134,14 @@ would deadlock forever waiting on its own reply.
 snapshot, never routed through the channel — there's nothing to synchronize,
 and a channel round trip would needlessly queue a pure read behind an
 in-flight tick's network I/O. `request_stop()` stays fire-and-forget, sending
-a `DaemonRequest::Stop` the loop drains like any other request.
+a `DaemonRequest::Stop` the loop drains like any other request. Because that
+request stays queued until a loop consumes it, it must not be sent while no
+loop is running (CORE-014).
+
+Blocking on the reply means a request can only be served once the loop is
+running. A caller that is about to start the loop itself (Android's restart)
+therefore uses `queue_note_user_start()`, which only enqueues the resume; the
+loop applies it ahead of anything queued after it (CORE-022).
 
 A `#[cfg(any(test, feature = "testing"))]` bypass (`test_login`, `test_logout`,
 …, plus `tick_once_for_test`) calls the same `apply_*` functions directly
@@ -239,7 +246,12 @@ responsiveness the old hand-rolled `MonitorCommand` queue existed for.
 (`AndroidCore.daemon: Arc<Daemon<...>>`). Every other `native*` call is a
 direct method call on that shared daemon (`nativeLogin` → `daemon.login()`,
 `nativeRunDaemonLoop` → `daemon.run_forever()`, `nativeStopDaemon` →
-`daemon.request_stop()`). `nativeIsLoggedIn`/`nativeGetDeviceId` still read
+`daemon.request_stop()`). `nativeRunDaemonLoop` and `nativeStopDaemon` share a
+`LoopState` (`Idle`/`Running`/`Stopping`): a start waits (up to 15s) for a
+previous loop still flushing on its way out instead of failing with `daemon
+already running`, and a stop is only sent to a loop that is `Running`, so
+Kotlin's unconditional `stopDaemonLoop()` cannot leave a stale `Stop` queued for
+the next loop. `nativeIsLoggedIn`/`nativeGetDeviceId` still read
 `event_state.json`'s `auth` key directly from disk rather than going through
 the daemon, unchanged from before.
 
@@ -350,11 +362,11 @@ That's fine because ticks only run when something is actually due
 
 ## Batch blob format
 
-See `../CLAUDE.md` (repo root) for the exact wire format. Summary:
+See `batch-format/SPEC.md` (repo root) for the exact wire format. Summary:
 
 ```
 events → encode_batch_event() per event → BatchBuilder::build_upload()
-       → msgpack({events: [...]}) → gzip → AES-256-GCM
+       → msgpack([event, ...]) → gzip → AES-256-GCM
 wire:  nonce[12 bytes] || ciphertext+tag
 ```
 
@@ -401,6 +413,9 @@ unlike the pre-rewrite in-memory version. `plan_hash_retries`/`plan_batch`
 each require `screen_active || state.bypass_lock` before attempting network
 I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 0 || interval elapsed || state.force_flush || queue >= MAX_BATCH_ITEMS`.
+A batch always takes every hashed event (BATCH-006), so `plan_hash_retries`
+stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
+and resumes after that batch lands.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
 backoffs to "ready now" — bypassing the cooldown for one attempt, matching
@@ -412,7 +427,7 @@ semantics.
 Per-event content hashes are uploaded to `POST /hash` independently of batches:
 
 ```
-content_hash = sha256(ts_le64 || type_utf8 || sorted(key_utf8 || encoded_value))
+content_hash = sha256(encoded_event_bytes)
 new_state    = sha256(current_state[32] || content_hash[32])
 ```
 
@@ -424,8 +439,10 @@ endpoint. On the wire the token rides as `settings.hash_token` (part of the embe
 `UploadState.hash_token_cache: Option<(String, i64)>` (token, fetched-at UTC-ms,
 persisted — no longer `Instant`-based) is refreshed from whichever of those
 responses arrived most recently and only triggers a `GET /d/device` call
-(inside `execute_hash_retries`, unlocked) when that cache goes stale (55
-minutes) without a batch having refreshed it in the meantime. `Daemon::new`
+(inside `execute_hash_retries`, unlocked) when that cache goes stale (110
+minutes, against the token's 2 hour lifetime) without a batch having refreshed it in the meantime,
+or when the hash server answered 401, which clears the cache (a wall clock set back can make an
+expired token look fresh). `Daemon::new`
 also performs one such refresh at startup if already authenticated (CORE-005's
 "refreshed on process startup" requirement).
 

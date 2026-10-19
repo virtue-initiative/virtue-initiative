@@ -14,7 +14,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _accountEmail = string.Empty;
     private string _emailInput = string.Empty;
     private string _passwordInput = string.Empty;
-    private string _deviceNameInput = Environment.MachineName;
+    private string _deviceNameInput = string.Empty;
     private string _statusText = "Starting Virtue...";
     private string _monitorState = "loading";
     private string? _monitorError;

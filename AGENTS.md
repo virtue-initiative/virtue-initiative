@@ -372,9 +372,11 @@ Gotchas:
   dependencies, which invalidates refs. Take a fresh snapshot if a ref is "not found".
 - `screenshot --filename` must be a path inside the repo. An absolute path elsewhere (such as
   `/tmp`) is silently not written. Save the file inside the repo, then move it.
-- `gh --attach`, which the skill suggests for PR screenshots, needs `gh` 2.99 or later. On older
-  versions, commit the image to the public `virtue-initiative/pr-assets` repo under
-  `pr/<number>/` and link its `raw.githubusercontent.com` URL.
+- `playwright-cli open` blocks `file:` URLs. To screenshot local HTML (such as a rendered email),
+  serve it over http (for example `python3 -m http.server`) and open that.
+- Attach PR screenshots with `gh pr create --attach`, or `gh pr edit --attach` on an existing PR
+  (add `--repo` if running outside the checkout). It needs `gh` 2.99 or later, so upgrade `gh`
+  if it is older. Do not commit screenshots to the repo or push them to a separate branch.
 
 ## Minimum recommended local validation
 

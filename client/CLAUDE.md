@@ -60,7 +60,7 @@ other platform.
 
 - `core/src/module/lifecycle.rs` — `tick()`: compares actual vs. scheduled
   wakeup time each tick and alerts (`UploadKind::ScreenshotMissed`) on a single
-  late wakeup > 1 min or a last-10-array sum > 5 min, excused near a system
+  late wakeup > 2 min or a last-10-array sum > 5 min, excused near a system
   login/logout; `note_user_stop()` — immediate high-risk alert, unrelated to
   the late-wakeup check. See CORE-002; `core/tampering.md` is now
   just a pointer there (a richer suspend/reboot/gap-bucket model was retired

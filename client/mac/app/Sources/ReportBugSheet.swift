@@ -1,7 +1,7 @@
 import SwiftUI
 import VirtueKit
 
-/// "Report a Bug" form, ported from the Windows client's `ShowReportBugDialogAsync`:
+/// "Report an Issue" form, ported from the Windows client's `ShowReportBugDialogAsync`:
 /// a message box, an optional contact email (pre-filled when signed in), and an
 /// opt-out "include logs" checkbox with the same disclosure text.
 struct ReportBugSheet: View {
@@ -18,7 +18,7 @@ struct ReportBugSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Report a Bug")
+                Text("Report an Issue")
                     .font(.headline)
                 Spacer()
                 Button("Cancel") {
