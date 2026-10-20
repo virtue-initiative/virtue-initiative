@@ -41,7 +41,8 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         <strong>Alert details</strong> - when a client records a high-concern event (for example, you
         stop monitoring, or a device stops reporting), it sends a short unencrypted summary of that event
         alongside the batch - its type, timestamp, concern score, and a brief title and description. We
-        use that summary only to compose an alert email to your accountability partners, and we do not store it. The event itself is retained only in encrypted form. If you have no accepted partners,
+        use that summary only to compose an alert email to your accountability partners, and we do not
+        store it. The event itself is retained only in encrypted form. If you have no accepted partners,
         or they have turned alert emails off, no alert is sent.
       </li>
       <li>
@@ -69,17 +70,19 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         us which account it came from, and a report sent from a client app signed in to your account always
         identifies that device by name and platform along with the account that owns it. Your account
         email address is included and is used as the address we reply to, whether or not you fill in the
-        contact field. There is no way to send an identified report anonymously. If you do not want a report tied to your account, sign out first, or send it from our public site without signing in. In that case it carries only what you type into it.
+        contact field. There is no way to send an identified report anonymously. If you do not want a
+        report tied to your account, sign out first, or send it from our public site without signing in.
+        In that case it carries only what you type into it.
       </li>
       <li>
         <strong>Donation records</strong> - if you donate, you are redirected to Stripe's own hosted checkout
         page to enter your payment details. Those details go straight to Stripe and are never sent to
-        our servers, so we never see your full card number. Stripe shows us only the card brand, its
-        expiry, and its last four digits. Stripe then reports the completed donation back to us, and we
-        keep that record: your name, email address, phone number, the amount, whether the donation recurs,
-        and Stripe's identifiers for you and for any recurring donation. Stripe may also collect a billing
-        address. We do not store it in our own systems, but like the partial card details it is visible
-        to us in our Stripe account.
+        our servers, so we never see your full card number. Stripe shows us only the card brand, its expiry,
+        and its last four digits. Stripe then reports the completed donation back to us, and we keep that
+        record: your name, email address, phone number, the amount, whether the donation recurs, and Stripe's
+        identifiers for you and for any recurring donation. Stripe may also collect a billing address.
+        We do not store it in our own systems, but like the partial card details it is visible to us in
+        our Stripe account.
       </li>
       <li>
         <strong>Newsletter</strong> - if you subscribe to our newsletter, either from our website or by

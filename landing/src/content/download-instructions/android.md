@@ -1,13 +1,13 @@
 ## Android installation
 
-Virtue isn't in the Play Store yet, so you install it from a downloaded file. These steps use Chrome, and other browsers work the same way.
+Virtue is not in the Play Store yet, so you install it from a downloaded file. These steps use Chrome, and other browsers work the same way.
 
 1. If you do not have one, [create an account](/signup).
 2. On your phone, download the [Android `.apk` file]({ANDROID_DOWNLOAD}).
 3. If Chrome says **File might be harmful**, tap **Download anyway**.
    ![Chrome's "File might be harmful" warning, with "Download anyway" highlighted](/images/android-setup/download-warning.webp)
 4. Tap **Open** when the download finishes. If you missed it, open Chrome's menu and tap **Downloads**, then tap the file.
-5. If Android says your phone isn't allowed to install unknown apps from Chrome, tap **Settings**.
+5. If Android says your phone is not allowed to install unknown apps from Chrome, tap **Settings**.
    ![Android's warning about installing unknown apps, with "Settings" highlighted](/images/android-setup/install-blocked.webp)
 6. Turn on **Allow from this source**, then go back.
    ![The "Install unknown apps" screen for Chrome, with "Allow from this source" highlighted](/images/android-setup/install-allow-source.webp)
@@ -80,7 +80,7 @@ Tap <strong>Allow</strong> to let Virtue capture screenshots.
 Virtue checks for new versions on its own and downloads them over Wi-Fi.
 
 1. When an update is ready, tap the **Virtue update available** notification. You can also tap **Install Update** in the Virtue app.
-2. The first time, Android says your phone isn't allowed to install unknown apps from this source. Tap **Settings**, then turn on **Allow from this source**. On Android 10 and 11, go back afterward.
+2. The first time, Android says your phone is not allowed to install unknown apps from this source. Tap **Settings**, then turn on **Allow from this source**. On Android 10 and 11, go back afterward.
 3. Tap **Update**.
 
 On Android 12 and later, Virtue installs later updates by itself. On Android 10 and 11, repeat the last step for each update.

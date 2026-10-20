@@ -4,15 +4,15 @@ sidebar_position: 5
 
 # Device status
 
-Every device on the Devices page or listed on a partner's card carries a
-status tag to indicate if the device is still sending information, and if
-it is still set up at all.
+Every device on the Devices page or listed on a partner's card carries a status
+tag to show whether the device is still sending information, and whether it is
+still set up at all.
 
 ## Online
 
 The device has checked in within the last two hours. A device checks in each time it records activity while its screen is unlocked.
 
-This is the normal state for a device that's in use. A device that's switched
+This is the normal state for a device that is in use. A device that is switched
 off, asleep, or offline for the night will leave this state without anything
 being wrong.
 
@@ -22,9 +22,9 @@ The device is still set up, but it last checked in more than two hours ago.
 
 This is common and usually harmless: the computer or phone is off, sleeping,
 locked, or has no internet connection. It will flip back to **Online** on its own
-once the device checks in again. No action needed on your side.
+once the device checks in again. No action is needed on your side.
 
-Offline stops being routine when it lasts. A device that's offline for days
+Offline stops being routine when it lasts. A device that is offline for days
 while the person is clearly using it is worth asking about: the app may have
 been stopped, blocked from the network, or removed from startup.
 
@@ -47,10 +47,10 @@ come back on its own.
 
 This is the one status that always means a deliberate action was taken. Logging
 out is not something that happens by accident or through a bad connection, so
-a device that's moved from Online to Deactivated has been signed out by whoever
+a device that has moved from Online to Deactivated has been signed out by whoever
 has access to it.
 
-Your partners will be notified when a device logs out. If you didn't expect it,
+Your partners will be notified when a device logs out. If you did not expect it,
 check your account activity, and reach out to help@virtueinitiative.org if you
 need help. Partners should reach out to the device owner.
 

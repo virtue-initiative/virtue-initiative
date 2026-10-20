@@ -34,7 +34,7 @@ iOS got a major user interface overhaul with styling polish and uniformity with 
 
 - [Updates for iOS](https://github.com/virtue-initiative/virtue-initiative/pull/346)
 - [Log dropdown fixes](https://github.com/virtue-initiative/virtue-initiative/pull/355)
-  - [Device buttons aren't the same width](https://github.com/virtue-initiative/virtue-initiative/issues/328)
+  - [Device buttons are not the same width](https://github.com/virtue-initiative/virtue-initiative/issues/328)
   - [Fix UI dropdowns](https://github.com/virtue-initiative/virtue-initiative/issues/348)
 - [Added nicer 404 pages](https://github.com/virtue-initiative/virtue-initiative/pull/357)
   - [Add a 404 to the landing page](https://github.com/virtue-initiative/virtue-initiative/issues/338)

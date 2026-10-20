@@ -5,22 +5,18 @@ sidebar_position: 1
 # Removing access
 
 One of the first lines of defense is removing access. There are a few main ways
-of restricting or removing access to porn.
+of restricting or removing access to pornography.
 
-Firstly, you can physically remove access. This could be unplugging your WiFi
-router at night, or replacing your smart phone with a dumb phone with no internet
+You can physically remove access. This could be unplugging your Wi-Fi
+router at night, or replacing your smartphone with a basic phone with no internet
 capabilities. This is the most extreme (and most effective) form of removing access.
 
-Secondly, you can remove access on the software side. This could be a
-[whitelist](/help/removing-access/whitelisting) or an app/setting that puts
-your device in a locked-down bedtime mode after a certain time. These are less
-effective than physical restrictions, but nevertheless can work very well
-(especially on phones).
+You can remove access on the software side. This could be a website
+allowlist or an app/setting that puts
+your device in a locked-down bedtime mode after a certain time. You can also
+[block app installs](/help/removing-access/block-app-installs-ios), for example
+to restrict yourself to a monitored browser. These are less effective than
+physical restrictions, but can still work very well (especially on phones).
 
 Lastly, you can filter access. This is rarely a perfect solution since the
-internet is so big and so full of junk, but it does help a lot. We have some
-articles on [setting up filtering on various operating
-systems](/help/removing-access/filtering).
-
-Implementing some of or all of these greatly helps in fighting against
-pornography.
+internet is so big and so full of junk, but it does help a lot.
