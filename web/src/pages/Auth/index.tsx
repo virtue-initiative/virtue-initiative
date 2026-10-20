@@ -54,6 +54,15 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
     if (mode !== 'signup') return '';
     return new URLSearchParams(window.location.search).get('signup_token') ?? '';
   }, [mode]);
+  useEffect(() => {
+    const label =
+      mode === 'signup'
+        ? 'Sign Up for Virtue'
+        : mode === 'forgot-password'
+          ? 'Reset Your Virtue Password'
+          : 'Log In to Virtue';
+    document.title = `${label} - The Virtue Initiative`;
+  }, [mode]);
   const resetToken = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return new URLSearchParams(window.location.search).get('token') ?? '';
