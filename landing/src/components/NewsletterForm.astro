@@ -16,6 +16,7 @@ const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/
     Virtue account to subscribe.
   </p>
   <form class="newsletter-form" action={BUTTONDOWN_EMBED_URL} method="post">
+    <input type="hidden" name="tag" value="landing" />
     <label class="newsletter-label" for="newsletter-email">Email address</label>
     <div class="newsletter-row">
       <Input

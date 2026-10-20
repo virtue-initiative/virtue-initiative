@@ -6,7 +6,7 @@ const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
  * Adds a new account's email to the Buttondown newsletter list (API-010).
  *
  * The address was just verified by the signup flow, so the subscriber is created as
- * `regular` and skips Buttondown's own confirmation email. No collision header is sent:
+ * `regular`, tagged `app` to tell it apart from landing-page signups, and skips Buttondown's own confirmation email. No collision header is sent:
  * Buttondown then rejects an address it already knows (including one that unsubscribed)
  * instead of resubscribing it.
  *
@@ -29,6 +29,7 @@ export async function subscribeToNewsletter(env: Env, email: string): Promise<vo
       body: JSON.stringify({
         email_address: email,
         type: 'regular',
+        tags: ['app'],
         referrer_url: `${env.APP_URL}/signup`,
       }),
     });

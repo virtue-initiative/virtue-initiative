@@ -36,6 +36,7 @@ describe('subscribeToNewsletter', () => {
     expect(captured?.body).toMatchObject({
       email_address: 'alice@example.com',
       type: 'regular',
+      tags: ['app'],
     });
   });
 
