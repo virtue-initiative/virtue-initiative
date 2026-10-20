@@ -31,9 +31,9 @@ been stopped, blocked from the network, or removed from startup.
 The **(last seen)** time next to each device tells you how long it has been
 offline.
 
-Every device can briefly show **Offline** at the same time if Virtue can't
+Every device can briefly show **Offline** at the same time if Virtue cannot
 reach the service that records check-ins. They return to **Online** on their
-own once it's back.
+own once it is back.
 
 **Online** means the device is checking in, not that its activity has arrived.
 On the Devices page, **Last upload** shows when the device last sent a batch of
