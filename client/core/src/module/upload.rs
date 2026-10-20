@@ -15,6 +15,7 @@ use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
     UploadKind,
 };
+use crate::module::lifecycle::risk_percent;
 
 static BATCH_UPLOAD_SUCCESS_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -42,9 +43,11 @@ const HASH_TOKEN_MAX_AGE_MS: i64 = 110 * 60 * 1_000;
 const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s
 const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes
 
-/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
-const HIGH_RISK_RATING: f32 = 0.7;
-const MEDIUM_RISK_RATING: f32 = 0.4;
+/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`), as whole
+/// percents because the web app rounds the score before choosing a level
+/// (see `lifecycle::risk_percent`).
+const HIGH_RISK_PERCENT: i64 = 70;
+const MEDIUM_RISK_PERCENT: i64 = 40;
 
 /// A hash-uploaded event awaiting batch upload, paired with its risk so the batch
 /// upload can report how many high/medium-risk events it carries.
@@ -57,7 +60,7 @@ pub struct PendingBatchEvent {
     /// can report `event_counts.screenshot` without decoding `encoded`.
     #[serde(default)]
     pub is_screenshot: bool,
-    /// Alert-email metadata, set when the event's risk is >= `EXTRA_HIGH_RISK` at
+    /// Alert-email metadata, set when the event's risk is at the `EXTRA_HIGH_RISK` level (see `is_extra_high_risk`) at
     /// hash time. Rides with this event into the batch it's uploaded in — never
     /// sent standalone.
     #[serde(default)]
@@ -197,7 +200,7 @@ pub fn enqueue(state: &mut UploadState, now_ms: i64, risk: f32, kind: UploadKind
         return;
     }
     let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
-    let is_high_risk = risk >= crate::module::lifecycle::EXTRA_HIGH_RISK;
+    let is_high_risk = crate::module::lifecycle::is_extra_high_risk(risk);
     state.pending_hash_events.push(LogEntry {
         ts: now_ms,
         risk: Some(risk),
@@ -445,7 +448,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                 next_hash_seq = seq;
                 let is_high_risk = event
                     .risk
-                    .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
+                    .is_some_and(crate::module::lifecycle::is_extra_high_risk);
                 let notify = is_high_risk.then(|| build_notify_payload(&event));
                 let is_screenshot = matches!(event.event, UploadKind::Screenshot { .. });
                 newly_hashed.push(PendingBatchEvent {
@@ -605,10 +608,16 @@ pub fn plan_batch(
     let count = state.pending_batch_events.len();
     let items = state.pending_batch_events.clone();
     let start_time_ms = items.iter().map(|event| event.ts).min()?;
-    let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
+    let high_risk_count = items
+        .iter()
+        .filter(|e| risk_percent(e.risk) >= HIGH_RISK_PERCENT)
+        .count() as u32;
     let medium_risk_count = items
         .iter()
-        .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
+        .filter(|e| {
+            let percent = risk_percent(e.risk);
+            (MEDIUM_RISK_PERCENT..HIGH_RISK_PERCENT).contains(&percent)
+        })
         .count() as u32;
     let screenshot_count = items.iter().filter(|e| e.is_screenshot).count() as u32;
     let notifications: Vec<NotifyPayload> = items.iter().filter_map(|e| e.notify.clone()).collect();
@@ -1039,6 +1048,26 @@ mod tests {
             next > 1_000,
             "next attempt {next} should wait out a backoff"
         );
+    }
+
+    /// The medium/high counts use the rounded percentage, like the web app's
+    /// "N% concern (Level)" label, so a digest never disagrees with the log feed.
+    #[test]
+    fn batch_counts_use_the_rounded_percentage_like_the_web_app() {
+        let mut state = authenticated_state();
+        state.last_batch_at_ms = None;
+        // 39% (low), 40% (medium), 69% (medium), 70% (high), 90% (alert, counted as high).
+        for risk in [0.3949_f32, 0.3951, 0.6949, 0.6951, 0.9] {
+            state.pending_batch_events.push(PendingBatchEvent {
+                risk,
+                ..pending_batch_event()
+            });
+        }
+
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let batch = plan.batch.expect("batch builds");
+        assert_eq!(batch.medium_risk_count, 2);
+        assert_eq!(batch.high_risk_count, 2);
     }
 
     #[test]
