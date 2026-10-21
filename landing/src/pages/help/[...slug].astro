@@ -15,7 +15,10 @@ function hasCompiledContent(entry: HelpEntry): entry is Required<HelpEntry> {
 
 export function getStaticPaths() {
   return Object.entries(
-    import.meta.glob('../../content/help/**/*.md*', { eager: true }) as Record<string, HelpEntry>,
+    import.meta.glob('../../content/help/**/*.{md,mdx}', { eager: true }) as Record<
+      string,
+      HelpEntry
+    >,
   ).map(([key, module]) => {
     const routePath = key
       .replace('../../content/help/', '')

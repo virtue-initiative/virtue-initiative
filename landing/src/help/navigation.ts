@@ -39,12 +39,6 @@ export const helpSidebar: HelpNavItem[] = [
     label: 'Removing access',
     href: '/help/removing-access',
     items: [
-      { label: 'Whitelisting', href: '/help/removing-access/whitelisting' },
-      { label: 'Filtering', href: '/help/removing-access/filtering' },
-      {
-        label: 'Disable the browser',
-        href: '/help/removing-access/disable-browser',
-      },
       {
         label: 'Block app installs (iPhone)',
         href: '/help/removing-access/block-app-installs-ios',

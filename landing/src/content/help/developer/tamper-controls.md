@@ -7,8 +7,8 @@
 
 ## Specific events handled
 
-- Suspend / wake: Zero-risk logs, there will be no screenshots taken between suspend and wake.
-- Shutdown / startup: Zero-risk logs, there will be no screenshots taken between shutdown and startup. These will be wrapped by primary service stop/start logs, also zero-risk because we detect it was part of a shutdown cycle.
+- Suspend / wake: Zero-risk logs. There will be no screenshots taken between suspend and wake.
+- Shutdown / startup: Zero-risk logs. There will be no screenshots taken between shutdown and startup. These will be wrapped by primary service stop/start logs, also zero-risk because we detect it was part of a shutdown cycle.
 - Service stopped inside app (e.g. `virtue daemon stop` on Linux): “Are you sure?” question, then high risk log and marker indicating it was a user event so another high risk log is not generated on startup.
 - Service stopped outside app / Service killed with cleanup allowed (e.g. `systemctl --user stop virtue.service` / `kill <service pid>` on Linux): 0.5 risk log, unknown source of stopping. Will have a stop marker which will be read on startup.
 - Service killed forcefully (e.g. `kill -9 <service pid>`): No alert can be sent on service stopping. Ping timestamps determine alert level on startup.
