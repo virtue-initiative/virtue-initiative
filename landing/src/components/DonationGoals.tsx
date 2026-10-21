@@ -27,9 +27,11 @@ export function DonationGoals() {
 
   return (
     <section class="donate-goals" aria-labelledby="donate-goals-heading">
-      <h3 id="donate-goals-heading">Our fundraising goals</h3>
+      <h3 id="donate-goals-heading">{goals.length === 1 ? 'Our fundraising goal' : 'Our fundraising goals'}</h3>
       <p class="donate-goals-intro">
-        This is what we are raising money for right now. The bars show how far along we are.
+        {goals.length === 1
+          ? 'This is the goal we are fundraising for right now.'
+          : 'These are the goals we are fundraising for right now.'}
       </p>
       {goals.map((goal) => {
         const percent = Math.min(100, Math.round((goal.raisedCents / goal.targetCents) * 100));
