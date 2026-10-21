@@ -1,5 +1,6 @@
 ---
 import { DonateForm } from '../components/DonateForm';
+import { DonationGoals } from '../components/DonationGoals';
 import SiteLayout from '../layouts/SiteLayout.astro';
 ---
 
@@ -27,6 +28,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         Please note: donations are not currently tax deductible, as we are still working toward
         501(c)(3) status.
       </p>
+      <DonationGoals client:load />
     </div>
 
     <div class="donate-card">

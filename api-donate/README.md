@@ -9,6 +9,8 @@ separate from the main `api/` worker and has no shared auth or data.
 - `GET /` — health check.
 - `POST /checkout` — body `{ amount: number (USD), recurring: boolean }`. Creates a Stripe Checkout
   session (`payment` or `subscription` mode) and returns `{ url }` to redirect the donor to.
+- `GET /goals` — active fundraising goals from the `goals` table, each with `targetCents` and
+  `raisedCents`. Both are entered by hand in the `goals` table. Shown as a progress bar on the donate page.
 - `POST /webhook` — Stripe webhook receiver. Verifies the signature, then on
   `checkout.session.completed` records the donation and on `customer.subscription.deleted` marks the
   matching donations cancelled. Idempotent on event id.
