@@ -27,7 +27,9 @@ export function DonationGoals() {
 
   return (
     <section class="donate-goals" aria-labelledby="donate-goals-heading">
-      <h3 id="donate-goals-heading">{goals.length === 1 ? 'Our fundraising goal' : 'Our fundraising goals'}</h3>
+      <h3 id="donate-goals-heading">
+        {goals.length === 1 ? 'Our fundraising goal' : 'Our fundraising goals'}
+      </h3>
       <p class="donate-goals-intro">
         {goals.length === 1
           ? 'This is the goal we are fundraising for right now.'
