@@ -26,13 +26,17 @@ export function DonationGoals() {
   if (goals.length === 0) return null;
 
   return (
-    <div class="donate-goals">
+    <section class="donate-goals" aria-labelledby="donate-goals-heading">
+      <h3 id="donate-goals-heading">Our fundraising goals</h3>
+      <p class="donate-goals-intro">
+        This is what we are raising money for right now. The bars show how far along we are.
+      </p>
       {goals.map((goal) => {
         const percent = Math.min(100, Math.round((goal.raisedCents / goal.targetCents) * 100));
         return (
           <div class="donate-goal" key={goal.id}>
             <div class="donate-goal-header">
-              <h3>{goal.title}</h3>
+              <h4>{goal.title}</h4>
               <span>
                 {formatDollars(goal.raisedCents)} of {formatDollars(goal.targetCents)}
               </span>
@@ -51,6 +55,6 @@ export function DonationGoals() {
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
