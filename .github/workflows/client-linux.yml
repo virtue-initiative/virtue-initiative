@@ -18,7 +18,9 @@ concurrency:
 jobs:
   client-linux:
     name: Client Linux
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04 (clang 21, newer leptonica), where the
+    # leptonica-sys 0.4.9 bindgen step fails with "unknown type name 'atomic_int'".
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
