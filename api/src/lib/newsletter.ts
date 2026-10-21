@@ -10,9 +10,15 @@ const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
  * Buttondown then rejects an address it already knows (including one that unsubscribed)
  * instead of resubscribing it.
  *
+ * `ipAddress` is the signing-up client's IP. Buttondown filters aggressively without it.
+ *
  * Best-effort: failures are logged, never thrown, so they can't fail the signup.
  */
-export async function subscribeToNewsletter(env: Env, email: string): Promise<void> {
+export async function subscribeToNewsletter(
+  env: Env,
+  email: string,
+  ipAddress?: string,
+): Promise<void> {
   const apiKey = env.BUTTONDOWN_API_KEY?.trim();
   if (!apiKey) {
     console.log(`[newsletter] BUTTONDOWN_API_KEY not set; skipping signup for ${email}`);
@@ -30,6 +36,7 @@ export async function subscribeToNewsletter(env: Env, email: string): Promise<vo
         email_address: email,
         type: 'regular',
         referrer_url: `${env.APP_URL}/signup`,
+        ...(ipAddress ? { ip_address: ipAddress } : {}),
       }),
     });
     if (!res.ok) {

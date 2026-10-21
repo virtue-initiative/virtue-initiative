@@ -28,7 +28,7 @@ describe('subscribeToNewsletter', () => {
         return { statusCode: 201, data: '{}' };
       });
 
-    await subscribeToNewsletter(envWithKey('bd-key'), 'alice@example.com');
+    await subscribeToNewsletter(envWithKey('bd-key'), 'alice@example.com', '203.0.113.7');
 
     expect(captured?.headers.authorization).toBe('Token bd-key');
     // A collision header would let Buttondown resubscribe an address that opted out.
@@ -36,6 +36,7 @@ describe('subscribeToNewsletter', () => {
     expect(captured?.body).toMatchObject({
       email_address: 'alice@example.com',
       type: 'regular',
+      ip_address: '203.0.113.7',
     });
   });
 
