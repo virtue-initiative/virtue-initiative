@@ -498,7 +498,9 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await createSession(c, userId);
 
   if (newsletter_opt_in === true) {
-    c.executionCtx.waitUntil(subscribeToNewsletter(c.env, normalizedEmail));
+    c.executionCtx.waitUntil(
+      subscribeToNewsletter(c.env, normalizedEmail, c.req.header('CF-Connecting-IP')),
+    );
   }
 
   return c.json<SignupResponse>(
