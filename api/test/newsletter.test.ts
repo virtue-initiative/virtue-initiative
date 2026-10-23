@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
-import { subscribeToNewsletter } from '../src/lib/newsletter';
+import { recordNewsletterRegion, subscribeToNewsletter } from '../src/lib/newsletter';
 import { Env } from '../src/types/bindings';
 
 const BUTTONDOWN_ORIGIN = 'https://api.buttondown.com';
@@ -62,5 +62,41 @@ describe('subscribeToNewsletter', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('not set'));
     fetchMock.assertNoPendingInterceptors();
     log.mockRestore();
+  });
+});
+
+describe('recordNewsletterRegion', () => {
+  const cf = {
+    country: 'US',
+    regionCode: 'CA',
+    region: 'California',
+  } as IncomingRequestCfProperties;
+
+  it('stores the signup region and keeps the first one seen', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+
+    await recordNewsletterRegion(env as unknown as Env, 'alice@example.com', cf);
+    await recordNewsletterRegion(env as unknown as Env, 'alice@example.com', {
+      country: 'US',
+      regionCode: 'NY',
+    } as IncomingRequestCfProperties);
+
+    const rows = await env.DONATE_DB!.prepare('SELECT * FROM newsletter_subscribers').all();
+    expect(rows.results).toMatchObject([
+      {
+        email: 'alice@example.com',
+        country: 'US',
+        region_code: 'CA',
+        region: 'California',
+        source: 'signup',
+      },
+    ]);
+  });
+
+  it('stores nulls when Cloudflare gives no location', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+    await recordNewsletterRegion(env as unknown as Env, 'bob@example.com', undefined);
+    const row = await env.DONATE_DB!.prepare('SELECT * FROM newsletter_subscribers').first();
+    expect(row).toMatchObject({ email: 'bob@example.com', country: null, region_code: null });
   });
 });

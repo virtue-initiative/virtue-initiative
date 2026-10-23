@@ -127,6 +127,20 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
 );
 `;
 
+// Lives in the donate worker's D1 in production (API-010); the test worker binds a separate empty one.
+await env
+  .DONATE_DB!.prepare(
+    `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+    email TEXT PRIMARY KEY,
+    country TEXT,
+    region_code TEXT,
+    region TEXT,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  )`,
+  )
+  .run();
+
 const statements = schema
   .split(';')
   .map((statement) => statement.replace(/--[^\n]*/g, '').trim())

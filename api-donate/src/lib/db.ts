@@ -117,3 +117,32 @@ export async function getActiveGoals(db: D1Database): Promise<Goal[]> {
     raisedCents: row.raised_cents,
   }));
 }
+
+export interface NewsletterSubscriberRecord {
+  email: string;
+  country?: string;
+  regionCode?: string;
+  region?: string;
+  source: 'landing' | 'signup';
+}
+
+/** Keeps the first location seen for an address, so a repeat signup can't overwrite it. */
+export async function recordSubscriber(
+  db: D1Database,
+  subscriber: NewsletterSubscriberRecord,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO newsletter_subscribers (email, country, region_code, region, source)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(email) DO NOTHING`,
+    )
+    .bind(
+      subscriber.email,
+      subscriber.country ?? null,
+      subscriber.regionCode ?? null,
+      subscriber.region ?? null,
+      subscriber.source,
+    )
+    .run();
+}

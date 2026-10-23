@@ -11,6 +11,11 @@ separate from the main `api/` worker and has no shared auth or data.
   session (`payment` or `subscription` mode) and returns `{ url }` to redirect the donor to.
 - `GET /goals` — active fundraising goals from the `goals` table, each with `targetCents` and
   `raisedCents`. Both are entered by hand in the `goals` table. Shown as a progress bar on the donate page.
+- `POST /newsletter` — form body `email`. Landing page newsletter signup. Stores the visitor's country and
+  region (Cloudflare geoip) in `newsletter_subscribers`, adds them to Buttondown as unconfirmed (so
+  Buttondown sends its confirmation email), then redirects to `/newsletter/check-email` on the landing
+  site. Account signups in `api/` write to the same table directly (`DONATE_DB` binding, API-010).
+  Needs the `BUTTONDOWN_API_KEY` secret; without it the Buttondown call is skipped.
 - `POST /webhook` — Stripe webhook receiver. Verifies the signature, then on
   `checkout.session.completed` records the donation and on `customer.subscription.deleted` marks the
   matching donations cancelled. Idempotent on event id.

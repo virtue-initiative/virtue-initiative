@@ -46,3 +46,34 @@ export async function subscribeToNewsletter(
     console.error('[newsletter] Buttondown request failed', err);
   }
 }
+
+/**
+ * Stores where a newsletter subscriber signed up from (API-010), since Buttondown keeps no
+ * metadata for us. The first location seen for an address wins.
+ *
+ * Best-effort: failures are logged, never thrown, so they can't fail the signup.
+ */
+export async function recordNewsletterRegion(
+  env: Env,
+  email: string,
+  cf: IncomingRequestCfProperties | undefined,
+): Promise<void> {
+  if (!env.DONATE_DB) return;
+
+  try {
+    await env.DONATE_DB.prepare(
+      `INSERT INTO newsletter_subscribers (email, country, region_code, region, source)
+       VALUES (?, ?, ?, ?, 'signup')
+       ON CONFLICT(email) DO NOTHING`,
+    )
+      .bind(
+        email,
+        (cf?.country as string | undefined) ?? null,
+        (cf?.regionCode as string | undefined) ?? null,
+        (cf?.region as string | undefined) ?? null,
+      )
+      .run();
+  } catch (err) {
+    console.error('[newsletter] failed to record subscriber region', err);
+  }
+}

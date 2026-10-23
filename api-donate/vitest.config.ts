@@ -11,6 +11,7 @@ export default defineWorkersConfig({
             STRIPE_SECRET_KEY: 'sk_test_dummy',
             STRIPE_WEBHOOK_SECRET: 'whsec_test_secret',
             LANDING_URL: 'http://localhost:4321',
+            BUTTONDOWN_API_KEY: 'bd-key',
           },
         },
       },

@@ -61,7 +61,7 @@ import {
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
-import { subscribeToNewsletter } from '../lib/newsletter';
+import { recordNewsletterRegion, subscribeToNewsletter } from '../lib/newsletter';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;

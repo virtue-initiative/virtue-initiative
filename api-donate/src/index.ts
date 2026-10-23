@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import checkout from './routes/checkout';
+import newsletter from './routes/newsletter';
 import goals from './routes/goals';
 import webhook from './routes/webhook';
 import { Env, Variables } from './types/bindings';
@@ -46,6 +47,7 @@ app.get('/', (c) =>
 );
 
 app.route('/', checkout);
+app.route('/', newsletter);
 app.route('/', goals);
 app.route('/', webhook);
 
