@@ -416,6 +416,8 @@ If it matches, the server MUST send **HTTP 204** and set the `refresh_token` coo
 
 If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
 
+If the user's email already has a row in the `newsletter_subscribers` table (see API-010) with no region code, the server SHOULD fill in the row's country and region from Cloudflare's geoip for the login request. The server MUST NOT create a row on login, so that only newsletter subscribers are recorded, and MUST NOT overwrite a region that is already set. A failure to do so MUST NOT fail the login.
+
 ### API-017 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.

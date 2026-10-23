@@ -56,7 +56,7 @@ export async function subscribeToNewsletter(
 export async function recordNewsletterRegion(
   env: Env,
   email: string,
-  cf: IncomingRequestCfProperties | undefined,
+  cf: Request['cf'],
 ): Promise<void> {
   if (!env.DONATE_DB) return;
 
@@ -75,5 +75,38 @@ export async function recordNewsletterRegion(
       .run();
   } catch (err) {
     console.error('[newsletter] failed to record subscriber region', err);
+  }
+}
+
+/**
+ * Fills in the region of an existing newsletter subscriber when they log in (API-016). It only
+ * updates a row that API-010 or a backfill created, so users who never subscribed are never
+ * recorded, and it never overwrites a region that is already set.
+ *
+ * Best-effort: failures are logged, never thrown, so they can't fail the login.
+ */
+export async function fillNewsletterRegion(
+  env: Env,
+  email: string,
+  cf: Request['cf'],
+): Promise<void> {
+  const regionCode = cf?.regionCode as string | undefined;
+  if (!env.DONATE_DB || !regionCode) return;
+
+  try {
+    await env.DONATE_DB.prepare(
+      `UPDATE newsletter_subscribers
+       SET country = ?, region_code = ?, region = ?
+       WHERE email = ? AND region_code IS NULL`,
+    )
+      .bind(
+        (cf?.country as string | undefined) ?? null,
+        regionCode,
+        (cf?.region as string | undefined) ?? null,
+        email,
+      )
+      .run();
+  } catch (err) {
+    console.error('[newsletter] failed to fill subscriber region', err);
   }
 }

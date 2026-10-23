@@ -1,6 +1,10 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock } from 'cloudflare:test';
-import { recordNewsletterRegion, subscribeToNewsletter } from '../src/lib/newsletter';
+import {
+  fillNewsletterRegion,
+  recordNewsletterRegion,
+  subscribeToNewsletter,
+} from '../src/lib/newsletter';
 import { Env } from '../src/types/bindings';
 
 const BUTTONDOWN_ORIGIN = 'https://api.buttondown.com';
@@ -98,5 +102,54 @@ describe('recordNewsletterRegion', () => {
     await recordNewsletterRegion(env as unknown as Env, 'bob@example.com', undefined);
     const row = await env.DONATE_DB!.prepare('SELECT * FROM newsletter_subscribers').first();
     expect(row).toMatchObject({ email: 'bob@example.com', country: null, region_code: null });
+  });
+});
+
+describe('fillNewsletterRegion', () => {
+  const cf = { country: 'US', regionCode: 'TX', region: 'Texas' } as IncomingRequestCfProperties;
+  const rows = () => env.DONATE_DB!.prepare('SELECT * FROM newsletter_subscribers').all();
+
+  it('fills the region of an existing subscriber with none', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+    await env
+      .DONATE_DB!.prepare(
+        "INSERT INTO newsletter_subscribers (email, source) VALUES ('a@example.com', 'signup')",
+      )
+      .run();
+
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
+
+    expect((await rows()).results).toMatchObject([
+      { email: 'a@example.com', country: 'US', region_code: 'TX', region: 'Texas' },
+    ]);
+  });
+
+  it('does not overwrite a region that is already set', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+    await recordNewsletterRegion(env as unknown as Env, 'a@example.com', {
+      country: 'US',
+      regionCode: 'CA',
+    } as IncomingRequestCfProperties);
+
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
+
+    expect((await rows()).results).toMatchObject([{ region_code: 'CA' }]);
+  });
+
+  it('never creates a row for someone who did not subscribe', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+    await fillNewsletterRegion(env as unknown as Env, 'nobody@example.com', cf);
+    expect((await rows()).results).toEqual([]);
+  });
+
+  it('skips the update when Cloudflare gives no region', async () => {
+    await env.DONATE_DB!.prepare('DELETE FROM newsletter_subscribers').run();
+    await env
+      .DONATE_DB!.prepare(
+        "INSERT INTO newsletter_subscribers (email, source) VALUES ('a@example.com', 'signup')",
+      )
+      .run();
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', undefined);
+    expect((await rows()).results).toMatchObject([{ region_code: null }]);
   });
 });
