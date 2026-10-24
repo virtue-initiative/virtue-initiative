@@ -166,6 +166,24 @@ describe('fillNewsletterRegion', () => {
     ]);
   });
 
+  it('never mixes a stored region code or name with another place', async () => {
+    await insert('a@example.com', 'signup', 'US', 'WA');
+    await insert('b@example.com', 'signup', 'US', null);
+    await env
+      .DONATE_DB!.prepare(
+        "UPDATE newsletter_subscribers SET region = 'Washington' WHERE email = 'b@example.com'",
+      )
+      .run();
+
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
+    await fillNewsletterRegion(env as unknown as Env, 'b@example.com', cf);
+
+    expect((await rows()).results).toMatchObject([
+      { email: 'a@example.com', country: 'US', region_code: 'WA', region: null },
+      { email: 'b@example.com', country: 'US', region_code: null, region: 'Washington' },
+    ]);
+  });
+
   it('never overwrites a value that is set', async () => {
     await insert('a@example.com', 'signup', 'US', 'WA');
     await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);

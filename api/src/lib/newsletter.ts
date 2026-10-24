@@ -111,12 +111,13 @@ export async function fillNewsletterRegion(
       .first<{ country: string | null; region_code: string | null; region: string | null }>();
     if (!row) return;
 
-    // Only pair a region with the stored country when they agree.
-    const sameCountry = !row.country || row.country === country;
+    // Fill the region code and name together, and only for the stored country, so a row never
+    // mixes values from different places.
+    const canFillRegion =
+      !row.region_code && !row.region && (!row.country || row.country === country);
     const nextCountry = row.country ?? country;
-    const nextCode = row.region_code ?? (sameCountry ? regionCode : null);
-    const nextRegion =
-      row.region ?? (sameCountry ? ((cf?.region as string | undefined) ?? null) : null);
+    const nextCode = canFillRegion ? regionCode : row.region_code;
+    const nextRegion = canFillRegion ? ((cf?.region as string | undefined) ?? null) : row.region;
     if (nextCountry === row.country && nextCode === row.region_code && nextRegion === row.region) {
       return;
     }
