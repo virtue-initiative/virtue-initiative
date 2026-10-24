@@ -102,14 +102,30 @@ export async function fillNewsletterRegion(
   if (!env.DONATE_DB || (!country && !regionCode)) return;
 
   try {
-    await env.DONATE_DB.prepare(
-      `UPDATE newsletter_subscribers
-       SET country = COALESCE(country, ?),
-           region_code = COALESCE(region_code, ?),
-           region = COALESCE(region, ?)
-       WHERE email = ? AND source = 'signup' AND (country IS NULL OR region_code IS NULL)`,
+    // Read first: D1 writes are the expensive part, and nearly every login finds nothing to fill.
+    const row = await env.DONATE_DB.prepare(
+      `SELECT country, region_code, region FROM newsletter_subscribers
+       WHERE email = ? AND source = 'signup'`,
     )
-      .bind(country, regionCode, (cf?.region as string | undefined) ?? null, email)
+      .bind(email)
+      .first<{ country: string | null; region_code: string | null; region: string | null }>();
+    if (!row) return;
+
+    // Only pair a region with the stored country when they agree.
+    const sameCountry = !row.country || row.country === country;
+    const nextCountry = row.country ?? country;
+    const nextCode = row.region_code ?? (sameCountry ? regionCode : null);
+    const nextRegion =
+      row.region ?? (sameCountry ? ((cf?.region as string | undefined) ?? null) : null);
+    if (nextCountry === row.country && nextCode === row.region_code && nextRegion === row.region) {
+      return;
+    }
+
+    await env.DONATE_DB.prepare(
+      `UPDATE newsletter_subscribers SET country = ?, region_code = ?, region = ?
+       WHERE email = ? AND source = 'signup'`,
+    )
+      .bind(nextCountry, nextCode, nextRegion, email)
       .run();
   } catch (err) {
     console.error('[newsletter] failed to fill subscriber region', err);

@@ -149,7 +149,7 @@ describe('fillNewsletterRegion', () => {
     ]);
   });
 
-  it('fills only the missing columns and never overwrites a value that is set', async () => {
+  it('fills the region of a stored country only when the login is from that country', async () => {
     await insert('a@example.com', 'signup', 'US', null);
     await fillNewsletterRegion(env as unknown as Env, 'a@example.com', {
       country: 'CA',
@@ -157,11 +157,28 @@ describe('fillNewsletterRegion', () => {
       region: 'Ontario',
     } as Request['cf']);
     expect((await rows()).results).toMatchObject([
-      { country: 'US', region_code: 'ON', region: 'Ontario' },
+      { country: 'US', region_code: null, region: null },
     ]);
 
     await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
-    expect((await rows()).results).toMatchObject([{ country: 'US', region_code: 'ON' }]);
+    expect((await rows()).results).toMatchObject([
+      { country: 'US', region_code: 'TX', region: 'Texas' },
+    ]);
+  });
+
+  it('never overwrites a value that is set', async () => {
+    await insert('a@example.com', 'signup', 'US', 'WA');
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
+    expect((await rows()).results).toMatchObject([{ country: 'US', region_code: 'WA' }]);
+  });
+
+  it('does not write when nothing is missing', async () => {
+    await insert('a@example.com', 'signup', 'US', 'WA');
+    await env.DONATE_DB!.prepare("UPDATE newsletter_subscribers SET region = 'Washington'").run();
+    const prepare = vi.spyOn(env.DONATE_DB!, 'prepare');
+    await fillNewsletterRegion(env as unknown as Env, 'a@example.com', cf);
+    expect(prepare.mock.calls.map(([sql]) => sql.trim().split(/\s/)[0])).toEqual(['SELECT']);
+    prepare.mockRestore();
   });
 
   it('fills a country when Cloudflare gives no region code', async () => {

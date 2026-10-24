@@ -416,7 +416,7 @@ If it matches, the server MUST send **HTTP 204** and set the `refresh_token` coo
 
 If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
 
-If the user's email already has a row in the `newsletter_subscribers` table (see API-010) that came from an account signup and is missing its country or region, the server SHOULD fill in the missing values from Cloudflare's geoip for the login request. The server MUST NOT create a row on login, MUST NOT touch a row created by the landing page form, so that only people who opted in through an account are recorded, and MUST NOT overwrite a value that is already set. A failure to do so MUST NOT fail the login.
+If the user's email already has a row in the `newsletter_subscribers` table (see API-010) that came from an account signup and is missing its country or region, the server SHOULD fill in the missing values from Cloudflare's geoip for the login request. The server MUST read the row first and MUST NOT write to the donations database when nothing is missing, so most logins cost no write. The server MUST fill a region only when the row's country is unset or equals the login's country, so a stored country is never paired with another country's region. The server MUST NOT create a row on login, MUST NOT touch a row created by the landing page form, so that only people who opted in through an account are recorded, and MUST NOT overwrite a value that is already set. A failure to do so MUST NOT fail the login.
 
 ### API-017 `POST /email-verification/validate`
 
