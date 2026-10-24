@@ -5,7 +5,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
 <SiteLayout pageTitle="Privacy Policy">
   <section class="legal">
     <h1>Privacy Policy</h1>
-    <p class="legal-date">Last updated: September 2026</p>
+    <p class="legal-date">Last updated: October 2026</p>
 
     <h2>1. Overview</h2>
     <p>
@@ -89,7 +89,11 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         ticking the box when you create an account, your email address is added to our mailing list at
         Buttondown. The box is unticked by default, and not subscribing has no effect on your account.
         Each email includes an unsubscribe link. The mailing list is kept separately from your account
-        and your monitoring data.
+        and your monitoring data. When you submit your address, and the first time you log in afterwards
+        if you subscribed with an account, we also record your approximate country and state, worked out
+        from your IP address. We keep this with your email address in our donations database, not at Buttondown,
+        to understand where our supporters are. We do not store your IP address there, and we delete this
+        record if you ask.
       </li>
       <li>
         <strong>Email preferences</strong> - how often you want to receive alert and summary emails, and
@@ -188,6 +192,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       immediately; the encrypted batch blobs themselves are removed by the normal 30-day cycle.
       Donation records are retained as long as we need them for accounting and tax purposes. Issue
       reports live in our support mailbox and are retained as long as they are useful for diagnosis.
+      The location we record for newsletter subscribers is kept until you ask us to delete it.
     </p>
     <p>
       You can delete your account yourself from the web app's settings. You may also request
@@ -220,7 +225,8 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       </li>
       <li>
         <strong>Buttondown</strong> - hosts our newsletter mailing list and sends newsletter emails. It
-        receives only the email addresses of people who subscribe.
+        receives the email addresses of people who subscribe, along with the IP address they signed up
+        from, which it uses to check that the signup is genuine.
       </li>
       <li>
         <strong>Have I Been Pwned</strong> - when you choose a new password, your browser checks it against

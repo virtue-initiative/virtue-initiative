@@ -6,6 +6,7 @@ export const BASE = 'http://localhost';
 export async function clearDB() {
   await env.DB.prepare('DELETE FROM donations').run();
   await env.DB.prepare('DELETE FROM stripe_events').run();
+  await env.DB.prepare('DELETE FROM newsletter_subscribers').run();
 }
 
 const signingStripe = new Stripe('sk_test_dummy', {

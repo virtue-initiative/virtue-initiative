@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS goals (
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+  email TEXT PRIMARY KEY,
+  country TEXT,
+  region_code TEXT,
+  region TEXT,
+  source TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 INSERT OR IGNORE INTO goals (id, title, description, target_cents)
 VALUES ('lawyer', 'Legal fees', 'Lawyer', 100000);
 `;

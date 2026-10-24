@@ -1,11 +1,12 @@
 ---
 import { Button, Input } from '@virtueinitiative/shared-web';
+import { DONATE_API_URL } from '../lib/donate-url';
 
-// Posts straight to Buttondown's embed endpoint, so it needs no API key and no account.
-// Buttondown sends its own confirmation email before the address is subscribed, which
-// is what makes this safe to accept from anyone. Accounts opt in from the signup form
-// instead (API-010).
-const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/virtueinitiative';
+// Posts to the donate worker, which records the visitor's region and adds them to Buttondown
+// as unconfirmed. Buttondown sends its own confirmation email before the address is
+// subscribed, which is what makes this safe to accept from anyone. Accounts opt in from the
+// signup form instead (API-010).
+const NEWSLETTER_URL = `${DONATE_API_URL}/newsletter`;
 
 interface Props {
   centered?: boolean;
@@ -14,6 +15,7 @@ const { centered = false } = Astro.props;
 ---
 
 <section
+  id="newsletter"
   class:list={['newsletter', { 'newsletter-centered': centered }]}
   aria-labelledby="newsletter-heading"
 >
@@ -23,7 +25,7 @@ const { centered = false } = Astro.props;
     We send occasional news about the project, new features, and new articles. You do not need a
     Virtue account to subscribe.
   </p>
-  <form class="newsletter-form" action={BUTTONDOWN_EMBED_URL} method="post">
+  <form class="newsletter-form" action={NEWSLETTER_URL} method="post">
     <label class="newsletter-label" for="newsletter-email">Email address</label>
     <div class="newsletter-row">
       <Input
