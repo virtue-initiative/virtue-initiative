@@ -17,8 +17,9 @@ separate from the main `api/` worker and has no shared auth or data.
   (`NEWSLETTER_DAILY_CONFIRMATION_CAP`, default 200). Otherwise it stores the visitor's country and
   region (Cloudflare geoip) in `newsletter_subscribers`, emails a confirmation link through SES, and
   redirects to `/newsletter/check-email`. An invalid address redirects back to the form. At most one
-  confirmation email goes out per address per hour, never to a suppressed address, and the visitor
-  sees the same redirect either way.
+  confirmation email goes out per address per hour (per day once the address has unsubscribed, though
+  the first request after an unsubscribe always goes through), never to a suppressed address, and the
+  visitor sees the same redirect either way.
 - `GET|POST /newsletter/confirm?token=` — the link in the confirmation email. `GET` shows a button
   (mail scanners fetch links), `POST` confirms and redirects to `/newsletter/confirmed`. A link works
   only for the latest confirmation email sent to that address, only if the address has not unsubscribed
@@ -48,6 +49,11 @@ an address that had unsubscribed.
 emails the address, a confirm link is refused, and an account opt-in leaves it alone. Confirm and
 unsubscribe links are stateless HMAC tokens signed with `NEWSLETTER_TOKEN_SECRET`. A confirm link also
 carries the time of the email it was sent in, which has to match the address's latest confirmation.
+
+The list is separate from accounts on purpose. Deleting an account or changing its email address does
+not touch the list: the old address was subscribed by whoever controls it, every email carries an
+unsubscribe link, and a removal request is a row update (`unsubscribed_at = unixepoch()`). Tying the
+two together would also unsubscribe people who still read the mail at the old address.
 
 ### Sending a newsletter
 
@@ -271,9 +277,11 @@ that account past AWS's bounce limits (review starts around 5%), so don't skip t
    wrangler secret put TURNSTILE_SECRET_KEY --env staging   # and --env prod
    ```
 
-3. **Set the site key on the landing site.** Add `PUBLIC_TURNSTILE_SITE_KEY` wherever the landing build
-   gets its other `PUBLIC_` variables, such as `PUBLIC_DONATE_API_URL`, and rebuild it. Without it there
-   is no widget and every signup is rejected.
+3. **The site key is committed.** `PUBLIC_TURNSTILE_SITE_KEY` is in `landing/.env.production` and
+   `landing/.env.staging` (site keys are public), and a production landing build fails if it is empty.
+   If you create a new widget, update both files. The widget sets `data-action="newsletter"`, and the
+   worker only accepts tokens for that action issued on a host in `TURNSTILE_HOSTNAMES` (in
+   `wrangler.json`; unset in local dev, where Cloudflare's test keys return fixed values).
 4. **Rate limit and daily cap need no setup.** The per-IP limit is the `NEWSLETTER_RATE_LIMITER`
    binding in `wrangler.json` (5 posts a minute per IP; the namespace ids `2001` and `2002` must not
    be used by another worker in the account). The daily cap is `NEWSLETTER_DAILY_CONFIRMATION_CAP`,
@@ -283,7 +291,8 @@ that account past AWS's bounce limits (review starts around 5%), so don't skip t
 ### 5. Apply migrations, set secrets, deploy
 
 Order matters. The main API writes the new columns when someone signs up with the newsletter box
-ticked, so the donate database must be migrated before either worker is deployed.
+ticked, and an opt-in that arrives before migration 0004 is applied is lost (it is only logged), so
+apply the migrations to donate-db before either worker is deployed. Nothing enforces this order.
 
 ```bash
 cd api-donate
@@ -320,7 +329,7 @@ it stays Pending, check the worker logs.
    in the footer works, and that Gmail's "Show original" shows `dkim=pass`, `spf=pass` and `dmarc=pass`.
 3. Exercise bounce handling with the SES mailbox simulator, which doesn't count against your
    reputation. Insert confirmed rows for the simulator addresses, send to them, and confirm they
-   become unsubscribed:
+   become suppressed:
 
    ```bash
    bunx wrangler d1 execute DB --env staging --remote --command \
@@ -328,10 +337,10 @@ it stays Pending, check the worker logs.
    bun run newsletter test.md --env staging --test-to bounce@simulator.amazonses.com
    bun run newsletter test.md --env staging --test-to complaint@simulator.amazonses.com
    bunx wrangler d1 execute DB --env staging --remote --command \
-     "SELECT email, unsubscribed_at FROM newsletter_subscribers WHERE email LIKE '%simulator.amazonses.com'"
+     "SELECT email, suppressed_at FROM newsletter_subscribers WHERE email LIKE '%simulator.amazonses.com'"
    ```
 
-   Both rows should have an `unsubscribed_at` within a minute. Delete them afterwards.
+   Both rows should have a `suppressed_at` within a minute. Delete them afterwards.
 
 ### Importing the existing Buttondown list
 

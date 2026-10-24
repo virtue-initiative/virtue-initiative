@@ -22,8 +22,9 @@ const newsletterSchema = z.object({ email: z.string().trim().toLowerCase().pipe(
 const tokenSchema = z.object({ token: z.string().max(512) });
 
 /**
- * Sends the double opt-in email. Without AWS credentials (local dev) the link is only logged.
- * If sending fails, the claim on this address is given back so the visitor can try again at once
+ * Sends the double opt-in email. Without AWS credentials the link is only logged in local dev;
+ * anywhere else that is a send failure, and nothing about the address or link is logged. If
+ * sending fails, the claim on this address is given back so the visitor can try again at once
  * instead of waiting out the hourly throttle.
  */
 async function sendConfirmation(
@@ -37,6 +38,9 @@ async function sendConfirmation(
     const content = confirmationEmail(`${origin}/newsletter/confirm?token=${token}`);
 
     if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) {
+      if (new URL(env.LANDING_URL).hostname !== 'localhost') {
+        throw new Error('AWS credentials are not set');
+      }
       console.log(
         `[newsletter] AWS credentials not set; confirmation for ${email}:\n${content.text}`,
       );
@@ -99,9 +103,13 @@ newsletter.post('/newsletter', async (c) => {
     const { success } = await c.env.NEWSLETTER_RATE_LIMITER.limit({ key: `ip:${ip ?? 'unknown'}` });
     if (!success) return fail();
   }
-  if (!(await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, body['cf-turnstile-response'], ip))) {
-    return fail();
-  }
+  const human = await verifyTurnstile(
+    c.env.TURNSTILE_SECRET_KEY,
+    body['cf-turnstile-response'],
+    ip,
+    c.env.TURNSTILE_HOSTNAMES,
+  );
+  if (!human) return fail();
 
   const cf = c.req.raw.cf;
   const cap = Number(c.env.NEWSLETTER_DAILY_CONFIRMATION_CAP) || DEFAULT_DAILY_CONFIRMATION_CAP;

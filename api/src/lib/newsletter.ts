@@ -18,7 +18,7 @@ export async function subscribeToNewsletter(
   cf: Request['cf'],
 ): Promise<void> {
   if (!env.DONATE_DB) {
-    console.log(`[newsletter] DONATE_DB not set; skipping signup for ${email}`);
+    console.log('[newsletter] DONATE_DB not set; skipping signup');
     return;
   }
 

@@ -27,6 +27,7 @@
       ],
       "vars": {
         "LANDING_URL": "https://virtueinitiative.org",
+        "TURNSTILE_HOSTNAMES": "virtueinitiative.org,staging.virtueinitiative.org",
         "AWS_SES_REGION": "us-east-1",
         "NEWSLETTER_SES_CONFIG_SET": "newsletter",
         "NEWSLETTER_REPLY_TO": "help@virtueinitiative.org",
@@ -59,6 +60,7 @@
       ],
       "vars": {
         "LANDING_URL": "https://staging.virtueinitiative.org",
+        "TURNSTILE_HOSTNAMES": "virtueinitiative.org,staging.virtueinitiative.org",
         "AWS_SES_REGION": "us-east-1",
         "NEWSLETTER_SES_CONFIG_SET": "newsletter",
         "NEWSLETTER_REPLY_TO": "help@virtueinitiative.org",

@@ -26,7 +26,8 @@ The markdown file starts with front matter holding the subject:
 
 Audience (always confirmed, not unsubscribed, and not suppressed by a bounce or complaint):
   --country US        ISO country code
-  --region CA         ISO 3166-2 subdivision code, e.g. a US state
+  --region CA         ISO 3166-2 subdivision code, e.g. a US state. Needs --country, since
+                      codes repeat across countries (WA is Washington and Western Australia)
   --source landing    "landing" (newsletter form) or "signup" (account signup)
   --since 2026-01-01  signed up on or after this date
   --before 2026-06-01 signed up before this date
@@ -153,6 +154,8 @@ if (values.help || !file) {
   process.exit(values.help ? 0 : 1);
 }
 if (values.env !== 'staging' && values.env !== 'prod') fail('--env must be staging or prod.');
+if (values.region && !values.country)
+  fail('--region needs --country, since region codes repeat across countries.');
 if (values.source && values.source !== 'landing' && values.source !== 'signup') {
   fail('--source must be landing or signup.');
 }

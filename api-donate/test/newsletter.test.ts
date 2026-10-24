@@ -1,7 +1,7 @@
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import app from '../src/index';
-import { requestSubscription } from '../src/lib/db';
+import { confirmSubscriber, requestSubscription } from '../src/lib/db';
 import { signNewsletterToken, verifyNewsletterToken } from '../src/lib/newsletter-token';
 import { BASE, clearDB } from './helpers';
 
@@ -23,14 +23,14 @@ beforeEach(clearDB);
 afterEach(() => fetchMock.assertNoPendingInterceptors());
 
 /** Expects one Turnstile verification and answers it. Returns what the worker sent. */
-function turnstile(success: boolean) {
+function turnstile(success: boolean, extra: Record<string, string> = {}) {
   const seen: { body?: Record<string, string> } = {};
   fetchMock
     .get('https://challenges.cloudflare.com')
     .intercept({ path: '/turnstile/v0/siteverify', method: 'POST' })
     .reply((opts) => {
       seen.body = JSON.parse(String(opts.body));
-      return { statusCode: 200, data: JSON.stringify({ success }) };
+      return { statusCode: 200, data: JSON.stringify({ success, ...extra }) };
     });
   return seen;
 }
@@ -150,6 +150,43 @@ describe('POST /newsletter', () => {
     error.mockRestore();
   });
 
+  describe('with TURNSTILE_HOSTNAMES set', () => {
+    const hostnames = { TURNSTILE_HOSTNAMES: 'virtueinitiative.org,staging.virtueinitiative.org' };
+    const ok = { action: 'newsletter', hostname: 'staging.virtueinitiative.org' };
+
+    it('accepts a token for the newsletter action on a landing host', async () => {
+      turnstile(true, ok);
+      const res = await postWith(hostnames);
+      expect(res.headers.get('location')).toBe(`${LANDING}/newsletter/check-email`);
+    });
+
+    it.each([
+      ['another action', { ...ok, action: 'login' }],
+      ['another hostname', { ...ok, hostname: 'evil.example' }],
+      ['no action or hostname', {}],
+    ])('rejects a token with %s', async (_name, extra) => {
+      turnstile(true, extra);
+      const res = await postWith(hostnames);
+      expect(res.headers.get('location')).toBe(`${LANDING}/newsletter/error`);
+      expect(await row()).toBeNull();
+    });
+  });
+
+  it('treats missing AWS credentials as a send failure outside local dev, logging no address', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    turnstile(true);
+    await postWith({ LANDING_URL: 'https://virtueinitiative.org' });
+    expect((await row())!.confirmation_sent_at).toBeNull();
+    const logged = JSON.stringify(
+      [...error.mock.calls, ...log.mock.calls].map((c) => String(c[0])),
+    );
+    expect(logged).not.toContain(EMAIL);
+    expect(logged).not.toContain('/newsletter/confirm');
+    error.mockRestore();
+    log.mockRestore();
+  });
+
   it('rejects a post over the per-IP rate limit before doing anything else', async () => {
     const res = await postWith({
       NEWSLETTER_RATE_LIMITER: { limit: async () => ({ success: false }) },
@@ -255,6 +292,34 @@ describe('requestSubscription', () => {
       .bind(EMAIL)
       .run();
     expect((await requestSubscription(env.DB, sub, 100)).status).toBe('send');
+  });
+
+  it('lets an unsubscribed address ask once right away, then waits a day', async () => {
+    await env.DB.prepare(
+      "INSERT INTO newsletter_subscribers (email, source, confirmed_at, unsubscribed_at, confirmation_sent_at) VALUES (?, 'landing', 1, unixepoch() - 60, unixepoch() - 600)",
+    )
+      .bind(EMAIL)
+      .run();
+    expect((await requestSubscription(env.DB, sub, 100)).status).toBe('send');
+    expect((await requestSubscription(env.DB, sub, 100)).status).toBe('skipped');
+
+    await env.DB.prepare(
+      'UPDATE newsletter_subscribers SET unsubscribed_at = unixepoch() - 10000, confirmation_sent_at = unixepoch() - 7200',
+    ).run();
+    expect((await requestSubscription(env.DB, sub, 100)).status).toBe('skipped');
+
+    await env.DB.prepare(
+      'UPDATE newsletter_subscribers SET confirmation_sent_at = unixepoch() - 90000',
+    ).run();
+    expect((await requestSubscription(env.DB, sub, 100)).status).toBe('send');
+  });
+
+  it('keeps the original confirmed_at when the same link is confirmed again', async () => {
+    await requestSubscription(env.DB, sub, 100);
+    const sentAt = (await row())!.confirmation_sent_at as number;
+    await env.DB.prepare('UPDATE newsletter_subscribers SET confirmed_at = 5').run();
+    expect(await confirmSubscriber(env.DB, EMAIL, sentAt)).toBe(true);
+    expect(await row()).toMatchObject({ confirmed_at: 5 });
   });
 
   it('never asks a suppressed address', async () => {
