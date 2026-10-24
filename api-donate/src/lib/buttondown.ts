@@ -10,7 +10,7 @@ const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
 export async function subscribeToButtondown(env: Env, email: string, ip?: string): Promise<void> {
   const apiKey = env.BUTTONDOWN_API_KEY?.trim();
   if (!apiKey) {
-    console.log(`[newsletter] BUTTONDOWN_API_KEY not set; skipping signup for ${email}`);
+    console.log('[newsletter] BUTTONDOWN_API_KEY not set; skipping signup');
     return;
   }
 

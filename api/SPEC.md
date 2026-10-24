@@ -266,7 +266,7 @@ The client MUST provide this request shape.
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
 
-If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. The server SHOULD pass the signup request's client IP address (`CF-Connecting-IP`) to the mailing list provider. The server SHOULD also record the subscriber's country and region code, as reported by Cloudflare for the signup request, in the `newsletter_subscribers` table of the donations database (the mailing list provider stores no metadata). A failure to record them or to add the email MUST NOT fail the signup.
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. The server SHOULD pass the signup request's client IP address (`CF-Connecting-IP`) to the mailing list provider. The server SHOULD also record the subscriber's country and region code, as reported by Cloudflare for the signup request, in the `newsletter_subscribers` table of the donations database (the mailing list provider stores no metadata). The first location recorded for an address wins, except that an account signup SHOULD replace a row created by the landing page newsletter form, because anyone can submit any address there. A failure to record them or to add the email MUST NOT fail the signup.
 
 The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
@@ -416,7 +416,7 @@ If it matches, the server MUST send **HTTP 204** and set the `refresh_token` coo
 
 If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
 
-If the user's email already has a row in the `newsletter_subscribers` table (see API-010) with no region code, the server SHOULD fill in the row's country and region from Cloudflare's geoip for the login request. The server MUST NOT create a row on login, so that only newsletter subscribers are recorded, and MUST NOT overwrite a region that is already set. A failure to do so MUST NOT fail the login.
+If the user's email already has a row in the `newsletter_subscribers` table (see API-010) that came from an account signup and is missing its country or region, the server SHOULD fill in the missing values from Cloudflare's geoip for the login request. The server MUST NOT create a row on login, MUST NOT touch a row created by the landing page form, so that only people who opted in through an account are recorded, and MUST NOT overwrite a value that is already set. A failure to do so MUST NOT fail the login.
 
 ### API-017 `POST /email-verification/validate`
 

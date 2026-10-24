@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
@@ -95,6 +95,14 @@ describe('Auth routes', () => {
       }),
     });
     expect(signupRes.status).toBe(200);
+
+    // API-010: the opted-in signup is recorded for the newsletter.
+    await vi.waitFor(async () => {
+      const row = await env
+        .DONATE_DB!.prepare('SELECT email, source FROM newsletter_subscribers')
+        .first();
+      expect(row).toMatchObject({ email: 'reader@example.com', source: 'signup' });
+    });
   });
 
   it('signup-request sends an email with a signup token, and /signup creates a verified user', async () => {

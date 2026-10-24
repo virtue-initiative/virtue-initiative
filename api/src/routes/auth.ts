@@ -505,6 +505,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
     c.executionCtx.waitUntil(
       subscribeToNewsletter(c.env, normalizedEmail, c.req.header('CF-Connecting-IP')),
     );
+    c.executionCtx.waitUntil(recordNewsletterRegion(c.env, normalizedEmail, c.req.raw.cf));
   }
 
   return c.json<SignupResponse>(
@@ -563,7 +564,9 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
 
-  c.executionCtx.waitUntil(fillNewsletterRegion(c.env, user.email, c.req.raw.cf));
+  c.executionCtx.waitUntil(
+    fillNewsletterRegion(c.env, user.email.trim().toLowerCase(), c.req.raw.cf),
+  );
 
   await createSession(c, user.id);
   return c.body(null, 204);
