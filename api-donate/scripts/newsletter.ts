@@ -3,11 +3,12 @@
  * they signed up from. Run from api-donate/ (see README.md, "Sending a newsletter").
  *
  * Subscribers are read straight from the worker's D1 with wrangler, and mail goes out through
- * SES using the same signed unsubscribe links the worker verifies. Nothing is stored, so there is
- * no send history: a dry run is the default and `--send` asks for confirmation.
+ * SES using the same signed unsubscribe links the worker verifies. A dry run is the default and
+ * `--send` asks for confirmation. Each address a `--send` reaches is appended to
+ * `<file>.sent.jsonl`, so rerunning after a crash skips them instead of mailing them twice.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 import { marked } from 'marked';
@@ -23,7 +24,7 @@ The markdown file starts with front matter holding the subject:
   subject: October update
   ---
 
-Audience (always confirmed and not unsubscribed):
+Audience (always confirmed, not unsubscribed, and not suppressed by a bounce or complaint):
   --country US        ISO country code
   --region CA         ISO 3166-2 subdivision code, e.g. a US state
   --source landing    "landing" (newsletter form) or "signup" (account signup)
@@ -35,13 +36,18 @@ Mode (default is a dry run that writes <file>.preview.html and sends nothing):
   --send              send to the whole audience, after a confirmation prompt
   --yes               skip that prompt
 
+A --send records each address it reaches in <file>.sent.jsonl and skips those on a rerun, so a
+crashed run can be resumed. Delete that file to mail the whole audience again.
+
 Target:
   --env staging|prod  which D1 and unsubscribe host to use (default staging)
   --local             read the local D1 and use http://localhost:8788
 
 Environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SES_REGION (default us-east-1),
 NEWSLETTER_FROM_EMAIL, NEWSLETTER_TOKEN_SECRET (the target worker's value), and optionally
-NEWSLETTER_SES_CONFIG_SET (default "newsletter") and NEWSLETTER_POSTAL_ADDRESS (defaults to the organization's address).
+NEWSLETTER_SES_CONFIG_SET (default "newsletter"), NEWSLETTER_WORKER_URL (to point at a dev worker on another port),
+NEWSLETTER_REPLY_TO (default
+help@virtueinitiative.org) and NEWSLETTER_POSTAL_ADDRESS (defaults to the organization's address).
 `;
 
 const WORKER_URLS = {
@@ -154,14 +160,16 @@ if (values.source && values.source !== 'landing' && values.source !== 'signup') 
 const { subject, markdown } = parseNewsletter(readFileSync(file, 'utf8'));
 const bodyHtml = renderHtml(markdown);
 
-const where = ['confirmed_at IS NOT NULL', 'unsubscribed_at IS NULL'];
+const where = ['confirmed_at IS NOT NULL', 'unsubscribed_at IS NULL', 'suppressed_at IS NULL'];
 if (values.country) where.push(`country = ${sqlLiteral('country', values.country.toUpperCase())}`);
 if (values.region) where.push(`region_code = ${sqlLiteral('region', values.region.toUpperCase())}`);
 if (values.source) where.push(`source = ${sqlLiteral('source', values.source)}`);
 if (values.since) where.push(`created_at >= ${toUnix('since', values.since)}`);
 if (values.before) where.push(`created_at < ${toUnix('before', values.before)}`);
 
-const workerUrl = values.local ? WORKER_URLS.local : WORKER_URLS[values.env];
+const workerUrl =
+  process.env.NEWSLETTER_WORKER_URL?.trim() ||
+  (values.local ? WORKER_URLS.local : WORKER_URLS[values.env]);
 const audience = queryRecipients({ env: values.env, local: values.local, where });
 const recipients = values['test-to'] ? [values['test-to'].trim().toLowerCase()] : audience;
 
@@ -181,6 +189,7 @@ async function buildMessage(email: string) {
     from: requireEnv('NEWSLETTER_FROM_EMAIL'),
     configurationSet: process.env.NEWSLETTER_SES_CONFIG_SET?.trim() || 'newsletter',
     to: email,
+    replyTo: process.env.NEWSLETTER_REPLY_TO?.trim() || 'help@virtueinitiative.org',
     subject,
     text: `${markdownToText(markdown)}\n${footer.text}`,
     html: layout(bodyHtml, footer.html),
@@ -209,29 +218,79 @@ const ses: SesConfig = {
   secretAccessKey: requireEnv('AWS_SECRET_ACCESS_KEY'),
 };
 
+// A wrong NEWSLETTER_TOKEN_SECRET (say the staging value with --env prod) would put an
+// unsubscribe link that returns 400 in every email, so try the first link before sending anything.
+async function assertUnsubscribeLinkWorks(email: string) {
+  const header = (await buildMessage(email)).headers['List-Unsubscribe'];
+  const url = header.slice(1, -1);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      fail(
+        `The unsubscribe link for ${email} returned ${res.status} from ${workerUrl}. ` +
+          'NEWSLETTER_TOKEN_SECRET probably does not match that worker. Nothing was sent.',
+      );
+    }
+  } catch (err) {
+    // The local worker is often not running, which is fine for a local trial.
+    if (!values.local) fail(`Could not reach ${workerUrl} to check the unsubscribe link: ${err}`);
+    console.warn(`Skipped the unsubscribe link check, ${workerUrl} is not reachable.`);
+  }
+}
+
+// Only a --send keeps a log. A test send to one address is not part of the issue's history.
+const logPath = file.replace(/\.md$/, '') + '.sent.jsonl';
+const alreadySent = new Set<string>();
+if (values.send && existsSync(logPath)) {
+  for (const line of readFileSync(logPath, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    const entry = JSON.parse(line) as { email: string; status: string };
+    if (entry.status === 'sent') alreadySent.add(entry.email);
+  }
+}
+const toSend = recipients.filter((email) => !alreadySent.has(email));
+if (alreadySent.size > 0) {
+  console.log(`Skipping ${recipients.length - toSend.length} address(es) already in ${logPath}.`);
+}
+if (toSend.length === 0) {
+  console.log('Nobody left to send to.');
+  process.exit(0);
+}
+
+await assertUnsubscribeLinkWorks(toSend[0]!);
+
 if (values.send && !values.yes) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const answer = await rl.question(
-    `Send to ${recipients.length} recipient(s) via ${values.env}? [y/N] `,
+    `Send to ${toSend.length} recipient(s) via ${values.env}? [y/N] `,
   );
   rl.close();
   if (answer.trim().toLowerCase() !== 'y') fail('Cancelled.');
 }
 
+const record = (email: string, status: 'sent' | 'failed', error?: string) => {
+  if (!values.send) return;
+  const entry = { email, status, at: new Date().toISOString(), ...(error ? { error } : {}) };
+  appendFileSync(logPath, JSON.stringify(entry) + '\n');
+};
+
 const failed: string[] = [];
-for (const [i, email] of recipients.entries()) {
+for (const [i, email] of toSend.entries()) {
   try {
     await sendSesEmail(ses, await buildMessage(email));
+    record(email, 'sent');
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     failed.push(email);
-    console.error(`Failed ${email}: ${err instanceof Error ? err.message : err}`);
+    record(email, 'failed', message);
+    console.error(`Failed ${email}: ${message}`);
   }
-  if ((i + 1) % 50 === 0) console.log(`${i + 1}/${recipients.length}`);
+  if ((i + 1) % 50 === 0) console.log(`${i + 1}/${toSend.length}`);
   await new Promise((resolve) => setTimeout(resolve, SEND_INTERVAL_MS));
 }
 
-console.log(`Sent ${recipients.length - failed.length} of ${recipients.length}.`);
+console.log(`Sent ${toSend.length - failed.length} of ${toSend.length}.`);
 if (failed.length > 0) {
-  console.log(`Failed addresses:\n${failed.join('\n')}`);
+  console.log(`Failed addresses (run again to retry only these):\n${failed.join('\n')}`);
   process.exit(1);
 }

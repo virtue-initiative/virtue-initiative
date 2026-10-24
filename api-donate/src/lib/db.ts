@@ -127,16 +127,38 @@ export interface NewsletterSubscriberRecord {
 
 // A repeat signup form post won't send another confirmation email within this window.
 const CONFIRMATION_RESEND_SECONDS = 60 * 60;
+const DAY_SECONDS = 24 * 60 * 60;
+
+export type SubscriptionRequest =
+  // A confirmation email should go out, with this send time baked into its link.
+  | { status: 'send'; sentAt: number }
+  // Already subscribed, suppressed or sent too recently. The visitor can't tell which.
+  | { status: 'skipped' }
+  // Too many confirmation emails went out in the last day.
+  | { status: 'capped' };
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+/** How many addresses were sent a confirmation email in the last day. */
+export async function countRecentConfirmations(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM newsletter_subscribers WHERE confirmation_sent_at > ?`)
+    .bind(nowSeconds() - DAY_SECONDS)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
 
 /**
- * Records a landing-page signup, keeping the first location seen for an address. Returns whether
- * a confirmation email should go out: not for an address that is already subscribed, and not
- * again within an hour, so the form can't be used to flood an inbox.
+ * Records a landing-page signup, keeping the first location seen for an address, and claims the
+ * right to email it a confirmation link. Never for an address that is suppressed (it hard-bounced
+ * or complained) or already subscribed, and not again within an hour. `dailyCap` caps the
+ * confirmation emails sent across all addresses, so the form can't be used to send mass mail.
  */
 export async function requestSubscription(
   db: D1Database,
   subscriber: NewsletterSubscriberRecord,
-): Promise<boolean> {
+  dailyCap: number,
+): Promise<SubscriptionRequest> {
   await db
     .prepare(
       `INSERT INTO newsletter_subscribers (email, country, region_code, region, source)
@@ -151,38 +173,74 @@ export async function requestSubscription(
     )
     .run();
 
+  if ((await countRecentConfirmations(db)) >= dailyCap) return { status: 'capped' };
+
   // Atomic, so two concurrent posts can't both send.
+  const sentAt = nowSeconds();
   const result = await db
     .prepare(
-      `UPDATE newsletter_subscribers SET confirmation_sent_at = unixepoch()
-       WHERE email = ?
+      `UPDATE newsletter_subscribers SET confirmation_sent_at = ?1
+       WHERE email = ?2
+         AND suppressed_at IS NULL
          AND (confirmed_at IS NULL OR unsubscribed_at IS NOT NULL)
-         AND (confirmation_sent_at IS NULL OR confirmation_sent_at <= unixepoch() - ?)`,
+         AND (confirmation_sent_at IS NULL OR confirmation_sent_at <= ?1 - ?3)`,
     )
-    .bind(subscriber.email, CONFIRMATION_RESEND_SECONDS)
+    .bind(sentAt, subscriber.email, CONFIRMATION_RESEND_SECONDS)
     .run();
 
-  return (result.meta.changes ?? 0) > 0;
+  return (result.meta.changes ?? 0) > 0 ? { status: 'send', sentAt } : { status: 'skipped' };
+}
+
+/** Gives back the claim from `requestSubscription` when the email could not be sent. */
+export async function releaseConfirmation(
+  db: D1Database,
+  email: string,
+  sentAt: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE newsletter_subscribers SET confirmation_sent_at = NULL
+       WHERE email = ? AND confirmation_sent_at = ?`,
+    )
+    .bind(email, sentAt)
+    .run();
 }
 
 /**
- * Stops mail to addresses that hard-bounced or complained. It reuses `unsubscribed_at`, so the
- * sender skips them like anyone else who opted out, and a later confirm click can undo it.
+ * Whether a confirm link is still good: it must belong to the latest confirmation email, the
+ * address must not be suppressed, and the subscriber must not have unsubscribed since it was
+ * sent. That last rule stops an old email, a forward or a mail scanner from resubscribing
+ * someone who opted out.
  */
-export async function suppressSubscribers(db: D1Database, emails: string[]): Promise<void> {
-  for (const email of emails) {
-    await unsubscribeSubscriber(db, email);
-  }
+export async function isConfirmationValid(
+  db: D1Database,
+  email: string,
+  issuedAt: number,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS ok FROM newsletter_subscribers
+       WHERE email = ?1 AND suppressed_at IS NULL AND confirmation_sent_at = ?2
+         AND (unsubscribed_at IS NULL OR unsubscribed_at < ?2)`,
+    )
+    .bind(email, issuedAt)
+    .first();
+  return row !== null;
 }
 
-/** Marks an address confirmed. Re-confirming also clears an earlier unsubscribe. */
-export async function confirmSubscriber(db: D1Database, email: string): Promise<boolean> {
+/** Marks an address confirmed, if the link is still valid. Re-confirming clears an unsubscribe. */
+export async function confirmSubscriber(
+  db: D1Database,
+  email: string,
+  issuedAt: number,
+): Promise<boolean> {
   const result = await db
     .prepare(
       `UPDATE newsletter_subscribers SET confirmed_at = unixepoch(), unsubscribed_at = NULL
-       WHERE email = ?`,
+       WHERE email = ?1 AND suppressed_at IS NULL AND confirmation_sent_at = ?2
+         AND (unsubscribed_at IS NULL OR unsubscribed_at < ?2)`,
     )
-    .bind(email)
+    .bind(email, issuedAt)
     .run();
   return (result.meta.changes ?? 0) > 0;
 }
@@ -195,4 +253,20 @@ export async function unsubscribeSubscriber(db: D1Database, email: string): Prom
     )
     .bind(email)
     .run();
+}
+
+/**
+ * Permanently stops mail to addresses that hard-bounced or complained. Unlike an unsubscribe,
+ * nothing clears this: not a confirm link, not a new signup, not an account opt-in.
+ */
+export async function suppressSubscribers(db: D1Database, emails: string[]): Promise<void> {
+  for (const email of emails) {
+    await db
+      .prepare(
+        `UPDATE newsletter_subscribers SET suppressed_at = COALESCE(suppressed_at, unixepoch())
+         WHERE email = ?`,
+      )
+      .bind(email)
+      .run();
+  }
 }

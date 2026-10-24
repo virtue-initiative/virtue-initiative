@@ -16,6 +16,7 @@ export interface OutgoingEmail {
   headers?: Record<string, string>;
   // SES configuration set whose event destination reports bounces and complaints.
   configurationSet?: string;
+  replyTo?: string;
 }
 
 const clients = new Map<string, SESv2Client>();
@@ -39,6 +40,7 @@ export async function sendSesEmail(config: SesConfig, email: OutgoingEmail): Pro
       FromEmailAddress: email.from,
       ConfigurationSetName: email.configurationSet,
       Destination: { ToAddresses: [email.to] },
+      ReplyToAddresses: email.replyTo ? [email.replyTo] : undefined,
       Content: {
         Simple: {
           Subject: { Data: email.subject },

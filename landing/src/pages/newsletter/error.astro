@@ -1,0 +1,21 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+
+// The donate worker redirects here when it turns a newsletter signup away: the Turnstile check
+// failed, the visitor posted too often, or the day's confirmation emails have run out.
+---
+
+<SiteLayout pageTitle="Signup failed">
+  <section class="newsletter-status">
+    <h2>We could not sign you up</h2>
+    <p>
+      The signup did not go through. This can happen if the check that you are a person failed, or
+      if a lot of people signed up at once. Please try again in a few minutes.
+    </p>
+    <div class="newsletter-status-actions">
+      <Button href="/#newsletter" variant="primary">Try again</Button>
+      <Button href="/" variant="outline">Back to home</Button>
+    </div>
+  </section>
+</SiteLayout>

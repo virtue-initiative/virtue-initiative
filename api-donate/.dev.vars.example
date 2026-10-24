@@ -18,3 +18,8 @@ NEWSLETTER_TOKEN_SECRET=dev-newsletter-secret
 # then printed to the worker log instead of emailed.
 # AWS_ACCESS_KEY_ID=
 # AWS_SECRET_ACCESS_KEY=
+
+# Cloudflare Turnstile secret for the newsletter form. This is Cloudflare's test secret, which
+# always passes, and goes with the test site key the landing site uses in dev. Production needs
+# the real widget's secret (see README, "Turnstile").
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

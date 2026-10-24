@@ -6,13 +6,24 @@ import { Env, Variables } from '../types/bindings';
 
 const newsletterEvents = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-/** Addresses to stop mailing: hard bounces and complaints. A transient bounce may deliver later. */
-function suppressedEmails(message: string): string[] {
-  const parsed = JSON.parse(message) as {
-    eventType?: string;
-    bounce?: { bounceType?: string; bouncedRecipients?: Array<{ emailAddress?: string }> };
-    complaint?: { complainedRecipients?: Array<{ emailAddress?: string }> };
-  };
+type SesEvent = {
+  eventType?: string;
+  bounce?: { bounceType?: string; bouncedRecipients?: Array<{ emailAddress?: string }> };
+  complaint?: { complainedRecipients?: Array<{ emailAddress?: string }> };
+};
+
+/**
+ * Addresses to stop mailing: hard bounces and complaints. A transient bounce may deliver later.
+ * Returns null for a message that isn't an SES event, such as a manual test publish.
+ */
+function suppressedEmails(message: string): string[] | null {
+  let parsed: SesEvent;
+  try {
+    parsed = JSON.parse(message) as SesEvent;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
 
   const recipients =
     parsed.eventType === 'Bounce' && parsed.bounce?.bounceType === 'Permanent'
@@ -60,6 +71,17 @@ newsletterEvents.post('/newsletter/sns', async (c) => {
   }
 
   const emails = suppressedEmails(body.Message);
+  if (emails === null) {
+    // 200 so SNS doesn't retry something we can never parse.
+    console.warn('[newsletter] ignoring SNS message that is not an SES event');
+    return c.json({ ok: true });
+  }
+  if (emails.length === 0) {
+    // A transient bounce is expected. Anything else is a shape we don't act on, so leave a trace.
+    console.log('[newsletter] SES event suppressed no one');
+    return c.json({ ok: true, updated: 0 });
+  }
+
   await suppressSubscribers(c.env.DB, emails);
   return c.json({ ok: true, updated: emails.length });
 });

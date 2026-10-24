@@ -13,6 +13,15 @@ export interface Env {
   NEWSLETTER_SES_CONFIG_SET: string;
   // Comma-separated SNS topic ARNs accepted by POST /newsletter/sns. Unset rejects every request.
   SNS_TOPIC_ARNS?: string;
+  // Checked on every newsletter form post. Unset rejects every post. Local dev uses Cloudflare's
+  // always-passing test secret (see .dev.vars.example).
+  TURNSTILE_SECRET_KEY?: string;
+  // Per-IP limit on newsletter form posts. Unset (tests, local dev) skips the check.
+  NEWSLETTER_RATE_LIMITER?: RateLimit;
+  // Most confirmation emails the form may send in a day, across all addresses. Defaults to 200.
+  NEWSLETTER_DAILY_CONFIRMATION_CAP?: string;
+  // Where replies to newsletter mail go, since the From address has no mailbox.
+  NEWSLETTER_REPLY_TO?: string;
   // Unset in local dev, where confirmation links are logged instead of emailed.
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;

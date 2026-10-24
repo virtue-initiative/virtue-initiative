@@ -86,16 +86,16 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       </li>
       <li>
         <strong>Newsletter</strong> - if you subscribe to our newsletter, either from our website or by
-        ticking the box when you create an account, your email address is added to our mailing list.
-        Subscribing from the website requires clicking a confirmation link we email you. The box in the
-        signup form is unticked by default, and not subscribing has no effect on your account. Each
-        email includes an unsubscribe link. The mailing list is kept separately from your account and
-        your monitoring data, so deleting your account does not unsubscribe you. Use the unsubscribe link
-        in any newsletter, or ask us to remove you. When you submit your address, and the first time you
-        log in afterwards if you subscribed with an account, we also record your approximate country and
-        state, worked out from your IP address. We keep this with your email address in our donations
-        database to understand where our supporters are. We do not store your IP address there, and we
-        delete this record if you ask.
+        ticking the box when you create an account, your email address is added to our mailing list. Subscribing
+        from the website requires clicking a confirmation link we email you. The box in the signup form
+        is unticked by default, and not subscribing has no effect on your account. Each email includes
+        an unsubscribe link. The mailing list is kept separately from your account and your monitoring
+        data, so deleting your account does not unsubscribe you. Use the unsubscribe link in any newsletter,
+        or ask us to remove you. When you submit your address, and the first time you log in afterwards
+        if you subscribed with an account, we also record your approximate country and state, worked out
+        from your IP address. We keep this with your email address in our donations database to understand
+        where our supporters are. We do not store your IP address there, and we delete this record if
+        you ask.
       </li>
       <li>
         <strong>Email preferences</strong> - how often you want to receive alert and summary emails, and
@@ -214,7 +214,8 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       <li>
         <strong>Cloudflare</strong> - hosts the API and web apps and stores account data and encrypted
         batches (Workers, D1, and R2 object storage), and provides the network tunnel to our tamper-evidence
-        server.
+        server. It also runs Turnstile on the newsletter form, which checks that a signup comes from a
+        person and sees the visitor's IP address and browser details.
       </li>
       <li>
         <strong>Amazon Web Services</strong> - delivers our outgoing email (Simple Email Service) and

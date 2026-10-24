@@ -11,16 +11,23 @@ separate from the main `api/` worker and has no shared auth or data.
   session (`payment` or `subscription` mode) and returns `{ url }` to redirect the donor to.
 - `GET /goals` — active fundraising goals from the `goals` table, each with `targetCents` and
   `raisedCents`. Both are entered by hand in the `goals` table. Shown as a progress bar on the donate page.
-- `POST /newsletter` — form body `email`. Landing page newsletter signup. Stores the visitor's country and
-  region (Cloudflare geoip) in `newsletter_subscribers`, emails a confirmation link through SES, then
-  redirects to `/newsletter/check-email` on the landing site. At most one confirmation email goes out
-  per address per hour.
-- `GET /newsletter/confirm?token=` — the link in the confirmation email. Marks the address confirmed
-  and redirects to `/newsletter/confirmed` on the landing site.
+- `POST /newsletter` — form body `email` and `cf-turnstile-response`. Landing page newsletter signup.
+  Rejects the post (redirect to `/newsletter/error` on the landing site) unless it passes a per-IP
+  rate limit (5 a minute), a Cloudflare Turnstile check, and a daily cap on confirmation emails
+  (`NEWSLETTER_DAILY_CONFIRMATION_CAP`, default 200). Otherwise it stores the visitor's country and
+  region (Cloudflare geoip) in `newsletter_subscribers`, emails a confirmation link through SES, and
+  redirects to `/newsletter/check-email`. An invalid address redirects back to the form. At most one
+  confirmation email goes out per address per hour, never to a suppressed address, and the visitor
+  sees the same redirect either way.
+- `GET|POST /newsletter/confirm?token=` — the link in the confirmation email. `GET` shows a button
+  (mail scanners fetch links), `POST` confirms and redirects to `/newsletter/confirmed`. A link works
+  only for the latest confirmation email sent to that address, only if the address has not unsubscribed
+  since, and never for a suppressed address.
 - `POST /newsletter/sns` — SES bounce and complaint events from SNS. Verifies the SNS signature, then
-  unsubscribes addresses that hard-bounced or complained. Transient bounces are ignored.
-- `GET|POST /newsletter/unsubscribe?token=` — the link in every newsletter. `GET` shows a button
-  (mail scanners fetch links), `POST` unsubscribes and also serves RFC 8058 one-click clients.
+  suppresses addresses that hard-bounced or complained. Transient bounces and messages that are not SES
+  events are ignored.
+- `GET|POST /newsletter/unsubscribe?token=` — the link in every newsletter. `GET` shows a button,
+  `POST` unsubscribes and also serves RFC 8058 one-click clients.
 - `POST /webhook` — Stripe webhook receiver. Verifies the signature, then on
   `checkout.session.completed` records the donation and on `customer.subscription.deleted` marks the
   matching donations cancelled. Idempotent on event id.
@@ -32,9 +39,15 @@ page (configured on the landing site via `PUBLIC_STRIPE_PORTAL_URL`); no server 
 ## Newsletter
 
 Subscribers live in `newsletter_subscribers`. An address receives mail only when `confirmed_at` is set
-and `unsubscribed_at` is not: landing signups confirm by email link, and accounts that tick the box
-when signing up (API-010) are confirmed immediately. Confirm and unsubscribe links are stateless
-HMAC tokens signed with `NEWSLETTER_TOKEN_SECRET`.
+and neither `unsubscribed_at` nor `suppressed_at` is. Landing signups confirm by email link, and
+accounts that tick the box when signing up (API-010) are confirmed immediately, which also resubscribes
+an address that had unsubscribed.
+
+`unsubscribed_at` is the subscriber's own choice and can be undone by confirming or opting in again.
+`suppressed_at` is set by a hard bounce or complaint and nothing undoes it: the signup form never
+emails the address, a confirm link is refused, and an account opt-in leaves it alone. Confirm and
+unsubscribe links are stateless HMAC tokens signed with `NEWSLETTER_TOKEN_SECRET`. A confirm link also
+carries the time of the email it was sent in, which has to match the address's latest confirmation.
 
 ### Sending a newsletter
 
@@ -64,8 +77,17 @@ Filters are `--country`, `--region` (ISO 3166-2 code), `--source` (`landing` or 
 read the D1 database, plus `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `NEWSLETTER_FROM_EMAIL` and
 the target worker's `NEWSLETTER_TOKEN_SECRET` in the environment, and optionally
 `NEWSLETTER_SES_CONFIG_SET` (default `newsletter`). Every footer carries the organization's postal
-address, which `NEWSLETTER_POSTAL_ADDRESS` overrides. Nothing is recorded about a send, so a failed run prints
-the addresses that failed instead of resuming.
+address, which `NEWSLETTER_POSTAL_ADDRESS` overrides. Replies go to `NEWSLETTER_REPLY_TO` (default
+`help@virtueinitiative.org`), since the From address has no mailbox.
+
+Safeguards in the script:
+
+- Before sending anything, it requests the first generated unsubscribe link from the target worker and
+  aborts unless that returns 200. This catches a `NEWSLETTER_TOKEN_SECRET` that belongs to another
+  environment. `NEWSLETTER_WORKER_URL` points it at a dev worker on a different port.
+- A `--send` appends every address it reaches to `<file>.sent.jsonl` next to the markdown file. If a
+  run crashes or some sends fail, run the same command again and it mails only the addresses not yet
+  logged. Delete the log to send the issue to everyone again. A `--test-to` send is not logged.
 
 ## Local development
 
@@ -208,7 +230,7 @@ Cloudflare, so every record below is added there with the proxy off (grey cloud)
 4. The topic ARN has to match `SNS_TOPIC_ARNS` in `wrangler.json`
    (`arn:aws:sns:us-east-1:<account>:virtue-newsletter-events`). Both environments use the one SES account (`599243104123`), so both point at the same topic.
 
-Do the subscription in step 5, after the worker is deployed.
+Do the subscription in step 6, after the worker is deployed.
 
 ### 3. Create an IAM user that can only send newsletters
 
@@ -234,7 +256,31 @@ account id; this allows only that identity and configuration set):
 Create an access key for it. The worker uses this key for confirmation emails and you use it when
 running the send script.
 
-### 4. Apply migrations, set secrets, deploy
+### 4. Protect the signup form
+
+The form is public and every confirmation email counts against the one SES account that also sends
+password resets and alerts, so it has three guards. A bot mailing nonexistent addresses could push
+that account past AWS's bounce limits (review starts around 5%), so don't skip this step.
+
+1. **Turnstile.** Cloudflare dashboard, Turnstile, Add widget. Name it "Newsletter signup", add the
+   hostnames `virtueinitiative.org` and `staging.virtueinitiative.org` (subdomains are covered), and
+   pick the Managed mode. Copy the site key and the secret key.
+2. **Set the secret on the worker.** The worker refuses every signup without it:
+
+   ```bash
+   wrangler secret put TURNSTILE_SECRET_KEY --env staging   # and --env prod
+   ```
+
+3. **Set the site key on the landing site.** Add `PUBLIC_TURNSTILE_SITE_KEY` wherever the landing build
+   gets its other `PUBLIC_` variables, such as `PUBLIC_DONATE_API_URL`, and rebuild it. Without it there
+   is no widget and every signup is rejected.
+4. **Rate limit and daily cap need no setup.** The per-IP limit is the `NEWSLETTER_RATE_LIMITER`
+   binding in `wrangler.json` (5 posts a minute per IP; the namespace ids `2001` and `2002` must not
+   be used by another worker in the account). The daily cap is `NEWSLETTER_DAILY_CONFIRMATION_CAP`,
+   200 by default, and counts the confirmation emails sent in the last 24 hours across all addresses.
+   Set it in the `vars` of `wrangler.json` if a campaign needs more.
+
+### 5. Apply migrations, set secrets, deploy
 
 Order matters. The main API writes the new columns when someone signs up with the newsletter box
 ticked, so the donate database must be migrated before either worker is deployed.
@@ -255,7 +301,7 @@ needs the same value to sign unsubscribe links. Rotating it invalidates every un
 sent, so don't. Then merge, and the deploy workflow ships `api-donate` and `api`. Note that pushes to
 `staging` also deploy `api-donate` to prod, so migrate prod before merging.
 
-### 5. Subscribe the worker to the topic
+### 6. Subscribe the worker to the topic
 
 After the worker is deployed, SNS, Topics, `virtue-newsletter-events`, Create subscription: protocol
 HTTPS, endpoint `https://staging.donate-api.virtueinitiative.org/newsletter/sns` (or
@@ -263,9 +309,11 @@ HTTPS, endpoint `https://staging.donate-api.virtueinitiative.org/newsletter/sns`
 signature and confirms the subscription itself, so the status flips to Confirmed within seconds. If
 it stays Pending, check the worker logs.
 
-### 6. Verify end to end
+### 7. Verify end to end
 
-1. Submit the form on the landing page with your own address. You should get a confirmation email
+1. Submit the form on the landing page with your own address. Posting the form without a Turnstile
+   token (for example `curl -X POST -d email=you@example.com <worker>/newsletter`) should redirect to
+   `/newsletter/error` and send nothing. You should get a confirmation email
    from `news.virtueinitiative.org`, and clicking it should land on `/newsletter/confirmed`.
 2. Write a one-line markdown file with a `subject:` and send it to yourself:
    `bun run newsletter test.md --env staging --test-to you@example.com`. Check that the unsubscribe link
@@ -296,7 +344,7 @@ already confirmed, export the subscribed addresses from Buttondown and insert th
 
 In SES, Reputation metrics shows the bounce and complaint rates. AWS puts an account under review at
 roughly 5% bounces or 0.1% complaints and pauses sending at roughly 10% or 0.5%, so keep bounces
-under 2% and complaints well under 0.1%. Hard bounces and complaints already unsubscribe themselves through `/newsletter/sns`, so
+under 2% and complaints well under 0.1%. Hard bounces and complaints are already suppressed through `/newsletter/sns` and never emailed again, so
 a rate above that means the list itself needs attention.
 
 ## Checks

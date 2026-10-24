@@ -28,31 +28,35 @@ function hmacKey(secret: string, usage: 'sign' | 'verify') {
 }
 
 /**
- * Makes a stateless link token for an address: `base64url(email).base64url(hmac)`. The purpose is
- * part of the signed message, so a confirm token can't be used to unsubscribe or the reverse.
- * Tokens don't expire, since an unsubscribe link in an old email has to keep working.
+ * Makes a stateless link token for an address: `base64url(email).issuedAt.base64url(hmac)`. The
+ * purpose and `issuedAt` are part of the signed message, so a confirm token can't be used to
+ * unsubscribe, and a confirm link is tied to the one email it was sent in (`issuedAt` is that
+ * email's send time). Unsubscribe tokens use `issuedAt` 0 and never expire, since an unsubscribe
+ * link in an old email has to keep working.
  */
 export async function signNewsletterToken(
   secret: string,
   purpose: NewsletterTokenPurpose,
   email: string,
+  issuedAt = 0,
 ): Promise<string> {
   const signature = await crypto.subtle.sign(
     'HMAC',
     await hmacKey(secret, 'sign'),
-    encoder.encode(`${purpose}:${email}`),
+    encoder.encode(`${purpose}:${issuedAt}:${email}`),
   );
-  return `${toBase64Url(encoder.encode(email))}.${toBase64Url(new Uint8Array(signature))}`;
+  return `${toBase64Url(encoder.encode(email))}.${issuedAt}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
-/** Returns the address a token was issued for, or null if it is malformed or not signed by us. */
+/** Returns the address and issue time a token was signed for, or null if it isn't ours. */
 export async function verifyNewsletterToken(
   secret: string,
   purpose: NewsletterTokenPurpose,
   token: string,
-): Promise<string | null> {
-  const [emailPart, signaturePart, ...rest] = token.split('.');
-  if (!emailPart || !signaturePart || rest.length > 0) return null;
+): Promise<{ email: string; issuedAt: number } | null> {
+  const [emailPart, issuedPart, signaturePart, ...rest] = token.split('.');
+  if (!emailPart || !issuedPart || !signaturePart || rest.length > 0) return null;
+  if (!/^\d{1,12}$/.test(issuedPart)) return null;
 
   try {
     const email = new TextDecoder().decode(fromBase64Url(emailPart));
@@ -60,9 +64,9 @@ export async function verifyNewsletterToken(
       'HMAC',
       await hmacKey(secret, 'verify'),
       fromBase64Url(signaturePart),
-      encoder.encode(`${purpose}:${email}`),
+      encoder.encode(`${purpose}:${issuedPart}:${email}`),
     );
-    return valid ? email : null;
+    return valid ? { email, issuedAt: Number(issuedPart) } : null;
   } catch {
     return null;
   }

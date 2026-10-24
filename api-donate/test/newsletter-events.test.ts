@@ -1,5 +1,5 @@
 import { env, fetchMock, SELF } from 'cloudflare:test';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BASE, clearDB } from './helpers';
 import { TEST_OTHER_SNS_PRIVATE_KEY, TEST_SNS_CERT, TEST_SNS_PRIVATE_KEY } from './sns-test-keys';
 
@@ -74,12 +74,12 @@ const complaint = (email: string) =>
     complaint: { complainedRecipients: [{ emailAddress: email }] },
   });
 
-const unsubscribedAt = async (email: string) =>
+const suppressedAt = async (email: string) =>
   (
-    await env.DB.prepare('SELECT unsubscribed_at FROM newsletter_subscribers WHERE email = ?')
+    await env.DB.prepare('SELECT suppressed_at FROM newsletter_subscribers WHERE email = ?')
       .bind(email)
-      .first<{ unsubscribed_at: number | null }>()
-  )?.unsubscribed_at;
+      .first<{ suppressed_at: number | null }>()
+  )?.suppressed_at;
 
 beforeAll(() => {
   fetchMock.activate();
@@ -98,19 +98,19 @@ describe('POST /newsletter/sns', () => {
     const res = await post({ Message: bounce('Permanent', 'A@Example.com') });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, updated: 1 });
-    expect(await unsubscribedAt('a@example.com')).toBeTypeOf('number');
-    expect(await unsubscribedAt('b@example.com')).toBeNull();
+    expect(await suppressedAt('a@example.com')).toBeTypeOf('number');
+    expect(await suppressedAt('b@example.com')).toBeNull();
   });
 
   it('suppresses a complaint', async () => {
     await post({ Message: complaint('b@example.com') });
-    expect(await unsubscribedAt('b@example.com')).toBeTypeOf('number');
+    expect(await suppressedAt('b@example.com')).toBeTypeOf('number');
   });
 
   it('ignores a transient bounce', async () => {
     const res = await post({ Message: bounce('Transient', 'a@example.com') });
     expect(await res.json()).toEqual({ ok: true, updated: 0 });
-    expect(await unsubscribedAt('a@example.com')).toBeNull();
+    expect(await suppressedAt('a@example.com')).toBeNull();
   });
 
   it('rejects a topic that is not allowlisted', async () => {
@@ -119,7 +119,7 @@ describe('POST /newsletter/sns', () => {
       { serve: false },
     );
     expect(res.status).toBe(403);
-    expect(await unsubscribedAt('a@example.com')).toBeNull();
+    expect(await suppressedAt('a@example.com')).toBeNull();
   });
 
   it('rejects a signature from the wrong key', async () => {
@@ -128,7 +128,7 @@ describe('POST /newsletter/sns', () => {
       { privateKey: TEST_OTHER_SNS_PRIVATE_KEY },
     );
     expect(res.status).toBe(403);
-    expect(await unsubscribedAt('a@example.com')).toBeNull();
+    expect(await suppressedAt('a@example.com')).toBeNull();
   });
 
   it('rejects a certificate URL that is not on amazonaws.com', async () => {
@@ -147,6 +147,30 @@ describe('POST /newsletter/sns', () => {
       SubscribeURL: `${SNS_ORIGIN}/confirm?token=t`,
     });
     expect(await res.json()).toEqual({ ok: true, subscribed: true });
+  });
+
+  it('returns 200 and suppresses no one for a message that is not an SES event', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const res = await post({ Message: 'Test message from the SNS console' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not an SES event'));
+    expect(await suppressedAt('a@example.com')).toBeNull();
+    warn.mockRestore();
+  });
+
+  it('logs and ignores an event type it does not act on', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await post({
+      Message: JSON.stringify({
+        eventType: 'Delivery',
+        mail: { destination: ['a@example.com'] },
+      }),
+    });
+    expect(await res.json()).toEqual({ ok: true, updated: 0 });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('suppressed no one'));
+    expect(await suppressedAt('a@example.com')).toBeNull();
+    log.mockRestore();
   });
 
   it('rejects a body that is not an SNS message', async () => {
