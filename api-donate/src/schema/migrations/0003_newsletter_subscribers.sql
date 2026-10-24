@@ -1,5 +1,5 @@
--- Where each newsletter subscriber signed up from. Buttondown stores no metadata for us, so
--- country and region come from Cloudflare's geoip on the signup request.
+-- Where each newsletter subscriber signed up from, taken
+-- from Cloudflare's geoip on the signup request.
 CREATE TABLE newsletter_subscribers (
   email TEXT PRIMARY KEY,
   country TEXT,                        -- ISO 3166-1 alpha-2, e.g. 'US'

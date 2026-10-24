@@ -26,7 +26,11 @@
         }
       ],
       "vars": {
-        "LANDING_URL": "https://virtueinitiative.org"
+        "LANDING_URL": "https://virtueinitiative.org",
+        "AWS_SES_REGION": "us-east-1",
+        "NEWSLETTER_SES_CONFIG_SET": "newsletter",
+        "SNS_TOPIC_ARNS": "arn:aws:sns:us-east-1:599243104123:virtue-newsletter-events",
+        "NEWSLETTER_FROM_EMAIL": "The Virtue Initiative <newsletter@news.virtueinitiative.org>"
       },
       "routes": [
         {
@@ -46,7 +50,11 @@
         }
       ],
       "vars": {
-        "LANDING_URL": "https://staging.virtueinitiative.org"
+        "LANDING_URL": "https://staging.virtueinitiative.org",
+        "AWS_SES_REGION": "us-east-1",
+        "NEWSLETTER_SES_CONFIG_SET": "newsletter",
+        "SNS_TOPIC_ARNS": "arn:aws:sns:us-east-1:599243104123:virtue-newsletter-events",
+        "NEWSLETTER_FROM_EMAIL": "The Virtue Initiative <newsletter@news.virtueinitiative.org>"
       },
       "routes": [
         {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import checkout from './routes/checkout';
 import newsletter from './routes/newsletter';
+import newsletterEvents from './routes/newsletter-events';
 import goals from './routes/goals';
 import webhook from './routes/webhook';
 import { Env, Variables } from './types/bindings';
@@ -9,8 +10,8 @@ import { Env, Variables } from './types/bindings';
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.use('/*', async (c, next) => {
-  // The webhook is called server-to-server by Stripe and must not be CORS-gated.
-  if (c.req.path === '/webhook') {
+  // The Stripe webhook and SNS notifications are called server-to-server and must not be CORS-gated.
+  if (c.req.path === '/webhook' || c.req.path === '/newsletter/sns') {
     return next();
   }
 
@@ -48,6 +49,7 @@ app.get('/', (c) =>
 
 app.route('/', checkout);
 app.route('/', newsletter);
+app.route('/', newsletterEvents);
 app.route('/', goals);
 app.route('/', webhook);
 

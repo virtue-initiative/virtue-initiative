@@ -19,8 +19,6 @@ export interface Env {
   BUG_REPORT_EMAIL: string;
   // Comma-separated SNS topic ARNs accepted by POST /email/sns (API-041). Unset rejects all.
   SNS_TOPIC_ARNS?: string;
-  // Unset in local dev, which skips newsletter signups (see lib/newsletter.ts).
-  BUTTONDOWN_API_KEY?: string;
   // The donate worker's D1, where newsletter subscribers' regions are stored (API-010). Unset in
   // tests and local dev unless bound.
   DONATE_DB?: D1Database;

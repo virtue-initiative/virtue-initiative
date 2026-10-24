@@ -2,9 +2,8 @@
 import { Button } from '@virtueinitiative/shared-web';
 import SiteLayout from '../../layouts/SiteLayout.astro';
 
-// Buttondown's subscription_redirect_url points here, so a subscriber lands back on the site
-// after submitting NewsletterForm instead of on Buttondown's own "subscribed" page. They
-// aren't subscribed yet, because Buttondown still needs them to confirm by email.
+// The donate worker redirects here after NewsletterForm is submitted. They aren't subscribed
+// yet, because they still need to click the link in the confirmation email.
 ---
 
 <SiteLayout pageTitle="Check your email">

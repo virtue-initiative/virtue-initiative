@@ -2,10 +2,9 @@
 import { Button, Input } from '@virtueinitiative/shared-web';
 import { DONATE_API_URL } from '../lib/donate-url';
 
-// Posts to the donate worker, which records the visitor's region and adds them to Buttondown
-// as unconfirmed. Buttondown sends its own confirmation email before the address is
-// subscribed, which is what makes this safe to accept from anyone. Accounts opt in from the
-// signup form instead (API-010).
+// Posts to the donate worker, which records the visitor's region and emails them a confirmation
+// link. The address only receives newsletters once they click it, which is what makes this safe
+// to accept from anyone. Accounts opt in from the signup form instead (API-010).
 const NEWSLETTER_URL = `${DONATE_API_URL}/newsletter`;
 
 interface Props {

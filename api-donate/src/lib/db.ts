@@ -123,18 +123,24 @@ export interface NewsletterSubscriberRecord {
   country?: string;
   regionCode?: string;
   region?: string;
-  source: 'landing' | 'signup';
 }
 
-/** Keeps the first location seen for an address, so a repeat signup can't overwrite it. */
-export async function recordSubscriber(
+// A repeat signup form post won't send another confirmation email within this window.
+const CONFIRMATION_RESEND_SECONDS = 60 * 60;
+
+/**
+ * Records a landing-page signup, keeping the first location seen for an address. Returns whether
+ * a confirmation email should go out: not for an address that is already subscribed, and not
+ * again within an hour, so the form can't be used to flood an inbox.
+ */
+export async function requestSubscription(
   db: D1Database,
   subscriber: NewsletterSubscriberRecord,
-): Promise<void> {
+): Promise<boolean> {
   await db
     .prepare(
       `INSERT INTO newsletter_subscribers (email, country, region_code, region, source)
-       VALUES (?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, 'landing')
        ON CONFLICT(email) DO NOTHING`,
     )
     .bind(
@@ -142,7 +148,51 @@ export async function recordSubscriber(
       subscriber.country ?? null,
       subscriber.regionCode ?? null,
       subscriber.region ?? null,
-      subscriber.source,
     )
+    .run();
+
+  // Atomic, so two concurrent posts can't both send.
+  const result = await db
+    .prepare(
+      `UPDATE newsletter_subscribers SET confirmation_sent_at = unixepoch()
+       WHERE email = ?
+         AND (confirmed_at IS NULL OR unsubscribed_at IS NOT NULL)
+         AND (confirmation_sent_at IS NULL OR confirmation_sent_at <= unixepoch() - ?)`,
+    )
+    .bind(subscriber.email, CONFIRMATION_RESEND_SECONDS)
+    .run();
+
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Stops mail to addresses that hard-bounced or complained. It reuses `unsubscribed_at`, so the
+ * sender skips them like anyone else who opted out, and a later confirm click can undo it.
+ */
+export async function suppressSubscribers(db: D1Database, emails: string[]): Promise<void> {
+  for (const email of emails) {
+    await unsubscribeSubscriber(db, email);
+  }
+}
+
+/** Marks an address confirmed. Re-confirming also clears an earlier unsubscribe. */
+export async function confirmSubscriber(db: D1Database, email: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE newsletter_subscribers SET confirmed_at = unixepoch(), unsubscribed_at = NULL
+       WHERE email = ?`,
+    )
+    .bind(email)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function unsubscribeSubscriber(db: D1Database, email: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE newsletter_subscribers SET unsubscribed_at = unixepoch()
+       WHERE email = ? AND unsubscribed_at IS NULL`,
+    )
+    .bind(email)
     .run();
 }

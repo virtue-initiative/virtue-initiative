@@ -61,11 +61,7 @@ import {
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
-import {
-  fillNewsletterRegion,
-  recordNewsletterRegion,
-  subscribeToNewsletter,
-} from '../lib/newsletter';
+import { fillNewsletterRegion, subscribeToNewsletter } from '../lib/newsletter';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -502,10 +498,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await createSession(c, userId);
 
   if (newsletter_opt_in === true) {
-    c.executionCtx.waitUntil(
-      subscribeToNewsletter(c.env, normalizedEmail, c.req.header('CF-Connecting-IP')),
-    );
-    c.executionCtx.waitUntil(recordNewsletterRegion(c.env, normalizedEmail, c.req.raw.cf));
+    c.executionCtx.waitUntil(subscribeToNewsletter(c.env, normalizedEmail, c.req.raw.cf));
   }
 
   return c.json<SignupResponse>(

@@ -1,102 +1,133 @@
-import { env, fetchMock, SELF } from 'cloudflare:test';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { env, SELF } from 'cloudflare:test';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { requestSubscription } from '../src/lib/db';
+import { signNewsletterToken, verifyNewsletterToken } from '../src/lib/newsletter-token';
 import { BASE, clearDB } from './helpers';
-
-beforeAll(() => {
-  fetchMock.activate();
-  fetchMock.disableNetConnect();
-});
 
 beforeEach(clearDB);
 
-function post(body: Record<string, string>, headers: Record<string, string> = {}) {
+const SECRET = 'newsletter-test-secret';
+const row = (email = 'alice@example.com') =>
+  env.DB.prepare('SELECT * FROM newsletter_subscribers WHERE email = ?').bind(email).first();
+
+function post(body: Record<string, string>) {
   return SELF.fetch(`${BASE}/newsletter`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body),
     redirect: 'manual',
   });
 }
 
-type Captured = { body: Record<string, unknown> };
-
-/** Intercepts the next Buttondown call. The result is filled in once the worker makes it. */
-function interceptButtondown(statusCode = 201, data = '{}') {
-  const captured: { value?: Captured } = {};
-  fetchMock
-    .get('https://api.buttondown.com')
-    .intercept({ path: '/v1/subscribers', method: 'POST' })
-    .reply((opts) => {
-      captured.value = { body: JSON.parse(String(opts.body)) };
-      return { statusCode, data };
-    });
-  return captured;
-}
+describe('newsletter tokens', () => {
+  it('round-trips and is bound to its purpose', async () => {
+    const token = await signNewsletterToken(SECRET, 'confirm', 'a+b@example.com');
+    expect(await verifyNewsletterToken(SECRET, 'confirm', token)).toBe('a+b@example.com');
+    expect(await verifyNewsletterToken(SECRET, 'unsubscribe', token)).toBeNull();
+    expect(await verifyNewsletterToken('other-secret', 'confirm', token)).toBeNull();
+    expect(await verifyNewsletterToken(SECRET, 'confirm', 'garbage')).toBeNull();
+  });
+});
 
 describe('POST /newsletter', () => {
-  it('records the region, subscribes as unconfirmed and redirects', async () => {
-    const captured = interceptButtondown();
-
-    const res = await post({ email: ' Alice@Example.com ' }, { 'CF-Connecting-IP': '203.0.113.7' });
+  it('records the subscriber unconfirmed and redirects', async () => {
+    const res = await post({ email: ' Alice@Example.com ' });
 
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toMatch(/\/newsletter\/check-email$/);
-    const row = await env.DB.prepare('SELECT * FROM newsletter_subscribers').first();
-    expect(row).toMatchObject({ email: 'alice@example.com', source: 'landing' });
-    await vi.waitFor(() => expect(captured.value).toBeDefined());
-    expect(captured.value?.body).toMatchObject({
-      email_address: 'alice@example.com',
-      type: 'unactivated',
-      ip_address: '203.0.113.7',
+    expect(await row()).toMatchObject({
+      source: 'landing',
+      confirmed_at: null,
+      unsubscribed_at: null,
     });
   });
 
-  it('sends an invalid email back to the form without recording anything', async () => {
+  it('rejects an invalid email', async () => {
     const res = await post({ email: 'not-an-email' });
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toMatch(/\/#newsletter$/);
-    expect(await env.DB.prepare('SELECT * FROM newsletter_subscribers').first()).toBeNull();
+    expect(res.status).toBe(400);
+    expect(await row('not-an-email')).toBeNull();
   });
+});
 
-  it('keeps the first location seen for an address', async () => {
-    const captured = interceptButtondown();
+describe('requestSubscription', () => {
+  const sub = { email: 'alice@example.com', country: 'US', regionCode: 'CA', region: 'California' };
+
+  it('sends one confirmation per hour and keeps the first region', async () => {
+    expect(await requestSubscription(env.DB, sub)).toBe(true);
+    expect(await requestSubscription(env.DB, { ...sub, regionCode: 'NY' })).toBe(false);
+    expect(await row()).toMatchObject({ region_code: 'CA' });
+
     await env.DB.prepare(
-      "INSERT INTO newsletter_subscribers (email, country, region_code, source) VALUES ('alice@example.com', 'US', 'CA', 'signup')",
+      'UPDATE newsletter_subscribers SET confirmation_sent_at = unixepoch() - 7200',
     ).run();
+    expect(await requestSubscription(env.DB, sub)).toBe(true);
+  });
 
+  it('does not email an address that is already subscribed', async () => {
+    await requestSubscription(env.DB, sub);
+    await env.DB.prepare(
+      'UPDATE newsletter_subscribers SET confirmed_at = unixepoch(), confirmation_sent_at = NULL',
+    ).run();
+    expect(await requestSubscription(env.DB, sub)).toBe(false);
+  });
+
+  it('asks an unsubscribed address to confirm again', async () => {
+    await requestSubscription(env.DB, sub);
+    await env.DB.prepare(
+      'UPDATE newsletter_subscribers SET confirmed_at = unixepoch(), unsubscribed_at = unixepoch(), confirmation_sent_at = NULL',
+    ).run();
+    expect(await requestSubscription(env.DB, sub)).toBe(true);
+  });
+});
+
+describe('confirm and unsubscribe links', () => {
+  beforeEach(async () => {
     await post({ email: 'alice@example.com' });
-    await vi.waitFor(() => expect(captured.value).toBeDefined());
-
-    const row = await env.DB.prepare('SELECT * FROM newsletter_subscribers').first();
-    expect(row).toMatchObject({ country: 'US', region_code: 'CA', source: 'signup' });
   });
 
-  it('still redirects when Buttondown rejects the address', async () => {
-    const captured = interceptButtondown(400, '{"code":"email_already_exists"}');
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('confirms with a valid token and rejects a bad one', async () => {
+    const bad = await SELF.fetch(`${BASE}/newsletter/confirm?token=nope`, { redirect: 'manual' });
+    expect(bad.status).toBe(400);
+    expect(await row()).toMatchObject({ confirmed_at: null });
 
-    const res = await post({ email: 'alice@example.com' });
-
+    const token = await signNewsletterToken(SECRET, 'confirm', 'alice@example.com');
+    const res = await SELF.fetch(`${BASE}/newsletter/confirm?token=${token}`, {
+      redirect: 'manual',
+    });
     expect(res.status).toBe(303);
-    await vi.waitFor(() => expect(captured.value).toBeDefined());
-    await vi.waitFor(() => expect(error).toHaveBeenCalled());
-    error.mockRestore();
+    expect(res.headers.get('location')).toMatch(/\/newsletter\/confirmed$/);
+    expect((await row())?.confirmed_at).toBeTypeOf('number');
   });
 
-  it('still subscribes and redirects when the database write fails', async () => {
-    const captured = interceptButtondown();
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await env.DB.prepare('DROP TABLE newsletter_subscribers').run();
+  it('only unsubscribes on POST, and re-confirming resubscribes', async () => {
+    const confirm = await signNewsletterToken(SECRET, 'confirm', 'alice@example.com');
+    await SELF.fetch(`${BASE}/newsletter/confirm?token=${confirm}`, { redirect: 'manual' });
+    const token = await signNewsletterToken(SECRET, 'unsubscribe', 'alice@example.com');
+    const url = `${BASE}/newsletter/unsubscribe?token=${token}`;
 
-    try {
-      const res = await post({ email: 'alice@example.com' });
-      expect(res.status).toBe(303);
-      await vi.waitFor(() => expect(captured.value).toBeDefined());
-    } finally {
-      await env.DB.prepare(
-        'CREATE TABLE newsletter_subscribers (email TEXT PRIMARY KEY, country TEXT, region_code TEXT, region TEXT, source TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()))',
-      ).run();
-      error.mockRestore();
-    }
+    const preview = await SELF.fetch(url);
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toContain('<form method="post"');
+    expect(await row()).toMatchObject({ unsubscribed_at: null });
+
+    // RFC 8058 one-click body.
+    const res = await SELF.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'List-Unsubscribe=One-Click',
+    });
+    expect(res.status).toBe(200);
+    expect((await row())?.unsubscribed_at).toBeTypeOf('number');
+
+    await SELF.fetch(`${BASE}/newsletter/confirm?token=${confirm}`, { redirect: 'manual' });
+    expect(await row()).toMatchObject({ unsubscribed_at: null });
+  });
+
+  it('rejects a confirm token at the unsubscribe endpoint', async () => {
+    const confirm = await signNewsletterToken(SECRET, 'confirm', 'alice@example.com');
+    const res = await SELF.fetch(`${BASE}/newsletter/unsubscribe?token=${confirm}`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(400);
   });
 });
