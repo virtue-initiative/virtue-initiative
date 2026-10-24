@@ -136,7 +136,11 @@ await env
     region_code TEXT,
     region TEXT,
     source TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    confirmed_at INTEGER,
+    unsubscribed_at INTEGER,
+    suppressed_at INTEGER,
+    confirmation_sent_at INTEGER
   )`,
   )
   .run();

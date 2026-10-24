@@ -75,7 +75,7 @@ describe('Auth routes', () => {
     expect(unknownBody).toHaveProperty('params');
   });
 
-  it('accepts a newsletter opt-in on /signup without failing when Buttondown is not configured', async () => {
+  it('accepts a newsletter opt-in on /signup and subscribes the address', async () => {
     await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

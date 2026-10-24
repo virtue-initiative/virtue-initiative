@@ -1,86 +1,52 @@
 import { Env } from '../types/bindings';
 
-const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
-
 /**
- * Adds a new account's email to the Buttondown newsletter list (API-010).
+ * Subscribes a new account's email to the newsletter (API-010). The address was just verified by
+ * the signup flow and the box was ticked, so the row is created already confirmed. That also
+ * resubscribes an address that unsubscribed, because ticking the box is a new opt-in. An address
+ * suppressed by a hard bounce or complaint is never touched.
  *
- * The address was just verified by the signup flow, so the subscriber is created as
- * `regular` and skips Buttondown's own confirmation email. No collision header is sent:
- * Buttondown then rejects an address it already knows (including one that unsubscribed)
- * instead of resubscribing it.
- *
- * `ipAddress` is the signing-up client's IP. Buttondown filters aggressively without it.
+ * The first location seen for an address wins, except that an account signup replaces a row the
+ * landing form created: anyone can submit any address there, so the owner's own signup is the
+ * better record.
  *
  * Best-effort: failures are logged, never thrown, so they can't fail the signup.
  */
 export async function subscribeToNewsletter(
   env: Env,
   email: string,
-  ipAddress?: string,
-): Promise<void> {
-  const apiKey = env.BUTTONDOWN_API_KEY?.trim();
-  if (!apiKey) {
-    console.log('[newsletter] BUTTONDOWN_API_KEY not set; skipping signup');
-    return;
-  }
-
-  try {
-    const res = await fetch(BUTTONDOWN_SUBSCRIBERS_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email_address: email,
-        type: 'regular',
-        referrer_url: `${env.APP_URL}/signup`,
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
-      }),
-    });
-    if (!res.ok) {
-      console.error(`[newsletter] Buttondown returned ${res.status}: ${await res.text()}`);
-    }
-  } catch (err) {
-    console.error('[newsletter] Buttondown request failed', err);
-  }
-}
-
-/**
- * Stores where a newsletter subscriber signed up from (API-010), since Buttondown keeps no
- * metadata for us. The first location seen for an address wins, except that an account signup
- * replaces a row the landing form created: anyone can submit any address there, so the owner's
- * own signup is the better record.
- *
- * Best-effort: failures are logged, never thrown, so they can't fail the signup.
- */
-export async function recordNewsletterRegion(
-  env: Env,
-  email: string,
   cf: Request['cf'],
 ): Promise<void> {
-  if (!env.DONATE_DB) return;
+  if (!env.DONATE_DB) {
+    console.log('[newsletter] DONATE_DB not set; skipping signup');
+    return;
+  }
 
   const country = (cf?.country as string | undefined) ?? null;
   const regionCode = (cf?.regionCode as string | undefined) ?? null;
   const region = (cf?.region as string | undefined) ?? null;
 
   try {
+    // Every right-hand side in DO UPDATE reads the row as it was before the update.
     await env.DONATE_DB.prepare(
-      `INSERT INTO newsletter_subscribers (email, country, region_code, region, source)
-       VALUES (?, ?, ?, ?, 'signup')
+      `INSERT INTO newsletter_subscribers (email, country, region_code, region, source, confirmed_at)
+       VALUES (?, ?, ?, ?, 'signup', unixepoch())
        ON CONFLICT(email) DO UPDATE SET
-         country = excluded.country,
-         region_code = excluded.region_code,
-         region = excluded.region,
-         source = 'signup'
-       WHERE source = 'landing'`,
+         country = CASE WHEN source = 'landing' THEN excluded.country ELSE country END,
+         region_code = CASE WHEN source = 'landing' THEN excluded.region_code ELSE region_code END,
+         region = CASE WHEN source = 'landing' THEN excluded.region ELSE region END,
+         source = 'signup',
+         confirmed_at = CASE
+           WHEN confirmed_at IS NULL OR unsubscribed_at IS NOT NULL THEN unixepoch()
+           ELSE confirmed_at
+         END,
+         unsubscribed_at = NULL
+       WHERE suppressed_at IS NULL`,
     )
       .bind(email, country, regionCode, region)
       .run();
   } catch (err) {
-    console.error('[newsletter] failed to record subscriber region', err);
+    console.error('[newsletter] failed to subscribe', err);
   }
 }
 

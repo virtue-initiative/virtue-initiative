@@ -26,8 +26,21 @@
         }
       ],
       "vars": {
-        "LANDING_URL": "https://virtueinitiative.org"
+        "LANDING_URL": "https://virtueinitiative.org",
+        "TURNSTILE_HOSTNAMES": "virtueinitiative.org,staging.virtueinitiative.org",
+        "AWS_SES_REGION": "us-east-1",
+        "NEWSLETTER_SES_CONFIG_SET": "newsletter",
+        "NEWSLETTER_REPLY_TO": "help@virtueinitiative.org",
+        "SNS_TOPIC_ARNS": "arn:aws:sns:us-east-1:599243104123:virtue-newsletter-events",
+        "NEWSLETTER_FROM_EMAIL": "The Virtue Initiative <newsletter@news.virtueinitiative.org>"
       },
+      "ratelimits": [
+        {
+          "name": "NEWSLETTER_RATE_LIMITER",
+          "namespace_id": "2001",
+          "simple": { "limit": 5, "period": 60 }
+        }
+      ],
       "routes": [
         {
           "pattern": "donate-api.virtueinitiative.org",
@@ -46,8 +59,21 @@
         }
       ],
       "vars": {
-        "LANDING_URL": "https://staging.virtueinitiative.org"
+        "LANDING_URL": "https://staging.virtueinitiative.org",
+        "TURNSTILE_HOSTNAMES": "virtueinitiative.org,staging.virtueinitiative.org",
+        "AWS_SES_REGION": "us-east-1",
+        "NEWSLETTER_SES_CONFIG_SET": "newsletter",
+        "NEWSLETTER_REPLY_TO": "help@virtueinitiative.org",
+        "SNS_TOPIC_ARNS": "arn:aws:sns:us-east-1:599243104123:virtue-newsletter-events",
+        "NEWSLETTER_FROM_EMAIL": "The Virtue Initiative <newsletter@news.virtueinitiative.org>"
       },
+      "ratelimits": [
+        {
+          "name": "NEWSLETTER_RATE_LIMITER",
+          "namespace_id": "2002",
+          "simple": { "limit": 5, "period": 60 }
+        }
+      ],
       "routes": [
         {
           "pattern": "staging.donate-api.virtueinitiative.org",

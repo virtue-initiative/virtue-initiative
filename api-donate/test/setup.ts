@@ -39,7 +39,11 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   region_code TEXT,
   region TEXT,
   source TEXT NOT NULL,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  confirmed_at INTEGER,
+  unsubscribed_at INTEGER,
+  suppressed_at INTEGER,
+  confirmation_sent_at INTEGER
 );
 INSERT OR IGNORE INTO goals (id, title, description, target_cents)
 VALUES ('lawyer', 'Legal fees', 'Lawyer', 100000);

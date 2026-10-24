@@ -1,11 +1,10 @@
 ---
 import { Button, Input } from '@virtueinitiative/shared-web';
-import { DONATE_API_URL } from '../lib/donate-url';
+import { DONATE_API_URL, TURNSTILE_SITE_KEY } from '../lib/donate-url';
 
-// Posts to the donate worker, which records the visitor's region and adds them to Buttondown
-// as unconfirmed. Buttondown sends its own confirmation email before the address is
-// subscribed, which is what makes this safe to accept from anyone. Accounts opt in from the
-// signup form instead (API-010).
+// Posts to the donate worker, which records the visitor's region and emails them a confirmation
+// link. The address only receives newsletters once they click it, which is what makes this safe
+// to accept from anyone. Accounts opt in from the signup form instead (API-010).
 const NEWSLETTER_URL = `${DONATE_API_URL}/newsletter`;
 
 interface Props {
@@ -38,10 +37,24 @@ const { centered = false } = Astro.props;
       />
       <Button type="submit" variant="primary">Subscribe</Button>
     </div>
+    {
+      TURNSTILE_SITE_KEY && (
+        <div
+          class="cf-turnstile"
+          data-sitekey={TURNSTILE_SITE_KEY}
+          data-action="newsletter"
+          data-appearance="interaction-only"
+        />
+      )
+    }
   </form>
+  {
+    TURNSTILE_SITE_KEY && (
+      <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
+    )
+  }
   <p class="newsletter-fine-print">
-    We will email you a link to confirm first. We never share your address. See our <a
-      href="/privacy">Privacy Policy</a
-    >.
+    We will email you a link to confirm first. We never share your address. Cloudflare Turnstile
+    checks that you are a person. See our <a href="/privacy">Privacy Policy</a>.
   </p>
 </section>

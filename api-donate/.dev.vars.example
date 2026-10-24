@@ -9,3 +9,17 @@ STRIPE_SECRET_KEY=sk_test_REPLACE_ME
 # Stripe CLI (`stripe listen --forward-to http://localhost:8788/webhook`),
 # use the whsec_... value it prints.
 STRIPE_WEBHOOK_SECRET=whsec_REPLACE_ME
+
+# Signs newsletter confirm and unsubscribe links. Any random string locally. The
+# send script (`bun run newsletter`) needs the same value as the worker it targets.
+NEWSLETTER_TOKEN_SECRET=dev-newsletter-secret
+
+# AWS credentials for SES. Leave unset locally: newsletter confirmation links are
+# then printed to the worker log instead of emailed.
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+
+# Cloudflare Turnstile secret for the newsletter form. This is Cloudflare's test secret, which
+# always passes, and goes with the test site key the landing site uses in dev. Production needs
+# the real widget's secret (see README, "Turnstile").
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
