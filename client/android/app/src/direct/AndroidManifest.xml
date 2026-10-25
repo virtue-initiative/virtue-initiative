@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into src/main/AndroidManifest.xml for the sideloaded APK only.
+     Google Play restricts these permissions, so the `play` flavor leaves them
+     out. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Lets MainActivity ask for the battery-optimization exemption directly
+         instead of sending the user to the settings list. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Self-update (AppUpdater). The second lets Android 12+ install an
+         update without asking once Virtue is its own installer of record. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
+    <application>
+        <receiver
+            android:name=".UpdateInstallReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

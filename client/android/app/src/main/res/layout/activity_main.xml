@@ -403,6 +403,19 @@
                         android:text="@string/btn_sign_out"
                         android:textColor="@color/virtue_forest"
                         app:strokeColor="@color/virtue_forest" />
+
+                    <!-- Google Play requires account deletion to be reachable
+                         from inside the app. It lives in the web app's Settings. -->
+                    <TextView
+                        android:id="@+id/deleteAccountLink"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="@string/btn_delete_account"
+                        android:textSize="14sp"
+                        android:textColor="@color/virtue_forest"
+                        android:clickable="true"
+                        android:focusable="true" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

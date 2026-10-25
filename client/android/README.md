@@ -58,14 +58,14 @@ Run doctor check:
 
 ## One-time Android SDK setup
 
-Install the exact SDK pieces this project expects (`compileSdk/targetSdk 35`, `ndkVersion 26.1.10909125`):
+Install the exact SDK pieces this project expects (`compileSdk/targetSdk 36`, `ndkVersion 26.1.10909125`). The emulator image can stay on API 35:
 
 ```bash
 yes | sdkmanager --licenses
 sdkmanager \
   "platform-tools" \
   "emulator" \
-  "platforms;android-35" \
+  "platforms;android-36" \
   "build-tools;35.0.0" \
   "system-images;android-35;google_apis;x86_64" \
   "ndk;26.1.10909125" \
@@ -112,8 +112,8 @@ adb shell input keyevent 82
 
 ```bash
 cd client/android
-./gradlew :app:assembleDebug
-./gradlew :app:installDebug
+./gradlew :app:assembleDirectDebug
+./gradlew :app:installDirectDebug
 ```
 
 4. Launch app activity.
@@ -137,17 +137,45 @@ Important for emulator networking:
 
 APK output path (if you want manual install):
 
-- `client/android/app/build/outputs/apk/debug/app-debug.apk`
+- `client/android/app/build/outputs/apk/direct/debug/app-direct-debug.apk`
 
 Manual install alternative:
 
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/direct/debug/app-direct-debug.apk
 ```
+
+## Build flavors
+
+The app has two product flavors:
+
+- `direct`: the APK published to GitHub releases and installed by hand. It updates itself
+  (below) and asks for the battery-optimization exemption directly.
+- `play`: the Google Play build. Play forbids self-updates and restricts
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, so this flavor leaves out the permissions in
+  `src/direct/AndroidManifest.xml`, swaps `AppUpdater` for a no-op (`src/play/`), and
+  instead shows a one-time dialog that opens the battery-optimization settings list.
+  `BuildConfig.PLAY_STORE` is true only here.
+
+The `play` flavor also declares the `isMonitoringTool` manifest flag that Play's
+stalkerware policy requires of monitoring apps (`src/play/AndroidManifest.xml`).
+
+Both flavors show an Accessibility disclosure with Agree and No Thanks buttons before the
+setup steps (`AccessibilityConsent.kt`, `AccessibilitySetupGuide.renderDisclosure`). Play
+requires it because Virtue isn't an accessibility tool, and the wording is what Play
+reviewers read, so change it with the Play Console declaration in mind. Raise
+`AccessibilityConsent.VERSION` when it changes enough that users should see it again.
+Signed-in users also get a Delete Account link, which opens the web app's Settings, because
+Play requires account deletion to be reachable from the app.
+
+Task names include the flavor: `assembleDirectDebug`, `installPlayDebug`,
+`bundlePlayRelease`, and so on. `scripts/build.sh` and `scripts/install.sh` build `direct`
+unless given `--play`. Play Console takes the `.aab` from `bundlePlayRelease`, which CI
+keeps as a workflow artifact on pushes to `main` and `staging`.
 
 ## Automatic updates
 
-Stable release builds update themselves (`AppUpdater.kt`). Dev, staging, and debug builds
+Stable `direct` release builds update themselves (`AppUpdater.kt`). Dev, staging, and debug builds
 don't: the `AUTO_UPDATE` BuildConfig flag is only on for release builds whose channel is
 `stable` (`VIRTUE_RELEASE_CHANNEL`, or `GITHUB_REF_NAME=main` in CI), so a tester's staging
 build never replaces itself with the stable APK.

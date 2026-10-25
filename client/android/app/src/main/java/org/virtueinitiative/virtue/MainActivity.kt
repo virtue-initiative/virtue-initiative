@@ -30,6 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private const val PREFS_BATTERY_PROMPT = "battery_prompt"
+private const val KEY_BATTERY_PROMPT_SHOWN = "shown"
+
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
@@ -84,6 +87,14 @@ class MainActivity : AppCompatActivity() {
         binding.openPartnersButton.setOnClickListener {
             startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/partners"))
+            )
+        }
+
+        // Account deletion is in the web app's Settings; Play requires a way to
+        // reach it from the app.
+        binding.deleteAccountLink.setOnClickListener {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/settings"))
             )
         }
 
@@ -190,7 +201,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // targetSdk 35 forces edge-to-edge, so the window no longer shrinks for the
+    // targetSdk 35+ forces edge-to-edge, so the window no longer shrinks for the
     // keyboard (adjustResize) or stops below the status bar on its own. Inset the
     // root ScrollView by hand. Using margins rather than padding resizes it, and
     // a ScrollView that shrinks scrolls its focused field back into view.
@@ -284,6 +295,7 @@ class MainActivity : AppCompatActivity() {
             if (!coreReady) {
                 renderSetupGuide(binding.onboardingSteps)
                 binding.onboardingStatusText.text = getString(R.string.msg_core_init_failed, initError)
+                binding.onboardingStatusText.visibility = android.view.View.VISIBLE
             }
             binding.statusTitle.text = getString(R.string.status_signed_out)
             setStatus(getString(R.string.msg_sign_in_to_start))
@@ -296,6 +308,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.deviceIdText.text = deviceName()
         binding.statusButtonsLayout.visibility = android.view.View.VISIBLE
+        // Show the "Monitoring active" notification as soon as the user is
+        // signed in rather than at KeepAliveWorker's next run, up to 15 minutes
+        // later. Google Play requires monitoring apps to show it whenever they
+        // run.
+        if (!VirtueAccessibilityService.isPaused()) ScreenshotService.start(this)
+        if (BuildConfig.PLAY_STORE) showBatteryOptimizationDialog()
 
         when {
             VirtueAccessibilityService.isEnabled() -> {
@@ -402,7 +420,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderSetupGuide(container: LinearLayout) {
-        AccessibilitySetupGuide.render(this, container, ::handleGuideAction)
+        AccessibilitySetupGuide.render(this, container, ::handleGuideAction, ::updateOnboardingStatus)
+        updateOnboardingStatus()
+    }
+
+    // "Waiting for Accessibility permission" only makes sense once the user
+    // has agreed to the disclosure and is on the setup steps.
+    private fun updateOnboardingStatus() {
+        binding.onboardingStatusText.visibility =
+            if (AccessibilityConsent.isGiven(this)) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     // Reached when Accessibility is off while signed in (or a sign-in raced the
@@ -420,10 +446,10 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(getString(R.string.btn_done), null)
             .create()
         // The guide's buttons leave the app, so close the dialog behind them.
-        AccessibilitySetupGuide.render(this, steps) { action ->
+        AccessibilitySetupGuide.render(this, steps, onAction = { action ->
             dialog.dismiss()
             handleGuideAction(action)
-        }
+        })
         dialog.show()
     }
 
@@ -436,17 +462,42 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(PowerManager::class.java)
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                runCatching {
-                    startActivity(
-                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                            .setData(Uri.parse("package:$packageName"))
-                    )
-                }
+        // Play builds ask after sign-in instead (showBatteryOptimizationDialog).
+        if (!BuildConfig.PLAY_STORE && !isIgnoringBatteryOptimizations()) {
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        .setData(Uri.parse("package:$packageName"))
+                )
             }
         }
+    }
+
+    private fun isIgnoringBatteryOptimizations() =
+        getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+
+    /**
+     * Play builds can't ask for the exemption directly (Play restricts
+     * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS), so explain it once and send the
+     * user to the settings list, where they pick Virtue themselves. It waits
+     * until the user is signed in so it doesn't cover the Accessibility
+     * disclosure, which Play wants shown on its own.
+     */
+    private fun showBatteryOptimizationDialog() {
+        if (isIgnoringBatteryOptimizations()) return
+        val prefs = getSharedPreferences(PREFS_BATTERY_PROMPT, MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_BATTERY_PROMPT_SHOWN, false)) return
+        prefs.edit().putBoolean(KEY_BATTERY_PROMPT_SHOWN, true).apply()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_battery_title))
+            .setMessage(getString(R.string.dialog_battery_message))
+            .setPositiveButton(getString(R.string.btn_open_settings)) { _, _ ->
+                runCatching {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
+            .setNegativeButton(getString(R.string.btn_not_now), null)
+            .show()
     }
 
     private fun setStatus(message: String) {

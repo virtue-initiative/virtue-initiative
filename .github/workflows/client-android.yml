@@ -62,14 +62,14 @@ jobs:
           path: |
             ${{ env.ANDROID_SDK_ROOT }}
             ~/.android
-          key: ${{ runner.os }}-android-sdk-35-26.1.10909125-v1
+          key: ${{ runner.os }}-android-sdk-36-26.1.10909125-v1
 
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null
           sdkmanager \
             "platform-tools" \
-            "platforms;android-35" \
+            "platforms;android-36" \
             "build-tools;35.0.0" \
             "ndk;26.1.10909125"
 
@@ -99,9 +99,9 @@ jobs:
           echo "build_label=$(virtue_build_label)" >> "$GITHUB_OUTPUT"
         working-directory: client
 
-      - name: Android unit tests + lint + build (debug)
+      - name: Android unit tests + lint + build (debug, both flavors)
         if: github.event_name != 'push' || (github.ref != 'refs/heads/main' && github.ref != 'refs/heads/staging')
-        run: ./gradlew --no-daemon -PrustProfile=debug :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: ./gradlew --no-daemon -PrustProfile=debug :app:testDirectDebugUnitTest :app:testPlayDebugUnitTest :app:lintDirectDebug :app:lintPlayDebug :app:assembleDebug
         working-directory: client/android
 
       - name: Decode Android signing keystore
@@ -126,9 +126,12 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=${ANDROID_KEY_PASSWORD}"
           } >> "$GITHUB_ENV"
 
+      # The sideloaded APK (`direct`) is published below. The Google Play
+      # bundle (`play`) is only kept as a workflow artifact, for uploading to
+      # Play Console by hand.
       - name: Android lint + build (release)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
-        run: ./gradlew --no-daemon -PrustProfile=release :app:lintRelease :app:assembleRelease
+        run: ./gradlew --no-daemon -PrustProfile=release :app:lintDirectRelease :app:lintPlayRelease :app:assembleDirectRelease :app:bundlePlayRelease
         working-directory: client/android
 
       - name: Package Android artifact
@@ -136,12 +139,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          apk_path="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n1)"
+          apk_path="$(find app/build/outputs/apk/direct/release -maxdepth 1 -type f -name '*.apk' | head -n1)"
           if [[ -z "${apk_path}" ]]; then
             echo "Release APK not found" >&2
             exit 1
           fi
           cp "${apk_path}" "dist/virtue-android-${{ steps.version.outputs.build_label }}.apk"
+          aab_path="$(find app/build/outputs/bundle/playRelease -maxdepth 1 -type f -name '*.aab' | head -n1)"
+          if [[ -z "${aab_path}" ]]; then
+            echo "Play bundle not found" >&2
+            exit 1
+          fi
+          cp "${aab_path}" "dist/virtue-android-play-${{ steps.version.outputs.build_label }}.aab"
         working-directory: client/android
 
       - name: Upload Android artifact
@@ -150,6 +159,13 @@ jobs:
         with:
           name: virtue-android-${{ steps.version.outputs.build_label }}
           path: client/android/dist/virtue-android-${{ steps.version.outputs.build_label }}.apk
+
+      - name: Upload Google Play bundle
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtue-android-play-${{ steps.version.outputs.build_label }}
+          path: client/android/dist/virtue-android-play-${{ steps.version.outputs.build_label }}.aab
 
       - name: Clear existing Android release assets
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
