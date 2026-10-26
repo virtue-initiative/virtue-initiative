@@ -176,15 +176,14 @@ export async function requestSubscription(
     )
     .run();
 
-  if ((await countRecentConfirmations(db)) >= dailyCap) return { status: 'capped' };
-
-  // Atomic, so two concurrent posts can't both send.
+  // One statement, so two concurrent posts can't both send or both slip under the cap.
   const sentAt = nowSeconds();
   const result = await db
     .prepare(
       `UPDATE newsletter_subscribers SET confirmation_sent_at = ?1
        WHERE email = ?2
          AND suppressed_at IS NULL
+         AND (SELECT COUNT(*) FROM newsletter_subscribers WHERE confirmation_sent_at > ?1 - ?5) < ?6
          AND (confirmed_at IS NULL OR unsubscribed_at IS NOT NULL)
          AND (
            confirmation_sent_at IS NULL
@@ -192,10 +191,20 @@ export async function requestSubscription(
            OR confirmation_sent_at < unsubscribed_at
          )`,
     )
-    .bind(sentAt, subscriber.email, CONFIRMATION_RESEND_SECONDS, UNSUBSCRIBED_RESEND_SECONDS)
+    .bind(
+      sentAt,
+      subscriber.email,
+      CONFIRMATION_RESEND_SECONDS,
+      UNSUBSCRIBED_RESEND_SECONDS,
+      DAY_SECONDS,
+      dailyCap,
+    )
     .run();
 
-  return (result.meta.changes ?? 0) > 0 ? { status: 'send', sentAt } : { status: 'skipped' };
+  if ((result.meta.changes ?? 0) > 0) return { status: 'send', sentAt };
+  return (await countRecentConfirmations(db)) >= dailyCap
+    ? { status: 'capped' }
+    : { status: 'skipped' };
 }
 
 /** Gives back the claim from `requestSubscription` when the email could not be sent. */

@@ -241,14 +241,16 @@ async function assertUnsubscribeLinkWorks(email: string) {
   }
 }
 
-// Only a --send keeps a log. A test send to one address is not part of the issue's history.
+// Only a full --send keeps a log. A test send to one address is not part of the issue's history.
+// Entries name the worker they went through, so a staging rehearsal doesn't skip anyone in prod.
+const keepLog = values.send && !values['test-to'];
 const logPath = file.replace(/\.md$/, '') + '.sent.jsonl';
 const alreadySent = new Set<string>();
-if (values.send && existsSync(logPath)) {
+if (keepLog && existsSync(logPath)) {
   for (const line of readFileSync(logPath, 'utf8').split('\n')) {
     if (!line.trim()) continue;
-    const entry = JSON.parse(line) as { email: string; status: string };
-    if (entry.status === 'sent') alreadySent.add(entry.email);
+    const entry = JSON.parse(line) as { email: string; status: string; target?: string };
+    if (entry.status === 'sent' && entry.target === workerUrl) alreadySent.add(entry.email);
   }
 }
 const toSend = recipients.filter((email) => !alreadySent.has(email));
@@ -272,8 +274,8 @@ if (values.send && !values.yes) {
 }
 
 const record = (email: string, status: 'sent' | 'failed', error?: string) => {
-  if (!values.send) return;
-  const entry = { email, status, at: new Date().toISOString(), ...(error ? { error } : {}) };
+  if (!keepLog) return;
+  const entry = { email, status, target: workerUrl, at: new Date().toISOString(), ...(error ? { error } : {}) };
   appendFileSync(logPath, JSON.stringify(entry) + '\n');
 };
 

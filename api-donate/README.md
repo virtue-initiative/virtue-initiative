@@ -93,7 +93,7 @@ Safeguards in the script:
   environment. `NEWSLETTER_WORKER_URL` points it at a dev worker on a different port.
 - A `--send` appends every address it reaches to `<file>.sent.jsonl` next to the markdown file. If a
   run crashes or some sends fail, run the same command again and it mails only the addresses not yet
-  logged. Delete the log to send the issue to everyone again. A `--test-to` send is not logged.
+  logged for that target (staging and prod are tracked separately). Delete the log to send the issue to everyone again. A `--test-to` send is not logged.
 
 ## Local development
 
