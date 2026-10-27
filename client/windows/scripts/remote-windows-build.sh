@@ -25,7 +25,7 @@ Options:
   --no-cow                        Don't use the Dev Drive even if the VM has one
   --target <triple>               Rust target for packaging modes. Default: x86_64-pc-windows-msvc
   --profile <Debug|Release>       Packaging profile. Default: Debug
-  --version <version>             Artifact label. Default: 0.1.7-dev
+  --version <version>             Artifact label. Default: 0.1.8-dev
   --clean                         Run cargo clean before packaging
   --skip-sync                     Reuse remote source tree without uploading local client/
   --log-dir <dir>                 Local directory for full remote run logs.
@@ -63,7 +63,7 @@ USE_COW=1
 WIN_COW_ROOT="${VIRTUE_WIN_COW_ROOT:-V:/virtue}"
 TARGET="x86_64-pc-windows-msvc"
 PROFILE="Debug"
-VERSION="0.1.7-dev"
+VERSION="0.1.8-dev"
 CLEAN=0
 SKIP_SYNC=0
 LOG_DIR="$REPO_ROOT/client/windows/dist/remote-logs"
