@@ -29,6 +29,7 @@ import { notifyPartnersAboutRiskLog, riskToSeverity } from '../lib/tamper';
 import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
+import { fillNewsletterLocation, requestLocation } from '../lib/newsletter';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -146,6 +147,8 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
 
   const owner = result.user.id;
   const id = uuidv4();
+
+  await fillNewsletterLocation(c.env, result.user.email, requestLocation(c.req.raw));
 
   await createDevice(c.env.DB, { id, owner, name, platform });
   const refreshToken = await createDeviceSession(c, id);

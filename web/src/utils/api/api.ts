@@ -214,12 +214,13 @@ export const api = {
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
-  signupRequest: (email: string, to?: string) =>
+  signupRequest: (email: string, to?: string, turnstileToken?: string) =>
     req<void>('/signup-request', {
       method: 'POST',
       body: JSON.stringify({
         email,
         ...(to ? { to } : {}),
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
       }),
     }),
 

@@ -230,8 +230,15 @@ The client MUST provide this shape.
 ```js
 {
   "email": "user@example.com",
-  "partner_invite_token": "opaque-string" | undefined
+  "partner_invite_token": "opaque-string" | undefined,
+  "turnstile_token": "opaque-string"
 }
+```
+
+The server MUST verify `turnstile_token` with Cloudflare Turnstile before anything else. If it is missing or does not verify, or the server has no Turnstile secret configured, the server MUST NOT send any email and MUST respond **HTTP 403** with this shape.
+
+```js
+{ "error": "...", "code": "turnstile_failed" }
 ```
 
 If a user at that email does not exist, the server MUST send a signup link to that email.
@@ -266,7 +273,7 @@ The client MUST provide this request shape.
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
 
-If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. The server SHOULD pass the signup request's client IP address (`CF-Connecting-IP`) to the mailing list provider. A failure to add the email MUST NOT fail the signup.
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter list (see API-058) after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
 The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
@@ -415,6 +422,8 @@ If that verification email was not sent because the email has a permanent bounce
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
 If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
+
+On a successful login, if the user's email is on the newsletter list (see API-058) without a location, the server SHOULD fill in the location of this request. A failure to do so MUST NOT fail the login.
 
 ### API-017 `POST /email-verification/validate`
 
@@ -784,7 +793,7 @@ The client MUST send
 }
 ```
 
-The server MUST validate the login (see `POST /login`) and create a long lived refresh token.
+The server MUST validate the login (see `POST /login`) and create a long lived refresh token. Like `POST /login`, it SHOULD fill in a missing newsletter location.
 
 It should also return the device settings (see `GET /d/device`)
 
@@ -933,6 +942,23 @@ A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A w
 A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
 
 The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
+
+### API-058 `POST /newsletter`
+
+The newsletter list lives in the donations worker's database (`newsletter_signups`), which this server reaches through its `DONATE_DB` binding. Each row is an email with the country (ISO 3166-1 alpha-2) and region (ISO 3166-2 subdivision code, e.g. a US state) that Cloudflare reports for the request that added it, which MAY be absent.
+
+The landing site's newsletter form posts here as `application/x-www-form-urlencoded` or `multipart/form-data`, with no authentication.
+
+```
+email=user@example.com
+cf-turnstile-response=opaque-string
+```
+
+The server SHOULD rate limit this endpoint by client IP. It MUST verify `cf-turnstile-response` with Cloudflare Turnstile, as in API-009.
+
+If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list with the request's location, and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. If the email is already on the list, the server MUST NOT change whether it is subscribed, and SHOULD only fill in a missing location. The response MUST be the same whether or not the email was already on the list.
+
+Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list.
 
 ### API-042 `POST /bug-report`
 

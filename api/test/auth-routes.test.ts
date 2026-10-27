@@ -3,6 +3,7 @@ import { fetchMock, SELF, env } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  TEST_TURNSTILE_TOKEN,
   batchMetadataForm,
   clearDB,
   createDeviceForUser,
@@ -75,28 +76,6 @@ describe('Auth routes', () => {
     expect(unknownBody).toHaveProperty('params');
   });
 
-  it('accepts a newsletter opt-in on /signup without failing when Buttondown is not configured', async () => {
-    await SELF.fetch(`${BASE}/signup-request`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'reader@example.com' }),
-    });
-    const [delivery] = await listEmailDeliveries();
-    const signupRes = await SELF.fetch(`${BASE}/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        verification_token: extractTokenFromDelivery(delivery!, 'signup_token'),
-        password_auth: await passwordAuthFor('reader-auth'),
-        password_salt: await passwordSaltFor('reader@example.com'),
-        pub_key: await publicKeyFor('reader@example.com'),
-        encrypted_priv_key: privateKeyFor('reader@example.com'),
-        newsletter_opt_in: true,
-      }),
-    });
-    expect(signupRes.status).toBe(200);
-  });
-
   it('signup-request sends an email with a signup token, and /signup creates a verified user', async () => {
     const password_auth = await passwordAuthFor('client-derived-auth');
     const password_salt = await passwordSaltFor('alice@example.com');
@@ -106,7 +85,7 @@ describe('Auth routes', () => {
     const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'alice@example.com' }),
+      body: JSON.stringify({ email: 'alice@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(requestRes.status).toBe(204);
 
@@ -202,7 +181,7 @@ describe('Auth routes', () => {
     const res = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'taken@example.com' }),
+      body: JSON.stringify({ email: 'taken@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(res.status).toBe(204);
 
@@ -231,7 +210,7 @@ describe('Auth routes', () => {
     const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'racer@example.com' }),
+      body: JSON.stringify({ email: 'racer@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(requestRes.status).toBe(204);
 
@@ -267,7 +246,7 @@ describe('Auth routes', () => {
     const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'pending@example.com' }),
+      body: JSON.stringify({ email: 'pending@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(requestRes.status).toBe(204);
 
@@ -295,7 +274,7 @@ describe('Auth routes', () => {
     const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'claimed@example.com' }),
+      body: JSON.stringify({ email: 'claimed@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(requestRes.status).toBe(204);
     const deliveries = await listEmailDeliveries();

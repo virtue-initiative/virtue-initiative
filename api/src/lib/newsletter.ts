@@ -1,48 +1,59 @@
 import { Env } from '../types/bindings';
 
-const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
+export interface RequestLocation {
+  country: string | null;
+  region: string | null;
+}
+
+/** Cloudflare's geolocation of the client: ISO country code and subdivision (US state) code. */
+export function requestLocation(request: Request): RequestLocation {
+  const cf = request.cf as IncomingRequestCfProperties | undefined;
+  return { country: cf?.country ?? null, region: cf?.regionCode ?? null };
+}
 
 /**
- * Adds a new account's email to the Buttondown newsletter list (API-010).
+ * Adds an email to the newsletter list in the donations database (API-010, API-058).
  *
- * The address was just verified by the signup flow, so the subscriber is created as
- * `regular` and skips Buttondown's own confirmation email. No collision header is sent:
- * Buttondown then rejects an address it already knows (including one that unsubscribed)
- * instead of resubscribing it.
+ * An address already on the list keeps its row, so one that unsubscribed stays unsubscribed.
+ * Only a missing location is filled in.
  *
- * `ipAddress` is the signing-up client's IP. Buttondown filters aggressively without it.
- *
- * Best-effort: failures are logged, never thrown, so they can't fail the signup.
+ * Best-effort: failures are logged, never thrown, so they can't fail a signup.
  */
-export async function subscribeToNewsletter(
+export async function addNewsletterSignup(
   env: Env,
   email: string,
-  ipAddress?: string,
+  location: RequestLocation,
 ): Promise<void> {
-  const apiKey = env.BUTTONDOWN_API_KEY?.trim();
-  if (!apiKey) {
-    console.log(`[newsletter] BUTTONDOWN_API_KEY not set; skipping signup for ${email}`);
-    return;
-  }
-
   try {
-    const res = await fetch(BUTTONDOWN_SUBSCRIBERS_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email_address: email,
-        type: 'regular',
-        referrer_url: `${env.APP_URL}/signup`,
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
-      }),
-    });
-    if (!res.ok) {
-      console.error(`[newsletter] Buttondown returned ${res.status}: ${await res.text()}`);
-    }
+    await env.DONATE_DB.prepare(
+      `INSERT INTO newsletter_signups (email, country, region) VALUES (?, ?, ?)
+       ON CONFLICT (email) DO UPDATE SET country = excluded.country, region = excluded.region
+       WHERE newsletter_signups.country IS NULL`,
+    )
+      .bind(email, location.country, location.region)
+      .run();
   } catch (err) {
-    console.error('[newsletter] Buttondown request failed', err);
+    console.error('[newsletter] failed to record signup', err);
+  }
+}
+
+/**
+ * Fills in the location of a subscriber that has none yet, such as one imported from
+ * Buttondown, when they log in (API-016, API-035). Best-effort, like addNewsletterSignup.
+ */
+export async function fillNewsletterLocation(
+  env: Env,
+  email: string,
+  location: RequestLocation,
+): Promise<void> {
+  if (!location.country) return;
+  try {
+    await env.DONATE_DB.prepare(
+      'UPDATE newsletter_signups SET country = ?, region = ? WHERE email = ? AND country IS NULL',
+    )
+      .bind(location.country, location.region, email)
+      .run();
+  } catch (err) {
+    console.error('[newsletter] failed to fill location', err);
   }
 }

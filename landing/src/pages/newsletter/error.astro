@@ -1,0 +1,25 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+
+// POST /newsletter (API-058) redirects here when the email is invalid or the Turnstile check fails.
+---
+
+<SiteLayout pageTitle="Subscription failed">
+  <section class="newsletter-status">
+    <h2>We could not subscribe you</h2>
+    <p>
+      Check that your email address is correct, wait for the verification check to finish, and try
+      again.
+    </p>
+    <p class="newsletter-status-note">
+      If it keeps failing, email <a href="mailto:help@virtueinitiative.org"
+        >help@virtueinitiative.org</a
+      >.
+    </p>
+    <div class="newsletter-status-actions">
+      <Button href="/blog" variant="primary">Back to the blog</Button>
+      <Button href="/" variant="outline">Back to home</Button>
+    </div>
+  </section>
+</SiteLayout>

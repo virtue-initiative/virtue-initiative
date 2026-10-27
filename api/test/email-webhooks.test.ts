@@ -3,6 +3,7 @@ import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  TEST_TURNSTILE_TOKEN,
   clearDB,
   latestEmailToken,
   listEmailDeliveries,
@@ -517,7 +518,7 @@ describe('Email webhooks', () => {
     const res = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'gone@example.com' }),
+      body: JSON.stringify({ email: 'gone@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(res.status).toBe(422);
     expect(((await res.json()) as { code: string }).code).toBe('email_bounced');

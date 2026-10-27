@@ -1,4 +1,5 @@
 import { env, SELF } from 'cloudflare:test';
+import { TEST_TURNSTILE_TOKEN } from './helpers';
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -136,6 +137,19 @@ for (const statement of statements) {
   await env.DB.prepare(statement).run();
 }
 
+// Mirrors api-donate/src/schema/migrations/0003_newsletter_signups.sql.
+await env.DONATE_DB.prepare(
+  `CREATE TABLE IF NOT EXISTS newsletter_signups (
+    email TEXT PRIMARY KEY,
+    country TEXT,
+    region TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    unsubscribed_at INTEGER
+  )`,
+).run();
+
+const TURNSTILE_SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
 const originalFetch = globalThis.fetch.bind(globalThis);
 
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -144,6 +158,14 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 
   if (url.startsWith('http://localhost/')) {
     return SELF.fetch(input, init);
+  }
+
+  // Accepts only TEST_TURNSTILE_TOKEN, sent with the test secret from vitest.config.ts.
+  if (url === TURNSTILE_SITEVERIFY_URL) {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { secret?: string; response?: string };
+    const success =
+      body.secret === 'test-turnstile-secret' && body.response === TEST_TURNSTILE_TOKEN;
+    return Promise.resolve(Response.json({ success }));
   }
 
   return originalFetch(input, init);

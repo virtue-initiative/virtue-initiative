@@ -2,15 +2,14 @@
 import { Button } from '@virtueinitiative/shared-web';
 import SiteLayout from '../../layouts/SiteLayout.astro';
 
-// Buttondown's subscription_confirmation_redirect_url points here, after the subscriber clicks
-// the link in the confirmation email.
+// POST /newsletter (API-058) redirects here after NewsletterForm subscribes an address.
 ---
 
 <SiteLayout pageTitle="Subscribed">
   <section class="newsletter-status">
     <h2>You are subscribed</h2>
     <p>
-      Thanks for confirming. We will email you occasional news about the project, new features, and
+      Thanks for signing up. We will email you occasional news about the project, new features, and
       new articles.
     </p>
     <div class="newsletter-status-actions">

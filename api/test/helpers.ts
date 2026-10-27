@@ -4,6 +4,9 @@ import { resetHashServerMock } from './hash-server-mock';
 
 export const BASE = 'http://localhost';
 
+// Cloudflare's documented dummy Turnstile token. test/setup.ts stubs siteverify to accept only it.
+export const TEST_TURNSTILE_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
+
 async function sha256Bytes(input: string) {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)));
 }
@@ -79,7 +82,7 @@ export async function signupAndGetCookie(
   const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, turnstile_token: TEST_TURNSTILE_TOKEN }),
   });
 
   if (!requestRes.ok) {
@@ -276,4 +279,5 @@ export async function clearDB(): Promise<void> {
   await env.DB.prepare('DELETE FROM partners').run();
   await env.DB.prepare('DELETE FROM devices').run();
   await env.DB.prepare('DELETE FROM users').run();
+  await env.DONATE_DB.prepare('DELETE FROM newsletter_signups').run();
 }

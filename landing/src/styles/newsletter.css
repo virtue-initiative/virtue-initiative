@@ -57,13 +57,17 @@
   text-align: left;
 }
 
+.newsletter-form .cf-turnstile {
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 480px) {
   .newsletter-row {
     flex-direction: column;
   }
 }
 
-/* /newsletter/check-email and /newsletter/confirmed, where Buttondown redirects to. */
+/* /newsletter/subscribed and /newsletter/error, where POST /newsletter redirects to. */
 .newsletter-status {
   display: flex;
   flex-direction: column;

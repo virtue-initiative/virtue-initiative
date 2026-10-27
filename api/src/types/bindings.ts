@@ -1,5 +1,7 @@
 export interface Env {
   DB: D1Database;
+  // The donations worker's database (api-donate/), which holds the newsletter list.
+  DONATE_DB: D1Database;
   BUCKET: R2Bucket;
   RATE_LIMITER: RateLimit;
   JWT_PRIVATE_KEY: string;
@@ -19,8 +21,8 @@ export interface Env {
   BUG_REPORT_EMAIL: string;
   // Comma-separated SNS topic ARNs accepted by POST /email/sns (API-041). Unset rejects all.
   SNS_TOPIC_ARNS?: string;
-  // Unset in local dev, which skips newsletter signups (see lib/newsletter.ts).
-  BUTTONDOWN_API_KEY?: string;
+  // Cloudflare Turnstile secret for the signup and newsletter forms. Unset rejects them.
+  TURNSTILE_SECRET_KEY?: string;
 }
 
 export interface Variables {

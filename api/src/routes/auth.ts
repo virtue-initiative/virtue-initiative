@@ -61,7 +61,8 @@ import {
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
-import { subscribeToNewsletter } from '../lib/newsletter';
+import { addNewsletterSignup, fillNewsletterLocation, requestLocation } from '../lib/newsletter';
+import { verifyTurnstile } from '../lib/turnstile';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 const REFRESH_TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60;
@@ -382,8 +383,25 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
 });
 
 auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) => {
-  const { email, to } = c.req.valid('json');
+  const { email, to, turnstile_token } = c.req.valid('json');
   const normalizedEmail = email.trim().toLowerCase();
+
+  // API-009: checked first, before any email can be sent.
+  if (
+    !(await verifyTurnstile(
+      c.env.TURNSTILE_SECRET_KEY,
+      turnstile_token,
+      c.req.header('CF-Connecting-IP'),
+    ))
+  ) {
+    return c.json(
+      {
+        error: 'We could not verify that you are human. Reload the page and try again.',
+        code: 'turnstile_failed',
+      },
+      403,
+    );
+  }
 
   // API-009: checked before the account lookup so the answer is the same
   // whether or not the address has an account.
@@ -498,9 +516,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await createSession(c, userId);
 
   if (newsletter_opt_in === true) {
-    c.executionCtx.waitUntil(
-      subscribeToNewsletter(c.env, normalizedEmail, c.req.header('CF-Connecting-IP')),
-    );
+    await addNewsletterSignup(c.env, normalizedEmail, requestLocation(c.req.raw));
   }
 
   return c.json<SignupResponse>(
@@ -558,6 +574,8 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
   if (isValidTimezone(timezone)) {
     await updateUser(c.env.DB, user.id, { settings: { timezone } });
   }
+
+  await fillNewsletterLocation(c.env, user.email, requestLocation(c.req.raw));
 
   await createSession(c, user.id);
   return c.body(null, 204);
