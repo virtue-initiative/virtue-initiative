@@ -1,5 +1,6 @@
 pub mod fingerprint;
 pub mod image_pipeline;
+pub mod image_regions;
 pub mod risk_classifier;
 
 use serde::{Deserialize, Serialize};
