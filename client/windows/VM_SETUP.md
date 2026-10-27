@@ -187,13 +187,13 @@ The full run log is saved locally under:
   --build-host win11 \
   --mode msix \
   --profile Debug \
-  --version 0.1.7-dev
+  --version 0.1.8-dev
 ```
 
 By default, the package remains on the Windows VM at:
 
-- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.1.7-dev.msix`
-- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.1.7-dev-setup.zip`
+- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.1.8-dev.msix`
+- `C:\virtue-build\src\client\windows\dist\virtue-windows-0.1.8-dev-setup.zip`
 
 ## 7) Optional direct Windows build checks
 
@@ -204,7 +204,7 @@ cd C:\virtue-build\src\client
 cargo build --target x86_64-pc-windows-msvc -p virtue-core
 cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 dotnet test .\windows\Virtue.WindowsApp.Tests\Virtue.WindowsApp.Tests.csproj -c Debug
-.\windows\scripts\build-msix.ps1 -Profile Debug -Version 0.1.7-dev
+.\windows\scripts\build-msix.ps1 -Profile Debug -Version 0.1.8-dev
 ```
 
 ## 8) Optional: per-worktree builds on a Dev Drive
