@@ -3,7 +3,8 @@ import { Button, Input } from '@virtueinitiative/shared-web';
 import { API_URL } from '../lib/api-url';
 
 // A plain form post to the API (API-058), which redirects back to /newsletter/subscribed or
-// /newsletter/error. The Turnstile widget adds its token as the `cf-turnstile-response` field.
+// /newsletter/error. The Turnstile widget adds its token as the `cf-turnstile-response` field, and
+// Subscribe stays disabled until it has one, since a post without it only reaches the error page.
 // Accounts opt in from the signup form instead (API-010).
 const TURNSTILE_SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -34,9 +35,16 @@ const { centered = false } = Astro.props;
         autocomplete="email"
         required
       />
-      <Button type="submit" variant="primary">Subscribe</Button>
+      <Button type="submit" variant="primary" disabled={!!TURNSTILE_SITE_KEY}>Subscribe</Button>
     </div>
-    <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY}></div>
+    <div
+      class="cf-turnstile"
+      data-sitekey={TURNSTILE_SITE_KEY}
+      data-callback="newsletterTurnstileReady"
+      data-expired-callback="newsletterTurnstileExpired"
+      data-error-callback="newsletterTurnstileExpired"
+    >
+    </div>
   </form>
   <p class="newsletter-fine-print">
     We will email you a link to confirm first. We never share your address. See our <a
@@ -44,4 +52,13 @@ const { centered = false } = Astro.props;
     >.
   </p>
 </section>
+<script is:inline>
+  function setNewsletterSubmitDisabled(disabled) {
+    document.querySelectorAll('.newsletter-form [type="submit"]').forEach((button) => {
+      button.disabled = disabled;
+    });
+  }
+  window.newsletterTurnstileReady = () => setNewsletterSubmitDisabled(false);
+  window.newsletterTurnstileExpired = () => setNewsletterSubmitDisabled(true);
+</script>
 <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>

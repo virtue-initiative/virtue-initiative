@@ -253,6 +253,49 @@ describe('Email webhooks', () => {
     expect(typeof row?.unsubscribed_at).toBe('number');
   });
 
+  it('cancels a pending resubscribe on a complaint', async () => {
+    // Unsubscribed long ago, then asked again through the landing form, so the token is live.
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, token, confirmed_at, unsubscribed_at, confirmation_sent_at) VALUES ('reader@example.com', 'pending', 1, 1, unixepoch() - 10)",
+    ).run();
+    const certPath = nextCertPath();
+    serveCert(certPath);
+    await postSns(
+      await snsMessage(
+        {
+          Message: JSON.stringify({
+            eventType: 'Complaint',
+            mail: { tags: { 'ses:configuration-set': ['newsletter'] } },
+            complaint: { complainedRecipients: [{ emailAddress: 'reader@example.com' }] },
+          }),
+        },
+        { certPath },
+      ),
+    );
+
+    const res = await SELF.fetch(`${BASE}/newsletter/confirm`, {
+      method: 'POST',
+      body: new URLSearchParams({ token: 'pending' }),
+      redirect: 'manual',
+    });
+    expect(res.headers.get('Location')).toBe(`${env.LANDING_URL}/newsletter/error`);
+  });
+
+  it('still answers 200 when the newsletter list cannot be updated', async () => {
+    // A 500 would make SNS redeliver, recording the bounce again each time.
+    await env.DONATE_DB.exec('ALTER TABLE newsletter_signups RENAME TO newsletter_signups_away');
+    try {
+      const res = await postBounce('gone@example.com', 'Permanent');
+      expect(res.status).toBe(200);
+    } finally {
+      await env.DONATE_DB.exec('ALTER TABLE newsletter_signups_away RENAME TO newsletter_signups');
+    }
+    const { results } = await env.DB.prepare(
+      "SELECT id FROM email_bounces WHERE email = 'gone@example.com'",
+    ).all();
+    expect(results).toHaveLength(1);
+  });
+
   it('accepts SignatureVersion 2, a Subject, and every allowlisted topic', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();

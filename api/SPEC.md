@@ -902,7 +902,7 @@ The server MUST record every recipient of a `Bounce` notification as an email bo
 
 The server SHOULD process `Complaint` notifications by marking the users' emails as unverified, except for a complaint about a newsletter (mail sent through the `newsletter` SES configuration set).
 
-The server MUST mark every permanently bounced and every complaining address as unsubscribed on the newsletter list (see API-060).
+The server MUST mark every permanently bounced and every complaining address as unsubscribed on the newsletter list (see API-060). A failure to do so MUST NOT fail the request.
 
 For an accepted message the server MUST respond **HTTP 200** with this shape.
 
@@ -958,7 +958,7 @@ cf-turnstile-response=opaque-string
 
 The server SHOULD rate limit this endpoint by client IP. It MUST verify `cf-turnstile-response` with Cloudflare Turnstile, as in API-009.
 
-If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is confirmed and not unsubscribed, or that has a permanent bounce (see API-056). Before emailing an unsubscribed row, the server MUST give it a new `token`, so links in emails sent before it unsubscribed stop working. It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
+If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST send that email through the `newsletter` SES configuration set, so a complaint about it is handled as a newsletter complaint (API-041). It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is confirmed and not unsubscribed, or that has a permanent bounce (see API-056). Before emailing an unsubscribed row, the server MUST give it a new `token`, so links in emails sent before it unsubscribed stop working. It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
 
 Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list or send email.
 
@@ -979,7 +979,9 @@ List-Unsubscribe-Post: List-Unsubscribe=One-Click
 
 `token` MAY instead be sent as a form field. The server MUST NOT require authentication or a Turnstile token.
 
-If `token` matches a row, the server MUST mark it unsubscribed (if it is not already). A one-click request (a form body of `List-Unsubscribe=One-Click`) MUST then get **HTTP 200**, and any other request **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribed`. If `token` matches no row, the server MUST respond **HTTP 400** to a one-click request, and **HTTP 303** to `{LANDING_URL}/newsletter/error` otherwise.
+If `token` matches a row, the server MUST mark it unsubscribed as of now, even if it already was, so a confirmation email sent before then (API-059) can no longer resubscribe it. A one-click request (a form body of `List-Unsubscribe=One-Click`) MUST then get **HTTP 200**, and any other request **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribed`. If `token` matches no row, the server MUST respond **HTTP 400** to a one-click request, and **HTTP 303** to `{LANDING_URL}/newsletter/error` otherwise.
+
+A `GET` to this URL, from a mail client that opens the `List-Unsubscribe` link in a browser, MUST NOT unsubscribe. The server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribe?token={token}`.
 
 The server MUST NOT unmark an unsubscribed row except through API-059.
 

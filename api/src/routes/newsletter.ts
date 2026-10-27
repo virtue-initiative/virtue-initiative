@@ -5,6 +5,7 @@ import { renderNewsletterConfirmationTemplate } from '../lib/email/templates';
 import {
   claimNewsletterConfirmation,
   confirmNewsletterSignup,
+  NEWSLETTER_SES_CONFIG_SET,
   requestLocation,
   unsubscribeNewsletterToken,
 } from '../lib/newsletter';
@@ -49,13 +50,15 @@ newsletter.post('/newsletter', rateLimitByIp(), async (c) => {
       appUrl: c.env.APP_URL,
       confirmUrl,
     });
-    // sendEmail skips an address with a permanent bounce (API-056).
+    // sendEmail skips an address with a permanent bounce (API-056). The newsletter configuration
+    // set keeps a complaint about this email from unverifying an account (API-041).
     await sendEmail({
       env: c.env,
       db: c.env.DB,
       kind: 'newsletter_confirmation',
       recipient: address,
       allowUnverified: true,
+      configurationSet: NEWSLETTER_SES_CONFIG_SET,
       metadata: { purpose: 'newsletter_confirmation', confirmUrl },
       ...content,
     }).catch((err: unknown) => console.error('[newsletter] confirmation email failed', err));
@@ -69,6 +72,17 @@ newsletter.post('/newsletter/confirm', async (c) => {
   const confirmed = token ? await confirmNewsletterSignup(c.env, token) : false;
   return c.redirect(`${c.env.LANDING_URL}/newsletter/${confirmed ? 'subscribed' : 'error'}`, 303);
 });
+
+/**
+ * GET /newsletter/unsubscribe - mail clients without one-click support open the List-Unsubscribe
+ * link in a browser. A GET must not unsubscribe, since link scanners fetch it too (API-060).
+ */
+newsletter.get('/newsletter/unsubscribe', (c) =>
+  c.redirect(
+    `${c.env.LANDING_URL}/newsletter/unsubscribe?token=${encodeURIComponent(c.req.query('token') ?? '')}`,
+    303,
+  ),
+);
 
 /**
  * POST /newsletter/unsubscribe - the landing site's unsubscribe button, and RFC 8058 one-click

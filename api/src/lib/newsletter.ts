@@ -98,24 +98,30 @@ export async function confirmNewsletterSignup(env: Env, token: string): Promise<
 /** API-060. Returns false when the token matches no row. */
 export async function unsubscribeNewsletterToken(env: Env, token: string): Promise<boolean> {
   const row = await env.DONATE_DB.prepare(
-    `UPDATE newsletter_signups SET unsubscribed_at = coalesce(unsubscribed_at, unixepoch())
-     WHERE token = ? RETURNING email`,
+    `UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE token = ? RETURNING email`,
   )
     .bind(token)
     .first();
   return row !== null;
 }
 
-/** Unsubscribes addresses that hard-bounced or complained (API-041). */
+/**
+ * Unsubscribes addresses that hard-bounced or complained (API-041). Best-effort, so a failure
+ * can't make SNS redeliver an event whose bounces were already recorded.
+ */
 export async function unsubscribeNewsletterEmails(env: Env, emails: string[]): Promise<void> {
   if (emails.length === 0) return;
-  await env.DONATE_DB.batch(
-    emails.map((email) =>
-      env.DONATE_DB.prepare(
-        'UPDATE newsletter_signups SET unsubscribed_at = coalesce(unsubscribed_at, unixepoch()) WHERE email = ?',
-      ).bind(email),
-    ),
-  );
+  try {
+    await env.DONATE_DB.batch(
+      emails.map((email) =>
+        env.DONATE_DB.prepare(
+          'UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE email = ?',
+        ).bind(email),
+      ),
+    );
+  } catch (err) {
+    console.error('[newsletter] failed to unsubscribe bounced or complaining addresses', err);
+  }
 }
 
 /**

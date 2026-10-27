@@ -147,6 +147,8 @@ describe('POST /newsletter (API-058)', () => {
     const [delivery] = await confirmationDeliveries();
     expect(delivery?.recipient_email).toBe('fan@example.com');
     expect(delivery?.text).toContain(`${LANDING_URL}/newsletter/confirm?token=${row?.token}`);
+    // So a complaint about it doesn't unverify an account at this address (API-041).
+    expect(delivery?.configurationSet).toBe('newsletter');
   });
 
   it('sends at most one confirmation an hour, and none to a confirmed address', async () => {
@@ -280,6 +282,18 @@ describe('POST /newsletter/unsubscribe (API-060)', () => {
       'List-Unsubscribe': 'One-Click',
     });
     expect(again.status).toBe(200);
+  });
+
+  it('sends a GET to the landing page without unsubscribing', async () => {
+    const token = await confirmedToken('fan@example.com');
+    const res = await SELF.fetch(`${BASE}/newsletter/unsubscribe?token=${token}`, {
+      redirect: 'manual',
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('Location')).toBe(
+      `${LANDING_URL}/newsletter/unsubscribe?token=${token}`,
+    );
+    expect((await signupRow('fan@example.com'))?.unsubscribed_at).toBeNull();
   });
 
   it('rejects an unknown token', async () => {

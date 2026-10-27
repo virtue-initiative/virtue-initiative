@@ -228,9 +228,9 @@ function unsubscribe() {
   const email = arg.trim().toLowerCase();
   const [row] = d1<{ email: string }>(
     env,
-    `UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE email = ${sqlString(email)} AND unsubscribed_at IS NULL RETURNING email;`,
+    `UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE email = ${sqlString(email)} RETURNING email;`,
   );
-  console.log(row ? `Unsubscribed ${email}.` : `${email} is not subscribed.`);
+  console.log(row ? `Unsubscribed ${email}.` : `${email} is not on the list.`);
 }
 
 if (command === 'send') await send();
