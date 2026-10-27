@@ -49,9 +49,9 @@ export async function addConfirmedNewsletterSignup(
 
 /**
  * Adds an email from the landing form, unconfirmed (API-058). Returns the row's token when a
- * confirmation email should go out now, or null when the row is already confirmed, unsubscribed,
- * or was sent one within the last hour. Claiming the send here keeps two quick posts from both
- * sending.
+ * confirmation email should go out now, or null when the row is confirmed and subscribed, or was
+ * sent one within the last hour. Claiming the send here keeps two quick posts from both sending.
+ * An unsubscribed row gets a new token, so links in its old emails stop working.
  */
 export async function claimNewsletterConfirmation(
   env: Env,
@@ -64,8 +64,10 @@ export async function claimNewsletterConfirmation(
     .bind(email, location.country, location.region)
     .run();
   const row = await env.DONATE_DB.prepare(
-    `UPDATE newsletter_signups SET confirmation_sent_at = unixepoch()
-     WHERE email = ? AND confirmed_at IS NULL AND unsubscribed_at IS NULL
+    `UPDATE newsletter_signups SET
+       confirmation_sent_at = unixepoch(),
+       token = CASE WHEN unsubscribed_at IS NULL THEN token ELSE lower(hex(randomblob(16))) END
+     WHERE email = ? AND (confirmed_at IS NULL OR unsubscribed_at IS NOT NULL)
        AND (confirmation_sent_at IS NULL OR confirmation_sent_at <= unixepoch() - ?)
      RETURNING token`,
   )
@@ -74,11 +76,19 @@ export async function claimNewsletterConfirmation(
   return row?.token ?? null;
 }
 
-/** API-059. Returns false when the token matches no row that is still subscribed. */
+/**
+ * API-059. Also resubscribes an unsubscribed row, but only one that asked again through the landing
+ * form after unsubscribing, since an old newsletter's token must not resubscribe anyone. Returns
+ * false when the token matches no row it may confirm.
+ */
 export async function confirmNewsletterSignup(env: Env, token: string): Promise<boolean> {
   const row = await env.DONATE_DB.prepare(
-    `UPDATE newsletter_signups SET confirmed_at = coalesce(confirmed_at, unixepoch())
-     WHERE token = ? AND unsubscribed_at IS NULL RETURNING email`,
+    `UPDATE newsletter_signups SET
+       confirmed_at = CASE WHEN unsubscribed_at IS NULL THEN coalesce(confirmed_at, unixepoch())
+                      ELSE unixepoch() END,
+       unsubscribed_at = NULL
+     WHERE token = ? AND (unsubscribed_at IS NULL OR confirmation_sent_at > unsubscribed_at)
+     RETURNING email`,
   )
     .bind(token)
     .first();

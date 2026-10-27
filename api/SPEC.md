@@ -958,7 +958,7 @@ cf-turnstile-response=opaque-string
 
 The server SHOULD rate limit this endpoint by client IP. It MUST verify `cf-turnstile-response` with Cloudflare Turnstile, as in API-009.
 
-If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is already confirmed or unsubscribed, or that has a permanent bounce (see API-056). It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
+If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is confirmed and not unsubscribed, or that has a permanent bounce (see API-056). Before emailing an unsubscribed row, the server MUST give it a new `token`, so links in emails sent before it unsubscribed stop working. It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
 
 Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list or send email.
 
@@ -966,7 +966,7 @@ Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/erro
 
 The landing page at `/newsletter/confirm` posts here as a form with `token=opaque-string`. Confirming takes a `POST` so that a mail scanner fetching the emailed link can't confirm the address.
 
-If `token` matches a row that has not unsubscribed, the server MUST mark the row confirmed (if it is not already) and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. Otherwise it MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error`.
+If `token` matches a row that is not unsubscribed, or one that was sent a confirmation email (API-058) after it unsubscribed, the server MUST mark the row confirmed and not unsubscribed, and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. Otherwise it MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error`.
 
 ### API-060 `POST /newsletter/unsubscribe?token=[token]`
 
@@ -981,7 +981,7 @@ List-Unsubscribe-Post: List-Unsubscribe=One-Click
 
 If `token` matches a row, the server MUST mark it unsubscribed (if it is not already). A one-click request (a form body of `List-Unsubscribe=One-Click`) MUST then get **HTTP 200**, and any other request **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribed`. If `token` matches no row, the server MUST respond **HTTP 400** to a one-click request, and **HTTP 303** to `{LANDING_URL}/newsletter/error` otherwise.
 
-The server MUST NOT unmark an unsubscribed row, by API-010, API-058 or anything else.
+The server MUST NOT unmark an unsubscribed row except through API-059.
 
 ### API-042 `POST /bug-report`
 

@@ -168,14 +168,43 @@ describe('POST /newsletter (API-058)', () => {
     expect(await confirmationDeliveries()).toHaveLength(2);
   });
 
-  it('never emails or resubscribes an address that unsubscribed', async () => {
+  it('lets an unsubscribed address resubscribe by confirming a fresh email', async () => {
     await env.DONATE_DB.prepare(
-      "INSERT INTO newsletter_signups (email, unsubscribed_at) VALUES ('fan@example.com', 1)",
+      "INSERT INTO newsletter_signups (email, token, confirmed_at, confirmation_sent_at, unsubscribed_at) VALUES ('fan@example.com', 'oldtoken', 1, 1, 2)",
     ).run();
+
+    // The token from an old newsletter can't resubscribe anyone.
+    const stale = await postForm('/newsletter/confirm', { token: 'oldtoken' });
+    expect(stale.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
+
     const res = await subscribe('fan@example.com');
     expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/check-email`);
-    expect(await confirmationDeliveries()).toHaveLength(0);
-    expect(await signupRow('fan@example.com')).toMatchObject({ unsubscribed_at: 1 });
+    const [delivery] = await confirmationDeliveries();
+    const row = await signupRow('fan@example.com');
+    // Subscribing alone changes nothing but the token, and the old one stops working.
+    expect(row).toMatchObject({ confirmed_at: 1, unsubscribed_at: 2 });
+    expect(row?.token).not.toBe('oldtoken');
+    expect(delivery?.text).toContain(`token=${row?.token}`);
+    const old = await postForm('/newsletter/confirm', { token: 'oldtoken' });
+    expect(old.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
+
+    const confirmed = await postForm('/newsletter/confirm', { token: row!.token });
+    expect(confirmed.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/subscribed`);
+    const after = await signupRow('fan@example.com');
+    expect(after?.unsubscribed_at).toBeNull();
+    expect(after?.confirmed_at).toBeGreaterThan(1);
+  });
+
+  it('does not resubscribe a row that unsubscribed after its confirmation email', async () => {
+    await subscribe('fan@example.com');
+    const { token } = (await signupRow('fan@example.com'))!;
+    // A complaint lands after the confirmation email went out.
+    await env.DONATE_DB.prepare(
+      "UPDATE newsletter_signups SET unsubscribed_at = unixepoch() + 1 WHERE email = 'fan@example.com'",
+    ).run();
+    const res = await postForm('/newsletter/confirm', { token });
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
+    expect(typeof (await signupRow('fan@example.com'))?.unsubscribed_at).toBe('number');
   });
 
   it('rejects a failed Turnstile check or a bad email without adding anything', async () => {

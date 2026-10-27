@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'preact/hooks';
+import { Alert } from '@virtueinitiative/shared-web';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 // Unset in tests, so the widget renders nothing there. Dev uses Cloudflare's always-passing test
 // key from .env.development.
@@ -39,9 +40,11 @@ function loadTurnstile(): Promise<TurnstileApi> {
 /**
  * Cloudflare Turnstile widget. Calls `onToken` with a token once the visitor passes, and with ''
  * when it expires or fails. A token is single use, so remount (change `key`) after each submit.
+ * If the script can't load or the widget errors, it says so, since the form waits on a token.
  */
 export function Turnstile({ onToken }: { onToken: (token: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!TURNSTILE_SITE_KEY) return;
@@ -52,12 +55,21 @@ export function Turnstile({ onToken }: { onToken: (token: string) => void }) {
         if (cancelled || !ref.current) return;
         widgetId = turnstile.render(ref.current, {
           sitekey: TURNSTILE_SITE_KEY,
-          callback: onToken,
+          callback: (token) => {
+            setFailed(false);
+            onToken(token);
+          },
           'expired-callback': () => onToken(''),
-          'error-callback': () => onToken(''),
+          'error-callback': () => {
+            setFailed(true);
+            onToken('');
+          },
         });
       })
-      .catch((err: unknown) => console.error(err));
+      .catch((err: unknown) => {
+        console.error(err);
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
       if (widgetId) loadTurnstile().then((turnstile) => turnstile.remove(widgetId!));
@@ -65,5 +77,14 @@ export function Turnstile({ onToken }: { onToken: (token: string) => void }) {
   }, []);
 
   if (!TURNSTILE_SITE_KEY) return null;
-  return <div ref={ref} class="turnstile" />;
+  return (
+    <>
+      <div ref={ref} class="turnstile" />
+      {failed && (
+        <Alert variant="error">
+          The verification check could not load. Reload the page and try again.
+        </Alert>
+      )}
+    </>
+  );
 }

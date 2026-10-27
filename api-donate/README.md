@@ -120,6 +120,8 @@ this worker serves it. The main `api/` worker manages it through its `DONATE_DB`
   reach `POST /newsletter/unsubscribe` (API-060).
 - Hard bounces and complaints reach the API's `POST /email/sns` through the `newsletter` SES
   configuration set's SNS topic, and unsubscribe the address (API-041).
+- An address that unsubscribed can come back through the landing form. It gets a new token and a
+  fresh confirmation email, and stays unsubscribed until it confirms.
 
 Only rows that are confirmed and not unsubscribed get newsletters. Each row's random `token` is what
 its confirm and unsubscribe links carry.
@@ -137,7 +139,9 @@ bun run newsletter send issue.md --env prod --send
 bun run newsletter unsubscribe reader@example.com --env prod
 ```
 
-The issue's first `# Heading` is the subject. `--env local` uses the local D1 instead.
+The issue's first `# Heading` is the subject. `--env local` reads the local API's D1 (under
+`api/.wrangler`), which is what the dev API writes to. Set `NEWSLETTER_LANDING_URL` and
+`NEWSLETTER_API_URL` to the ports `launch.sh` printed so the unsubscribe links point at them.
 
 Sending needs `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the `virtue-newsletter` IAM user,
 which can only send from `news.virtueinitiative.org` through the `newsletter` SES configuration set.

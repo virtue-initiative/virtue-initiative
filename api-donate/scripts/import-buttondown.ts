@@ -37,10 +37,10 @@ const rows = subscribers.map((s) => {
   const at = s.createdAt || 'unixepoch()';
   return `(${sqlString(s.email)}, ${at}, ${at})`;
 });
-for (let i = 0; i < rows.length; i += 500) {
+if (rows.length > 0) {
   d1(
     env,
-    `INSERT OR IGNORE INTO newsletter_signups (email, created_at, confirmed_at) VALUES ${rows.slice(i, i + 500).join(', ')};`,
+    `INSERT OR IGNORE INTO newsletter_signups (email, created_at, confirmed_at) VALUES ${rows.join(', ')};`,
   );
 }
 const [count] = d1<{ n: number }>(env, 'SELECT COUNT(*) AS n FROM newsletter_signups;');

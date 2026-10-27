@@ -19,7 +19,9 @@ const USAGE = `Usage:
   bun run newsletter unsubscribe <email> --env staging|prod|local
       For someone who asks by email instead of using the link.
 
-Sending needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for the newsletter SES user.`;
+Sending needs AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY for the newsletter SES user.
+--env local reads the local API's D1. Set NEWSLETTER_LANDING_URL and NEWSLETTER_API_URL to the
+ports launch.sh printed, so the unsubscribe links point at them.`;
 
 const FROM = 'The Virtue Initiative <newsletter@news.virtueinitiative.org>';
 const REPLY_TO = 'help@virtueinitiative.org';
@@ -36,6 +38,7 @@ const URLS = {
     landing: 'https://staging.virtueinitiative.org',
     api: 'https://staging.app.virtueinitiative.org/api',
   },
+  // launch.sh picks random ports, so set NEWSLETTER_LANDING_URL and NEWSLETTER_API_URL to match.
   local: { landing: 'http://localhost:4321', api: 'http://localhost:8787' },
 };
 
@@ -51,7 +54,10 @@ const { values, positionals } = parseArgs({
 });
 const [command, arg] = positionals;
 const env = parseEnv(values.env, USAGE);
-const urls = URLS[env];
+const urls = {
+  landing: process.env.NEWSLETTER_LANDING_URL || URLS[env].landing,
+  api: process.env.NEWSLETTER_API_URL || URLS[env].api,
+};
 
 /** Unsubscribe links for one subscriber's token (API-060). */
 function unsubscribeUrls(token: string) {
