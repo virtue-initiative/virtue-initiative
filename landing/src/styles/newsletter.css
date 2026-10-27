@@ -67,7 +67,7 @@
   }
 }
 
-/* /newsletter/subscribed and /newsletter/error, where POST /newsletter redirects to. */
+/* The /newsletter/* pages the emails link to and the API redirects to. */
 .newsletter-status {
   display: flex;
   flex-direction: column;

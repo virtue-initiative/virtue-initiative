@@ -14,7 +14,11 @@ const EXCLUDED_FROM_SITEMAP = new Set([
   '/404',
   '/check-extension',
   '/donate/success',
+  '/newsletter/check-email',
+  '/newsletter/confirm',
   '/newsletter/subscribed',
+  '/newsletter/unsubscribe',
+  '/newsletter/unsubscribed',
   '/newsletter/error',
 ]);
 

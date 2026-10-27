@@ -16,14 +16,21 @@ import {
 const LANDING_URL = env.LANDING_URL;
 const CALIFORNIA = { country: 'US', regionCode: 'CA' } as IncomingRequestCfProperties;
 
+interface SignupRow {
+  email: string;
+  token: string;
+  country: string | null;
+  region: string | null;
+  confirmed_at: number | null;
+  unsubscribed_at: number | null;
+}
+
 beforeEach(clearDB);
 
 async function signupRow(email: string) {
-  return env.DONATE_DB.prepare(
-    'SELECT email, country, region, unsubscribed_at FROM newsletter_signups WHERE email = ?',
-  )
+  return env.DONATE_DB.prepare('SELECT * FROM newsletter_signups WHERE email = ?')
     .bind(email)
-    .first<{ email: string; country: string | null; region: string | null }>();
+    .first<SignupRow>();
 }
 
 async function signUp(email: string, newsletterOptIn: boolean) {
@@ -49,8 +56,8 @@ async function signUp(email: string, newsletterOptIn: boolean) {
   expect(res.status).toBe(200);
 }
 
-function postNewsletterForm(fields: Record<string, string>) {
-  return SELF.fetch(`${BASE}/newsletter`, {
+function postForm(path: string, fields: Record<string, string>) {
+  return SELF.fetch(`${BASE}${path}`, {
     method: 'POST',
     body: new URLSearchParams(fields),
     redirect: 'manual',
@@ -58,19 +65,33 @@ function postNewsletterForm(fields: Record<string, string>) {
   });
 }
 
+function subscribe(email: string) {
+  return postForm('/newsletter', { email, 'cf-turnstile-response': TEST_TURNSTILE_TOKEN });
+}
+
+async function confirmationDeliveries() {
+  return (await listEmailDeliveries()).filter((d) => d.kind === 'newsletter_confirmation');
+}
+
 describe('newsletter opt-in at signup (API-010)', () => {
-  it('records the email with the location of the signup', async () => {
+  it('records the email as confirmed, with the location of the signup', async () => {
     await signUp('reader@example.com', true);
-    expect(await signupRow('reader@example.com')).toMatchObject({
-      country: 'US',
-      region: 'CA',
-      unsubscribed_at: null,
-    });
+    const row = await signupRow('reader@example.com');
+    expect(row).toMatchObject({ country: 'US', region: 'CA', unsubscribed_at: null });
+    expect(typeof row?.confirmed_at).toBe('number');
   });
 
   it('records nothing without the opt-in', async () => {
     await signUp('reader@example.com', false);
     expect(await signupRow('reader@example.com')).toBeNull();
+  });
+
+  it('confirms an unconfirmed row from the landing form', async () => {
+    await env.DONATE_DB.prepare('INSERT INTO newsletter_signups (email) VALUES (?)')
+      .bind('reader@example.com')
+      .run();
+    await signUp('reader@example.com', true);
+    expect(typeof (await signupRow('reader@example.com'))?.confirmed_at).toBe('number');
   });
 
   it('never resubscribes an address that unsubscribed', async () => {
@@ -80,7 +101,10 @@ describe('newsletter opt-in at signup (API-010)', () => {
       .bind('reader@example.com')
       .run();
     await signUp('reader@example.com', true);
-    expect(await signupRow('reader@example.com')).toMatchObject({ unsubscribed_at: 1 });
+    expect(await signupRow('reader@example.com')).toMatchObject({
+      confirmed_at: null,
+      unsubscribed_at: 1,
+    });
   });
 });
 
@@ -113,26 +137,45 @@ describe('location fill on login (API-016)', () => {
 });
 
 describe('POST /newsletter (API-058)', () => {
-  it('adds the address with its location and redirects to the subscribed page', async () => {
-    const res = await postNewsletterForm({
-      email: 'Fan@Example.com',
-      'cf-turnstile-response': TEST_TURNSTILE_TOKEN,
-    });
+  it('adds the address unconfirmed and emails it a confirmation link', async () => {
+    const res = await subscribe('Fan@Example.com');
     expect(res.status).toBe(303);
-    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/subscribed`);
-    expect(await signupRow('fan@example.com')).toMatchObject({ country: 'US', region: 'CA' });
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/check-email`);
+
+    const row = await signupRow('fan@example.com');
+    expect(row).toMatchObject({ country: 'US', region: 'CA', confirmed_at: null });
+    const [delivery] = await confirmationDeliveries();
+    expect(delivery?.recipient_email).toBe('fan@example.com');
+    expect(delivery?.text).toContain(`${LANDING_URL}/newsletter/confirm?token=${row?.token}`);
   });
 
-  it('only fills a missing location for an address already on the list', async () => {
+  it('sends at most one confirmation an hour, and none to a confirmed address', async () => {
+    await subscribe('fan@example.com');
+    await subscribe('fan@example.com');
+    expect(await confirmationDeliveries()).toHaveLength(1);
+
     await env.DONATE_DB.prepare(
-      "INSERT INTO newsletter_signups (email, country, region) VALUES ('fan@example.com', 'CA', 'ON')",
+      "UPDATE newsletter_signups SET confirmation_sent_at = unixepoch() - 3601 WHERE email = 'fan@example.com'",
     ).run();
-    const res = await postNewsletterForm({
-      email: 'fan@example.com',
-      'cf-turnstile-response': TEST_TURNSTILE_TOKEN,
-    });
-    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/subscribed`);
-    expect(await signupRow('fan@example.com')).toMatchObject({ country: 'CA', region: 'ON' });
+    await subscribe('fan@example.com');
+    expect(await confirmationDeliveries()).toHaveLength(2);
+
+    await env.DONATE_DB.prepare(
+      "UPDATE newsletter_signups SET confirmed_at = 1, confirmation_sent_at = 0 WHERE email = 'fan@example.com'",
+    ).run();
+    const res = await subscribe('fan@example.com');
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/check-email`);
+    expect(await confirmationDeliveries()).toHaveLength(2);
+  });
+
+  it('never emails or resubscribes an address that unsubscribed', async () => {
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, unsubscribed_at) VALUES ('fan@example.com', 1)",
+    ).run();
+    const res = await subscribe('fan@example.com');
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/check-email`);
+    expect(await confirmationDeliveries()).toHaveLength(0);
+    expect(await signupRow('fan@example.com')).toMatchObject({ unsubscribed_at: 1 });
   });
 
   it('rejects a failed Turnstile check or a bad email without adding anything', async () => {
@@ -141,7 +184,7 @@ describe('POST /newsletter (API-058)', () => {
       { email: 'fan@example.com' },
       { email: 'not-an-email', 'cf-turnstile-response': TEST_TURNSTILE_TOKEN },
     ]) {
-      const res = await postNewsletterForm(fields);
+      const res = await postForm('/newsletter', fields);
       expect(res.status).toBe(303);
       expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
     }
@@ -149,6 +192,74 @@ describe('POST /newsletter (API-058)', () => {
       'SELECT COUNT(*) AS n FROM newsletter_signups',
     ).first<{ n: number }>();
     expect(count?.n).toBe(0);
+    expect(await confirmationDeliveries()).toHaveLength(0);
+  });
+});
+
+describe('POST /newsletter/confirm (API-059)', () => {
+  it('confirms the row the token belongs to', async () => {
+    await subscribe('fan@example.com');
+    const { token } = (await signupRow('fan@example.com'))!;
+
+    const res = await postForm('/newsletter/confirm', { token });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/subscribed`);
+    expect(typeof (await signupRow('fan@example.com'))?.confirmed_at).toBe('number');
+  });
+
+  it('rejects an unknown token, and a row that unsubscribed', async () => {
+    await subscribe('fan@example.com');
+    const { token } = (await signupRow('fan@example.com'))!;
+    await postForm(`/newsletter/unsubscribe?token=${token}`, {});
+
+    for (const fields of [{ token: 'nope' }, { token }, {}]) {
+      const res = await postForm('/newsletter/confirm', fields);
+      expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
+    }
+    expect((await signupRow('fan@example.com'))?.confirmed_at).toBeNull();
+  });
+});
+
+describe('POST /newsletter/unsubscribe (API-060)', () => {
+  async function confirmedToken(email: string) {
+    await env.DONATE_DB.prepare(
+      'INSERT INTO newsletter_signups (email, confirmed_at) VALUES (?, 1)',
+    )
+      .bind(email)
+      .run();
+    return (await signupRow(email))!.token;
+  }
+
+  it('unsubscribes from the landing page button and redirects', async () => {
+    const token = await confirmedToken('fan@example.com');
+    const res = await postForm('/newsletter/unsubscribe', { token });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/unsubscribed`);
+    expect(typeof (await signupRow('fan@example.com'))?.unsubscribed_at).toBe('number');
+  });
+
+  it('answers an RFC 8058 one-click post with 200', async () => {
+    const token = await confirmedToken('fan@example.com');
+    const res = await postForm(`/newsletter/unsubscribe?token=${token}`, {
+      'List-Unsubscribe': 'One-Click',
+    });
+    expect(res.status).toBe(200);
+    expect(typeof (await signupRow('fan@example.com'))?.unsubscribed_at).toBe('number');
+
+    // Repeating it is harmless.
+    const again = await postForm(`/newsletter/unsubscribe?token=${token}`, {
+      'List-Unsubscribe': 'One-Click',
+    });
+    expect(again.status).toBe(200);
+  });
+
+  it('rejects an unknown token', async () => {
+    const oneClick = await postForm('/newsletter/unsubscribe?token=nope', {
+      'List-Unsubscribe': 'One-Click',
+    });
+    expect(oneClick.status).toBe(400);
+    const button = await postForm('/newsletter/unsubscribe', { token: 'nope' });
+    expect(button.headers.get('Location')).toBe(`${LANDING_URL}/newsletter/error`);
   });
 });
 

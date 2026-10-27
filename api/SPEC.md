@@ -273,7 +273,7 @@ The client MUST provide this request shape.
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
 
-If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter list (see API-058) after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter list (see API-058) after creating the account, already confirmed, because the signup verified the address. An existing unconfirmed row for the email SHOULD become confirmed. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
 The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
@@ -900,7 +900,9 @@ The server MUST confirm the subscription (`SubscriptionConfirmation`) by fetchin
 
 The server MUST record every recipient of a `Bounce` notification as an email bounce (see API-056). It SHOULD mark users at a permanently bounced email as bounced and unverified. A temporary bounce MUST NOT mark a user unverified.
 
-The server SHOULD process `Complaint` notifications by marking the users' emails as unverified.
+The server SHOULD process `Complaint` notifications by marking the users' emails as unverified, except for a complaint about a newsletter (mail sent through the `newsletter` SES configuration set).
+
+The server MUST mark every permanently bounced and every complaining address as unsubscribed on the newsletter list (see API-060).
 
 For an accepted message the server MUST respond **HTTP 200** with this shape.
 
@@ -945,7 +947,7 @@ The server MUST limit how fast it sends digests, so that digests and the other e
 
 ### API-058 `POST /newsletter`
 
-The newsletter list lives in the donations worker's database (`newsletter_signups`), which this server reaches through its `DONATE_DB` binding. Each row is an email with the country (ISO 3166-1 alpha-2) and region (ISO 3166-2 subdivision code, e.g. a US state) that Cloudflare reports for the request that added it, which MAY be absent.
+The newsletter list lives in the donations worker's database (`newsletter_signups`), which this server reaches through its `DONATE_DB` binding. Each row is an email with the country (ISO 3166-1 alpha-2) and region (ISO 3166-2 subdivision code, e.g. a US state) that Cloudflare reports for the request that added it, which MAY be absent. Each row also has a random, unguessable `token` that its confirmation and unsubscribe links carry. Newsletters MUST only be sent to rows that are confirmed and not unsubscribed.
 
 The landing site's newsletter form posts here as `application/x-www-form-urlencoded` or `multipart/form-data`, with no authentication.
 
@@ -956,9 +958,30 @@ cf-turnstile-response=opaque-string
 
 The server SHOULD rate limit this endpoint by client IP. It MUST verify `cf-turnstile-response` with Cloudflare Turnstile, as in API-009.
 
-If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list with the request's location, and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. If the email is already on the list, the server MUST NOT change whether it is subscribed, and SHOULD only fill in a missing location. The response MUST be the same whether or not the email was already on the list.
+If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is already confirmed or unsubscribed, or that has a permanent bounce (see API-056). It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
 
-Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list.
+Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list or send email.
+
+### API-059 `POST /newsletter/confirm`
+
+The landing page at `/newsletter/confirm` posts here as a form with `token=opaque-string`. Confirming takes a `POST` so that a mail scanner fetching the emailed link can't confirm the address.
+
+If `token` matches a row that has not unsubscribed, the server MUST mark the row confirmed (if it is not already) and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. Otherwise it MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error`.
+
+### API-060 `POST /newsletter/unsubscribe?token=[token]`
+
+Every newsletter MUST link to `{LANDING_URL}/newsletter/unsubscribe?token={token}`, a page whose button posts here, and MUST carry the RFC 8058 one-click headers pointing here:
+
+```
+List-Unsubscribe: <{server}/newsletter/unsubscribe?token={token}>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+`token` MAY instead be sent as a form field. The server MUST NOT require authentication or a Turnstile token.
+
+If `token` matches a row, the server MUST mark it unsubscribed (if it is not already). A one-click request (a form body of `List-Unsubscribe=One-Click`) MUST then get **HTTP 200**, and any other request **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribed`. If `token` matches no row, the server MUST respond **HTTP 400** to a one-click request, and **HTTP 303** to `{LANDING_URL}/newsletter/error` otherwise.
+
+The server MUST NOT unmark an unsubscribed row, by API-010, API-058 or anything else.
 
 ### API-042 `POST /bug-report`
 

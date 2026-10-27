@@ -209,6 +209,50 @@ describe('Email webhooks', () => {
     expect(user?.email_bounced_at).toBeNull();
   });
 
+  it('unsubscribes newsletter rows on a permanent bounce but not a transient one', async () => {
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('gone@example.com', 1), ('soft@example.com', 1)",
+    ).run();
+
+    await postBounce('gone@example.com', 'Permanent');
+    await postBounce('soft@example.com', 'Transient');
+
+    const { results } = await env.DONATE_DB.prepare(
+      'SELECT email, unsubscribed_at FROM newsletter_signups ORDER BY email',
+    ).all<{ email: string; unsubscribed_at: number | null }>();
+    expect(typeof results[0]?.unsubscribed_at).toBe('number');
+    expect(results[1]?.unsubscribed_at).toBeNull();
+  });
+
+  it('unsubscribes on a newsletter complaint without unverifying the account', async () => {
+    const userId = await verifiedUser('reader@example.com');
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('reader@example.com', 1)",
+    ).run();
+    const certPath = nextCertPath();
+    serveCert(certPath);
+
+    const res = await postSns(
+      await snsMessage(
+        {
+          Message: JSON.stringify({
+            eventType: 'Complaint',
+            mail: { tags: { 'ses:configuration-set': ['newsletter'] } },
+            complaint: { complainedRecipients: [{ emailAddress: 'reader@example.com' }] },
+          }),
+        },
+        { certPath },
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect((await userEmailState(userId))?.email_verified).toBe(1);
+    const row = await env.DONATE_DB.prepare(
+      "SELECT unsubscribed_at FROM newsletter_signups WHERE email = 'reader@example.com'",
+    ).first<{ unsubscribed_at: number | null }>();
+    expect(typeof row?.unsubscribed_at).toBe('number');
+  });
+
   it('accepts SignatureVersion 2, a Subject, and every allowlisted topic', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();

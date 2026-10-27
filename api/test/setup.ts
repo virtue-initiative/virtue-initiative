@@ -141,9 +141,12 @@ for (const statement of statements) {
 await env.DONATE_DB.prepare(
   `CREATE TABLE IF NOT EXISTS newsletter_signups (
     email TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
     country TEXT,
     region TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    confirmed_at INTEGER,
+    confirmation_sent_at INTEGER,
     unsubscribed_at INTEGER
   )`,
 ).run();

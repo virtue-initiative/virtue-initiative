@@ -863,3 +863,31 @@ export function renderBugReportConfirmationTemplate(input: { appName: string; ap
     html: footer.html,
   };
 }
+
+// Sent to an address typed into the landing site's newsletter form (API-058).
+export function renderNewsletterConfirmationTemplate(input: {
+  appName: string;
+  appUrl: string;
+  confirmUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const asked = `Someone, hopefully you, asked to get ${appName} project updates at this address.`;
+  const ignore = "If this wasn't you, ignore this email and you won't hear from us again.";
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'Confirm your subscription',
+    textLines: [asked, '', `Confirm your subscription: ${input.confirmUrl}`, '', ignore],
+    htmlSections: [
+      paragraph(asked),
+      actionButton(input.confirmUrl, 'Confirm subscription'),
+      paragraph(ignore),
+    ],
+  });
+
+  return {
+    subject: `Confirm your ${appName} newsletter subscription`,
+    text: footer.text,
+    html: footer.html,
+  };
+}

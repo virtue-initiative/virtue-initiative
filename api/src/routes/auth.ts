@@ -61,7 +61,11 @@ import {
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
-import { addNewsletterSignup, fillNewsletterLocation, requestLocation } from '../lib/newsletter';
+import {
+  addConfirmedNewsletterSignup,
+  fillNewsletterLocation,
+  requestLocation,
+} from '../lib/newsletter';
 import { verifyTurnstile } from '../lib/turnstile';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -516,7 +520,7 @@ auth.post('/signup', validateZ('json', signupSchema), async (c) => {
   await createSession(c, userId);
 
   if (newsletter_opt_in === true) {
-    await addNewsletterSignup(c.env, normalizedEmail, requestLocation(c.req.raw));
+    await addConfirmedNewsletterSignup(c.env, normalizedEmail, requestLocation(c.req.raw));
   }
 
   return c.json<SignupResponse>(

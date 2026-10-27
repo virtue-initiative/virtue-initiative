@@ -1,0 +1,23 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+
+// POST /newsletter (API-058) redirects here after NewsletterForm. The address isn't subscribed
+// until its owner confirms from the email.
+---
+
+<SiteLayout pageTitle="Check your email">
+  <section class="newsletter-status">
+    <h2>Check your email</h2>
+    <p>
+      We sent you a link to confirm your subscription. Click it to start getting project updates.
+    </p>
+    <p class="newsletter-status-note">
+      If it does not arrive in a few minutes, check your spam folder.
+    </p>
+    <div class="newsletter-status-actions">
+      <Button href="/" variant="primary">Back to home</Button>
+      <Button href="/blog" variant="outline">Read the blog</Button>
+    </div>
+  </section>
+</SiteLayout>

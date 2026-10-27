@@ -110,11 +110,21 @@ Like `api/`, this worker has separate `staging` and `prod` environments defined 
 ## Newsletter
 
 The `newsletter_signups` table holds one row per email, with the country and region (a US state, for
-example) Cloudflare reported when it was added, or the next time that account logged in. The main
-`api/` worker adds rows from the landing form (`POST /newsletter`, API-058) and from the opt-in box at
-account signup (API-010). Nothing here serves it.
+example) Cloudflare reported when it was added, or the next time that account logged in. Nothing in
+this worker serves it. The main `api/` worker manages it through its `DONATE_DB` binding:
 
-`scripts/newsletter.ts` manages the list and sends issues. Run it from `api-donate/`:
+- The landing form (`POST /newsletter`, API-058) adds an unconfirmed row and emails a confirmation
+  link. The landing page `/newsletter/confirm` then posts to `POST /newsletter/confirm` (API-059).
+- The opt-in box at account signup (API-010) adds a confirmed row, since signup verified the address.
+- Every newsletter links to `/newsletter/unsubscribe` and carries RFC 8058 one-click headers. Both
+  reach `POST /newsletter/unsubscribe` (API-060).
+- Hard bounces and complaints reach the API's `POST /email/sns` through the `newsletter` SES
+  configuration set's SNS topic, and unsubscribe the address (API-041).
+
+Only rows that are confirmed and not unsubscribed get newsletters. Each row's random `token` is what
+its confirm and unsubscribe links carry.
+
+`scripts/newsletter.ts` sends issues. Run it from `api-donate/`:
 
 ```bash
 # Write a preview (issue.html) and count the audience. Sends nothing.
@@ -123,10 +133,8 @@ bun run newsletter send issue.md --env prod --country US --region CA
 bun run newsletter send issue.md --env prod --to you@example.com
 # Send to everyone who matches, after a prompt. Reruns skip addresses in issue.sent.txt.
 bun run newsletter send issue.md --env prod --send
-# Remove someone who asked to unsubscribe.
+# Unsubscribe someone who asked by email instead of using the link.
 bun run newsletter unsubscribe reader@example.com --env prod
-# One-time copy of Buttondown's active subscribers.
-BUTTONDOWN_API_KEY=... bun run newsletter import-buttondown --env prod
 ```
 
 The issue's first `# Heading` is the subject. `--env local` uses the local D1 instead.
@@ -134,8 +142,14 @@ The issue's first `# Heading` is the subject. `--env local` uses the local D1 in
 Sending needs `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the `virtue-newsletter` IAM user,
 which can only send from `news.virtueinitiative.org` through the `newsletter` SES configuration set.
 Mail goes from `newsletter@news.virtueinitiative.org` with a `Reply-To` of
-`help@virtueinitiative.org`. Each email says to unsubscribe by replying, and carries a matching
-`List-Unsubscribe: mailto:` header. Those replies arrive at help@, so run `unsubscribe` for each one.
+`help@virtueinitiative.org`.
+
+`scripts/import-buttondown.ts` is a one-time copy of Buttondown's active subscribers, imported as
+confirmed. It is safe to rerun:
+
+```bash
+BUTTONDOWN_API_KEY=... bun run import-buttondown --env prod
+```
 
 ## Checks
 
