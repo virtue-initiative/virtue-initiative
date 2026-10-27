@@ -7,11 +7,26 @@ use crate::module::upload::{self, UploadState};
 use crate::platform::LifecycleHooks;
 
 pub(crate) const EXTRA_HIGH_RISK: f32 = 0.9;
+
+/// The score as a whole percent. Mirrors the web app's `getRiskRating`
+/// (`shared-web/risk.ts`), which rounds the score before choosing a level, so a score
+/// such as 0.8951 displays as "90% concern (Alert)" and must be treated as an alert
+/// here too. The product is computed in `f64` from the `f32` score because that is
+/// exactly the value the web app decodes.
+pub(crate) fn risk_percent(risk: f32) -> i64 {
+    (f64::from(risk) * 100.0).round() as i64
+}
+
+/// Whether `risk` is at the immediate-alert level (90% or more once rounded).
+pub(crate) fn is_extra_high_risk(risk: f32) -> bool {
+    risk_percent(risk) >= risk_percent(EXTRA_HIGH_RISK)
+}
+
 /// High-risk lifecycle alerts that are still noteworthy but don't warrant an
-/// immediate notification. The upload module routes `risk >= EXTRA_HIGH_RISK`
-/// through the immediate (emailed) path; keeping late-wakeup alerts just below
-/// that threshold flags them as high for review/sorting while letting them
-/// ride the normal batch.
+/// immediate notification. The upload module routes events where
+/// `is_extra_high_risk(risk)` holds through the immediate (emailed) path; keeping
+/// late-wakeup alerts just below that threshold flags them as high for review/sorting
+/// while letting them ride the normal batch.
 pub(crate) const HIGH_RISK_LIFECYCLE_ALERT: f32 = 0.8;
 
 /// See CORE-002.
@@ -329,6 +344,18 @@ mod tests {
     use crate::model::UploadKind;
     use crate::module::upload::UploadState;
     use crate::testing::TestPlatformHooks;
+
+    #[test]
+    fn extra_high_risk_uses_the_rounded_percentage_like_the_web_app() {
+        // 0.8951 shows as "90% concern (Alert)" on the website.
+        assert!(is_extra_high_risk(0.8951));
+        assert!(is_extra_high_risk(0.9));
+        assert!(is_extra_high_risk(1.0));
+        // 0.8949 rounds to 89%, which is still "High".
+        assert!(!is_extra_high_risk(0.8949));
+        assert!(!is_extra_high_risk(HIGH_RISK_LIFECYCLE_ALERT));
+        assert!(!is_extra_high_risk(0.0));
+    }
 
     /// Calls `tick`, first syncing `hooks`' mock clock to `now_ms` — matching
     /// the production invariant that `now_ms` passed into `tick` always

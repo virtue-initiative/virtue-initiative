@@ -15,7 +15,11 @@ const EXCLUDED_FROM_SITEMAP = new Set([
   '/check-extension',
   '/donate/success',
   '/newsletter/check-email',
-  '/newsletter/confirmed',
+  '/newsletter/confirm',
+  '/newsletter/subscribed',
+  '/newsletter/unsubscribe',
+  '/newsletter/unsubscribed',
+  '/newsletter/error',
 ]);
 
 export default defineConfig({

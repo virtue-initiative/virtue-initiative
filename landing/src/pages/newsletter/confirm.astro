@@ -1,0 +1,26 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { API_URL } from '../../lib/api-url';
+
+// The confirmation email links here with ?token=. Confirming takes a button press that posts to
+// POST /newsletter/confirm (API-059), so a mail scanner opening the link confirms nothing.
+---
+
+<SiteLayout pageTitle="Confirm your subscription">
+  <section class="newsletter-status">
+    <h2>Confirm your subscription</h2>
+    <p>
+      Confirm to start getting occasional news about the project, new features, and new articles.
+    </p>
+    <form class="newsletter-status-actions" action={`${API_URL}/newsletter/confirm`} method="post">
+      <input type="hidden" name="token" />
+      <Button type="submit" variant="primary">Confirm subscription</Button>
+    </form>
+  </section>
+</SiteLayout>
+
+<script is:inline>
+  document.querySelector('input[name="token"]').value =
+    new URLSearchParams(location.search).get('token') || '';
+</script>

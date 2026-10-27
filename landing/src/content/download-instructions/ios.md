@@ -29,9 +29,9 @@ These screenshots are from iOS 18. On iOS 17 and earlier, Safari is listed direc
 8. Close Safari completely. Swipe up from the bottom of the screen and pause, then swipe Safari up and away.
 9. In Virtue, tap **Check Extension**. Safari opens a page that shows whether the extension is on. Go back to Virtue and check that the status says **Monitoring active**.
 
-### If you can't turn on the extension
+### If you cannot turn on the extension
 
-If **Allow Extension** is grayed out or won't stay on, Screen Time restrictions are blocking it. Whoever knows your Screen Time passcode can open **Settings**, tap **Screen Time**, and turn off **Content & Privacy Restrictions**. Turn on the extension, then turn the restrictions back on.
+If **Allow Extension** is grayed out or will not stay on, Screen Time restrictions are blocking it. Whoever knows your Screen Time passcode can open **Settings**, tap **Screen Time**, and turn off **Content & Privacy Restrictions**. Turn on the extension, then turn the restrictions back on.
 
 If you plan to [block app installs](/help/removing-access/block-app-installs-ios), finish these steps first.
 

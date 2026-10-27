@@ -16,7 +16,9 @@
     "format": "prettier --write .",
     "db:migrate:local": "wrangler d1 migrations apply DB --env staging --local",
     "db:migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
-    "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote"
+    "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote",
+    "newsletter": "bun scripts/newsletter.ts",
+    "import-buttondown": "bun scripts/import-buttondown.ts"
   },
   "keywords": [
     "cloudflare",
@@ -27,9 +29,11 @@
   "author": "",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
+    "@aws-sdk/client-sesv2": "^3.1007.0",
     "@cloudflare/vitest-pool-workers": "^0.12.14",
     "@cloudflare/workers-types": "^4.20260228.0",
     "@types/node": "^25.3.0",
+    "marked": "^16.4.2",
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "vitest": "3.2.4",

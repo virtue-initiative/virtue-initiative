@@ -391,7 +391,7 @@ summarize tamper activity in partner digest emails without ever decrypting the b
 
 ## Notify flow
 
-High-risk events (`risk >= lifecycle::EXTRA_HIGH_RISK`) don't travel through a
+High-risk events (`lifecycle::is_extra_high_risk(risk)`, i.e. a risk that rounds to 90% or more, matching the web app's rating) don't travel through a
 separate notify queue. When `execute_hash_retries` successfully hashes an event, it
 checks whether that event was high-risk and, if so, attaches a `NotifyPayload
 { ts, type, risk, title?, details? }` to the `PendingBatchEvent.notify` field. The

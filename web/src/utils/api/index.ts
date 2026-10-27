@@ -7,8 +7,12 @@ export async function login(email: string, password: string): Promise<APIClient>
   return new APIClient(session);
 }
 
-export async function requestSignup(email: string, to?: string): Promise<void> {
-  await api.signupRequest(email, to);
+export async function requestSignup(
+  email: string,
+  to?: string,
+  turnstileToken?: string,
+): Promise<void> {
+  await api.signupRequest(email, to, turnstileToken);
 }
 
 function detectTimezone(): string {

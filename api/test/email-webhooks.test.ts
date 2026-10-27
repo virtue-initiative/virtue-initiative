@@ -3,6 +3,7 @@ import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  TEST_TURNSTILE_TOKEN,
   clearDB,
   latestEmailToken,
   listEmailDeliveries,
@@ -206,6 +207,93 @@ describe('Email webhooks', () => {
     const user = await userEmailState(userId);
     expect(user?.email_verified).toBe(0);
     expect(user?.email_bounced_at).toBeNull();
+  });
+
+  it('unsubscribes newsletter rows on a permanent bounce but not a transient one', async () => {
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('gone@example.com', 1), ('soft@example.com', 1)",
+    ).run();
+
+    await postBounce('gone@example.com', 'Permanent');
+    await postBounce('soft@example.com', 'Transient');
+
+    const { results } = await env.DONATE_DB.prepare(
+      'SELECT email, unsubscribed_at FROM newsletter_signups ORDER BY email',
+    ).all<{ email: string; unsubscribed_at: number | null }>();
+    expect(typeof results[0]?.unsubscribed_at).toBe('number');
+    expect(results[1]?.unsubscribed_at).toBeNull();
+  });
+
+  it('unsubscribes on a newsletter complaint without unverifying the account', async () => {
+    const userId = await verifiedUser('reader@example.com');
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('reader@example.com', 1)",
+    ).run();
+    const certPath = nextCertPath();
+    serveCert(certPath);
+
+    const res = await postSns(
+      await snsMessage(
+        {
+          Message: JSON.stringify({
+            eventType: 'Complaint',
+            mail: { tags: { 'ses:configuration-set': ['newsletter'] } },
+            complaint: { complainedRecipients: [{ emailAddress: 'reader@example.com' }] },
+          }),
+        },
+        { certPath },
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    expect((await userEmailState(userId))?.email_verified).toBe(1);
+    const row = await env.DONATE_DB.prepare(
+      "SELECT unsubscribed_at FROM newsletter_signups WHERE email = 'reader@example.com'",
+    ).first<{ unsubscribed_at: number | null }>();
+    expect(typeof row?.unsubscribed_at).toBe('number');
+  });
+
+  it('cancels a pending resubscribe on a complaint', async () => {
+    // Unsubscribed long ago, then asked again through the landing form, so the token is live.
+    await env.DONATE_DB.prepare(
+      "INSERT INTO newsletter_signups (email, token, confirmed_at, unsubscribed_at, confirmation_sent_at) VALUES ('reader@example.com', 'pending', 1, 1, unixepoch() - 10)",
+    ).run();
+    const certPath = nextCertPath();
+    serveCert(certPath);
+    await postSns(
+      await snsMessage(
+        {
+          Message: JSON.stringify({
+            eventType: 'Complaint',
+            mail: { tags: { 'ses:configuration-set': ['newsletter'] } },
+            complaint: { complainedRecipients: [{ emailAddress: 'reader@example.com' }] },
+          }),
+        },
+        { certPath },
+      ),
+    );
+
+    const res = await SELF.fetch(`${BASE}/newsletter/confirm`, {
+      method: 'POST',
+      body: new URLSearchParams({ token: 'pending' }),
+      redirect: 'manual',
+    });
+    expect(res.headers.get('Location')).toBe(`${env.LANDING_URL}/newsletter/error`);
+  });
+
+  it('still answers 200 when the newsletter list cannot be updated', async () => {
+    // A 500 would make SNS redeliver, recording the bounce again each time.
+    await env.DONATE_DB.exec('ALTER TABLE newsletter_signups RENAME TO newsletter_signups_away');
+    try {
+      const res = await postBounce('gone@example.com', 'Permanent');
+      expect(res.status).toBe(200);
+    } finally {
+      await env.DONATE_DB.exec('ALTER TABLE newsletter_signups_away RENAME TO newsletter_signups');
+    }
+    const { results } = await env.DB.prepare(
+      "SELECT id FROM email_bounces WHERE email = 'gone@example.com'",
+    ).all();
+    expect(results).toHaveLength(1);
   });
 
   it('accepts SignatureVersion 2, a Subject, and every allowlisted topic', async () => {
@@ -517,7 +605,7 @@ describe('Email webhooks', () => {
     const res = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'gone@example.com' }),
+      body: JSON.stringify({ email: 'gone@example.com', turnstile_token: TEST_TURNSTILE_TOKEN }),
     });
     expect(res.status).toBe(422);
     expect(((await res.json()) as { code: string }).code).toBe('email_bounced');

@@ -292,7 +292,7 @@ Notes:
 
 ## Deployment workflows
 
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`.
+`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`. Pushes to `staging` also deploy `api-donate` to prod.
 
 If you need to mirror deployment locally:
 
