@@ -133,6 +133,7 @@ export type SignupValidation = z.infer<typeof signupValidationSchema>;
 export const signupRequestSchema = z.object({
   email: z.email(),
   to: z.string().optional(),
+  turnstile_token: z.string().optional(),
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 

@@ -29,6 +29,7 @@ import {
 import { LANDING_URL } from '../../utils/landing-url';
 import { MIN_PASSWORD_LENGTH, passwordLengthError } from '../../utils/password-policy';
 import { PasswordField, PwnedPasswordWarning } from '../../components/PasswordField';
+import { Turnstile, TURNSTILE_SITE_KEY } from '../../components/Turnstile';
 import { usePwnedPasswordCount } from '../../hooks/usePwnedPasswordCount';
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'reset' | 'finish-signup';
@@ -95,6 +96,9 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
   // Opt-in only: starts unchecked and never gates the submit button.
   const [newsletterOptIn, setNewsletterOptIn] = useState(false);
   const [signupVerificationEmail, setSignupVerificationEmail] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  // Bumped after each signup request to remount the widget, since a token works only once.
+  const [turnstileKey, setTurnstileKey] = useState(0);
   const pwnedCount = usePwnedPasswordCount(password, isNewPassword);
   const signupVerificationDialogRef = useRef<HTMLDialogElement>(null);
 
@@ -150,7 +154,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         }
         setClient(client);
       } else if (authMode === 'signup') {
-        await requestSignup(email, toParam || undefined);
+        await requestSignup(email, toParam || undefined, turnstileToken);
         setStatus(null);
         setSignupVerificationEmail(email);
         signupVerificationDialogRef.current?.showModal();
@@ -219,6 +223,10 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
       setError(describeError(err, 'Something went wrong'));
     } finally {
       setLoading(false);
+      if (authMode === 'signup') {
+        setTurnstileToken('');
+        setTurnstileKey((key) => key + 1);
+      }
     }
   }
 
@@ -438,6 +446,8 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             </p>
           )}
 
+          {authMode === 'signup' && <Turnstile key={turnstileKey} onToken={setTurnstileToken} />}
+
           {status && <Alert variant="success">{status}</Alert>}
           {error && <Alert variant="error">{error}</Alert>}
 
@@ -445,7 +455,11 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
             variant="primary"
             type="submit"
             class="auth-submit"
-            disabled={loading || (requiresTermsAcceptance && !acceptedTerms)}
+            disabled={
+              loading ||
+              (requiresTermsAcceptance && !acceptedTerms) ||
+              (authMode === 'signup' && TURNSTILE_SITE_KEY !== '' && !turnstileToken)
+            }
           >
             {loading
               ? 'Please wait…'

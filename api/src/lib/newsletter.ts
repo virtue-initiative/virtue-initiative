@@ -1,48 +1,146 @@
 import { Env } from '../types/bindings';
 
-const BUTTONDOWN_SUBSCRIBERS_URL = 'https://api.buttondown.com/v1/subscribers';
+// SES configuration set the newsletter is sent through (api-donate/scripts/newsletter.ts). SES
+// tags each bounce and complaint event with it (API-041).
+export const NEWSLETTER_SES_CONFIG_SET = 'newsletter';
+
+// At most one confirmation email per address in this window (API-058).
+const CONFIRMATION_RESEND_SECONDS = 60 * 60;
+
+export interface RequestLocation {
+  country: string | null;
+  region: string | null;
+}
+
+/** Cloudflare's geolocation of the client: ISO country code and subdivision (US state) code. */
+export function requestLocation(request: Request): RequestLocation {
+  const cf = request.cf as IncomingRequestCfProperties | undefined;
+  return { country: cf?.country ?? null, region: cf?.regionCode ?? null };
+}
 
 /**
- * Adds a new account's email to the Buttondown newsletter list (API-010).
+ * Adds a just-verified account email to the newsletter list as confirmed (API-010). An existing
+ * unconfirmed row becomes confirmed and gets a missing location filled in. One that unsubscribed
+ * is left alone.
  *
- * The address was just verified by the signup flow, so the subscriber is created as
- * `regular` and skips Buttondown's own confirmation email. No collision header is sent:
- * Buttondown then rejects an address it already knows (including one that unsubscribed)
- * instead of resubscribing it.
- *
- * `ipAddress` is the signing-up client's IP. Buttondown filters aggressively without it.
- *
- * Best-effort: failures are logged, never thrown, so they can't fail the signup.
+ * Best-effort: failures are logged, never thrown, so they can't fail a signup.
  */
-export async function subscribeToNewsletter(
+export async function addConfirmedNewsletterSignup(
   env: Env,
   email: string,
-  ipAddress?: string,
+  location: RequestLocation,
 ): Promise<void> {
-  const apiKey = env.BUTTONDOWN_API_KEY?.trim();
-  if (!apiKey) {
-    console.log(`[newsletter] BUTTONDOWN_API_KEY not set; skipping signup for ${email}`);
-    return;
-  }
-
   try {
-    const res = await fetch(BUTTONDOWN_SUBSCRIBERS_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email_address: email,
-        type: 'regular',
-        referrer_url: `${env.APP_URL}/signup`,
-        ...(ipAddress ? { ip_address: ipAddress } : {}),
-      }),
-    });
-    if (!res.ok) {
-      console.error(`[newsletter] Buttondown returned ${res.status}: ${await res.text()}`);
-    }
+    await env.DONATE_DB.prepare(
+      `INSERT INTO newsletter_signups (email, country, region, confirmed_at)
+       VALUES (?, ?, ?, unixepoch())
+       ON CONFLICT (email) DO UPDATE SET
+         confirmed_at = coalesce(confirmed_at, excluded.confirmed_at),
+         country = coalesce(country, excluded.country),
+         region = CASE WHEN country IS NULL THEN excluded.region ELSE region END
+       WHERE unsubscribed_at IS NULL`,
+    )
+      .bind(email, location.country, location.region)
+      .run();
   } catch (err) {
-    console.error('[newsletter] Buttondown request failed', err);
+    console.error('[newsletter] failed to record signup', err);
+  }
+}
+
+/**
+ * Adds an email from the landing form, unconfirmed (API-058). Returns the row's token when a
+ * confirmation email should go out now, or null when the row is confirmed and subscribed, or was
+ * sent one within the last hour. Claiming the send here keeps two quick posts from both sending.
+ * An unsubscribed row gets a new token, so links in its old emails stop working.
+ */
+export async function claimNewsletterConfirmation(
+  env: Env,
+  email: string,
+  location: RequestLocation,
+): Promise<string | null> {
+  await env.DONATE_DB.prepare(
+    'INSERT OR IGNORE INTO newsletter_signups (email, country, region) VALUES (?, ?, ?)',
+  )
+    .bind(email, location.country, location.region)
+    .run();
+  const row = await env.DONATE_DB.prepare(
+    `UPDATE newsletter_signups SET
+       confirmation_sent_at = unixepoch(),
+       token = CASE WHEN unsubscribed_at IS NULL THEN token ELSE lower(hex(randomblob(16))) END
+     WHERE email = ? AND (confirmed_at IS NULL OR unsubscribed_at IS NOT NULL)
+       AND (confirmation_sent_at IS NULL OR confirmation_sent_at <= unixepoch() - ?)
+     RETURNING token`,
+  )
+    .bind(email, CONFIRMATION_RESEND_SECONDS)
+    .first<{ token: string }>();
+  return row?.token ?? null;
+}
+
+/**
+ * API-059. Also resubscribes an unsubscribed row, but only one that asked again through the landing
+ * form after unsubscribing, since an old newsletter's token must not resubscribe anyone. Returns
+ * false when the token matches no row it may confirm.
+ */
+export async function confirmNewsletterSignup(env: Env, token: string): Promise<boolean> {
+  const row = await env.DONATE_DB.prepare(
+    `UPDATE newsletter_signups SET
+       confirmed_at = CASE WHEN unsubscribed_at IS NULL THEN coalesce(confirmed_at, unixepoch())
+                      ELSE unixepoch() END,
+       unsubscribed_at = NULL
+     WHERE token = ? AND (unsubscribed_at IS NULL OR confirmation_sent_at > unsubscribed_at)
+     RETURNING email`,
+  )
+    .bind(token)
+    .first();
+  return row !== null;
+}
+
+/** API-060. Returns false when the token matches no row. */
+export async function unsubscribeNewsletterToken(env: Env, token: string): Promise<boolean> {
+  const row = await env.DONATE_DB.prepare(
+    `UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE token = ? RETURNING email`,
+  )
+    .bind(token)
+    .first();
+  return row !== null;
+}
+
+/**
+ * Unsubscribes addresses that hard-bounced or complained (API-041). Best-effort, so a failure
+ * can't make SNS redeliver an event whose bounces were already recorded.
+ */
+export async function unsubscribeNewsletterEmails(env: Env, emails: string[]): Promise<void> {
+  if (emails.length === 0) return;
+  try {
+    await env.DONATE_DB.batch(
+      emails.map((email) =>
+        env.DONATE_DB.prepare(
+          'UPDATE newsletter_signups SET unsubscribed_at = unixepoch() WHERE email = ?',
+        ).bind(email),
+      ),
+    );
+  } catch (err) {
+    console.error('[newsletter] failed to unsubscribe bounced or complaining addresses', err);
+  }
+}
+
+/**
+ * Fills in the location of a subscriber that has none yet, such as one imported from
+ * Buttondown, when they log in (API-016, API-035). Best-effort, like addConfirmedNewsletterSignup.
+ */
+export async function fillNewsletterLocation(
+  env: Env,
+  email: string,
+  location: RequestLocation,
+): Promise<void> {
+  if (!location.country) return;
+  try {
+    await env.DONATE_DB.prepare(
+      'UPDATE newsletter_signups SET country = ?, region = ? WHERE email = ? AND country IS NULL',
+    )
+      .bind(location.country, location.region, email)
+      .run();
+  } catch (err) {
+    console.error('[newsletter] failed to fill location', err);
   }
 }

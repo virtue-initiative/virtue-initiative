@@ -10,6 +10,7 @@ import {
   type EmailBounceReason,
 } from '../lib/db';
 import { EMAIL_TOKEN_TAG } from '../lib/email';
+import { NEWSLETTER_SES_CONFIG_SET, unsubscribeNewsletterEmails } from '../lib/newsletter';
 import { isSnsUrl, parseTopicArnAllowlist, snsMessageSchema, verifySnsSignature } from '../lib/sns';
 import { Env, Variables } from '../types/bindings';
 
@@ -51,6 +52,8 @@ function extractComplaintOrBounceEmails(message: string) {
     complaintEmails,
     bounceReason,
     emailTokenId: taggedTokenId && UUID_PATTERN.test(taggedTokenId) ? taggedTokenId : null,
+    // SES tags every event with the configuration set the message went through.
+    isNewsletter: parsed.mail?.tags?.['ses:configuration-set']?.[0] === NEWSLETTER_SES_CONFIG_SET,
   };
 }
 
@@ -81,7 +84,7 @@ emailWebhooks.post('/email/sns', async (c) => {
     return c.json({ ok: true });
   }
 
-  const { bouncedEmails, complaintEmails, bounceReason, emailTokenId } =
+  const { bouncedEmails, complaintEmails, bounceReason, emailTokenId, isNewsletter } =
     extractComplaintOrBounceEmails(body.Message);
   const impactedEmails = Array.from(new Set([...bouncedEmails, ...complaintEmails]));
 
@@ -103,12 +106,15 @@ emailWebhooks.post('/email/sns', async (c) => {
     }
   }
 
+  const permanentlyBounced = bounceReason === 'permanent' ? bouncedEmails : [];
   // A temporary bounce says nothing about whether the address is real, so it
-  // doesn't cost the user their verified status.
-  const unverifiedEmails =
-    bounceReason === 'permanent' ? impactedEmails : Array.from(new Set(complaintEmails));
+  // doesn't cost the user their verified status. Nor does marking a newsletter as spam.
+  const unverifiedEmails = Array.from(
+    new Set([...permanentlyBounced, ...(isNewsletter ? [] : complaintEmails)]),
+  );
   await markUsersUnverifiedByEmails(c.env.DB, unverifiedEmails);
-  await markUsersEmailBouncedByEmails(c.env.DB, bounceReason === 'permanent' ? bouncedEmails : []);
+  await markUsersEmailBouncedByEmails(c.env.DB, permanentlyBounced);
+  await unsubscribeNewsletterEmails(c.env, [...permanentlyBounced, ...complaintEmails]);
 
   return c.json({ ok: true, updated: impactedEmails.length });
 });

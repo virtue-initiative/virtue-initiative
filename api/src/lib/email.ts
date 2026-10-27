@@ -25,6 +25,7 @@ export interface MockEmailDelivery {
   status: 'sent' | 'failed' | 'skipped';
   metadata: string;
   attachmentFileNames: string[];
+  configurationSet?: string;
 }
 
 interface SendEmailInput extends EmailContent {
@@ -41,6 +42,8 @@ interface SendEmailInput extends EmailContent {
   allowUnverified?: boolean;
   replyTo?: string;
   attachments?: EmailAttachment[];
+  // SES configuration set to send through instead of the identity's default.
+  configurationSet?: string;
   // Pass this when the caller already looked up the recipient (e.g. a fan-out
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
@@ -144,6 +147,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       status: 'sent',
       metadata: JSON.stringify(input.metadata ?? {}),
       attachmentFileNames,
+      configurationSet: input.configurationSet,
     });
     return { id: `mock-${id}` };
   }
@@ -154,6 +158,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         FromEmailAddress: withDisplayName(input.env.AWS_SES_FROM_EMAIL),
         Destination: { ToAddresses: [input.recipient] },
         ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
+        ConfigurationSetName: input.configurationSet,
         EmailTags: input.email_token_id
           ? [{ Name: EMAIL_TOKEN_TAG, Value: input.email_token_id }]
           : undefined,
