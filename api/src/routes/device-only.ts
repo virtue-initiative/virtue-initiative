@@ -22,6 +22,7 @@ import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
+import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
 import { deleteObject, putObject } from '../lib/r2';
@@ -107,13 +108,15 @@ async function buildDeviceSettings(
     return null; // caller returns the existing 500
   }
 
-  const recipients = await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
-  const hashToken = await generateToken(
-    'device',
-    device.id,
-    c.env.JWT_PRIVATE_KEY,
-    HASH_TOKEN_TTL_SECONDS,
+  const { recipients, ownerFlagOverrides } = await listBatchAccessRecipientsForOwner(
+    c.env.DB,
+    device.owner,
   );
+  const [hashToken, featureFlags] = await Promise.all([
+    generateToken('device', device.id, c.env.JWT_PRIVATE_KEY, HASH_TOKEN_TTL_SECONDS),
+    // API-061: a device gets its owner's flags, so all their devices agree.
+    enabledFeatureFlags(c.env.DB, device.owner, ownerFlagOverrides),
+  ]);
 
   return {
     id: device.id,
@@ -125,6 +128,7 @@ async function buildDeviceSettings(
     })),
     hash_base_url: hashBaseUrl,
     hash_token: hashToken,
+    feature_flags: featureFlags,
   };
 }
 

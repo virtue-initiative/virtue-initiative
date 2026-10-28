@@ -132,6 +132,8 @@ struct DeviceSettingsResponse {
     #[serde(default)]
     hash_base_url: Option<String>,
     hash_token: String,
+    #[serde(default)]
+    feature_flags: Vec<String>,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -149,6 +151,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 })
                 .collect(),
             hash_base_url: response.hash_base_url,
+            feature_flags: response.feature_flags,
         }
     }
 }
@@ -711,5 +714,24 @@ mod tests {
             Some(r#"{"error":"bad email"}"#),
         );
         assert_eq!(message, "bad email");
+    }
+
+    #[test]
+    fn device_settings_feature_flags_default_to_none() {
+        // An API from before feature flags (API-061) omits the field entirely.
+        let without: DeviceSettingsResponse =
+            serde_json::from_str(r#"{"id":"d","name":"n","platform":"linux","hash_token":"t"}"#)
+                .unwrap();
+        let settings = DeviceSettings::from(without);
+        assert!(settings.feature_flags.is_empty());
+        assert!(!settings.has_feature_flag("beta"));
+
+        let with: DeviceSettingsResponse = serde_json::from_str(
+            r#"{"id":"d","name":"n","platform":"linux","hash_token":"t","feature_flags":["beta"]}"#,
+        )
+        .unwrap();
+        let settings = DeviceSettings::from(with);
+        assert!(settings.has_feature_flag("beta"));
+        assert!(!settings.has_feature_flag("other"));
     }
 }

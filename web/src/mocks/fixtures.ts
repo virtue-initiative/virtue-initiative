@@ -1,6 +1,7 @@
 import type {
   AnalyticsSnapshot,
   Device,
+  FeatureFlag,
   LockedPassword,
   User,
   WatcherPartner,
@@ -19,6 +20,7 @@ export const TEST_USER: User = {
     email_frequency: 'daily',
     timezone: 'UTC',
   },
+  feature_flags: [],
 };
 
 export const TEST_DEVICES: Device[] = [
@@ -79,4 +81,13 @@ export const TEST_ANALYTICS_SNAPSHOT: AnalyticsSnapshot = {
     partners: { total: 30, accepted: 24, pending: 6, watched_users: 20 },
     locked_passwords: { total: 7 },
   },
+};
+
+export const TEST_FEATURE_FLAG: FeatureFlag = {
+  key: 'new_report_tab',
+  rollout_percent: 25,
+  description: 'The redesigned report tab.',
+  overrides: [{ user_id: 'user-2', email: 'tester@example.com', enabled: true }],
+  created_at: 1_700_000_000_000,
+  updated_at: 1_700_000_000_000,
 };

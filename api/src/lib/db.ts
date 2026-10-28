@@ -2,6 +2,22 @@ import { DAY_MS } from './digest-schedule';
 
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
+// API-061: a user's flag overrides, {"flag_key": true | false}. Anything that
+// isn't a boolean is dropped rather than failing the request.
+function parseFlagOverrides(json: string | null): Record<string, boolean> {
+  try {
+    const parsed = JSON.parse(json ?? '{}') as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, boolean] => {
+        return typeof entry[1] === 'boolean';
+      }),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function parseUserSettings(json: string | null): { email_frequency: string; timezone: string } {
   try {
     const parsed = JSON.parse(json ?? '{}') as Record<string, unknown>;
@@ -148,11 +164,12 @@ export async function findUserById(db: D1Database, userId: string) {
     settings: string;
     pub_key: ArrayBuffer | null;
     encrypted_priv_key: ArrayBuffer | null;
+    feature_flags: string;
   }>(
     db
       .prepare(
         `SELECT id, email, name, email_verified, email_bounced_at, settings,
-                pub_key, encrypted_priv_key
+                pub_key, encrypted_priv_key, feature_flags
          FROM users
          WHERE id = ?`,
       )
@@ -160,7 +177,11 @@ export async function findUserById(db: D1Database, userId: string) {
     ['id'],
   );
   if (!raw) return null;
-  return { ...raw, settings: parseUserSettings(raw.settings) };
+  return {
+    ...raw,
+    settings: parseUserSettings(raw.settings),
+    feature_flags: parseFlagOverrides(raw.feature_flags),
+  };
 }
 
 export async function findUserPublicKeyByEmail(db: D1Database, email: string) {
@@ -1035,10 +1056,14 @@ export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
 }
 
+// Also returns the owner's flag overrides (API-061), since the owner's row is
+// already being read here for their public key.
 export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {
   const [owner, partners] = await Promise.all([
-    firstWithUuidFields<{ id: string; pub_key: ArrayBuffer | null }>(
-      db.prepare('SELECT id, pub_key FROM users WHERE id = ?').bind(uuidToBytes(ownerId)),
+    firstWithUuidFields<{ id: string; pub_key: ArrayBuffer | null; feature_flags: string }>(
+      db
+        .prepare('SELECT id, pub_key, feature_flags FROM users WHERE id = ?')
+        .bind(uuidToBytes(ownerId)),
       ['id'],
     ),
     allWithUuidFields<{ id: string; pub_key: ArrayBuffer | null }>(
@@ -1054,10 +1079,13 @@ export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId:
     ),
   ]);
 
-  return [
-    ...(owner?.pub_key ? [{ id: owner.id, pub_key: owner.pub_key }] : []),
-    ...partners.filter((partner) => partner.pub_key),
-  ];
+  return {
+    recipients: [
+      ...(owner?.pub_key ? [{ id: owner.id, pub_key: owner.pub_key }] : []),
+      ...partners.filter((partner) => partner.pub_key),
+    ],
+    ownerFlagOverrides: parseFlagOverrides(owner?.feature_flags ?? null),
+  };
 }
 
 export async function listAcceptedNotificationTargetsForUser(db: D1Database, userId: string) {
@@ -1447,4 +1475,97 @@ export async function listAnalyticsSnapshots(db: D1Database, limit: number) {
     .bind(limit)
     .all<{ day: string; metrics: string; created_at: number }>();
   return result.results;
+}
+
+// ── Feature flags (API-061) ──────────────────────────────────────────────────
+
+export async function listFeatureFlags(db: D1Database) {
+  const result = await db
+    .prepare(
+      `SELECT key, rollout_percent, description, created_at, updated_at
+       FROM feature_flags
+       ORDER BY key`,
+    )
+    .all<{
+      key: string;
+      rollout_percent: number;
+      description: string | null;
+      created_at: number;
+      updated_at: number;
+    }>();
+  return result.results;
+}
+
+// Reads every user row: only the admin flag routes call this, and rarely.
+export async function listUserFlagOverrides(db: D1Database) {
+  const rows = await allWithUuidFields<{ id: string; email: string; feature_flags: string }>(
+    db.prepare(
+      `SELECT id, email, feature_flags
+       FROM users
+       WHERE feature_flags != '{}'
+       ORDER BY email`,
+    ),
+    ['id'],
+  );
+  return rows.map((row) => ({ ...row, feature_flags: parseFlagOverrides(row.feature_flags) }));
+}
+
+export async function upsertFeatureFlag(
+  db: D1Database,
+  input: { key: string; rollout_percent: number; description?: string | null; now: number },
+) {
+  // A missing description leaves the stored one alone (API-063).
+  const keepDescription = input.description === undefined ? 1 : 0;
+  await db
+    .prepare(
+      `INSERT INTO feature_flags (key, rollout_percent, description, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?4)
+       ON CONFLICT (key) DO UPDATE SET
+         rollout_percent = excluded.rollout_percent,
+         description = CASE WHEN ?5 THEN feature_flags.description ELSE excluded.description END,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(input.key, input.rollout_percent, input.description ?? null, input.now, keepDescription)
+    .run();
+}
+
+// JSON path for a flag key. Keys match ^[a-z0-9_]{1,64}$, so quoting is enough.
+function flagJsonPath(key: string) {
+  return `$."${key}"`;
+}
+
+export async function deleteFeatureFlag(db: D1Database, key: string) {
+  const path = flagJsonPath(key);
+  const [deleted] = await db.batch([
+    db.prepare('DELETE FROM feature_flags WHERE key = ?').bind(key),
+    // Only rows that hold the key are written.
+    db
+      .prepare(
+        `UPDATE users SET feature_flags = json_remove(feature_flags, ?1)
+         WHERE json_type(feature_flags, ?1) IS NOT NULL`,
+      )
+      .bind(path),
+  ]);
+  return (deleted?.meta.changes ?? 0) > 0;
+}
+
+export async function setUserFlagOverride(
+  db: D1Database,
+  email: string,
+  key: string,
+  enabled: boolean | null,
+) {
+  const path = flagJsonPath(key);
+  const statement =
+    enabled === null
+      ? db
+          .prepare('UPDATE users SET feature_flags = json_remove(feature_flags, ?) WHERE email = ?')
+          .bind(path, email)
+      : db
+          .prepare(
+            'UPDATE users SET feature_flags = json_set(feature_flags, ?, json(?)) WHERE email = ?',
+          )
+          .bind(path, enabled ? 'true' : 'false', email);
+  const result = await statement.run();
+  return result.meta.changes > 0;
 }

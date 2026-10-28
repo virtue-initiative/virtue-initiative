@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { clearMockEmailDeliveries, listMockEmailDeliveries } from '../src/lib/email';
+import { clearFeatureFlagCache } from '../src/lib/feature-flags';
 import { resetHashServerMock } from './hash-server-mock';
 
 export const BASE = 'http://localhost';
@@ -268,6 +269,8 @@ export function extractTokenFromDelivery(
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   resetHashServerMock();
+  clearFeatureFlagCache();
+  await env.DB.prepare('DELETE FROM feature_flags').run();
   await env.DB.prepare('DELETE FROM analytics_snapshots').run();
   await env.DB.prepare('DELETE FROM admins').run();
   await env.DB.prepare('DELETE FROM email_tokens').run();

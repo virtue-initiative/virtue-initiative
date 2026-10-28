@@ -259,6 +259,16 @@ pub struct DeviceSettings {
     pub wrapping_keys: Vec<BatchRecipient>,
     #[serde(default)]
     pub hash_base_url: Option<String>,
+    /// Keys of the feature flags enabled for the device's owner (API-061). A key
+    /// not listed is off, as is every flag before settings are first fetched.
+    #[serde(default)]
+    pub feature_flags: Vec<String>,
+}
+
+impl DeviceSettings {
+    pub fn has_feature_flag(&self, key: &str) -> bool {
+        self.feature_flags.iter().any(|flag| flag == key)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -782,6 +782,7 @@ mod tests {
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             }],
             hash_base_url: None,
+            feature_flags: Vec::new(),
         }
     }
 
