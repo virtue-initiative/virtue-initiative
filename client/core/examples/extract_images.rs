@@ -6,7 +6,7 @@
 //! ```
 //!
 //! For every input it writes `DIR/<name>_proof.png`: the screenshot with a colored box around
-//! each region on the left, and the extracted crops with matching borders on the right. With
+//! each region on the left, and the six largest crops with matching borders on the right. With
 //! `--classify`, a bar under each crop shows its final score (red) out of 1.0. Each crop is
 //! also saved as `DIR/<name>_<n>.png`.
 
@@ -15,11 +15,12 @@ use std::time::Instant;
 
 use image::{DynamicImage, GenericImageView, Rgba, RgbaImage, imageops};
 use virtue_core::module::screenshot::image_regions::{Region, extract_regions};
-use virtue_core::module::screenshot::risk_classifier::{MAX_REGIONS, RiskClassifier};
+use virtue_core::module::screenshot::risk_classifier::{MAX_REGIONS, RiskClassifier, Screen};
 
 const MODEL_BYTES: &[u8] = include_bytes!("../models/nsfw_small_v1.nnef.tar");
 
-const COLORS: [[u8; 3]; MAX_REGIONS] = [
+/// Box colors, reused in order; the proof's right-hand panel shows the first this many crops.
+const COLORS: [[u8; 3]; 6] = [
     [230, 25, 75],
     [60, 180, 75],
     [0, 130, 200],
@@ -82,7 +83,12 @@ fn main() {
                 whole.risk,
             );
             let start = Instant::now();
-            let result = classifier.classify_regions(&img).expect("classify");
+            let screen = if h > w {
+                Screen::Phone
+            } else {
+                Screen::Desktop
+            };
+            let result = classifier.classify_regions(&img, screen).expect("classify");
             println!(
                 "  per region:            {:.0} ms, {} model run(s), skin {:.2}, nsfw {}, risk {:.2}",
                 start.elapsed().as_secs_f64() * 1000.0,
@@ -148,17 +154,17 @@ fn proof_image(img: &DynamicImage, regions: &[Region], scores: &[Option<f32>]) -
             r.width,
             r.height,
             thickness,
-            COLORS[i],
+            COLORS[i % COLORS.len()],
         );
     }
 
     let cols = 2;
-    let rows = MAX_REGIONS.div_ceil(cols) as u32;
+    let rows = COLORS.len().div_ceil(cols) as u32;
     let cell_w = panel_w / cols as u32;
     let cell_h = h / rows;
     let pad = 16;
     let bar_h = 10;
-    for (i, r) in regions.iter().enumerate() {
+    for (i, r) in regions.iter().take(COLORS.len()).enumerate() {
         let cx = w + gap + (i % cols) as u32 * cell_w;
         let cy = (i / cols) as u32 * cell_h;
         let max_w = cell_w - 2 * pad;
