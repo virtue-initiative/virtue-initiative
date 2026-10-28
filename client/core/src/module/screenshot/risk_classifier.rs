@@ -27,12 +27,17 @@ const MODEL_WEIGHT: f32 = 0.70; // model contributes up to 70% of risk
 const SKIN_GATE: f32 = 0.05; // below this contribution (~1.5% skin) skip the model
 const GRAY_CHROMA: u8 = 24; // a pixel whose channels differ by more than this has color
 const GRAY_MAX_COLORED: f32 = 0.05; // an image with fewer colored pixels than this is grayscale
+// The YCbCr skin range needs Y > 80, which leaves out dark skin. A darker pixel down to this
+// brightness also counts when it's warm (R > G > B) with a skin-like share of red and green;
+// below it, skin can't be told from black.
+const DARK_SKIN_MIN_Y: f32 = 30.0;
 
 // Per-region scoring constants (see `classify_regions`). They were tuned on a labeled set of
 // 338 screenshots with `scripts/nsfw-eval/`, for no ordinary page at high risk.
 pub const MAX_REGIONS: usize = 12;
-// A region's own skin gate: the model runs on it only above ~15% skin pixels. Stricter than
-// the whole-frame gate because each region is one image, not a page.
+// A region's own skin gate, in the same units as SKIN_GATE: the model runs on it only above
+// ~15% skin pixels. Stricter than the whole-frame gate because each region is one image, not
+// a page. It only saves model runs: risk comes from the model alone.
 const REGION_SKIN_GATE: f32 = 0.15;
 // Weight of the "sexy" class (swimwear, lingerie). Those are meant to be flagged.
 const REGION_SEXY_WEIGHT: f32 = 1.0;
@@ -68,8 +73,9 @@ type NsfwModel = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dy
 /// recorded on the log as low-level dev metadata so a reviewer can see *why* a frame scored
 /// the way it did.
 pub struct RiskScores {
-    /// Blended risk ∈ [0.0, 1.0] = `skin * SKIN_WEIGHT + nsfw * MODEL_WEIGHT` (or just the
-    /// skin contribution when the gate skips the model).
+    /// Risk ∈ [0.0, 1.0]. From [`RiskClassifier::classify_image`] it's the blend
+    /// `skin * SKIN_WEIGHT + nsfw * MODEL_WEIGHT` (or just the skin contribution when the gate
+    /// skips the model); from [`RiskClassifier::classify_regions`] it's the model score alone.
     pub risk: f32,
     /// Raw skin-tone heuristic score ∈ [0.0, 1.0], before weighting.
     pub skin: f32,
@@ -137,6 +143,7 @@ pub fn scoring_constants() -> Vec<(&'static str, f64)> {
         ("skin_weight", SKIN_WEIGHT as f64),
         ("model_weight", MODEL_WEIGHT as f64),
         ("skin_gate", SKIN_GATE as f64),
+        ("dark_skin_min_y", DARK_SKIN_MIN_Y as f64),
         ("region_skin_gate", REGION_SKIN_GATE as f64),
         ("max_regions", MAX_REGIONS as f64),
         ("region_sexy_weight", REGION_SEXY_WEIGHT as f64),
@@ -240,9 +247,13 @@ impl RiskClassifier {
     /// - Small regions are scaled down (see [`SMALL_REGION_WEIGHT`]), since upscaling makes
     ///   the model noisier.
     ///
-    /// See [`combine`] for how the region scores become the risk. When no region is found
-    /// (text, code, a desktop) the whole frame is scored once under the same gate and
-    /// grayscale rules. The model is built at most once per call, and only if needed.
+    /// See [`combine`] for how the region scores become the risk. Unlike
+    /// [`classify_image`](Self::classify_image), skin only decides which crops reach the
+    /// model and adds nothing to the risk: once the floor and agreement rules were in, a skin
+    /// term changed no high-risk result on the labeled set. When no region is found (text,
+    /// code, a desktop) the whole frame is scored once under the same gate and grayscale
+    /// rules. The model is built at most once per call, and only if needed. If it can't be
+    /// built, the risk falls back to the skin contribution, as in `classify_image`.
     pub fn classify_regions(
         &self,
         img: &DynamicImage,
@@ -274,7 +285,7 @@ impl RiskClassifier {
             if gated || !build(&mut model) {
                 return Ok(RegionRiskScores {
                     scores: RiskScores {
-                        risk: skin * SKIN_WEIGHT,
+                        risk: if gated { 0.0 } else { skin * SKIN_WEIGHT },
                         skin,
                         nsfw: None,
                     },
@@ -284,10 +295,9 @@ impl RiskClassifier {
             }
             NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
             let nsfw = Self::run_inference(model.as_ref().expect("built above"), img)?;
-            let skin_term = if gray { nsfw } else { skin };
             return Ok(RegionRiskScores {
                 scores: RiskScores {
-                    risk: skin_term * SKIN_WEIGHT + nsfw * MODEL_WEIGHT,
+                    risk: nsfw,
                     skin,
                     nsfw: Some(nsfw),
                 },
@@ -298,6 +308,7 @@ impl RiskClassifier {
 
         let screen_area = img.width() as u64 * img.height() as u64;
         let mut model_runs = 0;
+        let mut wanted_model = false;
         let mut results = Vec::with_capacity(extracted.len());
         let mut scored = Vec::new();
         for e in extracted {
@@ -313,7 +324,9 @@ impl RiskClassifier {
                 confirm_probs: None,
                 score: None,
             };
-            if (crop_skin * SKIN_WEIGHT > REGION_SKIN_GATE || crop_gray) && build(&mut model) {
+            let gated = crop_skin * SKIN_WEIGHT <= REGION_SKIN_GATE && !crop_gray;
+            wanted_model |= !gated;
+            if !gated && build(&mut model) {
                 let model = model.as_ref().expect("built above");
                 let probs = Self::run_probs(model, &crop)?;
                 model_runs += 1;
@@ -336,7 +349,6 @@ impl RiskClassifier {
                 scored.push(ScoredRegion {
                     score,
                     raw,
-                    skin: if crop_gray { score } else { crop_skin },
                     prominent: region.area() as f32 >= AGREE_SHARE * frame as f32,
                 });
             }
@@ -344,7 +356,11 @@ impl RiskClassifier {
         }
         NSFW_MODEL_INVOCATIONS.fetch_add(model_runs as u64, Ordering::Relaxed);
 
-        let (risk, nsfw) = combine(skin, gray, &scored);
+        let (risk, nsfw) = if wanted_model && model.is_none() {
+            (skin * SKIN_WEIGHT, None)
+        } else {
+            combine(&scored)
+        };
         Ok(RegionRiskScores {
             scores: RiskScores { risk, skin, nsfw },
             regions: results,
@@ -411,30 +427,16 @@ struct ScoredRegion {
     score: f32,
     /// Before the floor: the class sum, or the lower of it and the mirrored pass.
     raw: f32,
-    /// The region's skin score, or for a grayscale region (whose skin can't be measured)
-    /// its own `score`.
-    skin: f32,
     /// Covers at least [`AGREE_SHARE`] of its window (desktop) or of the screen (phone).
     prominent: bool,
 }
 
-/// Combines region scores into `(risk, nsfw)`. `nsfw` is the best region score. The skin
-/// term comes from that best region, since the whole frame's skin is diluted by everything
-/// else on screen; with no region scored it's the whole frame's skin, or 0 for a grayscale
-/// frame. High risk needs [`MIN_AGREE`] regions at [`AGREE_AT`] or one prominent one;
-/// otherwise the risk is held at [`BELOW_HIGH`].
-fn combine(frame_skin: f32, frame_gray: bool, scored: &[ScoredRegion]) -> (f32, Option<f32>) {
-    // On a tie the first (largest) region wins, as in score.py.
-    let best = scored
-        .iter()
-        .reduce(|best, r| if r.score > best.score { r } else { best });
-    let nsfw = best.map(|b| b.score);
-    let skin = match best {
-        Some(b) => b.skin,
-        None if frame_gray => 0.0,
-        None => frame_skin,
-    };
-    let mut risk = skin * SKIN_WEIGHT + nsfw.unwrap_or(0.0) * MODEL_WEIGHT;
+/// Combines region scores into `(risk, nsfw)`. `nsfw` is the best region score, and the risk
+/// is that score too, or 0 with no region scored. High risk needs [`MIN_AGREE`] regions at
+/// [`AGREE_AT`] or one prominent one; otherwise the risk is held at [`BELOW_HIGH`].
+fn combine(scored: &[ScoredRegion]) -> (f32, Option<f32>) {
+    let nsfw = scored.iter().map(|r| r.score).reduce(f32::max);
+    let mut risk = nsfw.unwrap_or(0.0);
     let agreeing = scored.iter().filter(|r| r.raw >= AGREE_AT);
     let agree_count = agreeing.clone().count() as u32;
     let prominent = agreeing.clone().any(|r| r.prominent);
@@ -501,15 +503,24 @@ pub fn skin_score(img: &DynamicImage) -> f32 {
 }
 
 /// Returns true if an RGB pixel falls in a typical skin range using BT.601 YCbCr:
-/// Y > 80, Cb ∈ [77, 127], Cr ∈ [133, 173].
+/// Y > 80, Cb ∈ [77, 127], Cr ∈ [133, 173]. Darker pixels, down to [`DARK_SKIN_MIN_Y`],
+/// count when R > G > B with a normalized red share in [0.36, 0.465] and green share in
+/// [0.28, 0.363] (Soriano et al.'s skin locus), which covers the darkest Monk skin tones.
 fn is_skin(r: u8, g: u8, b: u8) -> bool {
     let r = r as f32;
     let g = g as f32;
     let b = b as f32;
     let y = 0.299 * r + 0.587 * g + 0.114 * b;
-    let cb = 128.0 - 0.168_736 * r - 0.331_264 * g + 0.5 * b;
-    let cr = 128.0 + 0.5 * r - 0.418_688 * g - 0.081_312 * b;
-    y > 80.0 && (77.0..=127.0).contains(&cb) && (133.0..=173.0).contains(&cr)
+    if y > 80.0 {
+        let cb = 128.0 - 0.168_736 * r - 0.331_264 * g + 0.5 * b;
+        let cr = 128.0 + 0.5 * r - 0.418_688 * g - 0.081_312 * b;
+        return (77.0..=127.0).contains(&cb) && (133.0..=173.0).contains(&cr);
+    }
+    if y < DARK_SKIN_MIN_Y || !(r > g && g > b) {
+        return false;
+    }
+    let sum = r + g + b;
+    (0.36..=0.465).contains(&(r / sum)) && (0.28..=0.363).contains(&(g / sum))
 }
 
 #[cfg(test)]
@@ -574,18 +585,17 @@ mod tests {
         assert_eq!(size_weight(&region(1000)), 1.0);
     }
 
-    fn scored(score: f32, raw: f32, skin: f32, prominent: bool) -> ScoredRegion {
+    fn scored(score: f32, raw: f32, prominent: bool) -> ScoredRegion {
         ScoredRegion {
             score,
             raw,
-            skin,
             prominent,
         }
     }
 
     #[test]
     fn one_confident_image_is_held_under_high() {
-        let (risk, nsfw) = combine(0.1, false, &[scored(1.0, 1.0, 1.0, false)]);
+        let (risk, nsfw) = combine(&[scored(1.0, 1.0, false)]);
         assert_eq!(nsfw, Some(1.0));
         assert_eq!(risk, BELOW_HIGH);
     }
@@ -593,38 +603,74 @@ mod tests {
     #[test]
     fn three_agreeing_images_reach_high() {
         let three = [
-            scored(1.0, 1.0, 1.0, false),
-            scored(0.9, 0.95, 1.0, false),
-            scored(0.8, 0.91, 0.5, false),
+            scored(1.0, 1.0, false),
+            scored(0.9, 0.95, false),
+            scored(0.8, 0.91, false),
         ];
-        let (risk, _) = combine(0.1, false, &three);
-        assert!((risk - 1.0).abs() < 1e-6, "{risk}");
+        assert_eq!(combine(&three), (1.0, Some(1.0)));
     }
 
     #[test]
     fn one_prominent_image_reaches_high_only_if_confident() {
-        let (risk, _) = combine(0.1, false, &[scored(1.0, 1.0, 1.0, true)]);
-        assert!((risk - 1.0).abs() < 1e-6, "{risk}");
+        assert_eq!(combine(&[scored(1.0, 1.0, true)]), (1.0, Some(1.0)));
         // Prominent, but below the agreement bar.
-        let (risk, _) = combine(0.1, false, &[scored(0.5, 0.85, 1.0, true)]);
+        let (risk, _) = combine(&[scored(0.5, 0.85, true)]);
         assert!(risk <= BELOW_HIGH, "{risk}");
     }
 
     #[test]
-    fn skin_comes_from_the_best_region_and_the_first_on_a_tie() {
-        let regions = [scored(1.0, 1.0, 0.2, true), scored(1.0, 1.0, 1.0, true)];
-        let (risk, _) = combine(1.0, false, &regions);
-        assert!(
-            (risk - (0.2 * SKIN_WEIGHT + MODEL_WEIGHT)).abs() < 1e-6,
-            "{risk}"
-        );
+    fn risk_is_the_best_region_score_without_skin() {
+        let regions = [
+            scored(0.3, 0.9, true),
+            scored(0.6, 0.95, false),
+            scored(0.0, 0.5, false),
+        ];
+        assert_eq!(combine(&regions), (0.6, Some(0.6)));
     }
 
     #[test]
-    fn grayscale_frames_without_scored_regions_add_no_skin() {
-        assert_eq!(combine(0.8, true, &[]), (0.0, None));
-        let (risk, nsfw) = combine(0.8, false, &[]);
-        assert_eq!(nsfw, None);
-        assert!((risk - 0.8 * SKIN_WEIGHT).abs() < 1e-6);
+    fn no_scored_regions_means_no_risk() {
+        assert_eq!(combine(&[]), (0.0, None));
+    }
+
+    /// The Monk Skin Tone scale, lightest to darkest.
+    const MONK: [[u8; 3]; 10] = [
+        [0xf6, 0xed, 0xe4],
+        [0xf3, 0xe7, 0xdb],
+        [0xf7, 0xea, 0xd0],
+        [0xea, 0xda, 0xba],
+        [0xd7, 0xbd, 0x96],
+        [0xa0, 0x7e, 0x56],
+        [0x82, 0x5c, 0x43],
+        [0x60, 0x41, 0x34],
+        [0x3a, 0x31, 0x2a],
+        [0x29, 0x24, 0x20],
+    ];
+
+    #[test]
+    fn every_monk_skin_tone_counts_as_skin() {
+        for [r, g, b] in MONK {
+            assert!(is_skin(r, g, b), "#{r:02x}{g:02x}{b:02x} should be skin");
+        }
+    }
+
+    #[test]
+    fn dark_ui_colors_are_not_skin() {
+        // Black, dark grays and the backgrounds of common dark themes.
+        for [r, g, b] in [
+            [0x00, 0x00, 0x00],
+            [0x1a, 0x16, 0x14],
+            [0x1e, 0x1e, 0x1e],
+            [0x33, 0x33, 0x33],
+            [0x4d, 0x4d, 0x4d],
+            [0x28, 0x2c, 0x34],
+            [0x36, 0x39, 0x3f],
+            [0x0d, 0x11, 0x17],
+        ] {
+            assert!(
+                !is_skin(r, g, b),
+                "#{r:02x}{g:02x}{b:02x} should not be skin"
+            );
+        }
     }
 }

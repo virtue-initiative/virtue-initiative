@@ -28,11 +28,11 @@ rules (skin_gate, no grayscale handling). Extra knobs, whose defaults are what R
 (or the Moderator SDK, for mod_*):
 
   gray_bypass        grayscale views skip the per-region skin gate (1)
-  gray_skin          skin to assume for a grayscale view, where it can't be measured: a
-                     number, "model" for the view's own score, or "measured" (model)
+  region_skin_weight weight of skin in the per-image risk, the model taking the rest; skin
+                     comes from the best-scoring region, or is that region's score when
+                     it's grayscale. Rust's classify_regions uses the model alone (0)
   mirror_mode        gantman: what the mirrored pass does: min, mean, off (min)
   include_whole      also score the whole frame as one more candidate region (0)
-  region_skin        take the risk's skin term from the best-scoring region (1)
   max_aspect         skip regions longer than this many times their width, which the
                      model sees badly distorted; 0 keeps all (0)
   agree_in_window    measure agree_share against the window a region was found in (its
@@ -78,10 +78,9 @@ MODEL_NAMES = {"gantman": "Current model", "moderator": "Moderator"}
 MEDIUM, HIGH, EXTRA = 40, 70, 90
 EXTRA_DEFAULTS = {
     "gray_bypass": 1,
-    "gray_skin": "model",
     "mirror_mode": "min",
     "include_whole": 0,
-    "region_skin": 1,
+    "region_skin_weight": 0,
     "max_aspect": 0,
     "agree_in_window": "desktop",
     "mod_quality": "accurate",
@@ -183,13 +182,12 @@ def percent(risk):
     return int(risk * 100 + 0.5)
 
 
-def effective_skin(view, p, nsfw):
-    """The view's skin score, or a stand-in when it's grayscale and gray_skin says so."""
-    if not view.get("gray") or p["gray_skin"] == "measured":
-        return view["skin"]
-    if p["gray_skin"] == "model":
-        return nsfw or 0.0
-    return float(p["gray_skin"])
+def region_risk(view, nsfw, p):
+    """classify_regions' risk from its best score, plus region_skin_weight of the view's skin
+    (its own score when it's grayscale, where skin can't be measured)."""
+    w = p["region_skin_weight"]
+    skin = (nsfw or 0.0) if view.get("gray") else view["skin"]
+    return skin * w + (nsfw or 0.0) * (1 - w) if w else (nsfw or 0.0)
 
 
 def score_whole(rec, p, model, fallback=False):
@@ -201,15 +199,14 @@ def score_whole(rec, p, model, fallback=False):
     gate = p["region_skin_gate"] if fallback else p["skin_gate"]
     gray = fallback and rec["whole"].get("gray")
     if contribution <= gate and not (gray and p["gray_bypass"]):
-        return {"risk": contribution, "nsfw": None, "model_runs": 0}
+        return {"risk": 0.0 if fallback else contribution, "nsfw": None, "model_runs": 0}
     if model == "moderator":
         nsfw, runs = moderator_nsfw(rec["whole"], p)
     else:
         nsfw, runs = gantman_nsfw(rec["whole"]["probs"], 1.0), 1
-    if fallback:
-        skin = effective_skin(rec["whole"], p, nsfw)
-    return {"risk": skin * p["skin_weight"] + nsfw * p["model_weight"], "nsfw": nsfw,
-            "model_runs": runs}
+    risk = region_risk(rec["whole"], nsfw, p) if fallback else (
+        skin * p["skin_weight"] + nsfw * p["model_weight"])
+    return {"risk": risk, "nsfw": nsfw, "model_runs": runs}
 
 
 def score_region(view, p, model, runs):
@@ -257,11 +254,11 @@ def score_regions(rec, p, model):
         if s is not None:
             candidates.append(s)
     nsfw = max(candidates) if candidates else None
-    skin = effective_skin(rec["whole"], p, nsfw)
-    if p["region_skin"] and any(s is not None for s in scores):
+    best_view = dict(rec["whole"], gray=True)  # nothing scored: no skin either
+    if any(s is not None for s in scores):
         best = max((i for i, s in enumerate(scores) if s is not None), key=lambda i: scores[i])
-        skin = effective_skin(regions[best], p, scores[best])
-    risk = skin * p["skin_weight"] + (nsfw or 0.0) * p["model_weight"]
+        best_view = regions[best]
+    risk = region_risk(best_view, nsfw, p)
     if p["min_agree"] and agreeing < p["min_agree"] and not dominant:
         risk = min(risk, (HIGH - 1) / 100)
     return {"risk": risk, "nsfw": nsfw, "model_runs": runs, "region_scores": scores,
@@ -329,8 +326,8 @@ def fmt_metrics(m):
 
 def check_parity(scored, p, consts):
     """With untouched constants, the gantman replay must match Rust's classify_regions."""
-    if "region_skin_gate" not in consts:
-        return  # collected before today's rules; see LEGACY_CONSTANTS
+    if "dark_skin_min_y" not in consts:
+        return  # collected before today's skin rule and risk; see LEGACY_CONSTANTS
     if any(p[k] != v for k, v in consts.items()) or any(
         p[k] != v for k, v in EXTRA_DEFAULTS.items()
     ):
@@ -691,7 +688,7 @@ def write_page(path, results, models_meta, p, consts, images, variants=()):
 <main>
 <header><div class="eyebrow">Virtue · classifier evaluation</div>
 <h1>Screenshot NSFW evaluation</h1>
-<p>{n} labeled screenshots, {n_nsfw} of them NSFW, from {html.escape(sets)}. <b>Whole screen</b> is today's production scoring: one look at the full frame behind a skin check. <b>Per image</b> finds the photos in the screenshot and scores each one. Risk is 0.3 × skin + 0.7 × model score, the same formula production uses. {image_note}</p>
+<p>{n} labeled screenshots, {n_nsfw} of them NSFW, from {html.escape(sets)}. <b>Whole screen</b> is today's production scoring: one look at the full frame behind a skin check. <b>Per image</b> finds the photos in the screenshot and scores each one. Whole-screen risk is 0.3 × skin + 0.7 × model score; per-image risk is the model score alone, with skin only deciding which images the model sees. {image_note}</p>
 <div class="legend"><span style="color:var(--low)">low &lt; 0.40</span><span style="color:var(--medium)">medium</span><span style="color:var(--high)">high ≥ 0.70</span><span style="color:var(--extra)">email ≥ 0.90</span></div>
 </header>
 <section><h2>Summary</h2>{summary_table(results, p, variants)}</section>
