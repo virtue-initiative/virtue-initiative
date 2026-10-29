@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use image::DynamicImage;
@@ -9,7 +10,8 @@ use crate::model::ScoredImage;
 
 static NSFW_MODEL_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
 
-/// Process-lifetime count of `classify()` calls that actually ran the NSFW
+/// Process-lifetime count of classify calls (one per screenshot, whichever of
+/// `classify_image` or `classify_regions`) that actually built and ran the NSFW
 /// model (i.e. the skin gate didn't skip it) — not persisted across
 /// restarts, just a lightweight always-available tally for platform-side
 /// memory diagnostics (see the iOS `virtue_ios_native_nsfw_run_count` FFI
@@ -32,6 +34,9 @@ const GRAY_MAX_COLORED: f32 = 0.05; // an image with fewer colored pixels than t
 // pixel down to this brightness also counts when it's warm (R > G > B) with a skin-like share of
 // red and green; below it, skin can't be told from black. Only `classify_regions` uses it, so
 // `classify_image` scores exactly as before while per-image scoring is behind a feature flag.
+// Warm dark UI colors (Material brown, Gruvbox's warm grays) pass too: they sit next to the
+// darkest Monk tones, with as much or more color, so no per-pixel rule tells them apart. That
+// only costs a model run, since skin adds nothing to `classify_regions`' risk.
 const DARK_SKIN_MIN_Y: f32 = 30.0;
 
 // Per-region scoring constants (see `classify_regions`). They were tuned on a labeled set of
@@ -260,7 +265,7 @@ impl RiskClassifier {
     ///
     /// - Each crop has its own skin gate ([`REGION_SKIN_GATE`]), so most regions (landscapes,
     ///   products, UI art) never reach the model. Grayscale crops skip the gate, since a
-    ///   skin-tone test can't see skin in a black-and-white image.
+    ///   skin-tone test can't see skin in a black-and-white image (CORE-004).
     /// - A crop scoring at least [`CONFIRM_AT`] is run again mirrored, and keeps the lower of
     ///   the two scores. A real explicit image scores high both ways; a fluke often doesn't.
     /// - Scores at or below [`REGION_SCORE_FLOOR`] count as 0 and the rest are rescaled, so
@@ -272,9 +277,10 @@ impl RiskClassifier {
     /// [`classify_image`](Self::classify_image), skin only decides which crops reach the
     /// model and adds nothing to the risk: once the floor and agreement rules were in, a skin
     /// term changed no high-risk result on the labeled set. When no region is found (text,
-    /// code, a desktop) the whole frame is scored once under the same gate and grayscale
-    /// rules. The model is built at most once per call, and only if needed. If it can't be
-    /// built, the risk falls back to the skin contribution, as in `classify_image`.
+    /// code, a desktop) the whole frame is scored the same way, as one image filling its
+    /// window, but isn't listed in `regions`. The model is built at most once per call, and
+    /// only if needed; if that fails, it isn't tried again for the call's other regions, and
+    /// the risk falls back to the skin contribution, as in `classify_image`.
     pub fn classify_regions(
         &self,
         img: &DynamicImage,
@@ -285,71 +291,55 @@ impl RiskClassifier {
             MAX_REGIONS,
             &image_regions::ExtractParams::default(),
         );
-        let skin = skin_score(img, true);
-        let gray = is_grayscale(img);
-        let mut model: Option<NsfwModel> = None;
-        let build = |model: &mut Option<NsfwModel>| -> bool {
-            if model.is_none() {
-                match Self::build_model(self.model_bytes) {
-                    Ok(built) => *model = Some(built),
-                    Err(err) => {
-                        tracing::error!(error = %err, "NSFW classifier unavailable, falling back to skin-only risk");
-                        return false;
-                    }
-                }
-            }
-            true
+        let (skin, gray) = skin_and_gray(img, true);
+        let mut model = LazyModel::NotBuilt;
+
+        // With no image found, the whole frame stands in as the only one, unreported.
+        let frame = Region {
+            x: 0,
+            y: 0,
+            width: img.width(),
+            height: img.height(),
+        };
+        let reported = !extracted.is_empty();
+        let crops: Vec<(Region, Region)> = if reported {
+            extracted
+                .into_iter()
+                .map(|e| (e.region, e.container))
+                .collect()
+        } else {
+            vec![(frame, frame)]
         };
 
-        if extracted.is_empty() {
-            let gated = skin * SKIN_WEIGHT <= REGION_SKIN_GATE && !gray;
-            if gated || !build(&mut model) {
-                return Ok(RegionRiskScores {
-                    scores: RiskScores {
-                        risk: if gated { 0.0 } else { skin * SKIN_WEIGHT },
-                        skin,
-                        nsfw: None,
-                    },
-                    regions: Vec::new(),
-                    model_runs: 0,
-                });
-            }
-            NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
-            let nsfw = Self::run_inference(model.as_ref().expect("built above"), img)?;
-            return Ok(RegionRiskScores {
-                scores: RiskScores {
-                    risk: nsfw,
-                    skin,
-                    nsfw: Some(nsfw),
-                },
-                regions: Vec::new(),
-                model_runs: 1,
-            });
-        }
-
-        let screen_area = img.width() as u64 * img.height() as u64;
+        let screen_area = frame.area();
         let mut model_runs = 0;
         let mut wanted_model = false;
-        let mut results = Vec::with_capacity(extracted.len());
+        let mut results = Vec::with_capacity(crops.len());
         let mut scored = Vec::new();
-        for e in extracted {
-            let region = e.region;
-            let crop = img.crop_imm(region.x, region.y, region.width, region.height);
-            let crop_skin = skin_score(&crop, true);
-            let crop_gray = is_grayscale(&crop);
+        for (region, container) in crops {
+            let crop = if reported {
+                Cow::Owned(img.crop_imm(region.x, region.y, region.width, region.height))
+            } else {
+                Cow::Borrowed(img)
+            };
+            let (crop_skin, crop_gray) = if reported {
+                skin_and_gray(&crop, true)
+            } else {
+                (skin, gray)
+            };
             let mut result = RegionScore {
                 region,
-                container: e.container,
+                container,
                 skin: crop_skin,
                 gray: crop_gray,
                 probs: None,
                 confirm_probs: None,
                 score: None,
             };
+            // CORE-004: grayscale crops skip the skin gate.
             let gated = crop_skin * SKIN_WEIGHT <= REGION_SKIN_GATE && !crop_gray;
             wanted_model |= !gated;
-            if !gated && build(&mut model) {
-                let model = model.as_ref().expect("built above");
+            if let Some(model) = (!gated).then(|| model.get(self.model_bytes)).flatten() {
                 let probs = Self::run_probs(model, &crop)?;
                 model_runs += 1;
                 let mut raw = region_nsfw(&probs);
@@ -365,7 +355,7 @@ impl RiskClassifier {
                 let score = above_floor * size_weight(&region);
                 result.score = Some(score);
                 let frame = match screen {
-                    Screen::Desktop => e.container.area(),
+                    Screen::Desktop => container.area(),
                     Screen::Phone => screen_area,
                 };
                 scored.push(ScoredRegion {
@@ -374,11 +364,12 @@ impl RiskClassifier {
                     prominent: region.area() as f32 >= AGREE_SHARE * frame as f32,
                 });
             }
-            results.push(result);
+            if reported {
+                results.push(result);
+            }
         }
-        NSFW_MODEL_INVOCATIONS.fetch_add(model_runs as u64, Ordering::Relaxed);
 
-        let (risk, nsfw) = if wanted_model && model.is_none() {
+        let (risk, nsfw) = if wanted_model && matches!(model, LazyModel::Failed) {
             (skin * SKIN_WEIGHT, None)
         } else {
             combine(&scored)
@@ -443,6 +434,35 @@ impl RiskClassifier {
     }
 }
 
+/// The model for one `classify_regions` call: built on first use, and not retried once a
+/// build has failed, so a broken model costs one parse and one error per capture.
+enum LazyModel {
+    NotBuilt,
+    Built(Box<NsfwModel>),
+    Failed,
+}
+
+impl LazyModel {
+    fn get(&mut self, model_bytes: &[u8]) -> Option<&NsfwModel> {
+        if matches!(self, LazyModel::NotBuilt) {
+            *self = match RiskClassifier::build_model(model_bytes) {
+                Ok(model) => {
+                    NSFW_MODEL_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+                    LazyModel::Built(Box::new(model))
+                }
+                Err(err) => {
+                    tracing::error!(error = %err, "NSFW classifier unavailable, falling back to skin-only risk");
+                    LazyModel::Failed
+                }
+            };
+        }
+        match self {
+            LazyModel::Built(model) => Some(model),
+            _ => None,
+        }
+    }
+}
+
 /// A region the model ran on, as [`combine`] sees it.
 struct ScoredRegion {
     /// After the floor and size weighting.
@@ -484,17 +504,7 @@ fn size_weight(region: &Region) -> f32 {
 
 /// True if almost no pixel of a 64×64 thumbnail has visible color: a black-and-white photo.
 pub fn is_grayscale(img: &DynamicImage) -> bool {
-    let small = img.resize_exact(
-        SKIN_DOWNSAMPLE,
-        SKIN_DOWNSAMPLE,
-        image::imageops::FilterType::Nearest,
-    );
-    let rgb = small.to_rgb8();
-    let colored = rgb
-        .pixels()
-        .filter(|p| p.0.iter().max().unwrap() - p.0.iter().min().unwrap() > GRAY_CHROMA)
-        .count();
-    (colored as f32) < GRAY_MAX_COLORED * rgb.pixels().len() as f32
+    thumbnail_is_gray(&thumbnail(img))
 }
 
 /// Cheap skin-tone heuristic. Downsamples to 64×64 (Nearest) and counts pixels whose
@@ -502,13 +512,33 @@ pub fn is_grayscale(img: &DynamicImage) -> bool {
 /// 30% skin pixels: `min(skin_ratio / 0.30, 1.0)`. `dark_skin` also counts darker skin
 /// pixels (see [`is_skin`]).
 pub fn skin_score(img: &DynamicImage, dark_skin: bool) -> f32 {
-    let small = img.resize_exact(
+    thumbnail_skin(&thumbnail(img), dark_skin)
+}
+
+/// [`skin_score`] and [`is_grayscale`] from one shared thumbnail.
+fn skin_and_gray(img: &DynamicImage, dark_skin: bool) -> (f32, bool) {
+    let small = thumbnail(img);
+    (thumbnail_skin(&small, dark_skin), thumbnail_is_gray(&small))
+}
+
+fn thumbnail(img: &DynamicImage) -> image::RgbImage {
+    img.resize_exact(
         SKIN_DOWNSAMPLE,
         SKIN_DOWNSAMPLE,
         image::imageops::FilterType::Nearest,
-    );
-    let rgb = small.to_rgb8();
+    )
+    .to_rgb8()
+}
 
+fn thumbnail_is_gray(rgb: &image::RgbImage) -> bool {
+    let colored = rgb
+        .pixels()
+        .filter(|p| p.0.iter().max().unwrap() - p.0.iter().min().unwrap() > GRAY_CHROMA)
+        .count();
+    (colored as f32) < GRAY_MAX_COLORED * rgb.pixels().len() as f32
+}
+
+fn thumbnail_skin(rgb: &image::RgbImage, dark_skin: bool) -> f32 {
     let mut skin = 0u32;
     let mut total = 0u32;
     for pixel in rgb.pixels() {
@@ -688,6 +718,37 @@ mod tests {
             assert!(!is_skin(*r, *g, *b, false));
         }
         assert!(MONK[..7].iter().all(|&[r, g, b]| is_skin(r, g, b, false)));
+    }
+
+    #[test]
+    fn a_model_that_fails_to_build_falls_back_to_skin() {
+        // A plain skin-toned frame has no images, so the whole frame is scored, and its skin
+        // passes the gate; the model can't be built, so the risk is the skin contribution.
+        let classifier = RiskClassifier::new(b"not a model");
+        let result = classifier
+            .classify_regions(&solid(240, 200, 160), Screen::Desktop)
+            .unwrap();
+        assert!(result.regions.is_empty());
+        assert_eq!(result.model_runs, 0);
+        assert_eq!(result.scores.nsfw, None);
+        assert_eq!(result.scores.risk, SKIN_WEIGHT);
+    }
+
+    #[test]
+    fn warm_dark_theme_colors_pass_only_the_per_image_skin_gate() {
+        // Gruvbox bg2, a warm gray, Material brown 700 and 800, dark khaki. They overlap the
+        // darkest Monk tones, so the dark rule counts them; whole-frame scoring, where skin
+        // adds to the risk, doesn't use that rule.
+        for [r, g, b] in [
+            [0x50, 0x49, 0x45],
+            [0x48, 0x40, 0x3a],
+            [0x5d, 0x40, 0x37],
+            [0x4e, 0x34, 0x2e],
+            [0x55, 0x4b, 0x3c],
+        ] {
+            assert!(is_skin(r, g, b, true), "#{r:02x}{g:02x}{b:02x}");
+            assert!(!is_skin(r, g, b, false), "#{r:02x}{g:02x}{b:02x}");
+        }
     }
 
     #[test]

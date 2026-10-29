@@ -190,25 +190,20 @@ def region_risk(view, nsfw, p):
     return skin * w + (nsfw or 0.0) * (1 - w) if w else (nsfw or 0.0)
 
 
-def score_whole(rec, p, model, fallback=False):
-    """classify_image: whole-frame skin gate, then the model on the whole frame. With
-    fallback=True, classify_regions' version for screens with no regions: the per-region skin
-    gate and grayscale rules."""
+def score_whole(rec, p, model):
+    """classify_image: whole-frame skin gate, then the model on the whole frame."""
     whole = rec["whole"]
     # classify_image leaves out the dark-skin rule; collections from before it have only skin.
-    skin = whole["skin"] if fallback else whole.get("skin_ycbcr", whole["skin"])
+    skin = whole.get("skin_ycbcr", whole["skin"])
     contribution = skin * p["skin_weight"]
-    gate = p["region_skin_gate"] if fallback else p["skin_gate"]
-    gray = fallback and rec["whole"].get("gray")
-    if contribution <= gate and not (gray and p["gray_bypass"]):
-        return {"risk": 0.0 if fallback else contribution, "nsfw": None, "model_runs": 0}
+    if contribution <= p["skin_gate"]:
+        return {"risk": contribution, "nsfw": None, "model_runs": 0}
     if model == "moderator":
-        nsfw, runs = moderator_nsfw(rec["whole"], p)
+        nsfw, runs = moderator_nsfw(whole, p)
     else:
-        nsfw, runs = gantman_nsfw(rec["whole"]["probs"], 1.0), 1
-    risk = region_risk(rec["whole"], nsfw, p) if fallback else (
-        skin * p["skin_weight"] + nsfw * p["model_weight"])
-    return {"risk": risk, "nsfw": nsfw, "model_runs": runs}
+        nsfw, runs = gantman_nsfw(whole["probs"], 1.0), 1
+    return {"risk": skin * p["skin_weight"] + nsfw * p["model_weight"], "nsfw": nsfw,
+            "model_runs": runs}
 
 
 def score_region(view, p, model, runs):
@@ -229,10 +224,12 @@ def score_regions(rec, p, model):
         return short >= p["min_side"] and (not p["max_aspect"] or long <= p["max_aspect"] * short)
 
     regions = [r for r in rec["regions"] if keep(r)][: int(p["max_regions"])]
-    if not regions:
-        out = score_whole(rec, p, model, fallback=True)
-        out["region_scores"] = []
-        return out
+    # With no image found, the whole frame is scored as the only one, filling its window, and
+    # isn't reported as a region.
+    reported = bool(regions)
+    if not reported:
+        w, h = rec["width"], rec["height"]
+        regions = [dict(rec["whole"], x=0, y=0, width=w, height=h, container=[0, 0, w, h])]
     runs, scores, agreeing, dominant = 0, [], 0, False
     screen = rec["width"] * rec["height"]
     for r in regions:
@@ -263,8 +260,8 @@ def score_regions(rec, p, model):
     risk = region_risk(best_view, nsfw, p)
     if p["min_agree"] and agreeing < p["min_agree"] and not dominant:
         risk = min(risk, (HIGH - 1) / 100)
-    return {"risk": risk, "nsfw": nsfw, "model_runs": runs, "region_scores": scores,
-            "agreeing": agreeing}
+    return {"risk": risk, "nsfw": nsfw, "model_runs": runs,
+            "region_scores": scores if reported else [], "agreeing": agreeing}
 
 
 def cost_ms(rec, result, bench, method):
