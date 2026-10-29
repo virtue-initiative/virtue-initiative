@@ -63,6 +63,8 @@ To see a `web/` or `landing/` change in a browser, use `bunx playwright-cli` (th
 
 These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
 
+The shared test vectors in `batch-format/vectors/` (BATCH-008) pin all five. Both sides' tests check them, so drift on either side fails CI.
+
 ### 1. Batch wire format
 
 Rust produces, TypeScript consumes. `batch-format/SPEC.md` is the source of truth:
@@ -101,11 +103,11 @@ new_state = sha256(current_state[32] || contentHash[32])
 
 ### 4. Password auth derivation
 
-Login must hash the password the same way on both platforms before sending:
+Login must hash the password the same way on both platforms before sending. The salt and argon2 parameters come from `GET /user/login-material` (API-015):
 
 ```
-argon2id(password, salt=lowercase_email, m=65536, t=3, p=1, len=32)
-then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
+argon2id(password, salt=password_salt, m/t/p=params, len=32)
+then HKDF-SHA256("auth", argon_output) → Base64 string sent as password_auth
 ```
 
 Key files:

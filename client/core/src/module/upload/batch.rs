@@ -148,4 +148,118 @@ mod tests {
         assert_eq!(payload[..3], [0x91, 0xc4, encoded_event.len() as u8]);
         assert_eq!(payload[3..], encoded_event[..]);
     }
+
+    // BATCH-002, BATCH-004, BATCH-005, BATCH-006: the production BatchBuilder
+    // turns each vector's events into a batch that a consumer holding the
+    // vector's recipient private key opens to exactly those encoded events.
+    #[test]
+    fn build_upload_output_opens_for_every_vector_case() {
+        use aes_gcm::aead::{Aead, KeyInit};
+        use aes_gcm::{Aes256Gcm, Nonce};
+        use base64::Engine;
+        use hpke::aead::AesGcm256;
+        use hpke::kdf::HkdfSha256;
+        use hpke::kem::{Kem as KemTrait, X25519HkdfSha256};
+        use hpke::{Deserializable, OpModeR, setup_receiver};
+        use std::io::Read;
+
+        use super::BatchBuilder;
+        use crate::crypto::CryptoEngine;
+        use crate::model::BatchRecipient;
+
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len() / 2)
+                .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap())
+                .collect()
+        }
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../batch-format/vectors/batch.json");
+        let file: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read batch.json"))
+                .expect("parse batch.json");
+        let mut built = 0;
+        for case in file["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let encoded: Vec<Vec<u8>> = case["encoded_events_hex"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| unhex(e.as_str().unwrap()))
+                .collect();
+            let recipient = BatchRecipient {
+                user_id: "vector".to_string(),
+                pub_key_base64: case["recipient_public_key_base64"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            };
+            let upload = BatchBuilder::build_upload(
+                &encoded,
+                &CryptoEngine,
+                std::slice::from_ref(&recipient),
+                0,
+                0,
+                0,
+                0,
+                0,
+                Vec::new(),
+            );
+            if encoded.is_empty() {
+                // BATCH-002: a batch MUST contain at least one event.
+                assert!(upload.is_err(), "{name}: empty batch must be refused");
+                continue;
+            }
+            let upload = upload.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(upload.total_count as usize, encoded.len(), "{name}");
+
+            let sk = unhex(case["recipient_private_key_hex"].as_str().unwrap());
+            let sk =
+                <<X25519HkdfSha256 as KemTrait>::PrivateKey as Deserializable>::from_bytes(&sk)
+                    .unwrap();
+            let envelope = base64::engine::general_purpose::STANDARD
+                .decode(&upload.access_keys[0].hpke_key_base64)
+                .unwrap();
+            let enc = <<X25519HkdfSha256 as KemTrait>::EncappedKey as Deserializable>::from_bytes(
+                &envelope[..32],
+            )
+            .unwrap();
+            let mut ctx = setup_receiver::<AesGcm256, HkdfSha256, X25519HkdfSha256>(
+                &OpModeR::Base,
+                &sk,
+                &enc,
+                b"",
+            )
+            .unwrap();
+            let batch_key = ctx.open(&envelope[32..], b"").unwrap();
+
+            let cipher = Aes256Gcm::new_from_slice(&batch_key).unwrap();
+            let gz = cipher
+                .decrypt(Nonce::from_slice(&upload.bytes[..12]), &upload.bytes[12..])
+                .unwrap();
+            let mut payload = Vec::new();
+            flate2::read::GzDecoder::new(&gz[..])
+                .read_to_end(&mut payload)
+                .unwrap();
+            let decoded: Vec<serde_bytes::ByteBuf> = rmp_serde::from_slice(&payload).unwrap();
+            let decoded: Vec<Vec<u8>> = decoded.into_iter().map(|b| b.into_vec()).collect();
+            assert_eq!(decoded, encoded, "{name}");
+            built += 1;
+        }
+        assert!(built >= 5, "expected several non-empty batch cases");
+
+        // BATCH-005: a batch MUST NOT be built without recipients.
+        let none = BatchBuilder::build_upload(
+            &[vec![0x80]],
+            &CryptoEngine,
+            &[],
+            0,
+            0,
+            0,
+            0,
+            0,
+            Vec::new(),
+        );
+        assert!(none.is_err());
+    }
 }

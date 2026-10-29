@@ -1,0 +1,329 @@
+{
+  "cases": [
+    {
+      "content_hash_hex": "53b3abb163c3c0bbd8faae532c15297a18abc22784ff4ec02d364dca6258fb44",
+      "encoded_hex": "82a27473cf0000018bcfe56800a474797065a9686561727462656174",
+      "event": {
+        "ts": 1700000000000,
+        "type": "heartbeat"
+      },
+      "name": "heartbeat_no_risk_no_data",
+      "state_from_zero_hex": "88fe0ed7ed76101a1fc51340ff741e14ba123fa68797e0e215f48a48874c462a"
+    },
+    {
+      "content_hash_hex": "2eaf4682aca046636a5455c7575b6fdc588f3d75b48b5bde2f7c3ae4bff13851",
+      "encoded_hex": "82a2747300a474797065aa757365725f7374617274",
+      "event": {
+        "ts": 0,
+        "type": "user_start"
+      },
+      "name": "ts_zero",
+      "state_from_zero_hex": "8b6e317261d31d774476c9b89d7dbc6864658f5c007b30c88b8a2d6359c871d1"
+    },
+    {
+      "content_hash_hex": "ecf7a37bdb3b151ffc10d86be228d5108879bc9018eb5db2dee9d2da2273295e",
+      "encoded_hex": "83a27473ffa47269736bca3f800000a474797065a9757365725f73746f70",
+      "event": {
+        "risk": 1.0,
+        "ts": -1,
+        "type": "user_stop"
+      },
+      "name": "ts_negative_one",
+      "state_from_zero_hex": "925f1f427028862f440bf97c61dc667ee92768e6fac033fe47b304ee856aa37f"
+    },
+    {
+      "content_hash_hex": "28097c302bdd3e6618f37bbc0b126274ceed45b854e9d0cbb8fbec5570b14c7e",
+      "encoded_hex": "82a27473cf001fffffffffffffa474797065ae636170747572655f6661696c6564",
+      "event": {
+        "ts": 9007199254740991,
+        "type": "capture_failed"
+      },
+      "name": "ts_max_safe_integer",
+      "state_from_zero_hex": "99da611c0c0793189759aa28e5a332593c673728a88d00b2c9be16892f800ce9"
+    },
+    {
+      "content_hash_hex": "0f4805922773ad7bf1dfcd790dac180c045e9444bf3fc31dd214616d6b444271",
+      "encoded_hex": "83a27473cf0000000100000000a47269736bca00000000a474797065b173637265656e73686f745f6d6973736564",
+      "event": {
+        "risk": 0.0,
+        "ts": 4294967296,
+        "type": "screenshot_missed"
+      },
+      "name": "ts_above_u32",
+      "state_from_zero_hex": "0f3938b89e5bd7b3da815c8f0e71114f30a8c90e848f6e6d4716b42acb110438"
+    },
+    {
+      "content_hash_hex": "56f6e43b512526e8c383190736b43d7a624945de18ad6117dfb3a65f6c9608b2",
+      "encoded_hex": "84a27473cf0000018bcfe56be8a47269736bca3f333333a474797065a5616c657274a46461746181a76d657373616765a87269736b20302e37",
+      "event": {
+        "data": {
+          "message": "risk 0.7"
+        },
+        "risk": 0.7,
+        "ts": 1700000001000,
+        "type": "alert"
+      },
+      "name": "risk_inexact_in_f32",
+      "state_from_zero_hex": "e600dd612bd23abbda1eb213e448ceb684aa9d201af6d9850eefb55365b1d3fd"
+    },
+    {
+      "content_hash_hex": "1f2c3f004ef7a1153634edf67f013c08c0afbd293606e665cb9d7f0ada170c45",
+      "encoded_hex": "83a27473cf0000018bcfe56fd0a47269736bca3f600000a474797065a9757365725f73746f70",
+      "event": {
+        "risk": 0.875,
+        "ts": 1700000002000,
+        "type": "user_stop"
+      },
+      "name": "risk_exact_in_f32",
+      "state_from_zero_hex": "e99b5f83a3670d83919d462c4564e41de3c7e0ab98fa754459f8931e3748d3a5"
+    },
+    {
+      "content_hash_hex": "e1241466074639bd14cecf29a58f26eef52ccdb06c3127992c853acd0ece3ec1",
+      "encoded_hex": "84a27473cf0000018bcfe573b8a47269736bca00000000a474797065b273637265656e73686f745f736b6970706564a46461746181a6726561736f6ead7374617469635f73637265656e",
+      "event": {
+        "data": {
+          "reason": "static_screen"
+        },
+        "risk": 0.0,
+        "ts": 1700000003000,
+        "type": "screenshot_skipped"
+      },
+      "name": "screenshot_skipped_static",
+      "state_from_zero_hex": "53714c650bfbd12e506010cbcfca529d535ed43778b10375d92209e935e835ef"
+    },
+    {
+      "content_hash_hex": "430985a99ed7088362a61955002f62229130b2a83187d2f16dc96ad1f7bf3a79",
+      "encoded_hex": "83a27473cf0000018bcfe577a0a474797065b273637265656e73686f745f736b6970706564a46461746181a6726561736f6eb56c6f636b65645f6f725f73637265656e7361766572",
+      "event": {
+        "data": {
+          "reason": "locked_or_screensaver"
+        },
+        "ts": 1700000004000,
+        "type": "screenshot_skipped"
+      },
+      "name": "screenshot_skipped_locked",
+      "state_from_zero_hex": "94bc5ed597d747959789cadb8b2f3fad73bd0b087bd4ed76c85b7c3824dfd208"
+    },
+    {
+      "content_hash_hex": "8e1b454c5386341375f149d28ed04bcf9a469e6999bb07c8b6c256057dad3962",
+      "encoded_hex": "84a27473cf0000018bcfe57b88a47269736bca3f000000a474797065aa73637265656e73686f74a46461746184a5696d616765c440000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fac636f6e74656e745f74797065aa696d6167652f77656270ae736b696e5f646574656374696f6eca3e800000ae6e7366775f646574656374696f6eca3f400000",
+      "event": {
+        "data": {
+          "content_type": "image/webp",
+          "image": {
+            "$hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+          },
+          "nsfw_detection": 0.75,
+          "skin_detection": 0.25
+        },
+        "risk": 0.5,
+        "ts": 1700000005000,
+        "type": "screenshot"
+      },
+      "name": "screenshot_with_scores",
+      "state_from_zero_hex": "3151639f52bd2fd60fe0de6b8839651567e8de354bbdc9c41bfb55b4e4d41ab7"
+    },
+    {
+      "content_hash_hex": "fa5fac55f09ba2201abcd186a238ba121714c9aa26bb1393548b3793099cb1b0",
+      "encoded_hex": "83a27473cf0000018bcfe57f70a474797065aa73637265656e73686f74a46461746182a5696d616765c400ac636f6e74656e745f74797065a9696d6167652f706e67",
+      "event": {
+        "data": {
+          "content_type": "image/png",
+          "image": {
+            "$hex": ""
+          }
+        },
+        "ts": 1700000006000,
+        "type": "screenshot"
+      },
+      "name": "screenshot_empty_image",
+      "state_from_zero_hex": "a9c82e81f859dc1364ecca5939adc7e14d1cb09bc0b000d6cf7a3e9a8fa81bc7"
+    },
+    {
+      "content_hash_hex": "6d077a4eda48912a319a442553cd90991ffb07c87019b333ad1cafc6f135160d",
+      "encoded_hex": "83a27473cf0000018bcfe58358a474797065aa73637265656e73686f74a46461746182a5696d616765c4ff0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeffac636f6e74656e745f74797065aa696d6167652f77656270",
+      "event": {
+        "data": {
+          "content_type": "image/webp",
+          "image": {
+            "$hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+          }
+        },
+        "ts": 1700000007000,
+        "type": "screenshot"
+      },
+      "name": "screenshot_image_255_bytes_bin8_max",
+      "state_from_zero_hex": "14edcc91512ae284ab80651c481586bba19923a72d8c9ad82500a40ef2ff3c0c"
+    },
+    {
+      "content_hash_hex": "4932828aee48d06086277df3bc58e7ce43b5623f95d54ede4a7403b89fbc224e",
+      "encoded_hex": "83a27473cf0000018bcfe58740a474797065aa73637265656e73686f74a46461746182a5696d616765c50100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeffac636f6e74656e745f74797065aa696d6167652f77656270",
+      "event": {
+        "data": {
+          "content_type": "image/webp",
+          "image": {
+            "$hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"
+          }
+        },
+        "ts": 1700000008000,
+        "type": "screenshot"
+      },
+      "name": "screenshot_image_256_bytes_bin16_all_byte_values",
+      "state_from_zero_hex": "db589dd9c782b1e89bc9db43352123b485a54bfad4589cdec43b7467145f1314"
+    },
+    {
+      "content_hash_hex": "13ed7882575b55f25baccab537acc94aadc83080e445dec5dc669e93b671d34e",
+      "encoded_hex": "83a27473cf0000018bcfe58b28a474797065ac73797374656d5f6c6f67696ea46461746181a67574635f6d73cf0000018bcfe540f0",
+      "event": {
+        "data": {
+          "utc_ms": 1699999990000
+        },
+        "ts": 1700000009000,
+        "type": "system_login"
+      },
+      "name": "system_login",
+      "state_from_zero_hex": "438429e104faee8d573484d9d9f59d8a2f604603ee219d28668d62227e9c7e82"
+    },
+    {
+      "content_hash_hex": "fab5f890a00a87d72f07de841ecc2eeeb6924d91c0160f699401f6c4efecea0e",
+      "encoded_hex": "83a27473cf0000018bcfe58f10a474797065ad73797374656d5f6c6f676f7574a46461746181a67574635f6d7300",
+      "event": {
+        "data": {
+          "utc_ms": 0
+        },
+        "ts": 1700000010000,
+        "type": "system_logout"
+      },
+      "name": "system_logout",
+      "state_from_zero_hex": "24a79a242ead195c1c198c89fe64ad1848d192064446691817d6609fecb90657"
+    },
+    {
+      "content_hash_hex": "7d0f2695d57aa9383c56828c4ec423dcc135e10c130ec0fbfedb8a3cf8b3351c",
+      "encoded_hex": "84a27473cf0000018bcfe592f8a47269736bca3f000000a474797065b172657065617465645f7265737461727473a46461746182a5636f756e7403a977696e646f775f6d73ce000927c0",
+      "event": {
+        "data": {
+          "count": 3,
+          "window_ms": 600000
+        },
+        "risk": 0.5,
+        "ts": 1700000011000,
+        "type": "repeated_restarts"
+      },
+      "name": "repeated_restarts",
+      "state_from_zero_hex": "00f44cb36cf7544fe0bcc0a971e11af286dabeb6c0a4bb3b631d9e3356027a77"
+    },
+    {
+      "content_hash_hex": "6c49f274b4448502d737d35978da8e805d48f01e04f6175066cbaf45db8574eb",
+      "encoded_hex": "84a27473cf0000018bcfe596e0a47269736bca3f800000a474797065a5616c657274a46461746181a76d657373616765d92954616d70657220616c6572743a206e61c3af766520636166c3a920e697a5e69cace8aa9e20f09fa680",
+      "event": {
+        "data": {
+          "message": "Tamper alert: naïve café 日本語 🦀"
+        },
+        "risk": 1.0,
+        "ts": 1700000012000,
+        "type": "alert"
+      },
+      "name": "alert_unicode",
+      "state_from_zero_hex": "9679219d3950766ceb638102c6f17fff86911ec97440cdd59ee9f8f2ee1194a3"
+    },
+    {
+      "content_hash_hex": "92865ff93301f2b281997fcc49fe65f051d9b455ea1acc16a860aea047c42b8d",
+      "encoded_hex": "83a27473cf0000018bcfe59ac8a474797065a5616c657274a46461746181a76d657373616765a0",
+      "event": {
+        "data": {
+          "message": ""
+        },
+        "ts": 1700000013000,
+        "type": "alert"
+      },
+      "name": "alert_empty_message",
+      "state_from_zero_hex": "744e84d252a983ab7becaf56ecdda6bccc25ebf2c5a219c7454844727bb7e6e2"
+    },
+    {
+      "content_hash_hex": "c81679f1708a0292947e071ac97b2fccc8a13d7836298702017451ff7df0a5ac",
+      "encoded_hex": "83a27473cf0000018bcfe59eb0a474797065a5616c657274a46461746181a76d657373616765da012c616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161",
+      "event": {
+        "data": {
+          "message": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "ts": 1700000014000,
+        "type": "alert"
+      },
+      "name": "alert_300_chars_str16",
+      "state_from_zero_hex": "50f0f99159a2b95c589d70d982365c85257a6d3d1da77def75ee685c61f39a06"
+    },
+    {
+      "content_hash_hex": "c8e2b6604bca32915e74d70b423517f5d97603cafbb2e696595aa7662610b450",
+      "encoded_hex": "83a27473cf0000018bcfe5a298a474797065a3646576a46461746182a57469746c65a174a764657461696c73c0",
+      "event": {
+        "data": {
+          "details": null,
+          "title": "t"
+        },
+        "ts": 1700000015000,
+        "type": "dev"
+      },
+      "name": "dev_details_nil",
+      "state_from_zero_hex": "c80b951d7de64879af8a5b4d3920f92ff4300f4651c57efd4b4ec1cb83931b1d"
+    },
+    {
+      "content_hash_hex": "7c3ba209b450909b96f5de8bf50c1f2705e1e9f08c4dd0f1b270fc0de1f8f43b",
+      "encoded_hex": "83a27473cf0000018bcfe5a680a474797065a3646576a46461746182a57469746c65ba5a61c5bcc3b3c582c4872067c499c59b6cc485206a61c5bac584a764657461696c73d9296c696e65310a6c696e6532097461622000206e756c202271756f74656422206261636b5c736c617368",
+      "event": {
+        "data": {
+          "details": "line1\nline2\ttab \u0000 nul \"quoted\" back\\slash",
+          "title": "Zażółć gęślą jaźń"
+        },
+        "ts": 1700000016000,
+        "type": "dev"
+      },
+      "name": "dev_details_special_characters",
+      "state_from_zero_hex": "3176a8f10cef45a326e6148cc114bfada712ab0e865e75b348208b68541c81c8"
+    },
+    {
+      "content_hash_hex": "564bda383e7868ecec58f0beed09472b876fa0d2d6cac02cdb0f0768f1f955f1",
+      "encoded_hex": "82a27473cf0000018bcfe5aa68a474797065a9757365725f73746f70",
+      "event": {
+        "ts": 1700000017000,
+        "type": "user_stop"
+      },
+      "name": "user_stop_plain",
+      "state_from_zero_hex": "03b03aefe9632438be7e8b8bb14afc7cafd74f8eece01d21f11cefc519e5b872"
+    },
+    {
+      "content_hash_hex": "1b9bdc91ec506533c638563a091316618cbd982fadf7c8dad135ec826ea02b38",
+      "encoded_hex": "82a27473cf0000018bcfe5ae50a474797065aa757365725f7374617274",
+      "event": {
+        "ts": 1700000018000,
+        "type": "user_start"
+      },
+      "name": "user_start_plain",
+      "state_from_zero_hex": "91112cea6f4be3c051fbb9e1c93e86c1afb39cdda9c3d13de915d7048fcc9b4d"
+    },
+    {
+      "content_hash_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "encoded_hex": "",
+      "name": "raw_empty_input",
+      "state_from_zero_hex": "1c9ecec90e28d2461650418635878a5c91e49f47586ecf75f2b0cbb94e897112"
+    },
+    {
+      "content_hash_hex": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "encoded_hex": "616263",
+      "name": "raw_abc",
+      "state_from_zero_hex": "589f9ffed4c477966bfb8d41f37895b08c69047df8f911d6f3b57fbe08faee8d"
+    },
+    {
+      "content_hash_hex": "6bdecf949935c4d31dc4b8cd657a1d66e2ade69b8fe545e8710c870ad0f0a57c",
+      "encoded_hex": "ff00c180",
+      "name": "raw_non_msgpack_bytes",
+      "state_from_zero_hex": "38571763e4b0addceca19bee6b6f8f23ffcd79e242a1812f76b73155809cf77b"
+    },
+    {
+      "content_hash_hex": "541b3e9daa09b20bf85fa273e5cbd3e80185aa4ec298e765db87742b70138a53",
+      "encoded_hex": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "name": "raw_1000_zero_bytes",
+      "state_from_zero_hex": "e6e13d0693d45b3bd96f8780163d7df4d9b8439ebb750c928397ad6fcc3b2de8"
+    }
+  ],
+  "description": "Event encoding and content hash (BATCH-003, BATCH-004, BATCH-006). `event` is the logical event; bytes inside it are {\"$hex\": ...}. `encoded_hex` is the msgpack the Rust producer emits for it (lowercase hex). `content_hash_hex` = sha256(encoded bytes). `state_from_zero_hex` = sha256(32 zero bytes || content hash), the chain state after this one event. Cases without `event` are raw byte strings. Floats in `risk`, `skin_detection` and `nsfw_detection` are stored as msgpack float32; a consumer sees the float32 value widened to a double."
+}
