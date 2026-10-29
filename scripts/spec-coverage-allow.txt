@@ -1,0 +1,8 @@
+# Spec sections that have no test yet. One per line: `ID  reason`.
+#
+# This is a ratchet. `bun scripts/spec-check.ts` fails if an uncovered section is
+# missing from this list, and also if a listed section is now cited by a test,
+# so the list can only shrink. Delete the line when you add the test.
+# `bun scripts/spec-check.ts --write-allowlist` adds new uncovered sections
+# with the reason `todo`. Use a real reason where there is nothing to test,
+# e.g. `overview, nothing to test`.

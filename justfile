@@ -32,6 +32,18 @@ dev domain="":
 dev-donate domain="":
     ./scripts/launch.sh --donate {{domain}}
 
+# --- specs ---------------------------------------------------------------
+
+# Check every test cites a SPEC.md section ID and uncovered sections match the allow-list.
+[group('specs')]
+spec-check:
+    bun scripts/spec-check.ts
+
+# Print a markdown report of spec section test coverage and untagged tests.
+[group('specs')]
+spec-coverage:
+    bun scripts/spec-check.ts --report
+
 # --- api -----------------------------------------------------------------
 
 # Run the API worker locally (wrangler dev).

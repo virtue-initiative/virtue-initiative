@@ -1,0 +1,81 @@
+# Testing
+
+The specs say what the software must do, and the tests prove it. A test that proves
+a guarantee should still pass after the code behind it is rewritten, so tests check
+behavior at a component's public interface, not its internals.
+
+## Specs and tests
+
+Every component with behavior worth guaranteeing has a `SPEC.md` (see the table in
+`CLAUDE.md`). Each section has a stable ID such as `API-038` or `WEB-012`.
+
+- Every test MUST cite at least one spec ID. `just spec-check` enforces this in CI.
+- Cite the narrowest section that is true. Tag a whole `describe` block or Rust module
+  only when every test in it proves the same section.
+- An edge case worth guaranteeing goes in the spec as a sentence first, then as a test.
+  If no sentence in the spec explains why a test exists, add one or delete the test.
+
+Where the ID goes:
+
+| Language            | Put the ID in                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| TypeScript (Vitest) | The `it`/`test` title or an enclosing `describe` title, as a suffix: `describe('POST /d/batch (API-038)', ...)`  |
+| Rust                | A comment directly above `#[test]`, or above the enclosing `mod`, or the file's `//!` header: `// CORE-002: ...` |
+| C#, Kotlin, Swift   | A comment directly above the test method or its enclosing class                                                  |
+
+## Where tests attach
+
+Test through the interface a user or another component uses. Anything behind it is
+free to change.
+
+| Component             | Test through                                                                                            | Test setup                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `api/`, `api-donate/` | HTTP requests via `SELF.fetch`, plus visible effects: later responses, logged emails, R2 objects        | Workers Vitest pool with real D1 and R2 (`api/TESTING.md`)   |
+| `web/`                | What the user sees and does, by role and visible text (Testing Library), with the network mocked by MSW | `web/src/test-utils.tsx`, `web/src/mocks/`                   |
+| `client/core/`        | The `Scenario` DSL, which drives the whole daemon with a fake clock, randomness, platform and API       | `client/core/src/testing/`, `client/core/tests/scenarios.rs` |
+| `hash-server/`        | HTTP requests                                                                                           | `hash-server/tests/integration.rs`                           |
+| Platform clients      | Each platform's own test project, plus the device → API integration tests in `client/*/scripts/`        | `AGENTS.md`                                                  |
+| Contracts             | The shared vectors in `batch-format/vectors/`, checked by both the Rust and TypeScript implementations  | `batch-format/SPEC.md`                                       |
+
+Test an internal function directly only when it is pure and its whole input space is
+hard to reach from outside (encodings, time math, layout). It still cites the section
+whose behavior it serves.
+
+## Known bugs
+
+When the code doesn't meet the spec and the fix belongs in a later change:
+
+- Write the test for the spec'd behavior anyway.
+- TypeScript: use `it.fails(...)` with a `// KNOWN-BUG: <what is wrong>` comment
+  directly above. When the code is fixed the test starts failing, so drop `.fails`.
+- Rust: add `#[ignore = "KNOWN-BUG: <what is wrong>"]`.
+- `just spec-coverage` lists every `KNOWN-BUG`, so it doubles as the fix list.
+
+## Coverage
+
+`just spec-coverage` prints, for each spec section, how many tests cite it, plus the
+uncovered sections and the known bugs.
+
+`scripts/spec-coverage-allow.txt` lists the sections that have no test yet. CI fails
+when a new section has no test, and when a listed section gains one (remove its line),
+so the list only shrinks. Sections with nothing to test, such as overviews, stay on
+the list with a reason.
+
+## Keeping edge cases out of the main code
+
+- Handle edge cases at the boundaries. Validate, clamp and normalize where data comes in
+  (request parsing, the batch materializer, settings parsing), so the logic behind it
+  only sees valid data. One clamp in one place needs one table test.
+- Before adding a branch for an edge case, check whether the data model can make it
+  impossible: an enum instead of several booleans, a required field after parsing.
+- Write edge cases as rows of a table test (`it.each`, a Rust array of cases), not as
+  a new test per case. Adding a case should mean adding a line.
+
+## Workflow
+
+1. Behavior change: update the spec first, then add or change a test that cites it,
+   then change the code.
+2. Bug fix: add a test that fails without the fix and cites the section it violates. If
+   no section covers the case, add the sentence to the spec in the same change.
+3. Refactor: the tests should not change. If they have to, they were testing the design;
+   rewrite them against the interface.
