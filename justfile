@@ -170,6 +170,30 @@ shared-web-format:
 core-test:
     cargo test -p virtue-core
 
+# --- mutation testing ----------------------------------------------------
+# Occasional runs (not per PR) that look for code the tests do not really check.
+# See "Property and mutation testing" in TESTING.md. Reports: mutants.out/ (Rust),
+# web/reports/mutation/ (web). All three edit source files in place (and restore them), because
+# the tests read batch-format/vectors/ outside the crate. Pass extra flags, e.g. `-j 2`.
+
+# Mutate the riskiest client/core files (client/core/.cargo/mutants.toml; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'client']
+mutants-core *args:
+    cargo mutants -p virtue-core --config core/.cargo/mutants.toml --timeout 300 --in-place {{args}}
+
+# Mutate the hash server (hash-server/.cargo/mutants.toml; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'hash-server']
+mutants-hash *args:
+    cargo mutants --timeout 120 --in-place {{args}}
+
+# Mutate the web crypto, batch materializer and cache sync (web/stryker.config.json; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'web']
+mutants-web *args:
+    bunx stryker run {{args}}
+
 # --- linux ---------------------------------------------------------------
 
 # Build the Linux .deb package.

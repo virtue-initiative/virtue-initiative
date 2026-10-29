@@ -91,3 +91,55 @@ the list with a reason.
    no section covers the case, add the sentence to the spec in the same change.
 3. Refactor: the tests should not change. If they have to, they were testing the design;
    rewrite them against the interface.
+
+## Property and mutation testing
+
+Two extra tools that find what example-based tests miss. Neither replaces the rules above:
+a property test still cites the spec ID of the sentence it proves, in the same places.
+
+**Property tests** are for a large input space with a crisp invariant, such as "decoding
+what was encoded gives the same event", "raising the rollout never turns a flag off for a
+user", or "changing any byte of an event fails the hash chain". They run `fast-check`
+(TypeScript) or `proptest` (Rust) over generated inputs. Keep case counts modest so a file
+runs in a few seconds, and keep them in their own `*.property.test.ts` or `properties.rs`
+file. Use an example test, not a property, when the input space is small or the expected
+value can only be written by repeating the code under test.
+
+| Package        | Property tests                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `api/`         | `test/feature-flags.property.test.ts` (API-061)                                                                                                        |
+| `web/`         | `src/utils/api/crypto.property.test.ts`, `src/utils/cache/sync.property.test.ts`, `src/utils/time.property.test.ts`, `src/utils/risk.property.test.ts` |
+| `client/core/` | `tests/properties.rs` (BATCH-002, BATCH-003, BATCH-005, BATCH-006)                                                                                     |
+| `hash-server/` | `tests/properties.rs` (HASH-006 to HASH-008)                                                                                                           |
+
+They run with each package's normal test command. When a property fails, the framework
+prints a shrunk counterexample. Turn it into a table row of an example test so it stays
+fixed, then fix the code.
+
+**Mutation testing** changes the code on purpose (flips a comparison, deletes a statement,
+returns a constant) and reruns the tests. A mutant that no test fails is _missed_: that
+code can change without any test noticing. It is slow, so it is not part of CI for PRs.
+`.github/workflows/mutation.yml` runs it monthly and on demand, one job per tool, and
+uploads each report as an artifact.
+
+| Command             | Tool          | Scope                                                                                           |
+| ------------------- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `just mutants-core` | cargo-mutants | `client/core`: `crypto.rs`, `module/lifecycle.rs`, `module/upload.rs`, `module/upload/batch.rs` |
+| `just mutants-hash` | cargo-mutants | `hash-server/src/`, without start-up and logging                                                |
+| `just mutants-web`  | Stryker       | `web/src/utils/api/crypto.ts`, `batch-materializer.ts`, `web/src/utils/cache/sync.ts`           |
+
+Install `cargo-mutants` once with `cargo install --locked cargo-mutants`. The scope lives
+in `client/core/.cargo/mutants.toml`, `hash-server/.cargo/mutants.toml` and
+`web/stryker.config.json` (which narrows the tests with `web/vitest.mutation.config.ts`).
+Flags after the recipe name go to the tool, for example
+`just mutants-core --file core/src/crypto.rs`. The tools edit source files in place and
+restore them, because the tests read `batch-format/vectors/` outside each package, so start
+from a clean tree and do not run tests in the same checkout meanwhile. Reports are in
+`mutants.out/` (see `missed.txt`) and `web/reports/mutation/index.html`. `api/` is not
+mutated: Stryker cannot drive the Workers Vitest pool.
+
+A surviving mutant means one of two things. Either the spec has no sentence that says
+what the changed code must do, so add the sentence first, or the spec says it and no test
+checks it, so add a test that cites that section. If the mutant changes nothing anyone can
+observe (a log message, an equivalent rewrite), skip it, and exclude it in the tool's
+config only when it keeps coming back.
