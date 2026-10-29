@@ -499,4 +499,31 @@ mod tests {
         assert!(value["data"].get("model_runs").is_none());
         assert!(value["data"].get("images").is_none());
     }
+
+    #[test]
+    fn screenshot_queued_by_an_older_client_still_loads() {
+        // A screenshot saved in event_state.json before per-image details existed.
+        let upload: UploadKind = serde_json::from_value(json!({
+            "type": "screenshot",
+            "data": {
+                "image": [1, 2],
+                "content_type": "image/webp",
+                "skin_detection": 0.5,
+                "nsfw_detection": 0.25
+            }
+        }))
+        .unwrap();
+        let UploadKind::Screenshot {
+            skin_detection,
+            nsfw_detection,
+            model_runs,
+            images,
+            ..
+        } = upload
+        else {
+            panic!("expected a screenshot");
+        };
+        assert_eq!((skin_detection, nsfw_detection), (Some(0.5), Some(0.25)));
+        assert_eq!((model_runs, images), (None, None));
+    }
 }

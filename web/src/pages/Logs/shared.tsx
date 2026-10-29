@@ -53,17 +53,21 @@ type ScoredImage = {
   score?: number;
 };
 
-/** The screenshot's per-image scoring details, or null when it was scored as a whole. */
+/** The screenshot's per-image scoring details, or null when it was scored as a whole, as
+ * every screenshot from a client without per-image scoring is. */
 function getScoredImages(log: DataLog): ScoredImage[] | null {
-  return Array.isArray(log.data.images) ? (log.data.images as ScoredImage[]) : null;
+  if (!Array.isArray(log.data.images)) return null;
+  return log.data.images.filter(
+    (image): image is ScoredImage => typeof image === 'object' && image !== null,
+  );
 }
 
-function formatScore(value: number | undefined) {
-  return value === undefined ? '–' : value.toFixed(2);
+function formatScore(value: unknown) {
+  return typeof value === 'number' ? value.toFixed(2) : '–';
 }
 
 function ScoredImages({ images }: { images: ScoredImage[] }) {
-  const checked = images.filter((image) => image.nsfw !== undefined).length;
+  const checked = images.filter((image) => typeof image.nsfw === 'number').length;
   return (
     <section class="logs-images">
       <h3 class="logs-images-title">Images</h3>
@@ -97,7 +101,7 @@ function ScoredImages({ images }: { images: ScoredImage[] }) {
                     {image.x}, {image.y}
                   </td>
                   <td>{image.gray ? 'Gray' : formatScore(image.skin)}</td>
-                  <td>{image.nsfw === undefined ? 'Skipped' : formatScore(image.nsfw)}</td>
+                  <td>{typeof image.nsfw === 'number' ? formatScore(image.nsfw) : 'Skipped'}</td>
                   <td>{formatScore(image.mirrored)}</td>
                   <td>{formatScore(image.score)}</td>
                 </tr>

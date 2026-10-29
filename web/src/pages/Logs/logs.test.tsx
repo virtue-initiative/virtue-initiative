@@ -451,12 +451,45 @@ describe('LogDetailDialog — per-image scoring details', () => {
     expect(screen.getByText('0.9')).toBeInTheDocument();
   });
 
-  it('shows no image table for a screenshot scored as a whole', async () => {
+  it('still shows whole-frame scores from clients without per-image scoring', async () => {
     const user = userEvent.setup();
-    renderScreenshot({ skin_detection: 0.1 });
+    renderScreenshot({ skin_detection: 0.42, nsfw_detection: 0.875 });
     await user.click(screen.getByRole('button', { name: 'Advanced' }));
 
+    expect(screen.getByText('skin_detection')).toBeInTheDocument();
+    expect(screen.getByText('0.42')).toBeInTheDocument();
+    expect(screen.getByText('nsfw_detection')).toBeInTheDocument();
+    expect(screen.getByText('0.875')).toBeInTheDocument();
     expect(screen.queryByText('Images')).not.toBeInTheDocument();
+  });
+
+  it('still opens Advanced for a screenshot with no scores at all', async () => {
+    const user = userEvent.setup();
+    renderScreenshot({});
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+
+    expect(screen.getByText('content_type')).toBeInTheDocument();
+    expect(screen.queryByText('Images')).not.toBeInTheDocument();
+  });
+
+  it('ignores an images field that is not a list', async () => {
+    const user = userEvent.setup();
+    renderScreenshot({ skin_detection: 0.1, images: 'unexpected' });
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+
+    expect(screen.getByText('skin_detection')).toBeInTheDocument();
+    expect(screen.queryByText('Images')).not.toBeInTheDocument();
+  });
+
+  it('skips malformed image entries instead of failing', async () => {
+    const user = userEvent.setup();
+    renderScreenshot({
+      images: [null, 7, { x: 0, y: 0, width: 50, height: 40, skin: 'bad', nsfw: 0.5 }],
+    });
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+
+    expect(screen.getByText('1 found on the screen, 1 checked by the model.')).toBeInTheDocument();
+    expect(screen.getByText('50×40')).toBeInTheDocument();
   });
 });
 
