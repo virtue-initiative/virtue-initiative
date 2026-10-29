@@ -34,6 +34,9 @@ import type {
   AdminQueryPayload,
   AdminQueryResult,
   AdminQueryScanDetails,
+  FeatureFlag,
+  UpsertFeatureFlagPayload,
+  SetFeatureFlagOverridePayload,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -68,6 +71,9 @@ export type {
   AdminQueryPayload,
   AdminQueryResult,
   AdminQueryScanDetails,
+  FeatureFlag,
+  UpsertFeatureFlagPayload,
+  SetFeatureFlagOverridePayload,
 };
 
 const BASE =
@@ -362,6 +368,24 @@ export const api = {
 
   runAdminQuery: (payload: AdminQueryPayload) =>
     req<AdminQueryResult>('/admin/query', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // api/SPEC.md API-062 to API-065.
+  getAdminFlags: () => req<FeatureFlag[]>('/admin/flags'),
+
+  putAdminFlag: (key: string, payload: UpsertFeatureFlagPayload) =>
+    req<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAdminFlag: (key: string) =>
+    req<void>(`/admin/flags/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+
+  setAdminFlagOverride: (key: string, payload: SetFeatureFlagOverridePayload) =>
+    req<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}/users`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

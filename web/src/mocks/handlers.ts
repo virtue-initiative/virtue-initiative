@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import {
   TEST_ANALYTICS_SNAPSHOT,
+  TEST_FEATURE_FLAG,
   TEST_DEVICES,
   TEST_LOCKED_PASSWORD,
   TEST_USER,
@@ -105,6 +106,19 @@ export const handlers = [
       rows_read: 1,
     }),
   ),
+  http.get(`${BASE}/admin/flags`, () => HttpResponse.json([TEST_FEATURE_FLAG])),
+  http.put(`${BASE}/admin/flags/:key`, async ({ params, request }) => {
+    const body = (await request.json()) as { rollout_percent: number; description?: string };
+    return HttpResponse.json({
+      ...TEST_FEATURE_FLAG,
+      key: params.key,
+      rollout_percent: body.rollout_percent,
+      description: body.description ?? null,
+      overrides: [],
+    });
+  }),
+  http.delete(`${BASE}/admin/flags/:key`, () => new HttpResponse(null, { status: 204 })),
+  http.put(`${BASE}/admin/flags/:key/users`, () => HttpResponse.json(TEST_FEATURE_FLAG)),
 
   http.get(`${BASE}/locked-password`, () => HttpResponse.json([TEST_LOCKED_PASSWORD])),
   http.post(`${BASE}/locked-password`, () => HttpResponse.json({ id: 'new-password-1' })),

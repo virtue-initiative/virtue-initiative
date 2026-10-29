@@ -32,6 +32,7 @@ import {
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser } from '../lib/serializers';
 import {
   signupRequestSchema,
@@ -606,7 +607,9 @@ auth.get('/user', authenticateWebSession(), async (c) => {
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  return c.json(serializeUser(user));
+  return c.json(
+    serializeUser(user, await enabledFeatureFlags(c.env.DB, user.id, user.feature_flags)),
+  );
 });
 
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {

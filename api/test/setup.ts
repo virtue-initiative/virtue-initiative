@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
   settings TEXT NOT NULL DEFAULT '{}',
   pub_key BLOB,
   encrypted_priv_key BLOB,
+  feature_flags TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL
 );
 
@@ -125,6 +126,14 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
   day TEXT PRIMARY KEY,
   metrics TEXT NOT NULL,
   created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+  key TEXT PRIMARY KEY,
+  rollout_percent INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percent BETWEEN 0 AND 100),
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
 );
 `;
 

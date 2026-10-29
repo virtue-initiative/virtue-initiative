@@ -45,9 +45,12 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   },
   "name": "Name" | undefined,
   "pub_key": Base64 | undefined,
-  "encrypted_priv_key": Base64 | undefined
+  "encrypted_priv_key": Base64 | undefined,
+  "feature_flags": ["flag_key", ...]
 }
 ```
+
+`feature_flags` lists the keys of the flags enabled for this user (see API-061).
 
 **Device**
 
@@ -114,7 +117,25 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     }
   ],
   "hash_base_url": "https://..." | null,
-  "hash_token": HashServerToken
+  "hash_token": HashServerToken,
+  "feature_flags": ["flag_key", ...]
+}
+```
+
+`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+
+**FeatureFlag**
+
+```js
+{
+  "key": "new_report_tab",
+  "rollout_percent": 25,         // integer, 0 to 100
+  "description": "..." | null,
+  "overrides": [
+    { "user_id": UUID, "email": "user@example.com", "enabled": true | false }
+  ],
+  "created_at": DateTime,
+  "updated_at": DateTime
 }
 ```
 
@@ -1094,3 +1115,62 @@ Rows read are billed, so the server SHOULD inspect the plan of raw `sql` (`EXPLA
 Presets are trusted and skip the plan check.
 
 The server MUST respond **HTTP 200** with an `AdminQueryResult`, including `rows_read` as reported by the database so the caller can see what the query cost. A query the database rejects MUST produce **HTTP 400** with `error: "Query failed"` and the database message in `details`.
+
+## API-061 Feature flags
+
+Feature flags turn a feature on for some users before everyone. The server MUST evaluate flags; clients MUST receive only the result, as `feature_flags` on `User` and `DeviceSettings`, and MUST treat a key absent from that list as off.
+
+Each flag has a `key` matching `^[a-z0-9_]{1,64}$` and an integer `rollout_percent` from 0 to 100. At 0 the flag is on only for users with a `true` override; at 100 it is on for everyone without a `false` override.
+
+A user MAY have an override of `true` or `false` per flag key. Overrides MUST be stored on the user's row, MUST NOT be stored in `settings` (which the user can write through API-020), and MUST NOT be settable through any route outside this section. The server MUST ignore an override whose key names no flag.
+
+A flag is enabled for a user as follows:
+
+```
+enabled(flag, user) = override(user, flag.key) ?? bucket(flag.key, user.id) < flag.rollout_percent * 100
+bucket(key, user_id) = uint32_be(sha256(utf8(key + ":" + user_id))[0..4]) % 10000
+```
+
+`user_id` is the lowercase hyphenated UUID string. The bucket MUST depend only on the flag key and the user id, so that a user's result does not change when their email does, and raising `rollout_percent` never turns a flag off for a user who had it. For `DeviceSettings` the user is the device's owner, so that all of a user's devices agree.
+
+Evaluating flags MUST NOT write to the database. The server SHOULD read a user's overrides from the user row it already reads to build the response, and MAY cache the flag table in memory for up to 60 seconds. A change MAY therefore take that long, plus the time until a device next fetches its settings (CORE-005), to reach a client. A server instance that changes a flag SHOULD drop its own cache.
+
+Every route in this section is an admin route: API-051's authentication and **HTTP 403** rules apply. A `:key` that does not match the key format MUST produce **HTTP 400**.
+
+### API-062 `GET /admin/flags`
+
+The server MUST return every flag, ordered by `key`:
+
+```js
+// array of FeatureFlag
+```
+
+### API-063 `PUT /admin/flags/:key`
+
+The client MUST send:
+
+```js
+{
+  "rollout_percent": 25,
+  "description": "..." | null | undefined
+}
+```
+
+The server MUST create the flag if it does not exist and otherwise update it, leaving `description` unchanged when it is omitted. It MUST respond **HTTP 400** if `rollout_percent` is not an integer from 0 to 100, and otherwise **HTTP 200** with the resulting `FeatureFlag`.
+
+### API-064 `DELETE /admin/flags/:key`
+
+The server MUST delete the flag and remove its key from every user's overrides, so that a later flag with the same key starts with none. It MUST respond **HTTP 404** for an unknown key and otherwise **HTTP 204**.
+
+### API-065 `PUT /admin/flags/:key/users`
+
+The client MUST send:
+
+```js
+{
+  "email": "user@example.com",
+  "enabled": true | false | null
+}
+```
+
+The server MUST set the override for the user with that email, or remove it when `enabled` is `null`. It MUST respond **HTTP 404** if the flag or the user does not exist, and otherwise **HTTP 200** with the resulting `FeatureFlag`.

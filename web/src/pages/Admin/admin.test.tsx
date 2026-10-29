@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
-import { TEST_ANALYTICS_SNAPSHOT } from '../../mocks/fixtures';
+import { TEST_ANALYTICS_SNAPSHOT, TEST_FEATURE_FLAG } from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Admin } from './index';
 
@@ -248,6 +248,105 @@ describe('Admin', () => {
       expect(bodies[1]).toEqual({ sql: 'SELECT * FROM batches', limit: 100, allow_scan: true });
       expect(screen.queryByRole('button', { name: /run anyway/i })).not.toBeInTheDocument();
       expect(screen.getByText('No rows.')).toBeInTheDocument();
+    });
+  });
+
+  it('lists feature flags with their rollout and overrides', async () => {
+    renderWithClient(<Admin />);
+
+    expect(await screen.findByRole('heading', { name: TEST_FEATURE_FLAG.key })).toBeInTheDocument();
+    expect(screen.getByText('25% of users')).toBeInTheDocument();
+    expect(screen.getByText('tester@example.com')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Description', { selector: '#flag-new_report_tab-description' }),
+    ).toHaveValue(TEST_FEATURE_FLAG.description);
+  });
+
+  it('creates a flag', async () => {
+    let body: unknown;
+    let key: unknown;
+    server.use(
+      http.put(`${BASE}/admin/flags/:key`, async ({ params, request }) => {
+        key = params.key;
+        body = await request.json();
+        return HttpResponse.json({
+          ...TEST_FEATURE_FLAG,
+          key: params.key,
+          rollout_percent: 10,
+          description: 'Beta',
+          overrides: [],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await user.type(await screen.findByLabelText(/new flag key/i), 'beta');
+    const percent = screen.getByLabelText('Rollout %', { selector: '#admin-flag-percent' });
+    await user.clear(percent);
+    await user.type(percent, '10');
+    await user.type(
+      screen.getByLabelText('Description', { selector: '#admin-flag-description' }),
+      'Beta',
+    );
+    await user.click(screen.getByRole('button', { name: /create flag/i }));
+
+    await waitFor(() => {
+      expect(key).toBe('beta');
+      expect(body).toEqual({ rollout_percent: 10, description: 'Beta' });
+      expect(screen.getByRole('heading', { name: 'beta' })).toBeInTheDocument();
+    });
+  });
+
+  it('sets and removes a user override', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.put(`${BASE}/admin/flags/:key/users`, async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json(TEST_FEATURE_FLAG);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await user.type(await screen.findByLabelText(/user email/i), 'someone@example.com');
+    await user.selectOptions(screen.getByLabelText(/^override$/i), 'off');
+    await user.click(screen.getByRole('button', { name: /set override/i }));
+    await user.click(
+      screen.getByRole('button', { name: /remove override for tester@example.com/i }),
+    );
+
+    await waitFor(() => {
+      expect(bodies).toEqual([
+        { email: 'someone@example.com', enabled: false },
+        { email: 'tester@example.com', enabled: null },
+      ]);
+    });
+  });
+
+  it('deletes a flag after confirming', async () => {
+    let deleted: unknown;
+    server.use(
+      http.delete(`${BASE}/admin/flags/:key`, ({ params }) => {
+        deleted = params.key;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await screen.findByRole('heading', { name: TEST_FEATURE_FLAG.key });
+    await user.click(screen.getAllByRole('button', { name: /^delete flag$/i })[0]);
+    expect(deleted).toBeUndefined();
+    const confirm = screen.getAllByRole('button', { name: /^delete flag$/i });
+    await user.click(confirm[confirm.length - 1]);
+
+    await waitFor(() => {
+      expect(deleted).toBe(TEST_FEATURE_FLAG.key);
+      expect(screen.getByText(/no feature flags yet/i)).toBeInTheDocument();
     });
   });
 });
