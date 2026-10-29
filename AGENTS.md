@@ -133,6 +133,7 @@ cargo fmt --all -- --check
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-linux --all-targets -- -D warnings
 cargo test -p virtue-core
+cargo test -p virtue-core --features testing --tests
 cargo test -p virtue-linux
 ./linux/scripts/build-deb.sh
 ```
@@ -173,7 +174,7 @@ cargo build -p virtue-mac
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-mac --all-targets -- -D warnings
 cargo test -p virtue-core
-cargo test -p virtue-core --features testing --test scenarios
+cargo test -p virtue-core --features testing --tests
 ./mac/scripts/build-dmg.sh
 ```
 
@@ -211,7 +212,7 @@ cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
 cargo test --target x86_64-pc-windows-msvc -p virtue-core
-cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --tests
 cargo test --target x86_64-pc-windows-msvc -p virtue-windows
 ./windows/scripts/build-msix.ps1 -Profile Debug
 ```

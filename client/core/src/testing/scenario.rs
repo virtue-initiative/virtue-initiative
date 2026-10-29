@@ -82,6 +82,15 @@ impl Scenario {
         settings: Option<DeviceSettings>,
         initial_ms: i64,
     ) -> Self {
+        Self::from_state_dir_configured(state_dir, settings, initial_ms, |_, _| {})
+    }
+
+    fn from_state_dir_configured(
+        state_dir: PathBuf,
+        settings: Option<DeviceSettings>,
+        initial_ms: i64,
+        configure: impl FnOnce(&TestPlatformHooks, &MockApiClient),
+    ) -> Self {
         let config = scenario_config(state_dir.clone());
         let clock = MockClock::new(initial_ms);
         let platform = TestPlatformHooks::with_clock(clock.clone());
@@ -91,6 +100,7 @@ impl Scenario {
         }
         let api_handle = api.clone();
         let rng = TestRandomSource::new();
+        configure(&platform, &api_handle);
 
         let state_path = state_dir.join("event_state.json");
         let daemon = Daemon::new(config, platform.clone(), api, state_path)
@@ -120,6 +130,19 @@ impl Scenario {
     /// than always at t=0.
     pub fn authenticated_with_state_dir_at(state_dir: PathBuf, now_ms: i64) -> Self {
         Self::from_state_dir(state_dir, None, now_ms)
+    }
+
+    /// Same as [`Scenario::authenticated_with_state_dir_at`], but runs
+    /// `configure` on the test platform and mock API *before* `Daemon::new`,
+    /// so a test can shape what the one-time startup logic sees (e.g. a
+    /// platform whose `lifecycle_enabled` is false, or a canned startup
+    /// settings response).
+    pub fn authenticated_with_state_dir_configured(
+        state_dir: PathBuf,
+        now_ms: i64,
+        configure: impl FnOnce(&TestPlatformHooks, &MockApiClient),
+    ) -> Self {
+        Self::from_state_dir_configured(state_dir, None, now_ms, configure)
     }
 
     // --- time control ---
