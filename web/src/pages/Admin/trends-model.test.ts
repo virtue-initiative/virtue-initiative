@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TEST_ANALYTICS_SNAPSHOT } from '../../mocks/fixtures';
 import { formatTrendValue, niceCeil, seriesFor, trendVariables } from './trends-model';
 
-describe('trendVariables', () => {
+describe('trendVariables (WEB-067)', () => {
   it('adds one variable per platform seen in the snapshots', () => {
     const variables = trendVariables([TEST_ANALYTICS_SNAPSHOT]);
     const platformKeys = variables.filter((v) => v.key.startsWith('devices.by_platform.'));
@@ -21,7 +21,7 @@ describe('trendVariables', () => {
   });
 });
 
-describe('seriesFor', () => {
+describe('seriesFor (WEB-067)', () => {
   it('orders oldest first and positions by real date', () => {
     const users = trendVariables([]).find((v) => v.key === 'users.total')!;
     const series = seriesFor(users, [
@@ -43,7 +43,7 @@ describe('seriesFor', () => {
   });
 });
 
-describe('niceCeil', () => {
+describe('niceCeil (WEB-067)', () => {
   it('rounds up to 1, 2, or 5 times a power of ten', () => {
     expect(niceCeil(0)).toBe(1);
     expect(niceCeil(1)).toBe(1);
@@ -56,7 +56,7 @@ describe('niceCeil', () => {
   });
 });
 
-describe('formatTrendValue', () => {
+describe('formatTrendValue (WEB-067)', () => {
   it('keeps integers whole and ratios to two decimals', () => {
     expect(formatTrendValue(9001)).toBe('9,001');
     expect(formatTrendValue(1.5)).toBe('1.50');

@@ -27,7 +27,7 @@ function query(cookie: string, body: unknown) {
   });
 }
 
-describe('Admin access control', () => {
+describe('Admin access control (API-051)', () => {
   const routes: [string, string][] = [
     ['GET', '/admin/analytics'],
     ['POST', '/admin/analytics/refresh'],
@@ -67,7 +67,7 @@ describe('Admin access control', () => {
 });
 
 describe('Admin analytics', () => {
-  it('starts empty, then refresh writes one row and a second refresh replaces it', async () => {
+  it('starts empty, then refresh writes one row and a second refresh replaces it (API-053, API-052)', async () => {
     const { cookie } = await adminCookie();
 
     const empty = await SELF.fetch(`${BASE}/admin/analytics`, { headers: authHeaders(cookie) });
@@ -100,7 +100,7 @@ describe('Admin analytics', () => {
     expect(snapshots[0].created_at).toBe(secondBody.created_at);
   });
 
-  it('lists snapshots newest first and honours days', async () => {
+  it('lists snapshots newest first and honours days (API-052)', async () => {
     const { cookie } = await adminCookie();
     const metrics = JSON.stringify({ users: { total: 0 } });
     await env.DB.batch(
@@ -119,8 +119,8 @@ describe('Admin analytics', () => {
   });
 });
 
-describe('Admin queries', () => {
-  it('lists presets and every preset executes', async () => {
+describe('Admin queries (API-055)', () => {
+  it('lists presets and every preset executes (API-054)', async () => {
     const { cookie } = await adminCookie();
     await signupAndGetCookie('someone@example.com');
 
@@ -253,7 +253,7 @@ describe('Admin queries', () => {
   });
 });
 
-describe('Admin query cost guard', () => {
+describe('Admin query cost guard (API-055)', () => {
   it('reports rows_read on every result', async () => {
     const { cookie } = await adminCookie();
     await signupAndGetCookie('other@example.com');

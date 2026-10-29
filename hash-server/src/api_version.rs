@@ -109,6 +109,7 @@ fn is_version_segment(segment: &str) -> bool {
     }
 }
 
+// HASH-004: version-prefix routing and 410 for unsupported versions.
 #[cfg(test)]
 mod tests {
     use super::*;

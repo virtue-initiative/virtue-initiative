@@ -40,6 +40,7 @@ pub fn build(state: &DaemonState, config: &Config, is_running: bool) -> ServiceS
     }
 }
 
+// CORE-010: the status fields.
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

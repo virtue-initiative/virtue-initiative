@@ -35,6 +35,7 @@ pub fn record_all(state: &mut ErrorState, at_ms: i64, errors: Vec<(String, Strin
     }
 }
 
+// CORE-018: the bounded recent-errors ring.
 #[cfg(test)]
 mod tests {
     use super::*;

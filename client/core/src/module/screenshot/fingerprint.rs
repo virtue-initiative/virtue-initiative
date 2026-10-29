@@ -125,6 +125,7 @@ pub fn changed(prev: &Fingerprint, cur: &Fingerprint) -> bool {
     mean_delta >= MEAN_DELTA_THRESHOLD || strong_cells >= MIN_STRONG_CELLS
 }
 
+// CORE-003: the screen-change check that suppresses unchanged captures.
 #[cfg(test)]
 mod tests {
     use super::*;

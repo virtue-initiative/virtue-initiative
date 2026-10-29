@@ -86,7 +86,7 @@ function makeVP8X(width: number, height: number): Uint8Array {
   return buf;
 }
 
-describe('decodeWebpDimensions', () => {
+describe('decodeWebpDimensions (WEB-042)', () => {
   it('parses VP8 lossy', () => {
     expect(decodeWebpDimensions(makeVP8(1920, 1080))).toEqual({
       width: 1920,

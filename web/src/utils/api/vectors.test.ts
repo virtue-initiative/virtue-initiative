@@ -333,95 +333,102 @@ describe('seed script batches (BATCH-002, BATCH-006)', () => {
 
 // Generator for the TypeScript-made cases, which the Rust tests consume. Skipped unless
 // REGENERATE_TS_VECTORS is set.
-describe.skipIf(!process.env.REGENERATE_TS_VECTORS)('regenerate TypeScript vectors', () => {
-  function writeMerged(file: string, produced: Json[], keep: (c: Json) => boolean) {
-    const url = resolve(VECTORS_DIR, file);
-    const existing = JSON.parse(readFileSync(url, 'utf8'));
-    existing.cases = [...existing.cases.filter(keep), ...produced];
-    writeFileSync(url, JSON.stringify(existing, null, 2) + '\n');
-  }
-
-  it('hpke.json: envelopes sealed by encryptForPublicKey', async () => {
-    const hpke = loadVectors('hpke.json').cases;
-    const rustCases = hpke.filter((c) => c.producer === 'rust' && c.expect === 'ok');
-    const produced: Json[] = [];
-    const plaintexts: [string, Uint8Array][] = [
-      ['ts_sealed_batch_key', hexToBytes('0f'.repeat(32))],
-      ['ts_sealed_sequential_batch_key', Uint8Array.from({ length: 32 }, (_, i) => 255 - i)],
-      ['ts_sealed_locked_password_20_bytes', new TextEncoder().encode('locked pass é日本')],
-    ];
-    for (const [i, [name, plaintext]] of plaintexts.entries()) {
-      const recipient = rustCases[i % 2];
-      const sealed = await encryptForPublicKey(
-        hexToBytes(recipient.recipient_public_key_hex),
-        new Uint8Array(plaintext),
-      );
-      produced.push({
-        name,
-        producer: 'ts',
-        expect: 'ok',
-        recipient_private_key_hex: recipient.recipient_private_key_hex,
-        recipient_public_key_hex: recipient.recipient_public_key_hex,
-        plaintext_hex: bytesToHex(plaintext),
-        envelope_hex: bytesToHex(sealed),
-      });
+describe.skipIf(!process.env.REGENERATE_TS_VECTORS)(
+  'regenerate TypeScript vectors (BATCH-008)',
+  () => {
+    function writeMerged(file: string, produced: Json[], keep: (c: Json) => boolean) {
+      const url = resolve(VECTORS_DIR, file);
+      const existing = JSON.parse(readFileSync(url, 'utf8'));
+      existing.cases = [...existing.cases.filter(keep), ...produced];
+      writeFileSync(url, JSON.stringify(existing, null, 2) + '\n');
     }
-    writeMerged('hpke.json', produced, (c) => c.producer !== 'ts');
-  });
 
-  it('batch.json: batches built by scripts/seed/batch.ts', async () => {
-    const rustCase = loadVectors('batch.json').cases.find(
-      (c) => c.name === 'single_event_no_risk_no_data',
-    )!;
-    const privateKey = await importUserPrivateKey(hexToBytes(rustCase.recipient_private_key_hex));
-    const publicKey = base64ToBytes(rustCase.recipient_public_key_base64);
-    const sets: [string, Json[]][] = [
-      [
-        'seed_script_mixed_events',
+    it('hpke.json: envelopes sealed by encryptForPublicKey', async () => {
+      const hpke = loadVectors('hpke.json').cases;
+      const rustCases = hpke.filter((c) => c.producer === 'rust' && c.expect === 'ok');
+      const produced: Json[] = [];
+      const plaintexts: [string, Uint8Array][] = [
+        ['ts_sealed_batch_key', hexToBytes('0f'.repeat(32))],
+        ['ts_sealed_sequential_batch_key', Uint8Array.from({ length: 32 }, (_, i) => 255 - i)],
+        ['ts_sealed_locked_password_20_bytes', new TextEncoder().encode('locked pass é日本')],
+      ];
+      for (const [i, [name, plaintext]] of plaintexts.entries()) {
+        const recipient = rustCases[i % 2];
+        const sealed = await encryptForPublicKey(
+          hexToBytes(recipient.recipient_public_key_hex),
+          new Uint8Array(plaintext),
+        );
+        produced.push({
+          name,
+          producer: 'ts',
+          expect: 'ok',
+          recipient_private_key_hex: recipient.recipient_private_key_hex,
+          recipient_public_key_hex: recipient.recipient_public_key_hex,
+          plaintext_hex: bytesToHex(plaintext),
+          envelope_hex: bytesToHex(sealed),
+        });
+      }
+      writeMerged('hpke.json', produced, (c) => c.producer !== 'ts');
+    });
+
+    it('batch.json: batches built by scripts/seed/batch.ts', async () => {
+      const rustCase = loadVectors('batch.json').cases.find(
+        (c) => c.name === 'single_event_no_risk_no_data',
+      )!;
+      const privateKey = await importUserPrivateKey(hexToBytes(rustCase.recipient_private_key_hex));
+      const publicKey = base64ToBytes(rustCase.recipient_public_key_base64);
+      const sets: [string, Json[]][] = [
         [
-          { ts: 1700000000000, type: 'heartbeat' },
-          { ts: 1700000001000, risk: 0.5, type: 'alert', data: { message: 'naïve 日本語' } },
-          {
-            ts: 1700000002000,
-            risk: 0.25,
-            type: 'screenshot',
-            data: {
-              image: { $hex: bytesToHex(Uint8Array.from({ length: 300 }, (_, i) => i % 256)) },
-              content_type: 'image/webp',
+          'seed_script_mixed_events',
+          [
+            { ts: 1700000000000, type: 'heartbeat' },
+            { ts: 1700000001000, risk: 0.5, type: 'alert', data: { message: 'naïve 日本語' } },
+            {
+              ts: 1700000002000,
+              risk: 0.25,
+              type: 'screenshot',
+              data: {
+                image: { $hex: bytesToHex(Uint8Array.from({ length: 300 }, (_, i) => i % 256)) },
+                content_type: 'image/webp',
+              },
             },
-          },
+          ],
         ],
-      ],
-    ];
-    const produced: Json[] = [];
-    for (const [name, events] of sets) {
-      const built = await buildBatch(reviveBytes(events) as SeedEvent[], [
-        { uuid: 'recipient', pubKey: publicKey },
-      ]);
-      const accessKey = base64ToBytes(built.accessKeys.recipient);
-      const keyBytes = await decryptForOwnKey(privateKey, accessKey);
-      const key = await crypto.subtle.importKey('raw', new Uint8Array(keyBytes), 'AES-GCM', false, [
-        'decrypt',
-      ]);
-      const payload = decode(
-        await decompressGzip(await decryptBatch(key, built.blob)),
-      ) as Uint8Array[];
-      produced.push({
-        name,
-        note: 'Built by scripts/seed/batch.ts. msgpack-js encodes risk as float64 (or an integer when whole), unlike the Rust producer.',
-        producer: 'ts-seed',
-        encoding: 'seed_js_msgpack',
-        events,
-        encoded_events_hex: payload.map(bytesToHex),
-        content_hashes_hex: payload.map((p) => createHash('sha256').update(p).digest('hex')),
-        end_hash_hex: built.endHashHex,
-        recipient_private_key_hex: rustCase.recipient_private_key_hex,
-        recipient_public_key_base64: rustCase.recipient_public_key_base64,
-        access_key_base64: Buffer.from(accessKey).toString('base64'),
-        batch_key_hex: bytesToHex(keyBytes),
-        blob_hex: bytesToHex(built.blob),
-      });
-    }
-    writeMerged('batch.json', produced, (c) => c.producer === 'rust');
-  });
-});
+      ];
+      const produced: Json[] = [];
+      for (const [name, events] of sets) {
+        const built = await buildBatch(reviveBytes(events) as SeedEvent[], [
+          { uuid: 'recipient', pubKey: publicKey },
+        ]);
+        const accessKey = base64ToBytes(built.accessKeys.recipient);
+        const keyBytes = await decryptForOwnKey(privateKey, accessKey);
+        const key = await crypto.subtle.importKey(
+          'raw',
+          new Uint8Array(keyBytes),
+          'AES-GCM',
+          false,
+          ['decrypt'],
+        );
+        const payload = decode(
+          await decompressGzip(await decryptBatch(key, built.blob)),
+        ) as Uint8Array[];
+        produced.push({
+          name,
+          note: 'Built by scripts/seed/batch.ts. msgpack-js encodes risk as float64 (or an integer when whole), unlike the Rust producer.',
+          producer: 'ts-seed',
+          encoding: 'seed_js_msgpack',
+          events,
+          encoded_events_hex: payload.map(bytesToHex),
+          content_hashes_hex: payload.map((p) => createHash('sha256').update(p).digest('hex')),
+          end_hash_hex: built.endHashHex,
+          recipient_private_key_hex: rustCase.recipient_private_key_hex,
+          recipient_public_key_base64: rustCase.recipient_public_key_base64,
+          access_key_base64: Buffer.from(accessKey).toString('base64'),
+          batch_key_hex: bytesToHex(keyBytes),
+          blob_hex: bytesToHex(built.blob),
+        });
+      }
+      writeMerged('batch.json', produced, (c) => c.producer === 'rust');
+    });
+  },
+);

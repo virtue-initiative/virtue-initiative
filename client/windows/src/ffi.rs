@@ -598,6 +598,7 @@ mod tests {
         CString::new(value).expect("test strings should not contain null bytes")
     }
 
+    // CLIENT-017: setting up logging twice in one process does not fail or panic.
     #[test]
     fn init_logging_is_idempotent_across_repeated_calls() {
         // `virtue_windows_init` (and therefore `init_logging`) can legitimately be
@@ -615,6 +616,7 @@ mod tests {
         assert!(LOG_GUARD.get().is_some(), "logging should be initialized");
     }
 
+    // CLIENT-015: strings returned by the native layer are released through it.
     #[test]
     fn ffi_string_can_be_freed() {
         let _guard = test_lock().lock().expect("test lock");
@@ -632,6 +634,7 @@ mod tests {
         }
     }
 
+    // CLIENT-015: session status JSON carries loggedIn, buildLabel and email.
     #[test]
     fn session_status_json_contract_is_stable() {
         let _guard = test_lock().lock().expect("test lock");
@@ -647,6 +650,7 @@ mod tests {
         assert!(json.get("email").is_some());
     }
 
+    // CLIENT-015: login with no email fails with "email is required".
     #[test]
     fn login_returns_a_useful_error_string_for_missing_credentials() {
         let _guard = test_lock().lock().expect("test lock");
@@ -655,6 +659,7 @@ mod tests {
         assert_eq!(error, "email is required");
     }
 
+    // CLIENT-015: monitor status JSON carries state, loggedIn, pendingRequestCount, lastError, the CORE-010 fields and logDirectory.
     #[test]
     fn monitor_status_json_contract_is_stable() {
         let _guard = test_lock().lock().expect("test lock");
@@ -689,6 +694,7 @@ mod tests {
         }
     }
 
+    // CLIENT-015: a call that needs the monitor fails with "monitoring is not running" when it is not running.
     #[test]
     fn force_capture_returns_a_useful_error_string_when_monitoring_is_not_running() {
         let _guard = test_lock().lock().expect("test lock");
@@ -696,6 +702,7 @@ mod tests {
         assert_eq!(error, "monitoring is not running");
     }
 
+    // CLIENT-015: report issue with a blank message fails with "message is required".
     #[test]
     fn report_issue_returns_a_useful_error_string_for_empty_message() {
         let _guard = test_lock().lock().expect("test lock");
@@ -704,6 +711,7 @@ mod tests {
         assert_eq!(error, "message is required");
     }
 
+    // CLIENT-016: Windows platform details are never empty.
     #[test]
     fn windows_platform_details_is_never_empty() {
         assert!(!windows_platform_details().is_empty());

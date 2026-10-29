@@ -22,7 +22,7 @@ function bugReportForm(
   return { form };
 }
 
-describe('POST /bug-report', () => {
+describe('POST /bug-report (API-042)', () => {
   it('accepts an anonymous report and emails the fixed support address', async () => {
     const { form } = bugReportForm({
       message: 'The app crashes on launch.',

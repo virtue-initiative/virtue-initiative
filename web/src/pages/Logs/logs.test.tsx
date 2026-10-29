@@ -83,7 +83,7 @@ vi.mock('../../utils/cache/client', () => ({
 // The component handles a null cacheClient gracefully (cacheQuery is a no-op), so
 // the UI renders correctly with empty log lists.
 
-describe('Logs — header', () => {
+describe('Logs — header (WEB-038)', () => {
   it('shows "My logs" heading by default', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
@@ -92,7 +92,7 @@ describe('Logs — header', () => {
   });
 });
 
-describe('Logs — device dropdown', () => {
+describe('Logs — device dropdown (WEB-039, WEB-038)', () => {
   it('shows device names in the device dropdown after devices load', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
@@ -119,7 +119,7 @@ describe('Logs — device dropdown', () => {
   });
 });
 
-describe('Logs — deactivated device', () => {
+describe('Logs — deactivated device (WEB-038)', () => {
   it('tags the heading when the selected device is logged out', async () => {
     const user = userEvent.setup();
     const loggedOut = { ...TEST_DEVICES[0], status: 'logged_out' as const };
@@ -154,7 +154,7 @@ describe('Logs — deactivated device', () => {
   });
 });
 
-describe('Logs — filter panel', () => {
+describe('Logs — filter panel (WEB-039)', () => {
   it('renders the filter toggle button', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
@@ -175,7 +175,7 @@ describe('Logs — filter panel', () => {
   });
 });
 
-describe('Logs — view switching', () => {
+describe('Logs — view switching (WEB-043)', () => {
   it('shows List and Gallery navigation links', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
@@ -185,7 +185,7 @@ describe('Logs — view switching', () => {
   });
 });
 
-describe('Logs — type filter', () => {
+describe('Logs — type filter (WEB-039, WEB-041)', () => {
   it('offers kind/reason-specific categories, not just generic types', async () => {
     renderWithClient(<Logs />);
     await waitFor(() => {
@@ -228,7 +228,7 @@ describe('Logs — type filter', () => {
   });
 });
 
-describe('Logs — skipped screenshots filter', () => {
+describe('Logs — skipped screenshots filter (WEB-039)', () => {
   const skippedLog: FeedLog = {
     id: 'log-skipped',
     device_id: TEST_DEVICES[0].id,
@@ -285,7 +285,7 @@ describe('Logs — skipped screenshots filter', () => {
   });
 });
 
-describe('Logs — URL-driven filters (#659)', () => {
+describe('Logs — URL-driven filters (#659) (WEB-039)', () => {
   it('clears the device filter when the URL loses device_id', async () => {
     window.history.replaceState({}, '', `/logs?device_id=${TEST_DEVICES[0].id}`);
     renderWithClient(<Logs />);
@@ -307,7 +307,7 @@ describe('Logs — URL-driven filters (#659)', () => {
   });
 });
 
-describe('Logs — gallery is the default view (#661)', () => {
+describe('Logs — gallery is the default view (#661) (WEB-042, WEB-039)', () => {
   it('shows non-image logs and the type filter in the default (gallery) view', async () => {
     window.history.replaceState({}, '', '/logs');
     renderWithClient(<Logs />);
@@ -321,7 +321,7 @@ describe('Logs — gallery is the default view (#661)', () => {
   });
 });
 
-describe('LogDetailDialog — prev/next navigation (#660)', () => {
+describe('LogDetailDialog — prev/next navigation (#660) (WEB-044)', () => {
   const item = DEFAULT_SAMPLE_LOGS[0];
 
   // Virtualised rows don't paint in happy-dom (see the note above), so drive the
@@ -401,7 +401,7 @@ describe('LogDetailDialog — prev/next navigation (#660)', () => {
   });
 });
 
-describe('LogDetailDialog — per-image scoring details', () => {
+describe('LogDetailDialog — per-image scoring details (WEB-044)', () => {
   function renderScreenshot(data: Record<string, unknown>) {
     const item: FeedLog = {
       ...DEFAULT_SAMPLE_LOGS[0],
@@ -493,7 +493,7 @@ describe('LogDetailDialog — per-image scoring details', () => {
   });
 });
 
-describe('Logs — sync errors', () => {
+describe('Logs — sync errors (WEB-040)', () => {
   it('shows a network failure instead of "Logs synced", and retries on request', async () => {
     SYNC_ERROR = { kind: 'timeout', message: 'signal timed out' };
     renderWithClient(<Logs />);

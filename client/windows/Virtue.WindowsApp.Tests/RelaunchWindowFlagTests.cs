@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-029: the show-window-on-next-launch flag is created with its folder and consumed exactly once.
 public sealed class RelaunchWindowFlagTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());

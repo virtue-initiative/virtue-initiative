@@ -95,7 +95,7 @@ beforeEach(async () => {
   installAccountHandlers();
 });
 
-describe('Session.changePassword', () => {
+describe('Session.changePassword (WEB-061)', () => {
   it('keeps the key pair so batches sealed before the change still open after it', async () => {
     const session = await Session.fromLogin(EMAIL, OLD_PASSWORD);
     const originalPubKey = state.pubKey;

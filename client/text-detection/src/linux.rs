@@ -389,6 +389,7 @@ mod tests {
 </body>
 </html>"#;
 
+    // CLIENT-019: every detected word is returned with its bounding box.
     #[test]
     fn parse_hocr_words_extracts_all_word_regions() {
         let regions = parse_hocr_words(SAMPLE_HOCR);
@@ -397,6 +398,7 @@ mod tests {
         assert_eq!(regions[4].text, "sidebar");
     }
 
+    // CLIENT-019: paragraphs are joined by a blank line and lines by a newline.
     #[test]
     fn extract_paragraphs_joins_text_across_careas() {
         let paragraphs = extract_paragraphs(SAMPLE_HOCR, 0);
@@ -404,6 +406,7 @@ mod tests {
         assert_eq!(text, "Hello world\nsecond line\n\nsidebar");
     }
 
+    // CLIENT-019: words below confidence 50 are dropped from the text.
     #[test]
     fn extract_paragraphs_filters_low_confidence() {
         let hocr = r#"<p class='ocr_par'><span class='ocr_line'>
@@ -414,6 +417,7 @@ mod tests {
         assert_eq!(paras, vec!["good"]);
     }
 
+    // CLIENT-019: lines with fewer than 3 characters are dropped from the text.
     #[test]
     fn extract_lines_drops_short_lines() {
         let hocr = r#"
@@ -427,6 +431,7 @@ mod tests {
         assert_eq!(lines, vec!["real"]);
     }
 
+    // CLIENT-019: HTML entities in the recognized text are decoded.
     #[test]
     fn decode_entities_handles_named_and_numeric() {
         assert_eq!(decode_entities("&amp;"), "&");
@@ -439,6 +444,7 @@ mod tests {
         );
     }
 
+    // CLIENT-019: a word's confidence is read from the recognizer output (design test).
     #[test]
     fn word_confidence_parses_value() {
         assert_eq!(
@@ -447,11 +453,13 @@ mod tests {
         );
     }
 
+    // CLIENT-019: a word with no confidence counts as 100.
     #[test]
     fn word_confidence_returns_100_when_absent() {
         assert_eq!(word_confidence("<span title='bbox 0 0 10 10'>"), 100);
     }
 
+    // CLIENT-019: nested markup is read correctly when extracting words (design test).
     #[test]
     fn span_body_handles_nesting() {
         let s = "<span class='ocrx_word'>foo</span><span class='ocrx_word'>bar</span></span>";
@@ -465,6 +473,7 @@ mod tests {
 }
 
 #[cfg(test)]
+// CLIENT-019: Tesseract end to end on a real image (needs ImageMagick and Tesseract, so ignored by default).
 mod integration_tests {
     use super::*;
     use crate::OcrOptions;

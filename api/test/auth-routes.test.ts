@@ -30,7 +30,7 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Auth routes', () => {
-  it('returns current hash params with no email, and login material in an enumeration-safe shape with one', async () => {
+  it('returns current hash params with no email, and login material in an enumeration-safe shape with one (API-015)', async () => {
     await signupAndGetCookie('alice@example.com', 'correct horse');
 
     const paramsRes = await SELF.fetch(`${BASE}/user/login-material`);
@@ -76,7 +76,7 @@ describe('Auth routes', () => {
     expect(unknownBody).toHaveProperty('params');
   });
 
-  it('signup-request sends an email with a signup token, and /signup creates a verified user', async () => {
+  it('signup-request sends an email with a signup token, and /signup creates a verified user (API-009, API-010)', async () => {
     const password_auth = await passwordAuthFor('client-derived-auth');
     const password_salt = await passwordSaltFor('alice@example.com');
     const pub_key = await publicKeyFor('alice@example.com');
@@ -154,7 +154,7 @@ describe('Auth routes', () => {
     expect(consumedToken?.consumed_at).not.toBeNull();
   });
 
-  it('rejects signup with invalid or reused verification token', async () => {
+  it('rejects signup with invalid or reused verification token (API-010)', async () => {
     const badRes = await SELF.fetch(`${BASE}/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -169,7 +169,7 @@ describe('Auth routes', () => {
     expect(badRes.status).toBe(400);
   });
 
-  it('signup-request for an existing account looks identical to a fresh request but notifies the owner instead', async () => {
+  it('signup-request for an existing account looks identical to a fresh request but notifies the owner instead (API-009)', async () => {
     await signupAndGetCookie('taken@example.com', 'pw');
 
     const tokenCountBefore = await env.DB.prepare(
@@ -201,7 +201,7 @@ describe('Auth routes', () => {
     expect(tokenCountAfter?.count).toBe(tokenCountBefore?.count);
   });
 
-  it('signup consumes the token and does not leak account existence on a token-redemption race', async () => {
+  it('signup consumes the token and does not leak account existence on a token-redemption race (API-010)', async () => {
     const password_auth = await passwordAuthFor('client-derived-auth');
     const password_salt = await passwordSaltFor('racer@example.com');
     const pub_key = await publicKeyFor('racer@example.com');
@@ -242,7 +242,7 @@ describe('Auth routes', () => {
     expect(consumedToken?.consumed_at).not.toBeNull();
   });
 
-  it('signup/validate resolves the email for a pending signup token', async () => {
+  it('signup/validate resolves the email for a pending signup token (API-011)', async () => {
     const requestRes = await SELF.fetch(`${BASE}/signup-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -262,7 +262,7 @@ describe('Auth routes', () => {
     expect(await validateRes.json()).toEqual({ email: 'pending@example.com' });
   });
 
-  it('signup/validate rejects an invalid, expired, or already-claimed token', async () => {
+  it('signup/validate rejects an invalid, expired, or already-claimed token (API-011)', async () => {
     const badRes = await SELF.fetch(`${BASE}/signup/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -292,7 +292,7 @@ describe('Auth routes', () => {
     expect(await claimedRes.json()).toEqual({ error: 'Invalid or expired verification token' });
   });
 
-  it('logs in with password_auth and sets a refresh cookie', async () => {
+  it('logs in with password_auth and sets a refresh cookie (API-016)', async () => {
     await signupAndGetCookie('bob@example.com', 'pw');
 
     const loginRes = await SELF.fetch(`${BASE}/login`, {
@@ -317,7 +317,7 @@ describe('Auth routes', () => {
     expect(badLoginRes.status).toBe(401);
   });
 
-  it('sends a reverification email and 403s when logging into an unverified account, and the emailed token verifies it', async () => {
+  it('sends a reverification email and 403s when logging into an unverified account, and the emailed token verifies it (API-016, API-017)', async () => {
     const { userId } = await signupAndGetCookie('unverified-login@example.com', 'pw');
     await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
       .bind(uuidToBytes(userId))
@@ -375,7 +375,7 @@ describe('Auth routes', () => {
     expect(nowVerifiedLoginRes.status).toBe(204);
   });
 
-  it('stores the timezone sent at signup and falls back to UTC when it is missing or invalid', async () => {
+  it('stores the timezone sent at signup and falls back to UTC when it is missing or invalid (API-010)', async () => {
     const readTimezone = async (cookie: string) => {
       const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
       const body = (await res.json()) as { settings: { timezone: string } };
@@ -397,7 +397,7 @@ describe('Auth routes', () => {
     expect(await readTimezone(missing.cookie)).toBe('UTC');
   });
 
-  it('saves a valid timezone sent at login and ignores an invalid one', async () => {
+  it('saves a valid timezone sent at login and ignores an invalid one (API-016)', async () => {
     const { cookie } = await signupAndGetCookie('tz-login@example.com', 'pw', undefined, 'UTC');
     const readTimezone = async () => {
       const res = await SELF.fetch(`${BASE}/user`, { headers: authHeaders(cookie) });
@@ -422,7 +422,7 @@ describe('Auth routes', () => {
     expect(await readTimezone()).toBe('Asia/Tokyo');
   });
 
-  it('rejects an invalid timezone in PATCH /user and changes nothing', async () => {
+  it('rejects an invalid timezone in PATCH /user and changes nothing (API-020)', async () => {
     const { cookie } = await signupAndGetCookie('tz-patch@example.com', 'pw', undefined, 'UTC');
     const patch = (settings: Record<string, string>) =>
       SELF.fetch(`${BASE}/user`, {
@@ -444,7 +444,7 @@ describe('Auth routes', () => {
     expect(await readSettings()).toMatchObject({ timezone: 'America/Chicago' });
   });
 
-  it('returns the current user and allows updating profile fields but not key material', async () => {
+  it('returns the current user and allows updating profile fields but not key material (API-019, API-020)', async () => {
     const { cookie, userId } = await signupAndGetCookie('carol@example.com', 'pw', 'Carol');
 
     const originalPubKey = await publicKeyFor('carol@example.com');
@@ -543,7 +543,7 @@ describe('Auth routes', () => {
     expect(latestVerificationToken?.email).toBe('carol-new@example.com');
   });
 
-  it('PATCH /user email change to an in-use address notifies the owner instead of leaking a 409', async () => {
+  it('PATCH /user email change to an in-use address notifies the owner instead of leaking a 409 (API-020)', async () => {
     await signupAndGetCookie('owner@example.com', 'pw');
     const { cookie } = await signupAndGetCookie('requester@example.com', 'pw', 'Requester');
 
@@ -579,7 +579,7 @@ describe('Auth routes', () => {
     });
   });
 
-  it('verifies email-change tokens and sets a new session cookie', async () => {
+  it('verifies email-change tokens and sets a new session cookie (API-017)', async () => {
     const { cookie, userId } = await signupAndGetCookie('verifyme@example.com', 'pw', 'Verify Me');
 
     const updateEmailRes = await SELF.fetch(`${BASE}/user`, {
@@ -647,7 +647,7 @@ describe('Auth routes', () => {
     void userId;
   });
 
-  it('requires matching email confirmation and permanently deletes the account with cascaded D1 cleanup', async () => {
+  it('requires matching email confirmation and permanently deletes the account with cascaded D1 cleanup (API-021)', async () => {
     const { cookie, userId } = await signupAndGetCookie('delete-me@example.com', 'pw', 'Delete Me');
     const device = await createDeviceForUser('delete-me@example.com', 'pw', 'Phone', 'ios');
 
@@ -724,7 +724,7 @@ describe('Auth routes', () => {
     expect(await env.BUCKET.head(batch.url.replace(`${env.R2_URL}/`, ''))).toBeTruthy();
   });
 
-  it('requests and applies password resets with new auth material and keypair bytes', async () => {
+  it('requests and applies password resets with new auth material and keypair bytes (API-012, API-013, API-014)', async () => {
     const { userId } = await signupAndGetCookie('reset@example.com', 'old-password', 'Reset User');
     await markUserEmailVerified(userId);
 
@@ -789,7 +789,7 @@ describe('Auth routes', () => {
     expect(Buffer.from(storedUser!.encrypted_priv_key).toString('base64')).toBe(newPrivKey);
   });
 
-  describe('POST /user/password', () => {
+  describe('POST /user/password (API-050)', () => {
     async function changePassword(cookie: string, body: Record<string, unknown>) {
       return SELF.fetch(`${BASE}/user/password`, {
         method: 'POST',
@@ -936,7 +936,7 @@ describe('Auth routes', () => {
     });
   });
 
-  it('rejects an unprefixed or wrong-purpose refresh token before touching the session table', async () => {
+  it('rejects an unprefixed or wrong-purpose refresh token before touching the session table (API-003)', async () => {
     const unprefixedRes = await SELF.fetch(`${BASE}/user`, {
       headers: authHeaders('not-a-prefixed-token'),
     });

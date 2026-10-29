@@ -10,7 +10,7 @@ import {
   SYNC_FRESH_MS,
 } from './sync';
 
-describe('isSyncFresh', () => {
+describe('isSyncFresh (WEB-013)', () => {
   it('skips a sync within the fresh window unless forced', () => {
     expect(isSyncFresh(1_000, 1_000 + SYNC_FRESH_MS - 1, false)).toBe(true);
     expect(isSyncFresh(1_000, 1_000 + SYNC_FRESH_MS - 1, true)).toBe(false);
@@ -19,7 +19,7 @@ describe('isSyncFresh', () => {
   });
 });
 
-describe('needsRerun', () => {
+describe('needsRerun (WEB-013)', () => {
   const running = { forced: false, epoch: 1, hadKey: true };
 
   it('folds a plain sync into the running one', () => {
@@ -44,7 +44,7 @@ describe('needsRerun', () => {
   });
 });
 
-describe('scopeBatchesToTarget', () => {
+describe('scopeBatchesToTarget (WEB-013)', () => {
   const owners = new Map([
     ['dev-a', 'alice'],
     ['dev-b', 'bob'],
@@ -73,7 +73,7 @@ describe('scopeBatchesToTarget', () => {
   });
 });
 
-describe('createSharedFetch', () => {
+describe('createSharedFetch (WEB-013)', () => {
   it('shares one request among syncs started together, from the lowest since', async () => {
     const fetchSince = vi.fn(async (since: number) => since);
     const shared = createSharedFetch(fetchSince);
@@ -113,7 +113,7 @@ describe('createSharedFetch', () => {
   });
 });
 
-describe('createRowSync', () => {
+describe('createRowSync (WEB-013)', () => {
   function setup() {
     let epoch = 1;
     let clock = 1_000_000;

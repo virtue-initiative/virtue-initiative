@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-029: the debug-stage-update file is consumed once and its content sets the optional deferral cap.
 public sealed class DebugUpdateSentinelTests : IDisposable
 {
     private readonly string _directory = Path.Combine(

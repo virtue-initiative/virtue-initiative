@@ -136,7 +136,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('cache client leader handoff', () => {
+describe('cache client leader handoff (WEB-014)', () => {
   it('hands the cache to a waiting tab when the leader freezes', async () => {
     const a = openTab();
     a.client.setSession('user-1', null);
@@ -205,7 +205,7 @@ describe('cache client leader handoff', () => {
     expect(workerB.posted.map((m) => m.method)).toEqual(['setSession', 'cacheQuery']);
   });
 
-  it('settles a query with an error when nothing ever answers it', async () => {
+  it('settles a query with an error when nothing ever answers it (WEB-040)', async () => {
     const a = openTab();
     const updates: CacheQueryUpdate[] = [];
     a.client.cacheQuery({ userId: 'user-1' }, (u) => updates.push(u));
@@ -220,7 +220,7 @@ describe('cache client leader handoff', () => {
     expect(updates[0]).toMatchObject({ done: true, error: { kind: 'failed' } });
   });
 
-  it('passes a sync error from the worker through to the query', async () => {
+  it('passes a sync error from the worker through to the query (WEB-040)', async () => {
     const a = openTab();
     const updates: CacheQueryUpdate[] = [];
     a.client.cacheQuery({ userId: 'user-1' }, (u) => updates.push(u));
@@ -255,7 +255,7 @@ describe('cache client leader handoff', () => {
   });
 });
 
-describe('cache client liveness check', () => {
+describe('cache client liveness check (WEB-014)', () => {
   it("doesn't steal from a live leader after the follower sat idle", async () => {
     const a = openTab();
     a.client.setSession('user-1', null);

@@ -41,7 +41,7 @@ async function uploadBatchWithNotification(
 }
 
 describe('Notification routes and tamper alerts', () => {
-  it('stores notification frequency on the user and lists partnerships without a per-partner cadence', async () => {
+  it('stores notification frequency on the user and lists partnerships without a per-partner cadence (API-020, API-026)', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('notify-owner@example.com', 'pw');
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
       'notify-partner@example.com',
@@ -102,7 +102,7 @@ describe('Notification routes and tamper alerts', () => {
     });
   });
 
-  it('sends immediate tamper alerts for high-risk device log events', async () => {
+  it('sends immediate tamper alerts for high-risk device log events (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'alerts-owner@example.com',
       'pw',
@@ -157,7 +157,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(tamperDelivery?.text).toContain('Device: Workstation');
   });
 
-  it('passes custom title/details through to the rendered tamper alert email', async () => {
+  it('passes custom title/details through to the rendered tamper alert email (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'custom-owner@example.com',
       'pw',
@@ -213,7 +213,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(tamperDelivery?.text).toContain('Custom alert details');
   });
 
-  it('sends immediate tamper alerts for moderate-risk device log events', async () => {
+  it('sends immediate tamper alerts for moderate-risk device log events (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'moderate-owner@example.com',
       'pw',
@@ -258,7 +258,7 @@ describe('Notification routes and tamper alerts', () => {
     );
   });
 
-  it('sends an immediate tamper alert even for zero risk; requires the risk field', async () => {
+  it('sends an immediate tamper alert even for zero risk; requires the risk field (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'non-tamper-owner@example.com',
       'pw',
@@ -317,7 +317,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(missingRiskRes.status).toBe(400);
   });
 
-  it('stops all partner emails when receive emails is disabled', async () => {
+  it('stops all partner emails when receive emails is disabled (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'mute-owner@example.com',
       'pw',
@@ -373,7 +373,7 @@ describe('Notification routes and tamper alerts', () => {
     expect(deliveries.some((delivery) => delivery.kind === 'tamper_alert')).toBe(false);
   });
 
-  it('suppresses tamper alerts to unverified recipient accounts', async () => {
+  it('suppresses tamper alerts to unverified recipient accounts (API-038)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'unverified-owner@example.com',
       'pw',

@@ -29,6 +29,7 @@ pub fn tick(state: &mut CaptureAvailabilityState, upload: &mut UploadState, now_
     }
 }
 
+// CORE-006: the capture_failed event after repeated capture failures.
 #[cfg(test)]
 mod tests {
     use super::*;

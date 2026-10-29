@@ -301,6 +301,7 @@ mod tests {
 
     use super::{TrayErrorKind, classify_spawn_error, next_missing_watcher_retry_delay};
 
+    // CLIENT-021: a missing StatusNotifier host is told apart from other tray failures (design test).
     #[test]
     fn classifies_missing_status_notifier_watcher_as_non_retryable() {
         let error = ksni::Error::Watcher(zbus::fdo::Error::ServiceUnknown(
@@ -311,6 +312,7 @@ mod tests {
         assert_eq!(classify_spawn_error(&error), TrayErrorKind::MissingWatcher);
     }
 
+    // CLIENT-021: other tray failures stay on the plain retry path (design test).
     #[test]
     fn leaves_other_spawn_errors_retryable() {
         let error = ksni::Error::WontShow;
@@ -318,6 +320,7 @@ mod tests {
         assert_eq!(classify_spawn_error(&error), TrayErrorKind::Retryable);
     }
 
+    // CLIENT-021: with no tray host, retry after 5 s, 10 s and 60 s, then give up.
     #[test]
     fn missing_watcher_retries_use_capped_startup_backoff() {
         assert_eq!(
@@ -335,6 +338,7 @@ mod tests {
         assert_eq!(next_missing_watcher_retry_delay(3), None);
     }
 
+    // CLIENT-021: after the last scheduled retry the tray gives up until the daemon restarts.
     #[test]
     fn tray_backoff_caps_at_max_schedule_entry() {
         for failure_count in 3..=10 {
@@ -346,6 +350,7 @@ mod tests {
         }
     }
 
+    // CLIENT-021: tray host retry delays only grow (design test).
     #[test]
     fn tray_backoff_schedule_is_strictly_increasing() {
         let delays: Vec<Duration> = (0..3)

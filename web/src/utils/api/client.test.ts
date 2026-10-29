@@ -12,7 +12,7 @@ function makeClient() {
   return new APIClient(makeFakeSession());
 }
 
-describe('APIClient — user cache', () => {
+describe('APIClient — user cache (WEB-012)', () => {
   it('fetches and caches the user on first getUser()', async () => {
     const client = makeClient();
     client.getUser(); // triggers async fetch
@@ -83,7 +83,7 @@ describe('APIClient — user cache', () => {
   });
 });
 
-describe('APIClient — devices cache', () => {
+describe('APIClient — devices cache (WEB-012)', () => {
   it('fetches devices and notifies subscribers', async () => {
     const client = makeClient();
     const cb = vi.fn();
@@ -130,7 +130,7 @@ describe('APIClient — devices cache', () => {
   });
 });
 
-describe('APIClient — partners cache', () => {
+describe('APIClient — partners cache (WEB-012)', () => {
   it('fetches watchers and watchings', async () => {
     const client = makeClient();
     const watcherCb = vi.fn();
@@ -182,7 +182,7 @@ describe('APIClient — partners cache', () => {
 });
 
 describe('APIClient — logout', () => {
-  it('fires onLogout subscribers when token refresh fails', async () => {
+  it('fires onLogout subscribers when token refresh fails (WEB-006)', async () => {
     const session = makeFakeSession();
     let tokenRefreshFailedCb: (() => void) | null = null;
     (session.onTokenRefreshFailed as ReturnType<typeof vi.fn>).mockImplementation(
@@ -198,7 +198,7 @@ describe('APIClient — logout', () => {
     expect(logoutCb).toHaveBeenCalledTimes(1);
   });
 
-  it('fires logout only once even if token refresh fails multiple times', async () => {
+  it('fires logout only once even if token refresh fails multiple times (WEB-006)', async () => {
     const session = makeFakeSession();
     let tokenRefreshFailedCb: (() => void) | null = null;
     (session.onTokenRefreshFailed as ReturnType<typeof vi.fn>).mockImplementation(
@@ -214,7 +214,7 @@ describe('APIClient — logout', () => {
     expect(logoutCb).toHaveBeenCalledTimes(1);
   });
 
-  it('updateSettings calls PATCH /user and refreshes cache', async () => {
+  it('updateSettings calls PATCH /user and refreshes cache (WEB-059, WEB-012)', async () => {
     let patchCalled = false;
     server.use(
       http.patch(`${BASE}/user`, async () => {
@@ -228,7 +228,7 @@ describe('APIClient — logout', () => {
   });
 });
 
-describe('APIClient — updateDevice / removeDevice', () => {
+describe('APIClient — updateDevice / removeDevice (WEB-037, WEB-012)', () => {
   it('calls PATCH /device/:id', async () => {
     let patchedId: string | undefined;
     server.use(
@@ -256,7 +256,7 @@ describe('APIClient — updateDevice / removeDevice', () => {
   });
 });
 
-describe('APIClient — invitePartner / removeWatcher / stopWatching', () => {
+describe('APIClient — invitePartner / removeWatcher / stopWatching (WEB-050, WEB-051, WEB-012)', () => {
   it('calls POST /partner for invitePartner', async () => {
     let body: unknown;
     server.use(

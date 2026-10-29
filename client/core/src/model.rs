@@ -398,6 +398,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // BATCH-003: event type and data encoding.
     #[test]
     fn upload_kind_user_stop_serializes_to_tagged_shape() {
         let upload = UploadKind::UserStop;
@@ -407,6 +408,7 @@ mod tests {
         );
     }
 
+    // BATCH-003: event type and data encoding.
     #[test]
     fn upload_kind_screenshot_missed_serializes_to_tagged_shape() {
         // CORE-002: "The late wakeup event SHOULD be called
@@ -418,6 +420,7 @@ mod tests {
         );
     }
 
+    // BATCH-003: event type and data encoding.
     #[test]
     fn upload_kind_system_login_serializes_to_tagged_shape() {
         let upload = UploadKind::SystemLogin { utc_ms: 1_000 };
@@ -430,6 +433,7 @@ mod tests {
         );
     }
 
+    // BATCH-003: event type and data encoding.
     #[test]
     fn upload_kind_system_logout_serializes_to_tagged_shape() {
         let upload = UploadKind::SystemLogout { utc_ms: 2_000 };

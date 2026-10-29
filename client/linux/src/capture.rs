@@ -482,6 +482,7 @@ impl LifecycleHooks for LinuxPlatformHooks {
 }
 
 #[cfg(test)]
+// CLIENT-018: Linux platform signals (session detection, backend choice, clocks, previous-boot logout time).
 mod tests {
     use super::*;
     use virtue_core::ScreenshotHooks;

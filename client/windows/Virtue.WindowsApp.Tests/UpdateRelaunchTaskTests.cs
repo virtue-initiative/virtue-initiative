@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-029: the one-shot VirtueUpdateRelaunch task definition.
 public sealed class UpdateRelaunchTaskTests
 {
     private const string AliasPath = @"C:\Users\someone\AppData\Local\Microsoft\WindowsApps\virtue-initiative.exe";

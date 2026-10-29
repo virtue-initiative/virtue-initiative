@@ -46,11 +46,19 @@ The late wakeups array MUST be cleared after an alert is sent (to prevent duplic
 
 The late wakeup event SHOULD be called "screenshot_missed".
 
+Tamper detection MUST be skipped, recording nothing, on a platform whose hooks report `lifecycle_enabled` as false (iOS, which has no boot or session signal to compare against).
+
 A user-initiated stop MUST excuse the gap that follows it — the lateness check MUST be skipped once, rather than recorded, so restarting after it isn't also reported as tampering on top of the user-stop alert. This skip MUST apply to the first tick of the monitoring session that follows the daemon actually stopping and restarting, not to any tick that runs beforehand in the same still-running session (e.g. while an already-requested stop is still being processed) — a tick that happens before the daemon has actually stopped isn't the gap being excused, and consuming the excuse there would leave the real gap unprotected. A stop MUST NOT be excused this way merely because the process exited cleanly (e.g. a caught termination signal) — only an actual user-initiated stop, since anything broader would let simply killing the process defeat tamper detection.
 
 ## CORE-003 Screenshots
 
-Screenshots MUST be captured randomly (i.e. every second there is the same chance as any other second) about every 5 minutes.
+Screenshots MUST be captured randomly (i.e. every second there is the same chance as any other second) about every 5 minutes. The first screenshot after login MUST be taken on the next tick. Nothing is captured while logged out.
+
+A capture that comes due while the screen is locked or a screensaver is active MUST be skipped: the daemon MUST send a `screenshot_skipped` event (reason `locked_or_screensaver`, BATCH-003) and draw the next capture time as usual.
+
+A capture that has not materially changed from the last uploaded frame MUST NOT be uploaded; the daemon MUST send a `screenshot_skipped` event (reason `static_screen`) instead. The comparison MUST be against the last uploaded frame, not the previous capture, so that gradual change eventually counts. A broad change, even a low-contrast one such as a terminal filling with text, and a change concentrated in one region, such as a video, MUST count as changed. A few isolated cells changing, such as a clock, MUST NOT. The grid compared MUST scale with the screen size, and a change of screen size MUST count as changed.
+
+A capture or image processing failure MUST NOT be uploaded as a screenshot. It MUST be retained as in CORE-018 and counted towards CORE-006's `capture_failed` event.
 
 ### CORE-004 Content detection
 
@@ -62,13 +70,21 @@ When the `per_image_nsfw` feature flag is on (see /api/SPEC.md API-061), the dae
 
 Screenshots SHOULD then be redacted using an OCR engine and then compressed into small WebP.
 
+The skin tone score MUST be 0 for an image with no skin-toned pixels (e.g. all white or all black) and 1 for an image that is entirely skin-toned. The WebP MUST be scaled down by the same fixed factor on each axis (rounding up, never below one pixel), so that each monitor keeps the same detail however the monitors are laid out.
+
 ## CORE-005 Uploading
 
 Requests SHOULD be queued to be uploaded in a batch.
 
 See /api/SPEC.md and /hash-server/SPEC.md for details on the format.
 
-Both hash server uploads and batch uploads MUST be stored in the state object and retried with exponentional backoff on each wakeup.
+Both hash server uploads and batch uploads MUST be stored in the state object and retried with exponentional backoff on each wakeup. A batch that cannot be built MUST back off in the same way rather than be retried immediately.
+
+While no device credentials are stored, events MUST NOT be queued.
+
+A batch MUST NOT be uploaded while the screen is locked or a screensaver is active, unless an upload was forced by a heartbeat or `flush_batch_now`.
+
+An event with a risk of 90% or more, rounded to a whole percent, MUST force the next batch to upload without waiting for the batch interval. A `heartbeat` MUST do the same and MUST also bypass the screen-locked hold. In the batch's `event_counts` (API-038), an event MUST count as `high` at 70% or more and as `medium` from 40% to below 70%, using the same rounded percentage, so that the counts agree with the labels the web app shows.
 
 A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
 
@@ -83,6 +99,10 @@ The hash server token returned with the device settings is valid for 2 hours (se
 When the daemon detects that the System Login time changed, it MUST send a "system login at" event (risk 0%).
 
 When the daemon detects thtat hte System Logout time changed, it MUST send a "system logout at" event (risk 0%).
+
+While authenticated, the daemon MUST send a `heartbeat` event (risk 0%) at least once every 24 hours.
+
+When five screenshot captures fail within 30 minutes, the daemon MUST send a `capture_failed` event (risk 50%) and reset the failure count. A failure older than 30 minutes MUST NOT count.
 
 The first System Login/Logout time observed (i.e. there is no prior value to compare against) MUST NOT be reported — it only establishes the baseline a later change is measured against.
 
@@ -100,7 +120,7 @@ MUST revoke any existing device session first, then register a new device with t
 
 `logout()`
 
-MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture.
+MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture. A batch upload that was in flight when the device logged out MUST have its result discarded, so that it cannot restore queued events.
 
 ### CORE-010 status
 
@@ -140,7 +160,7 @@ MUST record that the user explicitly stopped monitoring while it was expected to
 
 `note_user_start()`
 
-MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes. A no-op when no stop is active. The core MUST also offer `queue_note_user_start()`, a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
+MUST record that monitoring has resumed after a prior `note_user_stop`, so tamper detection (CORE-002) resumes, and MUST send a `user_start` event. A no-op, sending nothing, when no stop is active. The core MUST also offer `queue_note_user_start()`, a variant that only enqueues this request and returns without waiting for the loop's reply, which the loop applies before anything queued after it. A caller that is itself about to start the loop (Android's accessibility service restarting it) MUST use that variant: the blocking form waits on a loop that is not yet running and fails with a timeout, and anything the caller queues behind it (such as `login`) waits out the same timeout.
 
 ### CORE-012 queue_upload
 
@@ -208,3 +228,23 @@ most one per 30 minutes. The restart-timestamps array MUST be cleared once
 the threshold is reached, alert sent or not. The event SHOULD be called
 "repeated_restarts". This check MUST be skipped where `lifecycle_enabled` is
 false (see CORE-002).
+
+## CORE-023 Logging
+
+The core MUST NOT install a logging subscriber itself; each platform does. The default log filter MUST be `info`, with `virtue_core` at `debug`, in release builds as well as debug builds.
+
+A platform with a rolling file log MUST keep only the 14 most recently modified files whose names start with the log prefix, and MUST NOT delete other files in the directory.
+
+The log excerpt attached to a bug report (API-042) MUST be built from file modified times, not file names. It MUST contain every log file modified in the last 24 hours, oldest first, or the newest file alone when none is that recent. Opaque session tokens and JWT-shaped strings in it MUST be replaced with `[redacted]`, and other text MUST be left unchanged. It MUST be absent when there are no log files or they are all empty.
+
+## CORE-024 Configuration
+
+The API base URL MUST be stored with surrounding whitespace and any trailing slashes removed.
+
+## CORE-025 Cross-process IPC
+
+On Linux and macOS, the CLI and tray run as a separate process from the daemon. The daemon MUST serve the CORE-007 methods to them over a Unix socket, using one JSON message per line, and MUST serve one client at a time: once a client disconnects, the next MUST be served. If the daemon replies to `login` or `logout` with a failure that has an empty message, the caller MUST receive the message `login failed` or `logout failed` respectively.
+
+## CORE-026 API error messages
+
+When the API replies with a non-2xx status, the error reported to the caller MUST be, in order of preference: the validation messages in the body's `details`, the body's non-empty `error` field, the body text, or, when the body is missing or empty, a non-empty message naming the HTTP status code and its reason phrase (e.g. `HTTP 502 Bad Gateway error`).

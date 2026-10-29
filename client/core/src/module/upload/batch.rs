@@ -84,6 +84,7 @@ mod tests {
     use crate::model::LogEntry;
     use crate::model::UploadKind;
 
+    // BATCH-002: the payload is a msgpack array of the encoded events.
     #[test]
     fn batch_payload_is_array_of_encoded_event_bytes() {
         let entry = LogEntry {

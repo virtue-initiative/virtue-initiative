@@ -242,6 +242,8 @@ MUST NOT require authentication. MUST return this shape:
 
 The version SHOULD match the version of the codebase.
 
+The same payload MUST also be served at `/api`.
+
 ## API-008 Users and authentication
 
 ### API-009 `POST /signup-request`
@@ -628,6 +630,8 @@ The client MUST be authenticated with a **Web Token** and send
 }
 ```
 
+The server MUST respond **HTTP 409** if the caller is the one who sent the invite.
+
 The server MUST finalize the partnership and return **HTTP 200**:
 
 ```js
@@ -654,6 +658,8 @@ The server MUST collect the lists of partners for the user and return **HTTP 200
 The client MUST be authenticated with a **Web Token**.
 
 The id MUST be a valid partnership ID.
+
+The server MUST respond **HTTP 404** if the partnership does not exist or the caller is not a party to it.
 
 The server MUST delete the partnership and notify the other user.
 
@@ -764,6 +770,8 @@ The client MUST be authenticated with a **Web Token** and send
 }
 ```
 
+The server MUST respond **HTTP 404** if the device does not exist or is not owned by the user.
+
 On success, the server MUST respond with **HTTP 204**.
 
 ### API-031 `DELETE /device/:id`
@@ -795,11 +803,13 @@ The server MUST collect the user, partners, and batches and return them in this 
 }
 ```
 
-The server SHOULD filter the batches to only include batches the user can decrypt.
+The server SHOULD filter the batches to only include batches the user can decrypt. A batch whose stored `access_keys` cannot be decoded MUST be left out of the response and logged. `access_keys` stored by an earlier version as JSON MUST still be served.
 
 The server MUST only return batches where `created_at > since`.
 
 ## API-034 Device Only
+
+The server MUST rate limit `GET /d/device` and `POST /d/batch` per authenticated device, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded. The limit is 60 requests per 60 seconds, and one device's requests MUST NOT count against another's.
 
 ### API-035 `POST /d/device`
 
@@ -880,11 +890,17 @@ The client MUST send a multipart form request:
 
 The server MUST upload the file to object storage and store the metadata in the database.
 
+The server MUST take `end_hash` from the hash server's current hash for the device (see `hash-server/SPEC.md`). If that is not 64 hexadecimal characters, the server MUST respond **HTTP 502** and MUST NOT store the batch. After storing the batch the server MUST reset the device's hash state. If the device no longer exists when the batch is stored, the server MUST NOT keep the batch or its object, and MUST respond **HTTP 404**.
+
+For each entry in `notifications`, the server MUST immediately email a tamper alert to every accepted watcher of the device's owner, whatever the entry's `risk`. The alert names the device and uses the entry's `title` and `details`; `title` defaults to `Device reported <type>.` with underscores in the type replaced by spaces. The server MUST NOT send the alert to a watcher whose `email_frequency` is `none` or whose email is unverified. `risk` is required on every entry. A failure to send an alert MUST NOT fail the upload.
+
 The server MUST clamp an `end_time` later than the time it received the batch to that time, and a `start_time` later than the resulting `end_time` to it, and SHOULD log a warning when it does. Both come from the device clock, and a batch is uploaded after the period it covers.
 
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
 
 The server SHOULD NOT store a batch's `url`. It MUST derive the `url` from the batch's stored version, its owner and its `id`, so that a later change to the object storage layout leaves batches uploaded under an earlier version resolving to where they were stored.
+
+The server MUST delete a batch's database row once its `created_at` is more than 30 days old, on the daily scheduled job, so a row can outlive 30 days by up to a day. A batch created exactly 30 days ago MUST be kept. The batch's object in object storage expires on its own after 30 days.
 
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
 
@@ -915,7 +931,7 @@ The server MUST reject a request with **HTTP 400** if the body is not an SNS mes
 - `SigningCertURL` is not an HTTPS URL on an `sns.<region>.amazonaws.com` host
 - the SNS message signature (`SignatureVersion` `1` or `2`) does not verify against that certificate
 
-The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
+The server SHOULD fetch each `SigningCertURL` only once and reuse the certificate. The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
 
 The server MUST confirm the subscription (`SubscriptionConfirmation`) by fetching `SubscribeURL`, and MUST reject the request with **HTTP 403** if that is not an HTTPS URL on an `sns.<region>.amazonaws.com` host.
 
@@ -961,6 +977,8 @@ The server SHOULD delete an email's bounces when a `signup`, `email_change` or `
 The server MUST run a digest job every hour. It MUST send each verified watcher whose `email_frequency` is `daily` or `weekly` one digest email that summarizes every user they watch.
 
 A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
+
+For each user watched, a digest MUST give the number of screenshots and of high risk alerts in the period it covers, name each of that user's devices that has no logs in the period, and link to that user's report for the period. A digest MUST NOT be sent to a watcher whose email is unverified or has a permanent bounce (see API-056).
 
 A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
 
@@ -1155,6 +1173,8 @@ The client MUST send:
   "description": "..." | null | undefined
 }
 ```
+
+The server MUST answer a CORS preflight for this route from the web app's origin with `PUT` allowed.
 
 The server MUST create the flag if it does not exist and otherwise update it, leaving `description` unchanged when it is omitted. It MUST respond **HTTP 400** if `rollout_percent` is not an integer from 0 to 100, and otherwise **HTTP 200** with the resulting `FeatureFlag`.
 

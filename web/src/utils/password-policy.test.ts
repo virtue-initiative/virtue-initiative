@@ -22,7 +22,7 @@ function mockRange(body: (suffix: string) => string, password: string) {
   );
 }
 
-describe('passwordLengthError', () => {
+describe('passwordLengthError (WEB-021)', () => {
   it('rejects a password one character below the minimum', () => {
     expect(passwordLengthError('a'.repeat(MIN_PASSWORD_LENGTH - 1))).toBe(
       'Use at least 12 characters.',
@@ -38,7 +38,7 @@ describe('passwordLengthError', () => {
   });
 });
 
-describe('checkPwnedPassword', () => {
+describe('checkPwnedPassword (WEB-021)', () => {
   it('returns the breach count when the suffix is present', async () => {
     mockRange(
       (suffix) => `AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:9\n${suffix}:4821`,

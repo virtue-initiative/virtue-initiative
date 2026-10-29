@@ -12,6 +12,7 @@ pub use platform::TestPlatformHooks;
 pub use rng::TestRandomSource;
 pub use scenario::Scenario;
 
+// CORE-001: design tests of the Scenario test support (fake clock, platform, API, randomness).
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -56,7 +56,7 @@ function log(id: string, type: string, risk: number, data: FeedLog['data'] = {})
 }
 
 describe('Report', () => {
-  it('summarizes flagged activity for today', async () => {
+  it('summarizes flagged activity for today (WEB-047)', async () => {
     SAMPLE_LOGS = [
       log('stop', 'user_stop', 0.9),
       log('shot-1', 'screenshot', 0.95),
@@ -81,7 +81,7 @@ describe('Report', () => {
     expect(screen.getByText('Monitoring Stopped by User')).toBeInTheDocument();
   });
 
-  it('shows an all-clear message when nothing was flagged', async () => {
+  it('shows an all-clear message when nothing was flagged (WEB-047)', async () => {
     SAMPLE_LOGS = [log('shot', 'screenshot', 0.1)];
     renderWithClient(<Report />);
 
@@ -89,7 +89,7 @@ describe('Report', () => {
     expect(screen.queryByRole('region', { name: /risk/i })).not.toBeInTheDocument();
   });
 
-  it('treats unchanged-screen skips as activity, not missing data', async () => {
+  it('treats unchanged-screen skips as activity, not missing data (WEB-047)', async () => {
     SAMPLE_LOGS = [log('skip', 'screenshot_skipped', 0, { reason: 'static_screen' })];
     renderWithClient(<Report />);
 
@@ -97,7 +97,7 @@ describe('Report', () => {
     expect(screen.queryByText(/no screen activity was recorded/i)).not.toBeInTheDocument();
   });
 
-  it('says there is no data, without an all-clear, when nothing was captured', async () => {
+  it('says there is no data, without an all-clear, when nothing was captured (WEB-047)', async () => {
     SAMPLE_LOGS = [log('locked', 'screenshot_skipped', 0, { reason: 'locked_or_screensaver' })];
     renderWithClient(<Report userId={TEST_WATCHING.user.id} />);
 
@@ -107,19 +107,19 @@ describe('Report', () => {
     expect(screen.queryByText(/note of encouragement/i)).not.toBeInTheDocument();
   });
 
-  it('names the watched person on their report', async () => {
+  it('names the watched person on their report (WEB-045)', async () => {
     renderWithClient(<Report userId={TEST_WATCHING.user.id} />);
     expect(
       await screen.findByRole('heading', { name: `${TEST_WATCHING.user.name}'s report` }),
     ).toBeInTheDocument();
   });
 
-  it('refuses a report for someone the viewer does not monitor', async () => {
+  it('refuses a report for someone the viewer does not monitor (WEB-045)', async () => {
     renderWithClient(<Report userId="stranger" />);
     expect(await screen.findByText(/this report isn't available\./i)).toBeInTheDocument();
   });
 
-  it('widens the query to seven days for the weekly view', async () => {
+  it('widens the query to seven days for the weekly view (WEB-046)', async () => {
     renderWithClient(<Report />);
     await waitFor(() => expect(queries.length).toBeGreaterThan(0));
     const daily = queries[queries.length - 1];
@@ -135,7 +135,7 @@ describe('Report', () => {
     expect(screen.getByRole('heading', { name: /activity report for the week of/i })).toBeVisible();
   });
 
-  it('jumps to a date chosen in the date picker', async () => {
+  it('jumps to a date chosen in the date picker (WEB-046)', async () => {
     const { container } = renderWithClient(<Report />);
     await screen.findByRole('button', { name: /choose a date/i });
 

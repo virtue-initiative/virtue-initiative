@@ -41,7 +41,7 @@ async function acceptPartnership(ownerCookie: string, ownerEmail: string, partne
 }
 
 describe('Locked passwords', () => {
-  it('creates a locked password and returns its id', async () => {
+  it('creates a locked password and returns its id (API-044)', async () => {
     const { cookie } = await signupAndGetCookie('alice@example.com');
 
     const res = await SELF.fetch(`${BASE}/locked-password`, {
@@ -55,7 +55,7 @@ describe('Locked passwords', () => {
     expect(body.id).toBeTruthy();
   });
 
-  it('rejects creation with invalid data', async () => {
+  it('rejects creation with invalid data (API-044)', async () => {
     const { cookie } = await signupAndGetCookie('bad-create@example.com');
 
     const res = await SELF.fetch(`${BASE}/locked-password`, {
@@ -67,7 +67,7 @@ describe('Locked passwords', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects an oversized wrapped_value, so this cannot be used for file storage', async () => {
+  it('rejects an oversized wrapped_value, so this cannot be used for file storage (API-043)', async () => {
     const { cookie } = await signupAndGetCookie('oversized@example.com');
 
     const res = await SELF.fetch(`${BASE}/locked-password`, {
@@ -82,7 +82,7 @@ describe('Locked passwords', () => {
     expect(res.status).toBe(400);
   });
 
-  it('lists only the caller-owned entries, without wrapped_value', async () => {
+  it('lists only the caller-owned entries, without wrapped_value (API-045)', async () => {
     const { cookie } = await signupAndGetCookie('owner@example.com');
     await signupAndGetCookie('someone-else@example.com');
 
@@ -104,7 +104,7 @@ describe('Locked passwords', () => {
     expect(body[0]).not.toHaveProperty('wrapped_value');
   });
 
-  it('404s reveal/delete/restore/permanent-delete for an entry the caller does not own', async () => {
+  it('404s reveal/delete/restore/permanent-delete for an entry the caller does not own (API-046, API-047, API-048, API-049)', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('owns-it@example.com');
     const { cookie: attackerCookie } = await signupAndGetCookie('not-owner@example.com');
 
@@ -129,7 +129,7 @@ describe('Locked passwords', () => {
     }
   });
 
-  it('reveals the value and permanently flags accessed_at the first time only, without re-alerting', async () => {
+  it('reveals the value and permanently flags accessed_at the first time only, without re-alerting (API-046)', async () => {
     const { cookie } = await signupAndGetCookie('reveal-once@example.com');
     await acceptPartnership(cookie, 'reveal-once@example.com', 'reveal-once-partner@example.com');
 
@@ -170,7 +170,7 @@ describe('Locked passwords', () => {
     expect(alertEmailsAfterSecondReveal).toHaveLength(1);
   });
 
-  it('skips alerting watchers whose email_frequency is none', async () => {
+  it('skips alerting watchers whose email_frequency is none (API-046)', async () => {
     const { cookie } = await signupAndGetCookie('quiet-owner@example.com');
     const { partnerCookie } = await acceptPartnership(
       cookie,
@@ -203,7 +203,7 @@ describe('Locked passwords', () => {
     expect(alertEmails).toHaveLength(0);
   });
 
-  it('soft-deletes, still lists it, and restore un-deletes it', async () => {
+  it('soft-deletes, still lists it, and restore un-deletes it (API-047, API-048, API-045)', async () => {
     const { cookie } = await signupAndGetCookie('soft-delete@example.com');
 
     const createRes = await SELF.fetch(`${BASE}/locked-password`, {
@@ -245,7 +245,7 @@ describe('Locked passwords', () => {
     expect(afterRestore.find((entry) => entry.id === id)?.deleted_at).toBeNull();
   });
 
-  it('permanently deletes so the entry no longer appears at all', async () => {
+  it('permanently deletes so the entry no longer appears at all (API-049, API-045)', async () => {
     const { cookie } = await signupAndGetCookie('permanent-delete@example.com');
 
     const createRes = await SELF.fetch(`${BASE}/locked-password`, {
