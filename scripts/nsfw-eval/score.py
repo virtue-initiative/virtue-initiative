@@ -194,7 +194,9 @@ def score_whole(rec, p, model, fallback=False):
     """classify_image: whole-frame skin gate, then the model on the whole frame. With
     fallback=True, classify_regions' version for screens with no regions: the per-region skin
     gate and grayscale rules."""
-    skin = rec["whole"]["skin"]
+    whole = rec["whole"]
+    # classify_image leaves out the dark-skin rule; collections from before it have only skin.
+    skin = whole["skin"] if fallback else whole.get("skin_ycbcr", whole["skin"])
     contribution = skin * p["skin_weight"]
     gate = p["region_skin_gate"] if fallback else p["skin_gate"]
     gray = fallback and rec["whole"].get("gray")

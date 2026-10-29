@@ -301,7 +301,8 @@ fn collect(opts: &Options) {
 /// One screenshot's record:
 ///
 /// - `file`, `width`, `height`
-/// - `whole`: `{skin, gray, ...model outputs}` for the full frame
+/// - `whole`: `{skin, skin_ycbcr, gray, ...model outputs}` for the full frame, where
+///   `skin_ycbcr` leaves out the dark-skin rule as `classify_image` does
 /// - `regions`: up to `max_regions` of `{x, y, width, height, skin, gray, blur, ...model
 ///   outputs}`, largest first
 /// - `rust`: what `classify_regions` returns with the built-in constants (gantman with default
@@ -335,7 +336,9 @@ fn record(
     let model_start = Instant::now();
     let (mut whole, runs) = model.view(&img);
     model_runs += runs;
-    whole.insert("skin".into(), json!(skin_score(&img)));
+    whole.insert("skin".into(), json!(skin_score(&img, true)));
+    // `classify_image` leaves out the dark-skin rule.
+    whole.insert("skin_ycbcr".into(), json!(skin_score(&img, false)));
     whole.insert("gray".into(), json!(is_grayscale(&img)));
 
     let mut region_values = Vec::new();
@@ -351,7 +354,7 @@ fn record(
             ("y", json!(r.y)),
             ("width", json!(r.width)),
             ("height", json!(r.height)),
-            ("skin", json!(skin_score(&crop))),
+            ("skin", json!(skin_score(&crop, true))),
             ("gray", json!(is_grayscale(&crop))),
             ("blur", json!(blur)),
             ("container", json!([c.x, c.y, c.width, c.height])),

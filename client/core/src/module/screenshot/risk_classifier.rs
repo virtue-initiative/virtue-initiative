@@ -27,9 +27,10 @@ const MODEL_WEIGHT: f32 = 0.70; // model contributes up to 70% of risk
 const SKIN_GATE: f32 = 0.05; // below this contribution (~1.5% skin) skip the model
 const GRAY_CHROMA: u8 = 24; // a pixel whose channels differ by more than this has color
 const GRAY_MAX_COLORED: f32 = 0.05; // an image with fewer colored pixels than this is grayscale
-// The YCbCr skin range needs Y > 80, which leaves out dark skin. A darker pixel down to this
-// brightness also counts when it's warm (R > G > B) with a skin-like share of red and green;
-// below it, skin can't be told from black.
+// The YCbCr skin range needs Y > 80, which leaves out dark skin. With `dark_skin`, a darker
+// pixel down to this brightness also counts when it's warm (R > G > B) with a skin-like share of
+// red and green; below it, skin can't be told from black. Only `classify_regions` uses it, so
+// `classify_image` scores exactly as before while per-image scoring is behind a feature flag.
 const DARK_SKIN_MIN_Y: f32 = 30.0;
 
 // Per-region scoring constants (see `classify_regions`). They were tuned on a labeled set of
@@ -196,7 +197,7 @@ impl RiskClassifier {
     /// that also needs the decoded image for something else (e.g. the fingerprint) doesn't pay
     /// for a second full PNG decode of the same bytes.
     pub fn classify_image(&self, img: &DynamicImage) -> CoreResult<RiskScores> {
-        let skin = skin_score(img);
+        let skin = skin_score(img, false);
         let contribution = skin * SKIN_WEIGHT;
         if contribution <= SKIN_GATE {
             return Ok(RiskScores {
@@ -264,7 +265,7 @@ impl RiskClassifier {
             MAX_REGIONS,
             &image_regions::ExtractParams::default(),
         );
-        let skin = skin_score(img);
+        let skin = skin_score(img, true);
         let gray = is_grayscale(img);
         let mut model: Option<NsfwModel> = None;
         let build = |model: &mut Option<NsfwModel>| -> bool {
@@ -314,7 +315,7 @@ impl RiskClassifier {
         for e in extracted {
             let region = e.region;
             let crop = img.crop_imm(region.x, region.y, region.width, region.height);
-            let crop_skin = skin_score(&crop);
+            let crop_skin = skin_score(&crop, true);
             let crop_gray = is_grayscale(&crop);
             let mut result = RegionScore {
                 region,
@@ -477,8 +478,9 @@ pub fn is_grayscale(img: &DynamicImage) -> bool {
 
 /// Cheap skin-tone heuristic. Downsamples to 64×64 (Nearest) and counts pixels whose
 /// YCbCr values fall in a typical skin range, normalising the ratio so it saturates at
-/// 30% skin pixels: `min(skin_ratio / 0.30, 1.0)`.
-pub fn skin_score(img: &DynamicImage) -> f32 {
+/// 30% skin pixels: `min(skin_ratio / 0.30, 1.0)`. `dark_skin` also counts darker skin
+/// pixels (see [`is_skin`]).
+pub fn skin_score(img: &DynamicImage, dark_skin: bool) -> f32 {
     let small = img.resize_exact(
         SKIN_DOWNSAMPLE,
         SKIN_DOWNSAMPLE,
@@ -490,7 +492,7 @@ pub fn skin_score(img: &DynamicImage) -> f32 {
     let mut total = 0u32;
     for pixel in rgb.pixels() {
         total += 1;
-        if is_skin(pixel[0], pixel[1], pixel[2]) {
+        if is_skin(pixel[0], pixel[1], pixel[2], dark_skin) {
             skin += 1;
         }
     }
@@ -503,10 +505,10 @@ pub fn skin_score(img: &DynamicImage) -> f32 {
 }
 
 /// Returns true if an RGB pixel falls in a typical skin range using BT.601 YCbCr:
-/// Y > 80, Cb ∈ [77, 127], Cr ∈ [133, 173]. Darker pixels, down to [`DARK_SKIN_MIN_Y`],
-/// count when R > G > B with a normalized red share in [0.36, 0.465] and green share in
+/// Y > 80, Cb ∈ [77, 127], Cr ∈ [133, 173]. With `dark_skin`, darker pixels, down to
+/// [`DARK_SKIN_MIN_Y`], also count when R > G > B with a normalized red share in [0.36, 0.465] and green share in
 /// [0.28, 0.363] (Soriano et al.'s skin locus), which covers the darkest Monk skin tones.
-fn is_skin(r: u8, g: u8, b: u8) -> bool {
+fn is_skin(r: u8, g: u8, b: u8, dark_skin: bool) -> bool {
     let r = r as f32;
     let g = g as f32;
     let b = b as f32;
@@ -516,7 +518,7 @@ fn is_skin(r: u8, g: u8, b: u8) -> bool {
         let cr = 128.0 + 0.5 * r - 0.418_688 * g - 0.081_312 * b;
         return (77.0..=127.0).contains(&cb) && (133.0..=173.0).contains(&cr);
     }
-    if y < DARK_SKIN_MIN_Y || !(r > g && g > b) {
+    if !dark_skin || y < DARK_SKIN_MIN_Y || !(r > g && g > b) {
         return false;
     }
     let sum = r + g + b;
@@ -534,18 +536,18 @@ mod tests {
 
     #[test]
     fn pure_white_has_zero_skin_score() {
-        assert_eq!(skin_score(&solid(255, 255, 255)), 0.0);
+        assert_eq!(skin_score(&solid(255, 255, 255), true), 0.0);
     }
 
     #[test]
     fn pure_black_has_zero_skin_score() {
-        assert_eq!(skin_score(&solid(0, 0, 0)), 0.0);
+        assert_eq!(skin_score(&solid(0, 0, 0), true), 0.0);
     }
 
     #[test]
     fn skin_tone_image_scores_above_zero() {
         // A typical light skin tone (240, 200, 160): Y≈207, Cb≈101, Cr≈151 — all in range.
-        let score = skin_score(&solid(240, 200, 160));
+        let score = skin_score(&solid(240, 200, 160), false);
         assert!(score > 0.0, "skin tone should score > 0, got {score}");
         // A fully skin-toned image saturates the score at 1.0.
         assert_eq!(score, 1.0);
@@ -650,8 +652,21 @@ mod tests {
     #[test]
     fn every_monk_skin_tone_counts_as_skin() {
         for [r, g, b] in MONK {
-            assert!(is_skin(r, g, b), "#{r:02x}{g:02x}{b:02x} should be skin");
+            assert!(
+                is_skin(r, g, b, true),
+                "#{r:02x}{g:02x}{b:02x} should be skin"
+            );
         }
+    }
+
+    #[test]
+    fn whole_frame_scoring_keeps_the_ycbcr_rule() {
+        // `classify_image` doesn't use the dark-skin rule, so the three darkest tones don't
+        // count there.
+        for [r, g, b] in &MONK[7..] {
+            assert!(!is_skin(*r, *g, *b, false));
+        }
+        assert!(MONK[..7].iter().all(|&[r, g, b]| is_skin(r, g, b, false)));
     }
 
     #[test]
@@ -668,7 +683,7 @@ mod tests {
             [0x0d, 0x11, 0x17],
         ] {
             assert!(
-                !is_skin(r, g, b),
+                !is_skin(r, g, b, true),
                 "#{r:02x}{g:02x}{b:02x} should not be skin"
             );
         }

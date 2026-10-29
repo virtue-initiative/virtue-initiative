@@ -16,7 +16,7 @@ use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
 use crate::module::screenshot::{
-    self, CaptureOutcome, ScreenshotState, risk_classifier::RiskClassifier,
+    self, CaptureOutcome, Scoring, ScreenshotState, risk_classifier::RiskClassifier,
 };
 use crate::module::status;
 use crate::module::upload::{self, Upload, UploadState};
@@ -360,11 +360,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
+        let scoring =
+            Scoring::for_device(state.upload.settings.as_ref(), &self.config.platform_name);
         let captured = plan.map(|plan| {
             screenshot::capture_and_process(
                 plan,
                 &self.platform,
                 self.classifier.as_deref(),
+                scoring,
                 self.ocr.as_deref(),
             )
         });
@@ -875,11 +878,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
+        let scoring =
+            Scoring::for_device(working.upload.settings.as_ref(), &self.config.platform_name);
         let captured = capture_plan.map(|plan| {
             screenshot::capture_and_process(
                 plan,
                 &self.platform,
                 self.classifier.as_deref(),
+                scoring,
                 self.ocr.as_deref(),
             )
         });
