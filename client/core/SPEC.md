@@ -58,6 +58,8 @@ Screenshots SHOULD be processed with the content detection logic.
 
 Screenshots SHOULD first be filtered based on a skin tone detector. If it rates it above a threashold, it SHOULD run a NSFW image classifier.
 
+When the `per_image_nsfw` feature flag is on (see /api/SPEC.md API-061), the daemon SHOULD instead find the photo-like regions of the screenshot and run the classifier on each region that passes its own skin tone filter, then combine the region scores into one risk. A grayscale region MAY skip the skin tone filter, since the detector can't see skin without color. When no region is found, the whole screenshot SHOULD be scored the same way, as a single region. The skin tone detector used for this SHOULD recognize dark skin tones. Phone screenshots MAY be scored differently from desktop ones, since a desktop can show several windows. When the flag is off, the daemon MUST score screenshots as described above.
+
 Screenshots SHOULD then be redacted using an OCR engine and then compressed into small WebP.
 
 ## CORE-005 Uploading

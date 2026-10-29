@@ -1,16 +1,17 @@
 pub mod fingerprint;
 pub mod image_pipeline;
+pub mod image_regions;
 pub mod risk_classifier;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::model::{ScreenshotSkipReason, StatusSkipReason, UploadKind};
+use crate::model::{DeviceSettings, ScreenshotSkipReason, StatusSkipReason, UploadKind};
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::upload::{self, UploadState};
 use crate::platform::ScreenshotHooks;
 use crate::rng::RandomSource;
-use risk_classifier::RiskClassifier;
+use risk_classifier::{RiskClassifier, Screen};
 use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(not(test))]
@@ -81,6 +82,33 @@ pub fn disable(state: &mut ScreenshotState) {
 /// What `plan` decided to do this tick — passed to `capture_and_process`.
 pub struct CapturePlan {
     anchor: Option<fingerprint::Fingerprint>,
+}
+
+/// Feature flag (API-061) that turns on per-image risk scoring (CORE-004).
+pub const PER_IMAGE_NSFW_FLAG: &str = "per_image_nsfw";
+
+/// How `capture_and_process` scores a screenshot's risk (CORE-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scoring {
+    /// [`RiskClassifier::classify_image`]: one look at the whole frame.
+    WholeFrame,
+    /// [`RiskClassifier::classify_regions`]: each photo-like region on its own.
+    PerImage(Screen),
+}
+
+impl Scoring {
+    /// Per-image scoring when the device's owner has [`PER_IMAGE_NSFW_FLAG`], treating Android
+    /// and iOS screenshots as phone screens. Otherwise whole-frame scoring, including before
+    /// settings are first fetched.
+    pub fn for_device(settings: Option<&DeviceSettings>, platform_name: &str) -> Self {
+        if !settings.is_some_and(|s| s.has_feature_flag(PER_IMAGE_NSFW_FLAG)) {
+            return Self::WholeFrame;
+        }
+        Self::PerImage(match platform_name {
+            "android" | "ios" => Screen::Phone,
+            _ => Screen::Desktop,
+        })
+    }
 }
 
 /// Phase 2a (cheap): decide whether a screenshot is due this tick, applying
@@ -175,6 +203,7 @@ pub fn capture_and_process(
     plan: CapturePlan,
     hooks: &dyn ScreenshotHooks,
     classifier: Option<&RiskClassifier>,
+    scoring: Scoring,
     ocr: Option<&ScreenshotOCR>,
 ) -> CaptureOutcome {
     let screenshot = match hooks.take_screenshot() {
@@ -216,17 +245,28 @@ pub fn capture_and_process(
     // Classify before the (consuming) image pipeline. A `None` classifier (model
     // failed to load) or a classify error fails safe to risk 0 with no raw scores,
     // logged so an always-0 misconfiguration is diagnosable.
-    let scores = classifier.and_then(|c| match c.classify_image(&decoded) {
-        Ok(scores) => Some(scores),
-        Err(err) => {
-            tracing::warn!(error = %err, "classify failed, recording risk 0");
-            None
+    // Per-image scoring also reports its model runs and each image it found (BATCH-003).
+    let scores = classifier.and_then(|c| {
+        let scores = match scoring {
+            Scoring::WholeFrame => c.classify_image(&decoded).map(|s| (s, None)),
+            Scoring::PerImage(screen) => c.classify_regions(&decoded, screen).map(|r| {
+                let images = r.regions.iter().map(|r| r.to_scored_image()).collect();
+                (r.scores, Some((r.model_runs, images)))
+            }),
+        };
+        match scores {
+            Ok(scores) => Some(scores),
+            Err(err) => {
+                tracing::warn!(error = %err, "classify failed, recording risk 0");
+                None
+            }
         }
     });
-    let (risk, skin_detection, nsfw_detection) = match scores {
-        Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
-        None => (0.0, None, None),
+    let (risk, skin_detection, nsfw_detection, details) = match scores {
+        Some((scores, details)) => (scores.risk, Some(scores.skin), scores.nsfw, details),
+        None => (0.0, None, None, None),
     };
+    let (model_runs, images) = details.unzip();
 
     let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
     let processed =
@@ -247,6 +287,8 @@ pub fn capture_and_process(
             content_type: processed.content_type,
             skin_detection,
             nsfw_detection,
+            model_runs,
+            images,
         },
         fingerprint: Some(fp),
     }
@@ -458,6 +500,7 @@ mod tests {
             },
             &hooks,
             None,
+            Scoring::WholeFrame,
             None,
         );
         assert!(matches!(outcome, CaptureOutcome::StaticFrame));
@@ -475,6 +518,7 @@ mod tests {
             },
             &hooks,
             None,
+            Scoring::WholeFrame,
             None,
         );
         assert!(matches!(outcome, CaptureOutcome::Uploaded { .. }));
@@ -484,8 +528,39 @@ mod tests {
     fn capture_failure_reported() {
         let hooks = TestPlatformHooks::new();
         hooks.queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
-        let outcome = capture_and_process(CapturePlan { anchor: None }, &hooks, None, None);
+        let outcome = capture_and_process(
+            CapturePlan { anchor: None },
+            &hooks,
+            None,
+            Scoring::WholeFrame,
+            None,
+        );
         assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn per_image_scoring_needs_its_feature_flag() {
+        let mut upload = authenticated_upload();
+        assert_eq!(Scoring::for_device(None, "linux"), Scoring::WholeFrame);
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "linux"),
+            Scoring::WholeFrame
+        );
+
+        let settings = upload.settings.as_mut().unwrap();
+        settings.feature_flags = vec![PER_IMAGE_NSFW_FLAG.into()];
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "windows"),
+            Scoring::PerImage(Screen::Desktop)
+        );
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "android"),
+            Scoring::PerImage(Screen::Phone)
+        );
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "ios"),
+            Scoring::PerImage(Screen::Phone)
+        );
     }
 
     #[test]

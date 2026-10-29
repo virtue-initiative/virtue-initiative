@@ -831,6 +831,8 @@ fn dev_send(paths: ClientPaths, args: SendLogArgs) -> Result<()> {
             content_type: shot.content_type,
             skin_detection: None,
             nsfw_detection: None,
+            model_runs: None,
+            images: None,
         }]
     } else {
         vec![build_send_kind(&args)?]

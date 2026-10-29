@@ -23,7 +23,15 @@ import { batchObject } from '../../api/src/lib/batch-url';
 import { CURRENT_API_VERSION } from '../../shared-web/api-version';
 import { deriveAccount, PASSWORD, type AccountMaterial } from './accounts';
 import { buildBatch } from './batch';
-import { DEV, DEVICES, generateBatches, PARTNERSHIPS, USERS } from './scenario';
+import {
+  DEV,
+  DEVICES,
+  generateBatches,
+  PARTNERSHIPS,
+  PER_IMAGE_FLAG,
+  PER_IMAGE_SINCE,
+  USERS,
+} from './scenario';
 import { hexToBytes, hexToUuid } from './util';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -79,6 +87,27 @@ try {
       now,
     ),
   );
+
+  // The per-image scoring flag, off by default, with overrides that match the seeded
+  // screenshots. An existing flag keeps its rollout, and other overrides are left alone.
+  statements.push(
+    DB.prepare(
+      `INSERT INTO feature_flags (key, rollout_percent, description, created_at, updated_at)
+       VALUES (?, 0, ?, ?, ?) ON CONFLICT(key) DO NOTHING`,
+    ).bind(PER_IMAGE_FLAG, 'Score each image on a screenshot on its own (CORE-004).', now, now),
+  );
+  for (const user of USERS) {
+    statements.push(
+      PER_IMAGE_SINCE.has(user)
+        ? DB.prepare(
+            `UPDATE users SET feature_flags = json_set(feature_flags, '$.' || ?, json('true'))
+             WHERE id = ?`,
+          ).bind(PER_IMAGE_FLAG, blob(user.idHex))
+        : DB.prepare(
+            `UPDATE users SET feature_flags = json_remove(feature_flags, '$.' || ?) WHERE id = ?`,
+          ).bind(PER_IMAGE_FLAG, blob(user.idHex)),
+    );
+  }
 
   if (!usersOnly) {
     for (const device of DEVICES) {
