@@ -72,6 +72,13 @@ pub enum UploadKind {
         /// was available.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         nsfw_detection: Option<f32>,
+        /// How many times the NSFW model ran. Only set by per-image scoring (CORE-004).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_runs: Option<u32>,
+        /// Every image per-image scoring found on the screen, largest first; empty when it
+        /// found none. `None` under whole-frame scoring.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        images: Option<Vec<ScoredImage>>,
     },
     /// The user explicitly quit the monitor while it was expected to be
     /// running. Always high risk.
@@ -114,6 +121,28 @@ pub enum UploadKind {
     },
 }
 
+/// One image found on a screenshot and how it scored (BATCH-003).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScoredImage {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Skin-tone score ∈ [0.0, 1.0].
+    pub skin: f32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gray: bool,
+    /// The model's NSFW score ∈ [0.0, 1.0]; `None` when the skin gate skipped the image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nsfw: Option<f32>,
+    /// The NSFW score of the mirrored image, when the confirmation pass ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirrored: Option<f32>,
+    /// The image's final score, which the risk is built from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f32>,
+}
+
 /// Hand-written so the captured screenshot bytes never reach a log line
 /// verbatim — every other field prints exactly as `#[derive(Debug)]` would.
 impl std::fmt::Debug for UploadKind {
@@ -124,9 +153,11 @@ impl std::fmt::Debug for UploadKind {
                 content_type,
                 skin_detection,
                 nsfw_detection,
+                model_runs,
+                images,
             } => write!(
                 f,
-                "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?} }}",
+                "Screenshot {{ image: <{} bytes>, content_type: {content_type:?}, skin_detection: {skin_detection:?}, nsfw_detection: {nsfw_detection:?}, model_runs: {model_runs:?}, images: {images:?} }}",
                 image.len()
             ),
             UploadKind::UserStop => write!(f, "UserStop"),
@@ -409,5 +440,63 @@ mod tests {
                 "data": { "utc_ms": 2_000 }
             })
         );
+    }
+
+    #[test]
+    fn screenshot_per_image_details_serialize_only_what_was_measured() {
+        // BATCH-003: `gray` only when true, model scores only when the model ran.
+        let upload = UploadKind::Screenshot {
+            image: vec![1],
+            content_type: "image/webp".into(),
+            skin_detection: Some(0.5),
+            nsfw_detection: Some(0.25),
+            model_runs: Some(2),
+            images: Some(vec![
+                ScoredImage {
+                    x: 10,
+                    y: 20,
+                    width: 300,
+                    height: 200,
+                    skin: 0.5,
+                    gray: false,
+                    nsfw: Some(0.75),
+                    mirrored: Some(0.5),
+                    score: Some(0.0),
+                },
+                ScoredImage {
+                    x: 0,
+                    y: 0,
+                    width: 64,
+                    height: 64,
+                    skin: 0.0,
+                    gray: true,
+                    nsfw: None,
+                    mirrored: None,
+                    score: None,
+                },
+            ]),
+        };
+        let value = serde_json::to_value(upload).unwrap();
+        assert_eq!(value["data"]["model_runs"], json!(2));
+        assert_eq!(
+            value["data"]["images"],
+            json!([
+                { "x": 10, "y": 20, "width": 300, "height": 200, "skin": 0.5,
+                  "nsfw": 0.75, "mirrored": 0.5, "score": 0.0 },
+                { "x": 0, "y": 0, "width": 64, "height": 64, "skin": 0.0, "gray": true },
+            ])
+        );
+
+        let whole_frame = UploadKind::Screenshot {
+            image: vec![1],
+            content_type: "image/webp".into(),
+            skin_detection: None,
+            nsfw_detection: None,
+            model_runs: None,
+            images: None,
+        };
+        let value = serde_json::to_value(whole_frame).unwrap();
+        assert!(value["data"].get("model_runs").is_none());
+        assert!(value["data"].get("images").is_none());
     }
 }

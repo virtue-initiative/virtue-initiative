@@ -62,6 +62,17 @@ Known types and their `data` fields:
 | `alert`              | `message`: string                                                                          |
 | `dev`                | `title`: string, `details`: string or nil                                                  |
 
+A `screenshot` event scored per image (CORE-004) MAY also carry `model_runs`: integer, how many times the NSFW model ran, and `images`: an array with one map per image found on the screen, which is empty when none was found. Each map has these keys:
+
+| Key                         | Type    | Required | Meaning                                                                        |
+| --------------------------- | ------- | -------- | ------------------------------------------------------------------------------ |
+| `x`, `y`, `width`, `height` | integer | yes      | Where the image is in the captured screenshot, in pixels, before any resizing. |
+| `skin`                      | float   | yes      | Skin tone score from `0.0` to `1.0`.                                           |
+| `gray`                      | boolean | no       | `true` when the image is grayscale. Absent means it has color.                 |
+| `nsfw`                      | float   | no       | The model's NSFW score from `0.0` to `1.0`. Absent when the model didn't run.  |
+| `mirrored`                  | float   | no       | The model's NSFW score for the mirrored image, when that second pass ran.      |
+| `score`                     | float   | no       | The image's final score, which the event's risk is built from.                 |
+
 The consumer MUST ignore keys it does not know and MUST NOT reject an event because its `type` is unknown. A new type or a new optional field is therefore not a breaking change.
 
 ## BATCH-004 Byte strings

@@ -401,6 +401,65 @@ describe('LogDetailDialog — prev/next navigation (#660)', () => {
   });
 });
 
+describe('LogDetailDialog — per-image scoring details', () => {
+  function renderScreenshot(data: Record<string, unknown>) {
+    const item: FeedLog = {
+      ...DEFAULT_SAMPLE_LOGS[0],
+      id: 'log-scored',
+      type: 'screenshot',
+      data: { content_type: 'image/webp', ...data },
+    };
+    render(
+      <LogDetailDialog
+        item={item}
+        deviceName={() => TEST_DEVICES[0].name}
+        onClose={() => {}}
+        viewerId="user-1"
+      />,
+    );
+  }
+
+  it('lists each image the client scored in the Advanced dialog', async () => {
+    const user = userEvent.setup();
+    renderScreenshot({
+      nsfw_detection: 0.8999999761581543,
+      model_runs: 3,
+      images: [
+        {
+          x: 40,
+          y: 120,
+          width: 640,
+          height: 360,
+          skin: 0.62,
+          nsfw: 0.97,
+          mirrored: 0.95,
+          score: 0.83,
+        },
+        { x: 700, y: 120, width: 200, height: 150, skin: 0.03 },
+        { x: 0, y: 500, width: 300, height: 300, skin: 0, gray: true, nsfw: 0.12, score: 0 },
+      ],
+    });
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+
+    expect(screen.getByText('3 found on the screen, 2 checked by the model.')).toBeInTheDocument();
+    expect(screen.getByText('640×360')).toBeInTheDocument();
+    expect(screen.getByText('0.95')).toBeInTheDocument();
+    expect(screen.getByText('Skipped')).toBeInTheDocument();
+    expect(screen.getByText('Gray')).toBeInTheDocument();
+    // Other metadata keeps its list, with float noise rounded off.
+    expect(screen.getByText('model_runs')).toBeInTheDocument();
+    expect(screen.getByText('0.9')).toBeInTheDocument();
+  });
+
+  it('shows no image table for a screenshot scored as a whole', async () => {
+    const user = userEvent.setup();
+    renderScreenshot({ skin_detection: 0.1 });
+    await user.click(screen.getByRole('button', { name: 'Advanced' }));
+
+    expect(screen.queryByText('Images')).not.toBeInTheDocument();
+  });
+});
+
 describe('Logs — sync errors', () => {
   it('shows a network failure instead of "Logs synced", and retries on request', async () => {
     SYNC_ERROR = { kind: 'timeout', message: 'signal timed out' };

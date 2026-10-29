@@ -5,6 +5,7 @@ use tract_nnef::prelude::*;
 
 use super::image_regions::{self, Region};
 use crate::error::{CoreError, CoreResult};
+use crate::model::ScoredImage;
 
 static NSFW_MODEL_INVOCATIONS: AtomicU64 = AtomicU64::new(0);
 
@@ -100,6 +101,8 @@ pub struct RegionScore {
     pub container: Region,
     /// Raw skin-tone score of the crop.
     pub skin: f32,
+    /// Whether the crop is grayscale, which lets it skip the skin gate.
+    pub gray: bool,
     /// Model class probabilities `[drawings, hentai, neutral, porn, sexy]`, or `None` when the
     /// crop's skin gate skipped the model.
     pub probs: Option<[f32; 5]>,
@@ -107,6 +110,23 @@ pub struct RegionScore {
     pub confirm_probs: Option<[f32; 5]>,
     /// The region's final score after reweighting, confirmation, the floor and size weighting.
     pub score: Option<f32>,
+}
+
+impl RegionScore {
+    /// How the region is reported on its screenshot event (BATCH-003).
+    pub fn to_scored_image(&self) -> ScoredImage {
+        ScoredImage {
+            x: self.region.x,
+            y: self.region.y,
+            width: self.region.width,
+            height: self.region.height,
+            skin: self.skin,
+            gray: self.gray,
+            nsfw: self.probs.as_ref().map(region_nsfw),
+            mirrored: self.confirm_probs.as_ref().map(region_nsfw),
+            score: self.score,
+        }
+    }
 }
 
 /// Result of [`RiskClassifier::classify_regions`].
@@ -321,6 +341,7 @@ impl RiskClassifier {
                 region,
                 container: e.container,
                 skin: crop_skin,
+                gray: crop_gray,
                 probs: None,
                 confirm_probs: None,
                 score: None,

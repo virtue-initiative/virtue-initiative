@@ -172,7 +172,40 @@ function screenshot(ts: number, name: string, risk: number, r: Rng): SeedEvent {
       content_type: 'image/webp',
       skin_detection: risk > 0.3 ? Math.min(1, risk + r.range(0, 0.1)) : r.range(0, 0.2),
       nsfw_detection: risk,
+      ...scoredImages(risk),
     },
+  };
+}
+
+// Per-image scoring details (batch-format BATCH-003), as a client with the per_image_nsfw flag
+// sends them. Worked out from the risk alone, so they don't shift the random sequence.
+function scoredImages(risk: number) {
+  if (risk < 0.4) {
+    const images: Record<string, unknown>[] = [
+      { x: 200, y: 300, width: 640, height: 360, skin: 0.05 },
+    ];
+    if (risk > 0)
+      images.push({ x: 900, y: 300, width: 320, height: 240, skin: 0.4, nsfw: risk, score: 0 });
+    return { model_runs: risk > 0 ? 1 : 0, images };
+  }
+  // The flagged image: a first pass, a mirrored pass, and a score rescaled above the 0.7 floor.
+  const raw = 0.7 + 0.3 * risk;
+  return {
+    model_runs: 3,
+    images: [
+      {
+        x: 320,
+        y: 160,
+        width: 960,
+        height: 540,
+        skin: 0.7,
+        nsfw: Math.min(1, raw + 0.02),
+        mirrored: raw,
+        score: risk,
+      },
+      { x: 1320, y: 160, width: 400, height: 300, skin: 0.08 },
+      { x: 1320, y: 500, width: 400, height: 300, skin: 0.4, nsfw: 0.22, score: 0 },
+    ],
   };
 }
 

@@ -116,6 +116,8 @@ mod tests {
                 content_type: "image/webp".to_string(),
                 skin_detection: None,
                 nsfw_detection: None,
+                model_runs: None,
+                images: None,
             },
         };
 

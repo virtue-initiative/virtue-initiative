@@ -245,10 +245,14 @@ pub fn capture_and_process(
     // Classify before the (consuming) image pipeline. A `None` classifier (model
     // failed to load) or a classify error fails safe to risk 0 with no raw scores,
     // logged so an always-0 misconfiguration is diagnosable.
+    // Per-image scoring also reports its model runs and each image it found (BATCH-003).
     let scores = classifier.and_then(|c| {
         let scores = match scoring {
-            Scoring::WholeFrame => c.classify_image(&decoded),
-            Scoring::PerImage(screen) => c.classify_regions(&decoded, screen).map(|r| r.scores),
+            Scoring::WholeFrame => c.classify_image(&decoded).map(|s| (s, None)),
+            Scoring::PerImage(screen) => c.classify_regions(&decoded, screen).map(|r| {
+                let images = r.regions.iter().map(|r| r.to_scored_image()).collect();
+                (r.scores, Some((r.model_runs, images)))
+            }),
         };
         match scores {
             Ok(scores) => Some(scores),
@@ -258,10 +262,11 @@ pub fn capture_and_process(
             }
         }
     });
-    let (risk, skin_detection, nsfw_detection) = match scores {
-        Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
-        None => (0.0, None, None),
+    let (risk, skin_detection, nsfw_detection, details) = match scores {
+        Some((scores, details)) => (scores.risk, Some(scores.skin), scores.nsfw, details),
+        None => (0.0, None, None, None),
     };
+    let (model_runs, images) = details.unzip();
 
     let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
     let processed =
@@ -282,6 +287,8 @@ pub fn capture_and_process(
             content_type: processed.content_type,
             skin_detection,
             nsfw_detection,
+            model_runs,
+            images,
         },
         fingerprint: Some(fp),
     }

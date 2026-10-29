@@ -132,3 +132,54 @@
   max-height: calc(100dvh - 4rem);
   overflow-y: auto;
 }
+
+/* Per-image scoring details under the Advanced dialog's metadata. The table needs more room
+   than the dialog's usual 400px; on a phone it scrolls sideways instead. */
+.logs-advanced-dialog:has(.logs-images-table) {
+  max-width: min(34rem, calc(100vw - 1.5rem));
+}
+
+.logs-images {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+}
+
+.logs-images-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.logs-images-summary {
+  margin: 0.25rem 0 0.5rem;
+  color: var(--text-muted);
+}
+
+.logs-images-scroll {
+  overflow-x: auto;
+}
+
+.logs-images-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+
+  & th,
+  & td {
+    padding: 0.2rem 0.5rem;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+
+  & th {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  & th:first-child,
+  & td:first-child {
+    padding-left: 0;
+    text-align: left;
+  }
+}
