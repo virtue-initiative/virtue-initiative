@@ -2,19 +2,19 @@ import { DAY_MS } from './digest-schedule';
 
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
-// API-061: a user's flag overrides, {"flag_key": true | false}. Anything that
-// isn't a boolean is dropped rather than failing the request.
-function parseFlagOverrides(json: string | null): Record<string, boolean> {
+// API-061: a user's flag overrides, stored as {"flag_key": true | false}.
+// Anything that isn't a boolean is dropped rather than failing the request.
+function parseFlagOverrides(json: string | null): Map<string, boolean> {
   try {
     const parsed = JSON.parse(json ?? '{}') as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map();
+    return new Map(
       Object.entries(parsed).filter((entry): entry is [string, boolean] => {
         return typeof entry[1] === 'boolean';
       }),
     );
   } catch {
-    return {};
+    return new Map();
   }
 }
 

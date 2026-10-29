@@ -36,8 +36,8 @@ export async function flagBucket(key: string, userId: string) {
   return new DataView(digest).getUint32(0) % 10000;
 }
 
-async function isEnabled(rule: FlagRule, userId: string, overrides: Record<string, boolean>) {
-  const override = overrides[rule.key];
+async function isEnabled(rule: FlagRule, userId: string, overrides: Map<string, boolean>) {
+  const override = overrides.get(rule.key);
   if (override !== undefined) {
     return override;
   }
@@ -49,7 +49,7 @@ async function isEnabled(rule: FlagRule, userId: string, overrides: Record<strin
 export async function enabledFeatureFlags(
   db: D1Database,
   userId: string,
-  overrides: Record<string, boolean>,
+  overrides: Map<string, boolean>,
   now = Date.now(),
 ) {
   const rules = await loadRules(db, now);
@@ -63,7 +63,7 @@ export async function listFeatureFlagsWithOverrides(db: D1Database): Promise<Fea
   return flags.map((flag) => ({
     ...flag,
     overrides: users.flatMap((user) => {
-      const enabled = user.feature_flags[flag.key];
+      const enabled = user.feature_flags.get(flag.key);
       return enabled === undefined ? [] : [{ user_id: user.id, email: user.email, enabled }];
     }),
   }));
