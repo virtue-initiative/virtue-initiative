@@ -199,7 +199,7 @@ fn a_failed_login_leaves_the_client_logged_out() {
 
 // CORE-008, CORE-005: after a failed login nothing is queued, as for any logged-out client.
 #[test]
-#[ignore = "KNOWN-BUG: a failed login revokes the old session and clears auth, but leaves the upload credentials in place, so events are still queued and uploaded with the revoked token"]
+#[should_panic(expected = "KNOWN-BUG")]
 fn a_failed_login_leaves_nothing_queueing_events() {
     let mut scenario = Scenario::authenticated();
     scenario
@@ -209,8 +209,10 @@ fn a_failed_login_leaves_nothing_queueing_events() {
     assert!(scenario.login("me@example.org", "wrong", None).is_err());
 
     scenario.queue_upload(dev("after the failed login"));
-    assert!(queued_events(&scenario).is_empty());
-    assert!(scenario.state().upload.device_credentials.is_none());
+    assert!(
+        scenario.state().upload.device_credentials.is_none() && queued_events(&scenario).is_empty(),
+        "KNOWN-BUG: a failed login revokes the old session and clears auth, but leaves the upload credentials in place, so events are still queued and uploaded with the revoked token"
+    );
 }
 
 // CORE-009: logout revokes the session best-effort, clears the credentials and disables capture.

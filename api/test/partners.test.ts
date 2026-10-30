@@ -464,14 +464,15 @@ describe('POST /partner/validate (API-024)', () => {
   });
 
   // KNOWN-BUG: the code answers 400 for a token whose invite was withdrawn, the spec says 401 for an invalid token.
-  it.fails('answers 401 for the token of an invite the owner deleted (API-024)', async () => {
+  // This pins today's 400, so it fails once the bug is fixed.
+  it('answers 400, not 401, for the token of an invite the owner deleted (API-024)', async () => {
     const { owner } = await ownerAndPartner();
     const invite = await invitePartner(owner.cookie, 'par@partners.test');
     expect((await removePartnership(owner.cookie, invite.id)).status).toBe(204);
 
     const res = await validate(invite.token);
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
   });
 
   // The spec only calls for 401 on an invalid or unknown token. Whether a used or lapsed

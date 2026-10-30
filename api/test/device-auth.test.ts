@@ -178,19 +178,17 @@ describe('POST /d/device (API-035)', () => {
   );
 
   // KNOWN-BUG: registering on an unverified account whose address bounced answers a plain 403 without code email_bounced, where POST /login answers 403 with code email_bounced
-  it.fails(
-    'answers 403 email_bounced for an unverified account with a bounced address, as POST /login does (API-035)',
-    async () => {
-      const { userId } = await signupAndGetCookie(EMAIL);
-      await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
-        .bind(uuidToBytes(userId))
-        .run();
-      await recordBounce(EMAIL);
-      const res = await register();
-      expect(res.status).toBe(403);
-      expect(await res.json()).toMatchObject({ code: 'email_bounced' });
-    },
-  );
+  // This pins today's missing code, so it fails once the bug is fixed.
+  it('answers 403 without email_bounced yet for an unverified account with a bounced address (API-035)', async () => {
+    const { userId } = await signupAndGetCookie(EMAIL);
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
+    await recordBounce(EMAIL);
+    const res = await register();
+    expect(res.status).toBe(403);
+    expect(await res.json()).not.toHaveProperty('code', 'email_bounced');
+  });
 
   it('fills a missing newsletter location from the registration request and keeps an existing one (API-035)', async () => {
     await signupAndGetCookie(EMAIL);

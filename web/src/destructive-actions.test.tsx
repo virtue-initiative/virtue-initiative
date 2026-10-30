@@ -51,6 +51,8 @@ type Action = {
   remains: () => HTMLElement | null;
   /** Whether the confirmation is still open while the request runs. */
   dialogStaysOpen: boolean;
+  /** For a confirmation that closes: the control that starts the action again. */
+  retry?: () => HTMLElement;
   /** Extra steps before the confirm button is enabled. */
   beforeConfirm?: (user: User, dialog: HTMLElement) => Promise<void>;
   /** Where the failure's error text shows. */
@@ -117,6 +119,7 @@ const ACTIONS: Action[] = [
     },
     remains: () => screen.queryByText(TEST_WATCHING.user.name!),
     dialogStaysOpen: false,
+    retry: () => button(cardOf(TEST_WATCHING.user.name!), 'Remove'),
     failure: 'toast',
   },
   {
@@ -137,6 +140,7 @@ const ACTIONS: Action[] = [
     },
     remains: () => screen.queryByText(TEST_WATCHER.user.name!),
     dialogStaysOpen: false,
+    retry: () => button(cardOf(TEST_WATCHER.user.name!), 'Remove'),
     failure: 'toast',
   },
   {
@@ -168,6 +172,7 @@ const ACTIONS: Action[] = [
     },
     remains: () => screen.queryByText(TEST_WATCHER.user.name!),
     dialogStaysOpen: false,
+    retry: () => button(cardOf(TEST_WATCHER.user.name!), 'Remove'),
     failure: 'toast',
   },
   {
@@ -193,6 +198,7 @@ const ACTIONS: Action[] = [
     },
     remains: () => screen.queryByText(TEST_LOCKED_PASSWORD.label),
     dialogStaysOpen: false,
+    retry: () => button(cardOf(TEST_LOCKED_PASSWORD.label), 'Reveal'),
     failure: 'toast',
   },
   {
@@ -365,6 +371,9 @@ describe.each(ACTIONS)('Destructive action: $name (WEB-020)', (action) => {
       if (action.dialogStaysOpen) {
         expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled();
         expect(within(dialog).getByRole('button', { name: action.confirm })).toBeEnabled();
+      } else {
+        expect(action.retry).toBeDefined();
+        expect(action.retry!()).toBeEnabled();
       }
     });
   });

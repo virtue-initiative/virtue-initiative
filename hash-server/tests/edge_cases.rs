@@ -1,186 +1,16 @@
 //! Edge cases for HASH-002 to HASH-009 and HASH-014, driven through HTTP only.
-//! The happy paths live in `integration.rs` and the shared vectors in `vectors.rs`.
+//! The happy paths live in `integration.rs`, the shared vectors in `vectors.rs` and
+//! the HASH-014 log checks in `logging.rs`.
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+mod common;
 
-use axum::ServiceExt;
-use ed25519_dalek::SigningKey;
-use hash_server::config::Config;
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use pkcs8::{EncodePrivateKey, EncodePublicKey};
-use reqwest::{Method, Response};
+use std::sync::Arc;
+
+use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use reqwest::Method;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
-const DEVICE_A: &str = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
-const DEVICE_B: &str = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
-const ZERO_HEX: &str = "0000000000000000000000000000000000000000000000000000000000000000";
-
-struct TestServer {
-    base_url: String,
-    signing_key_pem: String,
-    client: reqwest::Client,
-}
-
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
-fn new_signing_key_pem() -> (String, String) {
-    let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
-    let private = signing_key
-        .to_pkcs8_pem(Default::default())
-        .unwrap()
-        .to_string();
-    let public = signing_key
-        .verifying_key()
-        .to_public_key_pem(Default::default())
-        .unwrap();
-    (private, public)
-}
-
-fn sign_eddsa(claims: &Value, private_pem: &str) -> String {
-    let key = EncodingKey::from_ed_pem(private_pem.as_bytes()).unwrap();
-    encode(&Header::new(Algorithm::EdDSA), claims, &key).unwrap()
-}
-
-impl TestServer {
-    /// A correctly signed token with the given `sub` and `type`, valid for an hour.
-    fn token(&self, sub: &str, typ: &str) -> String {
-        self.token_with(json!({ "sub": sub, "type": typ, "exp": now() + 3600 }))
-    }
-
-    /// A token signed with the server's key carrying exactly these claims.
-    fn token_with(&self, claims: Value) -> String {
-        sign_eddsa(&claims, &self.signing_key_pem)
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{path}", self.base_url)
-    }
-
-    async fn post_raw(&self, token: &str, body: Vec<u8>) -> Response {
-        self.client
-            .post(self.url("/hash"))
-            .header("Authorization", format!("Bearer {token}"))
-            .body(body)
-            .send()
-            .await
-            .unwrap()
-    }
-
-    /// POST /hash as `device` with a fresh device token.
-    async fn post(&self, device: &str, unix_time: u32, seq: u32, hash: [u8; 32]) -> Response {
-        let token = self.token(device, "device");
-        self.post_raw(&token, post_body(unix_time, seq, hash)).await
-    }
-
-    async fn get_devices(&self, query: &str) -> Response {
-        let token = self.token("ignored", "server");
-        self.client
-            .get(self.url(&format!("/hash?{query}")))
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .await
-            .unwrap()
-    }
-
-    async fn delete_device(&self, query: &str) -> Response {
-        let token = self.token("ignored", "server");
-        self.client
-            .delete(self.url(&format!("/hash?{query}")))
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .await
-            .unwrap()
-    }
-
-    /// The `{hash, seq, last_received}` entry that GET /hash reports for a device.
-    async fn state(&self, device: &str) -> Value {
-        let resp = self.get_devices(&format!("devices={device}")).await;
-        assert_eq!(resp.status(), 200);
-        let mut body: Value = resp.json().await.unwrap();
-        body[device].take()
-    }
-}
-
-async fn spawn_server() -> TestServer {
-    let (signing_key_pem, public_key_pem) = new_signing_key_pem();
-    let db_path = std::env::temp_dir().join(format!(
-        "hash-server-edge-{}-{}.sqlite",
-        std::process::id(),
-        uuid::Uuid::new_v4()
-    ));
-    let config = Config {
-        bind_addr: "127.0.0.1:0".to_string(),
-        database_path: db_path.to_string_lossy().to_string(),
-        jwt_public_key_pem: public_key_pem,
-        write_batch_window: Duration::from_millis(2),
-    };
-    let app = hash_server::router(hash_server::init(&config));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, app.into_make_service())
-            .await
-            .unwrap();
-    });
-    TestServer {
-        base_url: format!("http://{addr}"),
-        signing_key_pem,
-        client: reqwest::Client::new(),
-    }
-}
-
-fn post_body(unix_time: u32, seq: u32, hash: [u8; 32]) -> Vec<u8> {
-    let mut body = Vec::with_capacity(40);
-    body.extend_from_slice(&unix_time.to_le_bytes());
-    body.extend_from_slice(&seq.to_le_bytes());
-    body.extend_from_slice(&hash);
-    body
-}
-
-fn chain(state: [u8; 32], hash: [u8; 32]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(state);
-    hasher.update(hash);
-    hex::encode(hasher.finalize())
-}
-
-/// HASH-002: every error body is JSON with a known `code`, a string `message`,
-/// and an optional string `details`.
-async fn assert_error_shape(resp: Response, status: u16, code: &str) {
-    assert_eq!(resp.status(), status);
-    let body: Value = resp
-        .json()
-        .await
-        .unwrap_or_else(|e| panic!("{status} {code}: body is not JSON: {e}"));
-    let known = [
-        "invalid_body",
-        "invalid_query",
-        "unauthorized",
-        "forbidden",
-        "sequence_conflict",
-        "internal_error",
-    ];
-    assert!(
-        known.contains(&body["code"].as_str().unwrap_or("")),
-        "{body}"
-    );
-    assert_eq!(body["code"], code, "{body}");
-    assert!(body["message"].as_str().is_some_and(|m| !m.is_empty()));
-    assert!(body["details"].is_null() || body["details"].is_string());
-    let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
-    assert!(
-        keys.iter()
-            .all(|k| ["code", "message", "details"].contains(&k.as_str())),
-        "unexpected keys in {body}"
-    );
-}
+use common::*;
 
 // HASH-002: the three client-caused errors on POST /hash use the documented shape.
 #[tokio::test]
@@ -234,21 +64,22 @@ async fn query_and_auth_errors_have_the_documented_shape() {
 }
 
 // HASH-002, HASH-004: the 410 for an unsupported version is an error response too.
-// KNOWN-BUG note: the 410 body is `{"error": "..."}` with no `code` or `message`.
-#[ignore = "KNOWN-BUG: the 410 Gone body is {\"error\": \"...\"} with no code or message"]
 #[tokio::test]
+#[should_panic(expected = "KNOWN-BUG")]
 async fn gone_response_has_the_documented_error_shape() {
     let s = spawn_server().await;
     let resp = s.client.get(s.url("/v2/hash")).send().await.unwrap();
     assert_eq!(resp.status(), 410);
     let body: Value = resp.json().await.unwrap();
-    assert!(body["code"].is_string(), "{body}");
-    assert!(body["message"].is_string(), "{body}");
+    assert!(
+        body["code"].is_string() && body["message"].is_string(),
+        "KNOWN-BUG: the 410 Gone body has an `error` field but no code or message: {body}"
+    );
 }
 
 // HASH-002: unknown routes and unsupported methods are error responses too.
-#[ignore = "KNOWN-BUG: axum's default 404 and 405 responses have an empty body, not the error shape"]
 #[tokio::test]
+#[should_panic(expected = "KNOWN-BUG")]
 async fn unknown_route_and_method_have_the_documented_error_shape() {
     let s = spawn_server().await;
     for (method, path, status) in [
@@ -264,20 +95,29 @@ async fn unknown_route_and_method_have_the_documented_error_shape() {
             .unwrap();
         assert_eq!(resp.status(), status, "{method} {path}");
         let body: Value = resp.json().await.unwrap_or(Value::Null);
-        assert!(body["code"].is_string(), "{method} {path}: {body}");
-        assert!(body["message"].is_string(), "{method} {path}: {body}");
+        assert!(
+            body["code"].is_string() && body["message"].is_string(),
+            "KNOWN-BUG: axum's default 404 and 405 responses have an empty body, not the error shape: {method} {path}: {body}"
+        );
     }
 }
 
 // HASH-002: a repeated query parameter is a malformed query and gets the error shape.
-#[ignore = "KNOWN-BUG: a repeated `devices` parameter gets axum's plain-text 400, not the error shape"]
 #[tokio::test]
+#[should_panic(expected = "KNOWN-BUG")]
 async fn repeated_query_parameter_has_the_documented_error_shape() {
     let s = spawn_server().await;
-    let a = s
+    let resp = s
         .get_devices(&format!("devices={DEVICE_A}&devices={DEVICE_B}"))
         .await;
-    assert_error_shape(a, 400, "invalid_query").await;
+    assert_eq!(resp.status(), 400);
+    let text = resp.text().await.unwrap();
+    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    assert_eq!(
+        body["code"], "invalid_query",
+        "KNOWN-BUG: a repeated `devices` parameter gets axum's plain-text 400, not the error shape: {text}"
+    );
+    assert!(body["message"].is_string(), "{body}");
 }
 
 fn base64url(bytes: &[u8]) -> String {
@@ -529,8 +369,8 @@ async fn server_token_sub_is_ignored() {
 }
 
 // HASH-007, HASH-008: a server token does not need a sub at all.
-#[ignore = "KNOWN-BUG: a server token with no sub claim is rejected with 401 because sub is parsed as required"]
 #[tokio::test]
+#[should_panic(expected = "KNOWN-BUG")]
 async fn server_token_without_sub_is_accepted() {
     let s = spawn_server().await;
     let token = s.token_with(json!({ "type": "server", "exp": now() + 3600 }));
@@ -541,7 +381,11 @@ async fn server_token_without_sub_is_accepted() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.status(),
+        200,
+        "KNOWN-BUG: a server token with no sub claim is rejected with 401 because sub is parsed as required"
+    );
 }
 
 // HASH-006: the token's sub is the device id, so two devices keep separate state.
@@ -1077,97 +921,4 @@ async fn non_version_first_segments_are_not_versions() {
         let resp = s.client.get(s.url(path)).send().await.unwrap();
         assert_ne!(resp.status(), 410, "{path}");
     }
-}
-
-/// A `tracing` writer that appends to a shared buffer.
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
-    type Writer = LogBuffer;
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
-// HASH-014: every request is logged at debug level with its method and path, and the
-// request body never appears in the log. Runs on the current-thread runtime so that the
-// thread-local subscriber sees the server task.
-#[tokio::test]
-async fn requests_are_logged_at_debug_and_bodies_are_not() {
-    let buffer = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(false)
-        .with_writer(buffer.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let s = spawn_server().await;
-    // A hash whose hex and decimal forms are easy to look for.
-    let marker = [0xC7u8; 32];
-    assert_eq!(s.post(DEVICE_A, 4_242_424, 7, marker).await.status(), 201);
-    assert_eq!(s.post(DEVICE_A, 1, 7, marker).await.status(), 409);
-    s.get_devices(&format!("devices={DEVICE_A}")).await;
-    s.delete_device(&format!("device={DEVICE_A}")).await;
-    s.client.get(s.url("/")).send().await.unwrap();
-
-    let log = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
-    let debug_requests: Vec<&str> = log
-        .lines()
-        .filter(|l| l.contains("DEBUG") && l.contains("hash_server") && l.contains("request"))
-        .collect();
-    assert!(
-        debug_requests.len() >= 5,
-        "expected one debug line per request, got:\n{log}"
-    );
-    for (method, path) in [
-        ("POST", "/hash"),
-        ("GET", "/hash"),
-        ("DELETE", "/hash"),
-        ("GET", "/"),
-    ] {
-        assert!(
-            debug_requests
-                .iter()
-                .any(|l| l.contains(method) && l.ends_with(&format!("path={path}"))),
-            "no debug line for {method} {path}:\n{log}"
-        );
-    }
-    assert!(
-        !log.contains(&hex::encode(marker)),
-        "body hash leaked:\n{log}"
-    );
-    assert!(!log.contains("4242424"), "body unix_time leaked:\n{log}");
-}
-
-// HASH-014: expected errors (4xx) are not logged as internal errors.
-#[tokio::test]
-async fn client_errors_are_not_logged_at_error_level() {
-    let buffer = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_ansi(false)
-        .with_writer(buffer.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let s = spawn_server().await;
-    s.post(DEVICE_A, 1, 1, [1; 32]).await;
-    s.post(DEVICE_A, 1, 1, [1; 32]).await;
-    s.get_devices("devices=nope").await;
-    s.client.post(s.url("/hash")).send().await.unwrap();
-
-    let log = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
-    assert!(!log.lines().any(|l| l.contains("ERROR")), "{log}");
 }
