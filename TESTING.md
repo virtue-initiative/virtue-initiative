@@ -14,6 +14,10 @@ Every component with behavior worth guaranteeing has a `SPEC.md` (see the table 
   only when every test in it proves the same section.
 - An edge case worth guaranteeing goes in the spec as a sentence first, then as a test.
   If no sentence in the spec explains why a test exists, add one or delete the test.
+- A test that guards no product behavior, such as a self-test of a test helper or fake,
+  cites `NO-SPEC` instead, with a comment saying why. Use it rarely: if users or another
+  component would notice the behavior, it belongs in a spec. `just spec-coverage` lists
+  every `NO-SPEC` test.
 
 Where the ID goes:
 
@@ -48,7 +52,15 @@ When the code doesn't meet the spec and the fix belongs in a later change:
 - Write the test for the spec'd behavior anyway.
 - TypeScript: use `it.fails(...)` with a `// KNOWN-BUG: <what is wrong>` comment
   directly above. When the code is fixed the test starts failing, so drop `.fails`.
-- Rust: add `#[ignore = "KNOWN-BUG: <what is wrong>"]`.
+- `it.fails` passes whichever assertion throws, so its body holds only the check that shows
+  the bug. If the test needs a setup check first (a status, a precondition), use a normal
+  `it` that asserts today's wrong behavior instead, with the `KNOWN-BUG` comment saying what
+  the spec wants. It then fails both when the bug is fixed and when something else breaks.
+- Rust: add `#[should_panic(expected = "KNOWN-BUG")]` and give the assertion that shows
+  the bug a message starting `KNOWN-BUG: <what is wrong>`. A setup failure panics with a
+  different message, so it still fails the test. When the code is fixed the test fails
+  with "did not panic", so drop the attribute and the message. Keep `#[ignore]` for tests
+  that are not meant to run in CI, such as generators.
 - `just spec-coverage` lists every `KNOWN-BUG`, so it doubles as the fix list.
 
 ## Coverage

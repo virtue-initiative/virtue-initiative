@@ -10,6 +10,8 @@
 // Spec sections are headings like `## API-038 ...` in any SPEC.md. A test cites
 // a section through an ID in its title, in a comment/attribute block above it,
 // or on an enclosing describe/mod/class (see the per-language rules below).
+// A test that guards no product behavior (a test-helper self-test) cites
+// `NO-SPEC` in the same places instead.
 // scripts/spec-coverage-allow.txt lists sections that have no test yet. It is a
 // ratchet: an uncovered section must be listed, and a listed section that gains
 // a test must be removed.
@@ -84,10 +86,12 @@ function parseSpecs(files: string[]) {
 
 // ---------- ID extraction ----------
 
-// Matches `PREFIX-123` for the prefixes found in the spec headings.
+const NO_SPEC = 'NO-SPEC';
+
+// Matches `PREFIX-123` for the prefixes found in the spec headings, and NO_SPEC.
 function idRegex(sections: Section[]): RegExp {
   const prefixes = [...new Set(sections.map((s) => s.id.split('-')[0]))];
-  return new RegExp(`\\b(?:${prefixes.join('|') || '(?!)'})-\\d+\\b`, 'g');
+  return new RegExp(`\\b(?:(?:${prefixes.join('|') || '(?!)'})-\\d+|${NO_SPEC})\\b`, 'g');
 }
 
 let ID_RE: RegExp;
@@ -335,6 +339,7 @@ for (const t of tests) {
   for (const id of new Set(t.refs.map((r) => r.id))) citing.set(id, (citing.get(id) ?? 0) + 1);
 }
 const isTagged = (t: Test) => t.refs.length > 0;
+const isExempt = (t: Test) => t.refs.some((r) => r.id === NO_SPEC);
 const uncovered = sections.filter((s) => !citing.has(s.id));
 const loc = (s: Section) => `${s.file}:${s.line}`;
 
@@ -344,7 +349,8 @@ function knownBugs() {
       .split('\n')
       .flatMap((text, i) => {
         const m = /KNOWN-BUG:\s*(.*)$/.exec(text);
-        const note = m?.[1].replace(/["'\]\s*]+$|\*\/\s*$/, '').trim(); // drop `"]` / `*/`
+        // Drop what closes the string or comment: `"]`, `");`, `*/`.
+        const note = m?.[1].replace(/["'][\]);,\s]*$|\*\/\s*$/, '').trim();
         return m ? [`${file}:${i + 1} ${note}`] : [];
       }),
   );
@@ -393,6 +399,9 @@ function report() {
     '',
     ...(bugs.length ? bugs.map((b) => `- ${b}`) : ['None.']),
   );
+  const exempt = tests.filter(isExempt);
+  out.push('', `## ${NO_SPEC} tests (${exempt.length})`, '');
+  out.push(...(exempt.length ? exempt.map((t) => `- ${t.file}:${t.line} ${t.name}`) : ['None.']));
 
   const dirs = new Map<string, { total: number; untagged: number }>();
   for (const t of tests) {
@@ -422,7 +431,7 @@ function check(): string[] {
   const specFiles = new Set(sections.map((s) => s.file));
 
   group(
-    'Tests that cite no spec section ID (add one to the title, a comment above, or an enclosing describe/mod/class):',
+    'Tests that cite no spec section ID (add one, or NO-SPEC, to the title, a comment above, or an enclosing describe/mod/class):',
     tests.filter((t) => !isTagged(t)).map((t) => `${t.file}:${t.line}  ${t.name}`),
   );
 
@@ -431,7 +440,7 @@ function check(): string[] {
   const unknown = new Set<string>();
   const checkRefs = (file: string, refs: Ref[]) =>
     refs
-      .filter((r) => !sectionIds.has(r.id))
+      .filter((r) => r.id !== NO_SPEC && !sectionIds.has(r.id))
       .forEach((r) => unknown.add(`${file}:${r.line}  ${r.id}`));
   for (const { file, lang } of testFiles) {
     const wholeFile = lang !== 'rust' || file.split('/').includes('tests');
