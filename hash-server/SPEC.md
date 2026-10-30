@@ -16,7 +16,9 @@ All error responses (not **2xx**) MUST have this shape.
 }
 ```
 
-`code` is one of: `invalid_body`, `invalid_query`, `unauthorized`, `forbidden`, `sequence_conflict`, `internal_error`.
+`code` is one of: `invalid_body`, `invalid_query`, `unauthorized`, `forbidden`, `not_found`, `method_not_allowed`, `gone`, `sequence_conflict`, `internal_error`.
+
+This includes unknown routes (**HTTP 404**, `not_found`), unsupported methods (**HTTP 405**, `method_not_allowed`), and a query or body the framework cannot parse (**HTTP 400**, `invalid_query` or `invalid_body`). The server MUST check authentication before reporting a query or body it cannot parse.
 
 ### HASH-003 Authentication
 
@@ -26,7 +28,7 @@ JWTs MUST use `EdDSA` (Ed25519). The verification key is configured via the
 
 ### HASH-004 Backwards compat
 
-The API MUST be prefixed with the current major version. For versions before `v1`, use `v0.x`. The server SHOULD return **HTTP 410 Gone** if it no longer supports a version.
+The API MUST be prefixed with the current major version. For versions before `v1`, use `v0.x`. The server SHOULD return **HTTP 410 Gone** with code `gone` if it no longer supports a version. That body MUST also keep an `error` field holding the message, because the old clients that receive it show that field (see CORE-026).
 
 ```
   /v0.1/...

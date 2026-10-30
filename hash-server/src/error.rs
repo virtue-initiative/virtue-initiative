@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::extract::rejection::{BytesRejection, QueryRejection};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
@@ -23,10 +24,26 @@ pub enum ApiError {
     Unauthorized(Option<String>),
     #[error("forbidden")]
     Forbidden(Option<String>),
+    #[error("not found")]
+    NotFound,
+    #[error("method not allowed")]
+    MethodNotAllowed,
     #[error("sequence conflict")]
     SequenceConflict,
     #[error("internal error")]
     Internal(Option<String>),
+}
+
+impl From<BytesRejection> for ApiError {
+    fn from(rejection: BytesRejection) -> Self {
+        ApiError::InvalidBody(Some(rejection.body_text()))
+    }
+}
+
+impl From<QueryRejection> for ApiError {
+    fn from(rejection: QueryRejection) -> Self {
+        ApiError::InvalidQuery(Some(rejection.body_text()))
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -55,6 +72,18 @@ impl IntoResponse for ApiError {
                 "forbidden",
                 "The token does not authorize this device",
                 details,
+            ),
+            ApiError::NotFound => (
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "There is nothing at this path",
+                None,
+            ),
+            ApiError::MethodNotAllowed => (
+                StatusCode::METHOD_NOT_ALLOWED,
+                "method_not_allowed",
+                "This path does not support this method",
+                None,
             ),
             ApiError::SequenceConflict => (
                 StatusCode::CONFLICT,

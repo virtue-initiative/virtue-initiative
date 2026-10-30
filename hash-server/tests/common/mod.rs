@@ -164,6 +164,9 @@ pub async fn assert_error_shape(resp: Response, status: u16, code: &str) {
         "invalid_query",
         "unauthorized",
         "forbidden",
+        "not_found",
+        "method_not_allowed",
+        "gone",
         "sequence_conflict",
         "internal_error",
     ];

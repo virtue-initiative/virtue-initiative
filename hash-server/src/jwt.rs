@@ -6,9 +6,20 @@ use crate::error::ApiError;
 
 #[derive(Debug, Deserialize)]
 pub struct Claims {
-    pub sub: String,
+    // HASH-007, HASH-008: a server token's sub is ignored, so it may be absent or any type.
+    sub: Option<serde_json::Value>,
     #[serde(rename = "type")]
     pub typ: String,
+}
+
+impl Claims {
+    /// HASH-006: the device a `device` token names.
+    pub fn device_id(self) -> Result<String, ApiError> {
+        match self.sub {
+            Some(serde_json::Value::String(sub)) => Ok(sub),
+            _ => Err(ApiError::Unauthorized(None)),
+        }
+    }
 }
 
 pub struct JwtVerifier {
