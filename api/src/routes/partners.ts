@@ -276,10 +276,10 @@ partners.get('/partner', authenticateWebSession(), async (c) => {
 partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
   const userId = c.get('sub');
   const partnerId = c.req.param('id');
-  const [partnership, currentUser] = await Promise.all([
-    findPartnerById(c.env.DB, partnerId),
-    findUserById(c.env.DB, userId),
-  ]);
+  // One at a time: a malformed ID rejects the first lookup, and the response must not leave the
+  // second one running.
+  const partnership = await findPartnerById(c.env.DB, partnerId);
+  const currentUser = partnership && (await findUserById(c.env.DB, userId));
 
   if (!partnership || !currentUser) {
     return c.json({ error: 'Not found' }, 404);
