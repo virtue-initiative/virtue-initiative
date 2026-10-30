@@ -1,0 +1,116 @@
+name: Mutation Testing
+
+# Occasional runs that look for code the tests do not really check. Never required on
+# PRs and never run per PR. See "Property and mutation testing" in TESTING.md.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 UTC on the first day of every month.
+    - cron: '0 4 1 * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Rust core (cargo-mutants)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore LFS objects
+        uses: ./.github/actions/lfs-cache
+
+      - name: Install OCR system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libleptonica-dev libtesseract-dev libclang-dev clang
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: client
+
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants
+
+      - name: Mutate client/core
+        run: cargo mutants -p virtue-core --config core/.cargo/mutants.toml --timeout 300 --in-place
+        working-directory: client
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-core
+          path: client/mutants.out
+          if-no-files-found: ignore
+
+  hash-server:
+    name: Hash server (cargo-mutants)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: hash-server
+
+      - name: Install cargo-mutants
+        run: cargo install --locked cargo-mutants
+
+      - name: Mutate hash-server
+        run: cargo mutants --timeout 120 --in-place
+        working-directory: hash-server
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-hash-server
+          path: hash-server/mutants.out
+          if-no-files-found: ignore
+
+  web:
+    name: Web (Stryker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Mutate web
+        run: bunx stryker run
+        working-directory: web
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-web
+          path: web/reports/mutation
+          if-no-files-found: ignore

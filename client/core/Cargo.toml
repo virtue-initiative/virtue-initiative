@@ -53,3 +53,7 @@ tracing = "0.1"
 ureq = { version = "3.4", default-features = false, features = ["cookies", "json", "platform-verifier", "rustls", "rustls-webpki-roots"] }
 virtue-text-detection = { path = "../text-detection" }
 webp = "0.3"
+
+[dev-dependencies]
+# Property tests (client/core/tests/properties.rs), see TESTING.md.
+proptest = "1"

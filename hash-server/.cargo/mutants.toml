@@ -1,0 +1,7 @@
+# cargo-mutants config for hash-server. `just mutants-hash` runs it from this directory
+# (see TESTING.md, "Property and mutation testing"). The chain logic, auth, versioned
+# routing and storage are mutated; process start-up and logging are not.
+exclude_globs = ["src/main.rs", "src/logging.rs", "src/config.rs"]
+
+# Mutants that loop forever are killed after this many times the unmutated test time.
+timeout_multiplier = 3.0
