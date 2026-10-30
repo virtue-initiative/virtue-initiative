@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { env, fetchMock, SELF } from 'cloudflare:test';
+import { createExecutionContext, env, fetchMock, SELF } from 'cloudflare:test';
+import worker from '../src/index';
 import {
   acceptPartnerInvite,
   authHeaders,
@@ -475,6 +476,21 @@ describe('GET /r2/* access (API-040)', () => {
     ['no key', '/r2/'],
   ])('answers 404 for %s (API-040)', async (_name, path) => {
     const res = await SELF.fetch(`${BASE}${path}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ['production', 'https://r2.virtueinitiative.org'],
+    ['staging', 'https://staging.r2.virtueinitiative.org'],
+  ])('answers 404 for a real object under the R2_URL of %s (API-040)', async (_name, R2_URL) => {
+    const key = 'user/someone/batches/real.enc';
+    await env.BUCKET.put(key, BATCH_BYTES);
+    const request = new Request(`${BASE}/r2/${key}`);
+
+    const res = await worker.fetch(request, { ...env, R2_URL }, createExecutionContext());
+    // An R2 stream left unread breaks the test pool's isolated storage.
+    await res.arrayBuffer();
 
     expect(res.status).toBe(404);
   });

@@ -225,7 +225,7 @@ The emailed link opens `/signup?signup_token=…`.
 
 ### WEB-033 Email verification
 
-`/verify-email?token=…` MUST work signed in or out. It MUST show "Verifying…", then either "Email updated" with "Your email address has been successfully updated." and a **Go to settings** button, or "This verification link is invalid or has expired." A link without a token MUST show the error.
+`/verify-email?token=…` MUST work signed in or out. It MUST show "Verifying…", then either "Email updated" with "Your email address has been successfully updated." and a **Go to settings** button, or "Verification failed" with "This verification link is invalid or has expired." A link without a token MUST show the error.
 
 > OPEN: the page says "Email updated" even when API-017 reports `purpose: "email_verification"` rather than an email change, and **Go to settings** sends a signed-out user to the login page — should the message depend on the purpose?
 

@@ -18,7 +18,7 @@ The server MUST be configured with these bindings:
 
 ### DONATE-003 CORS
 
-For every route except `POST /webhook`, the server MUST apply CORS (methods `GET`, `POST`, `OPTIONS`; header `Content-Type`). It MUST allow only the origin of `LANDING_URL`, plus any origin whose hostname is `localhost` or ends in `.localhost`. Other origins get no CORS allow headers. `POST /webhook` MUST NOT be CORS-gated, since Stripe calls it server to server.
+For every route except `POST /webhook`, the server MUST apply CORS (methods `GET`, `POST`, `OPTIONS`; header `Content-Type`). It MUST allow only the origin of `LANDING_URL`, plus any origin whose hostname is `localhost` or ends in `.localhost`. Other origins MUST NOT get `Access-Control-Allow-Origin`, which is what makes a browser refuse the response. A preflight from them MAY still list the allowed methods and header, since those aren't secret. `POST /webhook` MUST NOT be CORS-gated, since Stripe calls it server to server.
 
 ### DONATE-004 Errors
 

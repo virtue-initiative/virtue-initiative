@@ -87,7 +87,7 @@ trait, no event dispatch. A module that needs to enqueue work calls
 | `status`               | —                                                         | `build()` (pure `ServiceStatus` assembly from `&DaemonState` + `&Config`)                                                  |
 
 `lifecycle::tick` compares actual vs. scheduled wakeup time each tick and
-alerts on a single late wakeup > 1 min or a last-10-array sum > 5 min,
+alerts on a single late wakeup > 2 min or a last-10-array sum > 5 min,
 excused near a system login/logout — see CORE-002 and `tampering.md`
 (now a short pointer to SPEC.md, not its own model).
 

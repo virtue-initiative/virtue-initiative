@@ -82,6 +82,11 @@ pub fn derive_password_auth(
     password_salt: &[u8],
     params: &HashParams,
 ) -> CoreResult<[u8; 32]> {
+    // BATCH-008: the web app's argon2id can't derive this, so no account can have it.
+    if password.is_empty() {
+        return Err(CoreError::InvalidState("password must not be empty"));
+    }
+
     let argon_params = Params::new(
         params.memory_cost_kib,
         params.time_cost,
@@ -179,6 +184,12 @@ mod tests {
             .expect("second call");
         assert_eq!(out1, out2);
         assert_ne!(out1, [0_u8; 32]);
+    }
+
+    // BATCH-008: the derivation is not defined for an empty password.
+    #[test]
+    fn derive_password_auth_rejects_an_empty_password() {
+        assert!(derive_password_auth("", b"user@example.com", &low_cost_params()).is_err());
     }
 
     // API-016: password_auth derivation.

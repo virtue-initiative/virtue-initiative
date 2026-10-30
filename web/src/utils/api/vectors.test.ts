@@ -290,15 +290,19 @@ describe('password auth derivation (API-015, API-016)', () => {
     expect(Buffer.from(passwordAuth).toString('base64')).toBe(c.password_auth_base64);
   }
 
-  it.each(cases.filter((c) => c.name !== 'empty_password_low_cost').map((c) => [c.name, c]))(
-    '%s',
-    async (_name, c) => derive(c),
-    120_000,
-  );
+  it.each(cases.map((c) => [c.name, c]))('%s', async (_name, c) => derive(c), 120_000);
 
-  // KNOWN-BUG: hash-wasm's argon2id throws "Password must be specified" for an empty password, while the Rust client's derive_password_auth accepts it.
-  it.fails('empty_password_low_cost', async () => {
-    await derive(cases.find((c) => c.name === 'empty_password_low_cost')!);
+  it('rejects an empty password (BATCH-008)', async () => {
+    const params: HashParams = {
+      version: 'test',
+      algorithm: 'argon2id',
+      memory_cost_kib: 64,
+      time_cost: 1,
+      parallelism: 1,
+      salt_length: 16,
+      hkdf_hash: 'sha256',
+    };
+    await expect(derivePasswordMaterial('', new Uint8Array(16), params)).rejects.toThrow();
   });
 });
 

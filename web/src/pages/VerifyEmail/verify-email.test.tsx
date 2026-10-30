@@ -65,6 +65,7 @@ describe('Email verification (WEB-033)', () => {
     expect(
       await screen.findByText('This verification link is invalid or has expired.'),
     ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Verification failed' })).toBeInTheDocument();
     expect(screen.queryByText('Email updated')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Go to settings' })).not.toBeInTheDocument();
   });
