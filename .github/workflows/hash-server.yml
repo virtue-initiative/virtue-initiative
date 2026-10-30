@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'hash-server/**'
+      - 'batch-format/**'
       - '.github/workflows/hash-server.yml'
   push:
     branches:
@@ -11,6 +12,7 @@ on:
       - staging
     paths:
       - 'hash-server/**'
+      - 'batch-format/**'
       - '.github/workflows/hash-server.yml'
   workflow_dispatch:
 

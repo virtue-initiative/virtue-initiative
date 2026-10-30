@@ -115,3 +115,9 @@ To verify a batch, the consumer MUST start from 32 zero bytes, apply the two ste
 The API stores a `version` with each batch (API-038) and returns it in `BatchData`. This spec describes version `v0.1`.
 
 A change that an existing consumer cannot read, or that changes the bytes covered by the hash chain, is a breaking change. It MUST come with a new version.
+
+## BATCH-008 Test vectors
+
+`batch-format/vectors/` holds the canonical test vectors for the contracts in this spec: event encoding, content hash, hash chain, batch blob and HPKE key wrapping. It also holds vectors for the password auth derivation (API-015, API-016), which clients and the web app share.
+
+Every implementation of these contracts, including each producer, consumer and hash server, MUST pass the vectors that apply to it, and a change to the bytes MUST come with updated vectors (BATCH-007). The vectors fix the bytes of non-deterministic output (random nonce, gzip, HPKE ephemeral key), so an implementation checks them by consuming those bytes, and checks deterministic output by computing it and comparing.
