@@ -446,6 +446,7 @@ mod tests {
         );
     }
 
+    // BATCH-003: event type and data encoding.
     #[test]
     fn screenshot_per_image_details_serialize_only_what_was_measured() {
         // BATCH-003: `gray` only when true, model scores only when the model ran.
@@ -504,6 +505,7 @@ mod tests {
         assert!(value["data"].get("images").is_none());
     }
 
+    // CORE-016: state persistence.
     #[test]
     fn screenshot_queued_by_an_older_client_still_loads() {
         // A screenshot saved in event_state.json before per-image details existed.

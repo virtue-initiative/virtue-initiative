@@ -576,7 +576,7 @@ fn is_skin(r: u8, g: u8, b: u8, dark_skin: bool) -> bool {
     (0.36..=0.465).contains(&(r / sum)) && (0.28..=0.363).contains(&(g / sum))
 }
 
-// CORE-004: the skin tone score.
+// CORE-004: the skin tone and NSFW scores.
 #[cfg(test)]
 mod tests {
     use super::*;

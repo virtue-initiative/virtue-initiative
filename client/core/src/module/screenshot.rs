@@ -545,7 +545,7 @@ mod tests {
         assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
     }
 
-    // CORE-021: force_capture_now.
+    // CORE-004: per-image scoring behind its feature flag.
     #[test]
     fn per_image_scoring_needs_its_feature_flag() {
         let mut upload = authenticated_upload();
@@ -571,6 +571,7 @@ mod tests {
         );
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_bypasses_the_interval_due_gate() {
         let mut state = ScreenshotState::default();

@@ -763,6 +763,7 @@ impl ColorSet {
     }
 }
 
+// CORE-004: finding the photo-like regions to score.
 #[cfg(test)]
 mod tests {
     use super::*;
