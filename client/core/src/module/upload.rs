@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use batch::BatchBuilder;
+// The BATCH-008 vector generator builds its batches with the production
+// builder rather than a copy of it.
+#[cfg(feature = "testing")]
+pub use batch::BatchBuilder as BatchBuilderForTests;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::{ApiTransport, UploadedBatchResponse};

@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "envelope_hex": "6d10148a195d237fb449cbb0206df3d291512500f6024be2c1a1d654d87a774cf9cda9aa9bae79a96f9f0e377eaacd316620af89dbfca92bca9032baf0bb02bfdd8fa6e731a201d2d9dff65584dc1c10",
+      "envelope_hex": "1afa188f294601c751893209edf59d7eb39a08dcb90f9772a653e1fd3e29f921d1108ea27cc81aa641070a6b599eed52558b684fe361bff7d3053b5f1b068eb60b832adebbe84088be7218e57e4f4d38",
       "expect": "ok",
       "name": "all_zero_batch_key",
       "plaintext_hex": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -10,7 +10,7 @@
       "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     },
     {
-      "envelope_hex": "caba0ea1ee1581a73c97f9481e45446b54d5e7c40e30cacf4b1a3517abfcba7a8ec59e62cede96a2230084adc152564763b2d89f5f2589929da7d47f6c430d7bdbf6f3dff43c161826a5afdd3534b7dc",
+      "envelope_hex": "83c321a415a3c640f09fb445daa2937b029a0f6c8a8c0217bb0a8f7e45129766255e485047b497a265fe0001920374a74e93e537ec897c0ff747348cac7d02d91ccdba9080c3bfce788f50d023b308ba",
       "expect": "ok",
       "name": "all_ff_batch_key",
       "plaintext_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -19,7 +19,7 @@
       "recipient_public_key_hex": "c34dabc81d243dab32e632f2c86fa7010668656fc36039505e2851aa81e56d3f"
     },
     {
-      "envelope_hex": "9fccc518559b14c430d0576019961dd4b22b0956de59862b9f629639c637f225cddb7782c3bcca1f82ba8180241f900af246bf29da309cb0ddf0e5d466ee21997292e74ffa0c8ee8168c5361b490717e",
+      "envelope_hex": "e15028b1e5862e47bc7c018ae2ec1c3e00a1505d484ca473776a8355a3693031ebb123c865351e092983a9313e846445fe678d119a2b85b6a4546f55c849dc056d4a31ad74e49dfa9e882a10926cd3c9",
       "expect": "ok",
       "name": "sequential_batch_key",
       "plaintext_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
@@ -28,7 +28,7 @@
       "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     },
     {
-      "envelope_hex": "6d10148a195d237fb449cbb0206df3d291512500f6024be2c1a1d654d87a774cf9cda9aa9bae79a96f9f0e377eaacd316620af89dbfca92bca9032baf0bb02bfdd8fa6e731a201d2d9dff65584dc1c11",
+      "envelope_hex": "1afa188f294601c751893209edf59d7eb39a08dcb90f9772a653e1fd3e29f921d1108ea27cc81aa641070a6b599eed52558b684fe361bff7d3053b5f1b068eb60b832adebbe84088be7218e57e4f4d39",
       "expect": "fail",
       "name": "tampered_ciphertext_tag",
       "producer": "rust",
@@ -36,7 +36,7 @@
       "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     },
     {
-      "envelope_hex": "6c10148a195d237fb449cbb0206df3d291512500f6024be2c1a1d654d87a774cf9cda9aa9bae79a96f9f0e377eaacd316620af89dbfca92bca9032baf0bb02bfdd8fa6e731a201d2d9dff65584dc1c10",
+      "envelope_hex": "1bfa188f294601c751893209edf59d7eb39a08dcb90f9772a653e1fd3e29f921d1108ea27cc81aa641070a6b599eed52558b684fe361bff7d3053b5f1b068eb60b832adebbe84088be7218e57e4f4d38",
       "expect": "fail",
       "name": "tampered_encapsulated_key",
       "producer": "rust",
@@ -44,7 +44,7 @@
       "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     },
     {
-      "envelope_hex": "6d10148a195d237fb449cbb0206df3d291512500f6024be2c1a1d654d87a774cf9cda9aa9bae79a9",
+      "envelope_hex": "1afa188f294601c751893209edf59d7eb39a08dcb90f9772a653e1fd3e29f921d1108ea27cc81aa6",
       "expect": "fail",
       "name": "truncated_envelope",
       "producer": "rust",
@@ -52,7 +52,7 @@
       "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     },
     {
-      "envelope_hex": "6d10148a195d237fb449cbb0206df3d291512500f6024be2c1a1d654d87a774cf9cda9aa9bae79a96f9f0e377eaacd316620af89dbfca92bca9032baf0bb02bfdd8fa6e731a201d2d9dff65584dc1c10",
+      "envelope_hex": "1afa188f294601c751893209edf59d7eb39a08dcb90f9772a653e1fd3e29f921d1108ea27cc81aa641070a6b599eed52558b684fe361bff7d3053b5f1b068eb60b832adebbe84088be7218e57e4f4d38",
       "expect": "fail",
       "name": "wrong_recipient_key",
       "producer": "rust",
@@ -60,31 +60,31 @@
       "recipient_public_key_hex": "c34dabc81d243dab32e632f2c86fa7010668656fc36039505e2851aa81e56d3f"
     },
     {
+      "envelope_hex": "82d8ccaf1fefa8185137d31b81579ccbd502108e9e01cd8d801c6b8be8a1682f41cc67a2d574f5b7bdb4caa14c787e18a231f75de93f7b9364dfd24cd45a420802dea24afc2c2aebcb55d2daf2f94d07",
+      "expect": "ok",
       "name": "ts_sealed_batch_key",
-      "producer": "ts",
-      "expect": "ok",
-      "recipient_private_key_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-      "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
       "plaintext_hex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
-      "envelope_hex": "82d8ccaf1fefa8185137d31b81579ccbd502108e9e01cd8d801c6b8be8a1682f41cc67a2d574f5b7bdb4caa14c787e18a231f75de93f7b9364dfd24cd45a420802dea24afc2c2aebcb55d2daf2f94d07"
-    },
-    {
-      "name": "ts_sealed_sequential_batch_key",
       "producer": "ts",
-      "expect": "ok",
-      "recipient_private_key_hex": "a0a7aeb5bc838a91989fe6edf4fbc2c9d0d7de252c333a01080f161d646b7279",
-      "recipient_public_key_hex": "c34dabc81d243dab32e632f2c86fa7010668656fc36039505e2851aa81e56d3f",
-      "plaintext_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
-      "envelope_hex": "d0e3172052af15061c3b687f49bbfbf151898f4e94e5cc58a053cd36982e863499786f7cb1d5692f0f300c598bdd1b05d8856a777a85ebad0b7be7aa2bdf870307e88f2f5b6c38b6f72b0ed0b88e7de6"
-    },
-    {
-      "name": "ts_sealed_locked_password_20_bytes",
-      "producer": "ts",
-      "expect": "ok",
       "recipient_private_key_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-      "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c",
+      "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
+    },
+    {
+      "envelope_hex": "d0e3172052af15061c3b687f49bbfbf151898f4e94e5cc58a053cd36982e863499786f7cb1d5692f0f300c598bdd1b05d8856a777a85ebad0b7be7aa2bdf870307e88f2f5b6c38b6f72b0ed0b88e7de6",
+      "expect": "ok",
+      "name": "ts_sealed_sequential_batch_key",
+      "plaintext_hex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "producer": "ts",
+      "recipient_private_key_hex": "a0a7aeb5bc838a91989fe6edf4fbc2c9d0d7de252c333a01080f161d646b7279",
+      "recipient_public_key_hex": "c34dabc81d243dab32e632f2c86fa7010668656fc36039505e2851aa81e56d3f"
+    },
+    {
+      "envelope_hex": "469098e51af82b3502fb577b2adc948c39216ddecffc0e3ad1985f336397bd33cfb2a6dbc7cecd323964fed0228eabf1d89391597852bde98a4383fa0a8745a02cc3f917",
+      "expect": "ok",
+      "name": "ts_sealed_locked_password_20_bytes",
       "plaintext_hex": "6c6f636b6564207061737320c3a9e697a5e69cac",
-      "envelope_hex": "469098e51af82b3502fb577b2adc948c39216ddecffc0e3ad1985f336397bd33cfb2a6dbc7cecd323964fed0228eabf1d89391597852bde98a4383fa0a8745a02cc3f917"
+      "producer": "ts",
+      "recipient_private_key_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "recipient_public_key_hex": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c"
     }
   ],
   "description": "HPKE key wrapping (BATCH-005): DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM, base mode, empty info and aad. `envelope_hex` is enc[32] || ciphertext (plaintext length + 16 tag bytes), lowercase hex. `recipient_private_key_hex` is the raw 32-byte X25519 scalar and `recipient_public_key_hex` its public key. `producer` is `rust` or `ts`. With `expect` = `ok` the envelope opens to `plaintext_hex`, with `fail` it MUST be rejected."

@@ -4,9 +4,13 @@
 //! tests in `web/src/utils/api/vectors.test.ts` (and, for the hash chain, with
 //! `hash-server/tests/vectors.rs`). Every case is checked against the
 //! production Rust functions here. The ignored `generate_vectors` test writes
-//! the files using those same functions.
+//! the files using those same functions, so it needs `--features testing` to
+//! reach the production batch builder.
 //!
 //! Hex is lowercase. Bytes inside event JSON are written as `{"$hex": "..."}`.
+
+// Without the feature the generator is compiled out, leaving its helpers unused.
+#![cfg_attr(not(feature = "testing"), allow(dead_code, unused_imports))]
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -28,6 +32,8 @@ use virtue_core::crypto::{
     CryptoEngine, compute_event_hash, derive_password_auth, encode_batch_event,
 };
 use virtue_core::model::{BatchRecipient, HashParams, LogEntry};
+#[cfg(feature = "testing")]
+use virtue_core::module::upload::BatchBuilderForTests;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -553,26 +559,20 @@ fn recipient_for(sk: &[u8]) -> BatchRecipient {
     }
 }
 
-/// Builds one batch case with the production crypto functions. `encoded` are
-/// the event bytes exactly as the payload should carry them.
-fn batch_case(
+/// The JSON for one batch case. `encoded` are the event bytes the payload carries.
+#[allow(clippy::too_many_arguments)]
+fn batch_json(
     name: &str,
     note: &str,
     encoding: &str,
     events: Vec<Value>,
     encoded: Vec<Vec<u8>>,
-    payload: Vec<u8>,
     sk: &[u8; 32],
+    access_key: String,
+    batch_key: &[u8],
+    blob: &[u8],
 ) -> Value {
-    let engine = CryptoEngine;
-    let batch_key = engine.generate_batch_key();
-    let blob = engine
-        .encrypt_batch_blob(&batch_key, &gzip(&payload))
-        .expect("encrypt");
     let recipient = recipient_for(sk);
-    let access_key = engine
-        .wrap_batch_key_for_recipient(&recipient, &batch_key)
-        .expect("wrap");
     let hashes: Vec<[u8; 32]> = encoded.iter().map(|e| compute_event_hash(e)).collect();
     let end = chain([0u8; 32], &hashes)
         .last()
@@ -590,17 +590,68 @@ fn batch_case(
         "recipient_private_key_hex": hex_enc(sk),
         "recipient_public_key_base64": recipient.pub_key_base64,
         "access_key_base64": access_key,
-        "batch_key_hex": hex_enc(&batch_key),
-        "blob_hex": hex_enc(&blob),
+        "batch_key_hex": hex_enc(batch_key),
+        "blob_hex": hex_enc(blob),
     })
 }
 
+/// A batch the production `BatchBuilder` builds from these events (BATCH-008).
+#[cfg(feature = "testing")]
 fn canonical_batch(name: &str, note: &str, events: Vec<Value>, sk: &[u8; 32]) -> Value {
     let encoded: Vec<Vec<u8>> = events.iter().map(engine_event_bytes).collect();
-    let payload = payload_of(&encoded);
-    batch_case(name, note, "canonical", events, encoded, payload, sk)
+    let upload = BatchBuilderForTests::build_upload(
+        &encoded,
+        &CryptoEngine,
+        &[recipient_for(sk)],
+        0,
+        0,
+        0,
+        0,
+        0,
+        Vec::new(),
+    )
+    .expect("build batch");
+    let access_key = upload.access_keys[0].hpke_key_base64.clone();
+    let batch_key =
+        open_envelope(sk, &B64.decode(&access_key).expect("base64")).expect("the access key opens");
+    batch_json(
+        name,
+        note,
+        "canonical",
+        events,
+        encoded,
+        sk,
+        access_key,
+        &batch_key,
+        &upload.bytes,
+    )
 }
 
+/// A batch the producer cannot build (empty, legacy or future encodings),
+/// assembled by hand from `payload` with the production crypto functions.
+fn hand_built_batch(
+    name: &str,
+    note: &str,
+    encoding: &str,
+    events: Vec<Value>,
+    encoded: Vec<Vec<u8>>,
+    payload: Vec<u8>,
+    sk: &[u8; 32],
+) -> Value {
+    let engine = CryptoEngine;
+    let batch_key = engine.generate_batch_key();
+    let blob = engine
+        .encrypt_batch_blob(&batch_key, &gzip(&payload))
+        .expect("encrypt");
+    let access_key = engine
+        .wrap_batch_key_for_recipient(&recipient_for(sk), &batch_key)
+        .expect("wrap");
+    batch_json(
+        name, note, encoding, events, encoded, sk, access_key, &batch_key, &blob,
+    )
+}
+
+#[cfg(feature = "testing")]
 #[allow(clippy::vec_init_then_push)]
 fn batch_cases() -> Vec<Value> {
     let named = named_events();
@@ -623,7 +674,7 @@ fn batch_cases() -> Vec<Value> {
 
     // The producer rejects an empty batch (BATCH-002) but the consumer must
     // still verify one: the end hash of zero events is the zero state.
-    out.push(batch_case(
+    out.push(hand_built_batch(
         "empty_event_list",
         "Hand-assembled: BatchBuilder refuses to build this, a consumer must still accept it. The end hash is the 32 zero bytes.",
         "canonical",
@@ -696,7 +747,7 @@ fn batch_cases() -> Vec<Value> {
         })
         .collect();
     let legacy_payload = rmp_serde::to_vec_named(&legacy_encoded).expect("legacy payload");
-    out.push(batch_case(
+    out.push(hand_built_batch(
         "legacy_int_array_form",
         "Event elements and the screenshot image are msgpack arrays of integers, not bin. A consumer MUST accept this (BATCH-004). Keys are sorted, so the bytes differ from the canonical encoding.",
         "legacy_int_arrays",
@@ -716,7 +767,7 @@ fn batch_cases() -> Vec<Value> {
     });
     let future_encoded = vec![rmp_serde::to_vec_named(&future).expect("future event")];
     let future_payload = payload_of(&future_encoded);
-    out.push(batch_case(
+    out.push(hand_built_batch(
         "unknown_type_and_extra_keys",
         "An event type and keys this version does not know (BATCH-003). Rust cannot represent it as a LogEntry.",
         "future_type",
@@ -1031,6 +1082,7 @@ fn write_vector(file: &str, description: &str, cases: Vec<Value>) {
 }
 
 // BATCH-008: regenerates the canonical vectors from the production functions.
+#[cfg(feature = "testing")]
 #[test]
 #[ignore = "generator: run with --ignored to regenerate batch-format/vectors"]
 fn generate_vectors() {

@@ -173,6 +173,37 @@ mod tests {
                 .collect()
         }
 
+        // BATCH-004: reads the payload array, failing unless every element is
+        // msgpack `bin`. A lenient decoder would also accept the legacy
+        // array-of-integers form, which the producer must not emit.
+        fn bin_elements(payload: &[u8]) -> Vec<Vec<u8>> {
+            let be = |at: usize, n: usize| {
+                payload[at..at + n]
+                    .iter()
+                    .fold(0_usize, |acc, b| acc << 8 | *b as usize)
+            };
+            let (count, mut pos) = match payload[0] {
+                m @ 0x90..=0x9f => ((m & 0x0f) as usize, 1),
+                0xdc => (be(1, 2), 3),
+                0xdd => (be(1, 4), 5),
+                m => panic!("payload is not a msgpack array (marker {m:#04x})"),
+            };
+            let mut out = Vec::new();
+            for i in 0..count {
+                let (len, head) = match payload[pos] {
+                    0xc4 => (be(pos + 1, 1), 2),
+                    0xc5 => (be(pos + 1, 2), 3),
+                    0xc6 => (be(pos + 1, 4), 5),
+                    m => panic!("element {i} is not msgpack bin (marker {m:#04x})"),
+                };
+                pos += head;
+                out.push(payload[pos..pos + len].to_vec());
+                pos += len;
+            }
+            assert_eq!(pos, payload.len(), "bytes after the payload array");
+            out
+        }
+
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../batch-format/vectors/batch.json");
         let file: serde_json::Value =
@@ -241,9 +272,7 @@ mod tests {
             flate2::read::GzDecoder::new(&gz[..])
                 .read_to_end(&mut payload)
                 .unwrap();
-            let decoded: Vec<serde_bytes::ByteBuf> = rmp_serde::from_slice(&payload).unwrap();
-            let decoded: Vec<Vec<u8>> = decoded.into_iter().map(|b| b.into_vec()).collect();
-            assert_eq!(decoded, encoded, "{name}");
+            assert_eq!(bin_elements(&payload), encoded, "{name}");
             built += 1;
         }
         assert!(built >= 5, "expected several non-empty batch cases");
