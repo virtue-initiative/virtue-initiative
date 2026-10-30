@@ -8,7 +8,8 @@ use crate::module::upload::UploadState;
 /// another session is still active would otherwise leave the old device row
 /// active on the server forever). On success, updates `auth`, enables
 /// screenshot capture, and seeds `upload` with the fresh credentials/settings/
-/// hash token. Returns the new device id.
+/// hash token. Returns the new device id. On failure, leaves the client logged
+/// out (CORE-008), since the old session is already revoked.
 #[allow(clippy::too_many_arguments)]
 pub fn login<A: ApiTransport>(
     auth: &mut AuthState,
@@ -45,7 +46,10 @@ pub fn login<A: ApiTransport>(
             screenshot::enable(screenshot);
             Ok(device_id)
         }
-        Err(err) => Err(err),
+        Err(err) => {
+            clear_session(auth, screenshot, upload);
+            Err(err)
+        }
     }
 }
 
@@ -60,6 +64,11 @@ pub fn logout<A: ApiTransport>(
     if let Some(creds) = auth.device_credentials.take() {
         let _ = api.logout(&creds.refresh_token);
     }
+    clear_session(auth, screenshot, upload);
+}
+
+/// The logged-out state, once `auth.device_credentials` has been taken.
+fn clear_session(auth: &mut AuthState, screenshot: &mut ScreenshotState, upload: &mut UploadState) {
     auth.account_email = None;
     upload.reset_for_logout();
     screenshot::disable(screenshot);

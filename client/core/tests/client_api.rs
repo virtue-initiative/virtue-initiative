@@ -199,20 +199,35 @@ fn a_failed_login_leaves_the_client_logged_out() {
 
 // CORE-008, CORE-005: after a failed login nothing is queued, as for any logged-out client.
 #[test]
-#[should_panic(expected = "KNOWN-BUG")]
 fn a_failed_login_leaves_nothing_queueing_events() {
     let mut scenario = Scenario::authenticated();
     scenario
         .api
         .program_register_device(Err(CoreError::CommandFailed("wrong password".into())));
     scenario.at_t(T0);
+    scenario.queue_upload(dev("before the failed login"));
     assert!(scenario.login("me@example.org", "wrong", None).is_err());
 
     scenario.queue_upload(dev("after the failed login"));
-    assert!(
-        scenario.state().upload.device_credentials.is_none() && queued_events(&scenario).is_empty(),
-        "KNOWN-BUG: a failed login revokes the old session and clears auth, but leaves the upload credentials in place, so events are still queued and uploaded with the revoked token"
-    );
+    assert!(scenario.state().upload.device_credentials.is_none());
+    assert!(queued_events(&scenario).is_empty());
+}
+
+// CORE-008, CORE-009: a failed login stops capture and clears the account, as a logout does.
+#[test]
+fn a_failed_login_stops_capture_and_clears_the_account() {
+    let mut scenario = Scenario::authenticated();
+    scenario
+        .api
+        .program_register_device(Err(CoreError::CommandFailed("wrong password".into())));
+    scenario.at_t(T0);
+    assert!(scenario.state().screenshot.enabled);
+    assert!(scenario.login("me@example.org", "wrong", None).is_err());
+
+    let state = scenario.state();
+    assert!(!state.screenshot.enabled);
+    assert!(state.auth.account_email.is_none());
+    assert!(!scenario.daemon.status().is_authenticated);
 }
 
 // CORE-009: logout revokes the session best-effort, clears the credentials and disables capture.
