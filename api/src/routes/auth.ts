@@ -211,6 +211,33 @@ async function sendVerificationEmail(
   });
 }
 
+/** API-016, API-035: the answer to correct credentials on an unverified account. */
+export async function unverifiedLoginResponse(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  user: { id: string; email: string; name?: string | null },
+) {
+  const verificationToken = await issueEmailToken(
+    c.env.DB,
+    user,
+    'email_verification',
+    EMAIL_VERIFICATION_TTL_MS,
+  );
+  const sent = await sendVerificationEmail(c, user, verificationToken, 'email_verification');
+  if (sent.bounce_id) {
+    return c.json(
+      {
+        error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
+        code: 'email_bounced',
+      },
+      403,
+    );
+  }
+  return c.json(
+    { error: 'Please verify your email before logging in. A verification email has been sent.' },
+    403,
+  );
+}
+
 async function sendSignupConfirmationEmail(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   recipient: { email: string; name?: string | null },
@@ -546,31 +573,7 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
   }
 
   if (result.status === 'unverified') {
-    const verificationToken = await issueEmailToken(
-      c.env.DB,
-      result.user,
-      'email_verification',
-      EMAIL_VERIFICATION_TTL_MS,
-    );
-    const sent = await sendVerificationEmail(
-      c,
-      result.user,
-      verificationToken,
-      'email_verification',
-    );
-    if (sent.bounce_id) {
-      return c.json(
-        {
-          error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
-          code: 'email_bounced',
-        },
-        403,
-      );
-    }
-    return c.json(
-      { error: 'Please verify your email before logging in. A verification email has been sent.' },
-      403,
-    );
+    return unverifiedLoginResponse(c, result.user);
   }
 
   const { user } = result;
@@ -587,8 +590,10 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 });
 
 auth.post('/logout', async (c) => {
-  const refreshToken = getCookie(c, 'refresh_token');
-  if (refreshToken) {
+  const authHeader = c.req.header('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  for (const refreshToken of [getCookie(c, 'refresh_token'), bearerToken]) {
+    if (!refreshToken) continue;
     try {
       assertTokenPurpose(refreshToken, 'web_session');
       await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');

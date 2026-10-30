@@ -31,6 +31,7 @@ import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
 import { fillNewsletterLocation, requestLocation } from '../lib/newsletter';
+import { unverifiedLoginResponse } from './auth';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -146,7 +147,7 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
   }
 
   if (result.status === 'unverified') {
-    return c.json({ error: 'Please verify your email before logging in.' }, 403);
+    return unverifiedLoginResponse(c, result.user);
   }
 
   const owner = result.user.id;
@@ -312,6 +313,11 @@ deviceOnly.post(
     if (endTime !== end_time) {
       console.warn(
         `[batch] device ${device.id} sent end_time ${end_time - createdAt} ms in the future; clamped`,
+      );
+    }
+    if (startTime !== start_time) {
+      console.warn(
+        `[batch] device ${device.id} sent start_time ${start_time - endTime} ms after end_time; clamped`,
       );
     }
 

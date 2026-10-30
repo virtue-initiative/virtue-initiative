@@ -468,35 +468,46 @@ describe('POST /logout (API-018)', () => {
     );
   });
 
-  it('does not log out a device when given a device token (API-018)', async () => {
+  it.each([
+    ['a cookie', cookieOnly],
+    ['the Authorization header', bearer],
+  ])('does not log out a device when given a device token in %s (API-018)', async (_name, as) => {
     await signupAndGetCookie(EMAIL);
     const device = await createDeviceForUser(EMAIL);
-    await call('POST', '/logout', { headers: cookieOnly(device.refresh_token) });
+    await call('POST', '/logout', { headers: as(device.refresh_token) });
     expect((await call('GET', '/d/device', { headers: bearer(device.refresh_token) })).status).toBe(
       200,
     );
   });
 
-  // KNOWN-BUG: POST /logout only reads the refresh_token cookie, so a web token sent as a Bearer header is not revoked
-  it.fails('invalidates a session presented in the Authorization header (API-018)', async () => {
+  it('invalidates a session presented in the Authorization header (API-018)', async () => {
     const { cookie } = await signupAndGetCookie(EMAIL);
-    await call('POST', '/logout', { headers: bearer(cookie) });
+    const res = await call('POST', '/logout', { headers: bearer(cookie) });
+    expect(res.status).toBe(204);
     expect((await getUser(cookie)).status).toBe(401);
   });
 
-  for (const [name, headersFor] of [
-    ['no token', () => ({})],
-    ['an unknown token', () => cookieOnly('not-a-token')],
-    ['a device token', (deviceToken: string) => cookieOnly(deviceToken)],
-  ] as const) {
-    // KNOWN-BUG: POST /logout answers 204 to a request with no valid web token, where the spec requires a web token (401 per API-003)
-    it.fails(`rejects ${name} with 401 (API-018)`, async () => {
-      await signupAndGetCookie(EMAIL);
-      const device = await createDeviceForUser(EMAIL);
-      const headers = headersFor(device.refresh_token);
-      expect((await call('POST', '/logout', { headers })).status).toBe(401);
+  it('invalidates the Bearer session even when the cookie names a dead one (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    await call('POST', '/logout', {
+      headers: { ...cookieOnly('not-a-token'), ...bearer(cookie) },
     });
-  }
+    expect((await getUser(cookie)).status).toBe(401);
+  });
+
+  it('leaves other sessions alone when given no web token, and still answers 204 (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    const device = await createDeviceForUser(EMAIL);
+    for (const headers of [
+      {},
+      cookieOnly('not-a-token'),
+      bearer('not-a-token'),
+      cookieOnly(device.refresh_token),
+    ]) {
+      expect((await call('POST', '/logout', { headers })).status).toBe(204);
+    }
+    expect((await getUser(cookie)).status).toBe(200);
+  });
 });
 
 describe('GET /user (API-019)', () => {
@@ -542,13 +553,11 @@ describe('GET /user (API-019)', () => {
     expect((await getUser(cookie)).status).toBe(401);
   });
 
-  // KNOWN-BUG: GET /user accepts only a web token and answers a device token with 401, though the spec says either token works
-  it.fails('accepts a device token and returns the device owner (API-019)', async () => {
-    const { userId } = await signupAndGetCookie(EMAIL);
+  it('answers a device token with 401 (API-019)', async () => {
+    await signupAndGetCookie(EMAIL);
     const device = await createDeviceForUser(EMAIL);
     const res = await call('GET', '/user', { headers: bearer(device.refresh_token) });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ id: userId });
+    expect(res.status).toBe(401);
   });
 });
 

@@ -352,9 +352,7 @@ describe('POST /d/batch time clamping (API-038)', () => {
     warn.mockRestore();
   });
 
-  // KNOWN-BUG: the warning is only logged when end_time is clamped. A start_time that is clamped to an end_time in the past is silent.
-  // The spec wants a warning here. This pins today's silence, so it fails once the bug is fixed.
-  it('logs no warning yet when it clamps a start_time later than end_time (API-038)', async () => {
+  it('logs a warning when it clamps a start_time later than end_time (API-038)', async () => {
     const { userId, device } = await setup();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const now = Date.now();
@@ -369,7 +367,7 @@ describe('POST /d/batch time clamping (API-038)', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('start_time'));
     warn.mockRestore();
   });
 
