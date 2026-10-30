@@ -10,6 +10,8 @@ export interface Env {
   COMMIT_SHA?: string;
   HASH_SERVER_URL: string;
   R2_URL: string;
+  // 'true' serves GET /r2/* (API-040). Only local dev sets it.
+  DEV_R2_ROUTE?: string;
   APP_URL: string;
   LANDING_URL: string;
   APP_NAME: string;

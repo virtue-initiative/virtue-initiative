@@ -81,8 +81,8 @@ app.route('/d', deviceOnly);
 app.route('/admin', admin);
 
 app.get('/r2/*', async (c) => {
-  // API-040: only local dev's batch URLs point back here.
-  if (new URL(c.env.R2_URL).pathname !== '/r2') {
+  // API-040: only local dev turns this on.
+  if (c.env.DEV_R2_ROUTE !== 'true') {
     return c.json({ error: 'Not found' }, 404);
   }
 

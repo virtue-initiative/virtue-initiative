@@ -480,15 +480,16 @@ describe('GET /r2/* access (API-040)', () => {
     expect(res.status).toBe(404);
   });
 
-  it.each([
-    ['production', 'https://r2.virtueinitiative.org'],
-    ['staging', 'https://staging.r2.virtueinitiative.org'],
-  ])('answers 404 for a real object under the R2_URL of %s (API-040)', async (_name, R2_URL) => {
+  it('answers 404 for a real object without DEV_R2_ROUTE (API-040)', async () => {
     const key = 'user/someone/batches/real.enc';
     await env.BUCKET.put(key, BATCH_BYTES);
     const request = new Request(`${BASE}/r2/${key}`);
 
-    const res = await worker.fetch(request, { ...env, R2_URL }, createExecutionContext());
+    const res = await worker.fetch(
+      request,
+      { ...env, DEV_R2_ROUTE: undefined },
+      createExecutionContext(),
+    );
     // An R2 stream left unread breaks the test pool's isolated storage.
     await res.arrayBuffer();
 
