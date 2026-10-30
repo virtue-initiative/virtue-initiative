@@ -477,7 +477,7 @@ The client SHOULD authenticate with a **Web Token**, in the `refresh_token` cook
 
 The server MUST invalidate every session the request names this way and clear the refresh_token. It MUST NOT invalidate a device session.
 
-The server MUST respond with **HTTP 204**, including when the request carries no valid Web Token, so that a client can always finish logging out.
+The server MUST respond with **HTTP 204**, including when the request carries no valid Web Token, so that a client can always finish logging out. If it cannot invalidate a session the request names, it MUST still clear the refresh_token and MUST respond **HTTP 500**, because that session is still valid.
 
 ### API-019 `GET /user`
 

@@ -17,7 +17,6 @@ import {
   findPermanentEmailBounce,
   findUserByEmail,
   findUserById,
-  invalidateEmailTokens,
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
@@ -27,11 +26,12 @@ import {
   renderEmailVerificationTemplate,
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
-  HELP_EMAIL,
 } from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import { issueEmailToken } from '../lib/email-tokens';
+import { sendVerificationEmail, unverifiedLoginResponse } from '../lib/email-verification';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser } from '../lib/serializers';
 import {
@@ -157,85 +157,6 @@ async function createSession(
   });
 
   return refreshToken;
-}
-
-async function issueEmailToken(
-  db: D1Database,
-  user: { id: string; email: string },
-  purpose: 'email_change' | 'email_verification' | 'password_reset',
-  ttlMs: number,
-) {
-  await invalidateEmailTokens(db, user.id, purpose);
-  const token = generateOpaqueToken(purpose);
-  const id = uuidv4();
-  const now = Date.now();
-
-  await createEmailToken(db, {
-    id,
-    user_id: user.id,
-    email: user.email,
-    purpose,
-    token_hash: hashOpaqueToken(token),
-    expires_at: now + ttlMs,
-    created_at: now,
-  });
-
-  return { id, token };
-}
-
-async function sendVerificationEmail(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
-  user: { id: string; email: string; name?: string | null },
-  { id: tokenId, token }: { id: string; token: string },
-  purpose: 'email_change' | 'email_verification' = 'email_change',
-) {
-  const verifyUrl = `${c.env.APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
-  const email = renderEmailVerificationTemplate({
-    appName: c.env.APP_NAME,
-    appUrl: c.env.APP_URL,
-    recipientName: user.name,
-    verifyUrl,
-  });
-
-  return sendEmail({
-    env: c.env,
-    db: c.env.DB,
-    kind: 'email_verification',
-    recipient: user.email,
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
-    related_user_id: user.id,
-    email_token_id: tokenId,
-    metadata: { purpose, verifyUrl },
-  });
-}
-
-/** API-016, API-035: the answer to correct credentials on an unverified account. */
-export async function unverifiedLoginResponse(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
-  user: { id: string; email: string; name?: string | null },
-) {
-  const verificationToken = await issueEmailToken(
-    c.env.DB,
-    user,
-    'email_verification',
-    EMAIL_VERIFICATION_TTL_MS,
-  );
-  const sent = await sendVerificationEmail(c, user, verificationToken, 'email_verification');
-  if (sent.bounce_id) {
-    return c.json(
-      {
-        error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
-        code: 'email_bounced',
-      },
-      403,
-    );
-  }
-  return c.json(
-    { error: 'Please verify your email before logging in. A verification email has been sent.' },
-    403,
-  );
 }
 
 async function sendSignupConfirmationEmail(
@@ -592,16 +513,27 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 auth.post('/logout', async (c) => {
   const authHeader = c.req.header('Authorization');
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  let deleteFailed = false;
   for (const refreshToken of [getCookie(c, 'refresh_token'), bearerToken]) {
     if (!refreshToken) continue;
     try {
       assertTokenPurpose(refreshToken, 'web_session');
-      await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
     } catch {
       // Malformed or foreign-purpose token — nothing to delete.
+      continue;
+    }
+    try {
+      await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
+    } catch (err) {
+      console.error('[logout] failed to delete session', err);
+      deleteFailed = true;
     }
   }
   deleteCookie(c, 'refresh_token', { path: '/' });
+  // API-018: the session is still valid, so this is not a successful logout.
+  if (deleteFailed) {
+    return c.json({ error: 'Internal server error' }, 500);
+  }
   return c.body(null, 204);
 });
 

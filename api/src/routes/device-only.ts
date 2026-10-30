@@ -31,7 +31,7 @@ import { generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
 import { Env, Variables } from '../types/bindings';
 import { verifyUserCredentials } from '../lib/credentials';
 import { fillNewsletterLocation, requestLocation } from '../lib/newsletter';
-import { unverifiedLoginResponse } from './auth';
+import { unverifiedLoginResponse } from '../lib/email-verification';
 
 const deviceOnly = new Hono<{ Bindings: Env; Variables: Variables }>();
 

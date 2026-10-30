@@ -1,5 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { createExecutionContext, env, fetchMock, SELF } from 'cloudflare:test';
+import worker from '../src/index';
 import {
   BASE,
   TEST_TURNSTILE_TOKEN,
@@ -441,6 +442,28 @@ describe('Status codes (API-006)', () => {
 });
 
 describe('POST /logout (API-018)', () => {
+  it('clears the cookie, logs and answers 500 when it cannot delete the session (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => logged.mockRestore());
+    const failingDb = {
+      prepare: () => {
+        throw new Error('D1 is down');
+      },
+    };
+
+    const res = await worker.fetch(
+      new Request(`${BASE}/logout`, { method: 'POST', headers: cookieOnly(cookie) }),
+      { ...env, DB: failingDb as unknown as D1Database },
+      createExecutionContext(),
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Internal server error' });
+    expect(res.headers.get('set-cookie') ?? '').toMatch(/refresh_token=;/);
+    expect(logged).toHaveBeenCalledWith('[logout] failed to delete session', expect.any(Error));
+  });
+
   it('invalidates the session, clears the cookie and answers 204 (API-018)', async () => {
     const { cookie } = await signupAndGetCookie(EMAIL);
     const res = await call('POST', '/logout', { headers: cookieOnly(cookie) });
