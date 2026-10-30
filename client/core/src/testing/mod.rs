@@ -12,7 +12,8 @@ pub use platform::TestPlatformHooks;
 pub use rng::TestRandomSource;
 pub use scenario::Scenario;
 
-// CORE-001: design tests of the Scenario test support (fake clock, platform, API, randomness).
+// NO-SPEC: self-tests of the Scenario test support (fake clock, platform, API,
+// randomness). They guard the test helpers, not product behavior.
 #[cfg(test)]
 mod tests {
     use super::*;

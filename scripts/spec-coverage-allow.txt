@@ -89,4 +89,5 @@ CLIENT-030  todo: needs an OS-level or platform UI test harness
 CLIENT-032  todo: needs an OS-level or platform UI test harness
 
 # client/core/SPEC.md
+CORE-001  overview, covered through the sections it introduces
 CORE-007  todo
