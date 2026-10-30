@@ -1,4 +1,5 @@
 export interface Env {
+  // A new secret also goes in scripts/check-deploy-secrets.ts, which checks them before deploys.
   DB: D1Database;
   // The donations worker's database (api-donate/), which holds the newsletter list.
   DONATE_DB: D1Database;

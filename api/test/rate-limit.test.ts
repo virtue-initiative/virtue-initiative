@@ -66,6 +66,18 @@ describe('Per-device rate limiting (API-034)', () => {
 });
 
 describe('Per-IP rate limiting of the account lookup routes (API-012, API-015)', () => {
+  it('does not limit GET /user/login-material, which every login calls first (API-015)', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 130 }, () =>
+        SELF.fetch(`${BASE}/user/login-material?email=nobody%40example.com`, {
+          headers: { 'CF-Connecting-IP': 'shared-by-many-logins' },
+        }),
+      ),
+    );
+    await Promise.all(responses.map((res: Response) => res.arrayBuffer()));
+    expect(responses.map((res: Response) => res.status)).not.toContain(429);
+  });
+
   // Fires 130 for the reason given in the per-device test above.
   it.each([
     [
@@ -77,14 +89,6 @@ describe('Per-IP rate limiting of the account lookup routes (API-012, API-015)',
           body: JSON.stringify({ email: 'nobody@example.com' }),
         }),
       204,
-    ],
-    [
-      'GET /user/login-material',
-      (ip: string) =>
-        SELF.fetch(`${BASE}/user/login-material?email=nobody%40example.com`, {
-          headers: { 'CF-Connecting-IP': ip },
-        }),
-      200,
     ],
   ] as const)(
     '%s answers 429 once one IP exceeds the rate, without limiting other IPs',

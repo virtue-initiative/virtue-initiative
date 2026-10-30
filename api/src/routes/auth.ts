@@ -372,28 +372,23 @@ async function getValidTokenRecord(
   return token;
 }
 
-auth.get(
-  '/user/login-material',
-  rateLimitByIp(),
-  validateZ('query', loginMaterialQuerySchema),
-  async (c) => {
-    const { email } = c.req.valid('query');
+auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), async (c) => {
+  const { email } = c.req.valid('query');
 
-    if (!email) {
-      return c.json({ params: buildHashParamsResponse() });
-    }
+  if (!email) {
+    return c.json({ params: buildHashParamsResponse() });
+  }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    // API-015: computed for every email, so a real account takes the same work as an unknown one.
-    const madeUpSalt = await madeUpPasswordSalt(c.env.LOGIN_SALT_SECRET, normalizedEmail);
-    const user = await findUserByEmail(c.env.DB, normalizedEmail);
+  const normalizedEmail = email.trim().toLowerCase();
+  // API-015: computed for every email, so a real account takes the same work as an unknown one.
+  const madeUpSalt = await madeUpPasswordSalt(c.env.LOGIN_SALT_SECRET, normalizedEmail);
+  const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
-    return c.json({
-      password_salt: encodeBase64(user?.password_salt ?? madeUpSalt),
-      params: buildHashParamsResponse(),
-    });
-  },
-);
+  return c.json({
+    password_salt: encodeBase64(user?.password_salt ?? madeUpSalt),
+    params: buildHashParamsResponse(),
+  });
+});
 
 auth.post('/signup-request', validateZ('json', signupRequestSchema), async (c) => {
   const { email, to, turnstile_token } = c.req.valid('json');

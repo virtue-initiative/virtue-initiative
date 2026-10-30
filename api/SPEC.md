@@ -401,7 +401,7 @@ The client MAY send an email as a query param `?email=[email]`.
 
 The server MUST return an indistinguishable response for existing and non-existing emails.
 
-The server SHOULD rate limit this endpoint by client IP before looking up the account, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded.
+The server MUST NOT apply the shared per-IP rate limit to this endpoint, because every login calls it first and people sharing an IP would be locked out.
 
 If the client did not provide an email, the server MUST respond (**HTTP 200**) with the current argon2 hashing parameters:
 

@@ -30,6 +30,9 @@ jobs:
       - name: Check spec IDs in tests
         run: bun scripts/spec-check.ts
 
+      - name: Check the deploy secrets list against what Workers use
+        run: bun scripts/check-deploy-secrets.ts --check-usage
+
       - name: Coverage report
         if: always()
         run: bun scripts/spec-check.ts --report >> "$GITHUB_STEP_SUMMARY"
