@@ -7,6 +7,7 @@ namespace Virtue.WindowsApp.Tests;
 
 public sealed class SessionViewModelTests
 {
+    // CLIENT-027: before the first status load the app shows Loading... and the loading state.
     [Fact]
     public void BeforeAnyRefresh_ReportsLoadingState()
     {
@@ -20,6 +21,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
     }
 
+    // CLIENT-027: the tray tooltip gains " (update ready)" while an update is staged.
     [Fact]
     public void NotifyUpdateStaged_AppendsUpdateReadySuffixToTrayTooltip()
     {
@@ -32,6 +34,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Virtue: loading status (update ready)", viewModel.TrayTooltip);
     }
 
+    // CLIENT-029: the restart countdown text is exposed to the window (design test).
     [Fact]
     public void SetUpdateCountdownText_UpdatesProperty()
     {
@@ -45,6 +48,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("42m", viewModel.UpdateCountdownText);
     }
 
+    // CLIENT-029: leaving the staged state clears the notice, countdown and tooltip suffix.
     [Fact]
     public void NotifyUpdateUnstaged_ClearsTheNoticeCountdownAndTooltipSuffix()
     {
@@ -66,6 +70,7 @@ public sealed class SessionViewModelTests
         Assert.Contains(nameof(SessionViewModel.TrayTooltip), changed);
     }
 
+    // CLIENT-029: the update check line is exposed to the window (design test).
     [Fact]
     public void UpdateCheckStatusText_RaisesPropertyChanged()
     {
@@ -82,6 +87,7 @@ public sealed class SessionViewModelTests
         Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
     }
 
+    // CLIENT-004: sign-in uses the machine name as the default device name, clears the password and refreshes status.
     [Fact]
     public async Task LoginAsync_RefreshesStatusAfterSuccess()
     {
@@ -104,6 +110,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(string.Empty, viewModel.PasswordInput);
     }
 
+    // CLIENT-007: Status Details receives every CORE-010 field.
     [Fact]
     public async Task RefreshAsync_ExposesTheFullStatusPagePayload()
     {
@@ -151,6 +158,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(123, viewModel.LastScreenshotAtMs);
     }
 
+    // CLIENT-027: the device id and email fall back to the daemon's values.
     [Fact]
     public async Task RefreshAsync_FallsBackToTheDaemonsDeviceIdWhenTheSessionHasNone()
     {
@@ -174,6 +182,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("user@example.com", viewModel.AccountEmail);
     }
 
+    // CLIENT-011: tray Exit stops monitoring through its own tagged call.
     [Fact]
     public async Task StopMonitoringFromTrayExitAsync_UsesExplicitTrayExitInterop()
     {
@@ -190,6 +199,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
     }
 
+    // CLIENT-027: signed out clears the device id, error, queue count and last screenshot but keeps the typed email.
     [Fact]
     public async Task RefreshAsync_ClearsStaleMonitorDetailsWhenSignedOut()
     {
@@ -215,6 +225,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
     }
 
+    // CLIENT-027: a signed-in session whose monitor reports signed out shows starting.
     [Fact]
     public async Task RefreshAsync_TreatsSignedOutMonitorStateAsStartingWhenSessionIsSignedIn()
     {
@@ -232,6 +243,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Monitoring is starting for this device.", viewModel.StatusText);
     }
 
+    // CLIENT-027: the tray menu offers Open and Exit (design test).
     [Fact]
     public void TrayMenuController_RoutesOpenAndExitEvents()
     {
@@ -250,6 +262,7 @@ public sealed class SessionViewModelTests
         Assert.True(exitRaised);
     }
 
+    // CLIENT-015: a status payload that is not JSON surfaces as an error.
     [Fact]
     public void RustInteropJson_ThrowsForNonJsonPayload()
     {
@@ -257,6 +270,7 @@ public sealed class SessionViewModelTests
         Assert.Contains("non-JSON payload", ex.Message);
     }
 
+    // CLIENT-015: session status JSON carries loggedIn, deviceId, email and buildLabel.
     [Fact]
     public void RustInteropJson_DeserializesValidPayload()
     {
@@ -270,6 +284,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("build-42", result.BuildLabel);
     }
 
+    // CLIENT-004: sign-in without an email is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
     {
@@ -286,6 +301,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Email is required.", viewModel.ErrorText);
     }
 
+    // CLIENT-004: sign-in without a password is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingPassword()
     {
@@ -302,6 +318,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Password is required.", viewModel.ErrorText);
     }
 
+    // CLIENT-005: signing out reads as signed out.
     [Fact]
     public async Task LogoutAsync_SignsOutAndUpdatesStatusText()
     {
@@ -318,6 +335,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
     }
 
+    // CLIENT-011: Stop Monitoring stops monitoring and the status reads stopped.
     [Fact]
     public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesStatusText()
     {
@@ -334,6 +352,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
     }
 
+    // CLIENT-027: the tray tooltip text for each monitor state.
     [Theory]
     [InlineData("running", true, null, "Virtue: monitoring active")]
     [InlineData("stopped", true, null, "Virtue: monitoring stopped")]
@@ -355,6 +374,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(expectedTooltip, viewModel.TrayTooltip);
     }
 
+    // CLIENT-027: displayed states show underscores as spaces.
     [Fact]
     public async Task RefreshAsync_MonitorStateDisplayReplacesUnderscoresWithSpaces()
     {
@@ -370,6 +390,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("signed out", viewModel.MonitorStateDisplay);
     }
 
+    // CLIENT-027: once loaded, signed in reads "Yes" and the account is the email.
     [Fact]
     public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedIn()
     {
@@ -386,6 +407,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("user@example.com", viewModel.AccountSummary);
     }
 
+    // CLIENT-027: once loaded, signed out reads "No" and "Not signed in".
     [Fact]
     public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedOut()
     {
@@ -402,6 +424,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Not signed in", viewModel.AccountSummary);
     }
 
+    // CLIENT-027: the build line without a package version reads "Build unknown" before load.
     [Fact]
     public void BuildLabelText_WithNoWindowsPackageVersion()
     {
@@ -411,6 +434,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Build unknown", viewModel.BuildLabelText);
     }
 
+    // CLIENT-027: the email field keeps what the user typed while signed out.
     [Fact]
     public async Task RefreshAsync_PreservesUserEditedEmailWhenSignedOut()
     {
@@ -427,6 +451,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("typed@example.com", viewModel.EmailInput);
     }
 
+    // CLIENT-027: the email field follows the account while signed in.
     [Fact]
     public async Task RefreshAsync_OverwritesEmailInputWhenSignedIn()
     {
@@ -443,6 +468,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("server@example.com", viewModel.EmailInput);
     }
 
+    // CLIENT-016: a report is sent with its message, contact email and log choice.
     [Fact]
     public async Task SubmitBugReportAsync_ReturnsTrueAndForwardsFieldsOnSuccess()
     {
@@ -456,6 +482,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-016: a failed report shows the error.
     [Fact]
     public async Task SubmitBugReportAsync_ReturnsFalseAndSetsErrorTextOnFailure()
     {
@@ -471,6 +498,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Too many requests", viewModel.ErrorText);
     }
 
+    // CLIENT-008: Test Screenshot requests a capture and reports the uploaded outcome.
     [Fact]
     public async Task ForceCaptureAsync_ReturnsTheOutcomeAndInvokesInteropOnSuccess()
     {
@@ -485,6 +513,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-008: a not-captured outcome and its message are passed through.
     [Fact]
     public async Task ForceCaptureAsync_PassesThroughAnOutcomeThatIsNotAnUpload()
     {
@@ -502,6 +531,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-008: a failed Test Screenshot request shows the error.
     [Fact]
     public async Task ForceCaptureAsync_ReturnsNullAndSetsErrorTextOnFailure()
     {
@@ -517,6 +547,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("monitoring is not running", viewModel.ErrorText);
     }
 
+    // CLIENT-027: the tray menu offers Report an Issue (design test).
     [Fact]
     public void TrayMenuController_RoutesReportBugEvent()
     {
@@ -531,12 +562,14 @@ public sealed class SessionViewModelTests
         Assert.True(reportBugRaised);
     }
 
+    // CLIENT-027: where no tray icon can be hosted, the tray has no window handle.
     [Fact]
     public void NullTrayIconHost_HasNoWindowHandle()
     {
         Assert.Equal(IntPtr.Zero, new NullTrayIconHost().WindowHandle);
     }
 
+    // CLIENT-027: the tray exposes its host's window handle (design test).
     [Fact]
     public void TrayMenuController_ForwardsWindowHandleFromHost()
     {
@@ -546,6 +579,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(new IntPtr(0x1234), controller.WindowHandle);
     }
 
+    // CLIENT-008: the tray menu offers Test Screenshot (design test).
     [Fact]
     public void TrayMenuController_RoutesForceCaptureEvent()
     {
@@ -560,6 +594,7 @@ public sealed class SessionViewModelTests
         Assert.True(forceCaptureRaised);
     }
 
+    // CLIENT-008: Test Screenshot calls the native capture (design test, exercises only the test fake).
     [Fact]
     public void ForceScreenshotAndUpload_InvokesInterop()
     {
@@ -570,6 +605,7 @@ public sealed class SessionViewModelTests
         Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
     }
 
+    // CLIENT-027: the tray reports session logoff and system shutdown (CLIENT-012).
     [Fact]
     public void TrayMenuController_RoutesAllSystemEvents()
     {
@@ -588,6 +624,7 @@ public sealed class SessionViewModelTests
         Assert.True(shutdownRaised);
     }
 
+    // CLIENT-027: the periodic refresh does not change the signed-in state.
     [Fact]
     public async Task BackgroundRefreshAsync_DoesNotClearLoggedInState()
     {
@@ -650,6 +687,7 @@ public sealed class SessionViewModelTests
         }
     }
 
+    // CLIENT-029: the installing state is shown for the staged update and cleared when it is unstaged.
     [Fact]
     public void NotifyUpdateInstalling_FlagsTheNoticeAndIsClearedByUnstaging()
     {

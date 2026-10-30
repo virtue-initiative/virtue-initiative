@@ -4,7 +4,7 @@ import { BASE, clearDB, createDeviceForUser, signupAndGetCookie } from './helper
 
 beforeEach(clearDB);
 
-describe('Per-device rate limiting', () => {
+describe('Per-device rate limiting (API-034)', () => {
   it('returns 429 once a device exceeds the configured request rate', async () => {
     await signupAndGetCookie('rate-limited@example.com');
     const device = await createDeviceForUser(

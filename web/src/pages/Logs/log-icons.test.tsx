@@ -14,7 +14,7 @@ function log(type: string, data: Record<string, unknown> = {}): DataLog {
   return { id: 'x', device_id: 'd', ts: 0, created_at: 0, type, data };
 }
 
-describe('getLogCategory — titles', () => {
+describe('getLogCategory — titles (WEB-041)', () => {
   it('uses the improved, human-readable titles', () => {
     expect(getLogCategory(log('screenshot'))).toBe('Screenshot');
     expect(getLogCategory(log('system_login', { utc_ms: 0 }))).toBe('System Login');
@@ -41,7 +41,7 @@ describe('getLogCategory — titles', () => {
   });
 });
 
-describe('getLogMessage', () => {
+describe('getLogMessage (WEB-041)', () => {
   it('builds device-specific messages per log kind', () => {
     expect(getLogMessage(log('heartbeat'), 'Bob’s PC')).toBe(
       'Once a day, your device sends a small update to confirm that monitoring is still active.',
@@ -67,7 +67,7 @@ describe('getLogMessage', () => {
   });
 });
 
-describe('getLogHelpAnchor / getLogHelpUrl', () => {
+describe('getLogHelpAnchor / getLogHelpUrl (WEB-041)', () => {
   it('slugifies the category title into an anchor', () => {
     expect(getLogHelpAnchor(log('lifecycle_alert', { reason: 'unexpected_gap' }))).toBe(
       'unexpected-gap',
@@ -86,7 +86,7 @@ describe('getLogHelpAnchor / getLogHelpUrl', () => {
   });
 });
 
-describe('LogIcon', () => {
+describe('LogIcon (WEB-041)', () => {
   it('renders an SVG (not emoji text) for every log type', () => {
     for (const type of LOG_TYPES) {
       const { container, unmount } = render(<LogIcon log={log(type)} />);

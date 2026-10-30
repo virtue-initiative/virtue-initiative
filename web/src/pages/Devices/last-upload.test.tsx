@@ -18,7 +18,7 @@ vi.mock('../../utils/cache', () => ({
   },
 }));
 
-describe('Devices — last upload', () => {
+describe('Devices — last upload (WEB-035)', () => {
   it("shows each device's last upload from the cache, and Never for a device without one", async () => {
     getDeviceLastUploads.mockResolvedValue({ 'device-1': Date.now() - 3 * 60 * 60 * 1000 });
 

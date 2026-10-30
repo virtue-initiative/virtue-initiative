@@ -22,7 +22,7 @@ function log(id: string, type: string, ts: number, risk?: number, data = {}): Fe
   };
 }
 
-describe('reportWindow', () => {
+describe('reportWindow (WEB-046)', () => {
   it('covers one local day for a daily report', () => {
     const range = reportWindow('day', '2026-09-24');
     expect(range.start).toBe(new Date(2026, 8, 24).getTime());
@@ -38,7 +38,7 @@ describe('reportWindow', () => {
   });
 });
 
-describe('date strings', () => {
+describe('date strings (WEB-046)', () => {
   it('formats in local time and shifts across month boundaries', () => {
     expect(toDateString(new Date(2026, 0, 5))).toBe('2026-01-05');
     expect(shiftDateString('2026-10-01', -1)).toBe('2026-09-30');
@@ -50,7 +50,7 @@ describe('buildReport', () => {
   const range = reportWindow('day', '2026-09-24');
   const at = (hour: number) => new Date(2026, 8, 24, hour).getTime();
 
-  it('buckets flagged events into high and medium alerts and screenshots', () => {
+  it('buckets flagged events into high and medium alerts and screenshots (WEB-047, WEB-048)', () => {
     const report = buildReport(
       [
         log('shot-safe', 'screenshot', at(9), 0),
@@ -73,7 +73,7 @@ describe('buildReport', () => {
     expect(report.screenshotCount).toBe(4);
   });
 
-  it('counts unchanged-screen skips as captures, but not locked-screen skips', () => {
+  it('counts unchanged-screen skips as captures, but not locked-screen skips (WEB-047)', () => {
     const report = buildReport(
       [
         log('shot', 'screenshot', at(9), 0),
@@ -91,7 +91,7 @@ describe('buildReport', () => {
     expect(buildReport([locked], range).captureCount).toBe(0);
   });
 
-  it('orders by concern, then most recent first', () => {
+  it('orders by concern, then most recent first (WEB-048)', () => {
     const report = buildReport(
       [
         log('early', 'screenshot', at(9), 0.8),
@@ -104,7 +104,7 @@ describe('buildReport', () => {
   });
 });
 
-describe('explainAlert', () => {
+describe('explainAlert (WEB-048)', () => {
   it('says when monitoring came back on after a stop', () => {
     const stop = log('stop', 'user_stop', 1_000_000, 0.9);
     const start = log('start', 'user_start', 1_000_000 + 25 * 60_000, 0);

@@ -1050,6 +1050,7 @@ mod tests {
     use super::{Cli, Commands, DaemonCommands, parse_os_release};
     use clap::Parser;
 
+    // CLIENT-020: `virtue report-issue` parses with no flags.
     #[test]
     fn cli_accepts_report_issue_command() {
         let cli = Cli::try_parse_from(["virtue", "report-issue"])
@@ -1064,6 +1065,7 @@ mod tests {
         ));
     }
 
+    // CLIENT-020: `virtue report-issue` parses --message, --contact-email and --yes.
     #[test]
     fn cli_accepts_report_issue_flags() {
         let cli = Cli::try_parse_from([
@@ -1083,6 +1085,7 @@ mod tests {
         ));
     }
 
+    // CLIENT-016: platform details read NAME and VERSION from os-release, quotes stripped.
     #[test]
     fn parse_os_release_reads_name_and_version() {
         let contents = "NAME=\"Ubuntu\"\nVERSION=\"24.04.1 LTS (Noble Numbat)\"\nID=ubuntu\n";
@@ -1095,11 +1098,13 @@ mod tests {
         );
     }
 
+    // CLIENT-016: missing NAME and VERSION read as absent.
     #[test]
     fn parse_os_release_handles_missing_fields() {
         assert_eq!(parse_os_release("ID=arch\n"), (None, None));
     }
 
+    // CLIENT-020: `virtue login` parses with no flags.
     #[test]
     fn cli_accepts_login_command() {
         let cli = Cli::try_parse_from(["virtue", "login"]).expect("login command should parse");
@@ -1112,6 +1117,7 @@ mod tests {
         ));
     }
 
+    // CLIENT-020: `virtue login` parses --device-name.
     #[test]
     fn cli_accepts_login_device_name_flag() {
         let cli = Cli::try_parse_from(["virtue", "login", "--device-name", "My Box"])
@@ -1125,18 +1131,21 @@ mod tests {
         ));
     }
 
+    // CLIENT-020: `virtue logout` parses.
     #[test]
     fn cli_accepts_logout_command() {
         let cli = Cli::try_parse_from(["virtue", "logout"]).expect("logout command should parse");
         assert!(matches!(cli.command, Commands::Logout { yes: false }));
     }
 
+    // CLIENT-020: `virtue status` parses.
     #[test]
     fn cli_accepts_status_command() {
         let cli = Cli::try_parse_from(["virtue", "status"]).expect("status command should parse");
         assert!(matches!(cli.command, Commands::Status { json: false }));
     }
 
+    // CLIENT-020: `virtue status --json` parses.
     #[test]
     fn cli_accepts_status_json_flag() {
         let cli = Cli::try_parse_from(["virtue", "status", "--json"])
@@ -1144,6 +1153,7 @@ mod tests {
         assert!(matches!(cli.command, Commands::Status { json: true }));
     }
 
+    // CLIENT-020: bare `virtue daemon` parses as the daemon run.
     #[test]
     fn cli_accepts_bare_daemon_command() {
         let cli = Cli::try_parse_from(["virtue", "daemon"]).expect("daemon command should parse");
@@ -1154,6 +1164,7 @@ mod tests {
         }
     }
 
+    // CLIENT-020: `virtue daemon start` parses.
     #[test]
     fn cli_accepts_daemon_start_subcommand() {
         let cli =
@@ -1167,6 +1178,7 @@ mod tests {
         }
     }
 
+    // CLIENT-020: `virtue daemon stop` parses.
     #[test]
     fn cli_accepts_daemon_stop_subcommand() {
         let cli =
@@ -1180,6 +1192,7 @@ mod tests {
         }
     }
 
+    // CLIENT-020: `virtue daemon stop --yes` parses.
     #[test]
     fn cli_accepts_daemon_stop_yes_flag() {
         let cli = Cli::try_parse_from(["virtue", "daemon", "stop", "--yes"])

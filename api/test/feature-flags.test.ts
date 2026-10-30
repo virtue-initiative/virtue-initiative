@@ -49,7 +49,7 @@ async function deviceFlags(refreshToken: string) {
   return ((await res.json()) as { feature_flags: string[] }).feature_flags;
 }
 
-describe('flagBucket', () => {
+describe('flagBucket (API-061)', () => {
   it('matches the API-061 formula', async () => {
     // uint32_be(sha256("beta:<id>")[0..4]) % 10000, computed independently.
     expect(await flagBucket('beta', '00000000-0000-4000-8000-000000000000')).toBe(7899);
@@ -72,7 +72,7 @@ describe('flagBucket', () => {
 });
 
 describe('Feature flag admin routes', () => {
-  it('allow PUT from the web app in a CORS preflight', async () => {
+  it('allow PUT from the web app in a CORS preflight (API-063)', async () => {
     const res = await SELF.fetch(`${BASE}/admin/flags/beta`, {
       method: 'OPTIONS',
       headers: {
@@ -83,14 +83,14 @@ describe('Feature flag admin routes', () => {
     expect(res.headers.get('Access-Control-Allow-Methods')).toContain('PUT');
   });
 
-  it('reject non-admins', async () => {
+  it('reject non-admins (API-061)', async () => {
     const { cookie } = await signupAndGetCookie('user@example.com');
     const res = await SELF.fetch(`${BASE}/admin/flags`, { headers: authHeaders(cookie) });
     expect(res.status).toBe(403);
     expect((await putFlag(cookie, 'beta', { rollout_percent: 100 })).status).toBe(403);
   });
 
-  it('create, list, and update a flag, keeping the description when omitted', async () => {
+  it('create, list, and update a flag, keeping the description when omitted (API-063, API-062)', async () => {
     const cookie = await adminCookie();
 
     const created = await putFlag(cookie, 'beta', { rollout_percent: 10, description: 'Beta' });
@@ -116,14 +116,14 @@ describe('Feature flag admin routes', () => {
     expect(list.map((f) => f.key)).toEqual(['alpha', 'beta']);
   });
 
-  it('validate the key and the percentage', async () => {
+  it('validate the key and the percentage (API-063)', async () => {
     const cookie = await adminCookie();
     expect((await putFlag(cookie, 'Bad-Key', { rollout_percent: 10 })).status).toBe(400);
     expect((await putFlag(cookie, 'beta', { rollout_percent: 101 })).status).toBe(400);
     expect((await putFlag(cookie, 'beta', { rollout_percent: 2.5 })).status).toBe(400);
   });
 
-  it('404 for an unknown flag or user', async () => {
+  it('404 for an unknown flag or user (API-064, API-065)', async () => {
     const cookie = await adminCookie();
     expect((await putOverride(cookie, 'beta', 'admin@example.com', true)).status).toBe(404);
     const deleted = await SELF.fetch(`${BASE}/admin/flags/beta`, {
@@ -137,7 +137,7 @@ describe('Feature flag admin routes', () => {
   });
 });
 
-describe('Feature flag evaluation', () => {
+describe('Feature flag evaluation (API-061)', () => {
   it('is empty when no flags exist', async () => {
     const { cookie } = await signupAndGetCookie('user@example.com');
     expect(await userFlags(cookie)).toEqual([]);
@@ -158,7 +158,7 @@ describe('Feature flag evaluation', () => {
     expect(await userFlags(cookie)).toEqual(expected);
   });
 
-  it('lets an override win over the percentage in either direction', async () => {
+  it('lets an override win over the percentage in either direction (API-065)', async () => {
     const admin = await adminCookie();
     const { cookie } = await signupAndGetCookie('user@example.com');
 
@@ -182,7 +182,7 @@ describe('Feature flag evaluation', () => {
     expect(await userFlags(cookie)).toEqual(['beta']);
   });
 
-  it('drops overrides when the flag is deleted', async () => {
+  it('drops overrides when the flag is deleted (API-064)', async () => {
     const admin = await adminCookie();
     const { cookie } = await signupAndGetCookie('user@example.com');
 

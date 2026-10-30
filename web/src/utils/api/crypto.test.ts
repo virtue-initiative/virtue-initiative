@@ -16,7 +16,7 @@ async function makeAesKey(usage: 'encrypt' | 'decrypt' | 'both' = 'both') {
   return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, usages);
 }
 
-describe('encryptData / decryptBatch', () => {
+describe('encryptData / decryptBatch (BATCH-002, WEB-016)', () => {
   it('round-trips arbitrary bytes', async () => {
     const key = await makeAesKey();
     const original = new Uint8Array([1, 2, 3, 4, 5, 100, 200, 255]);
@@ -50,7 +50,7 @@ describe('encryptData / decryptBatch', () => {
   });
 });
 
-describe('generateUserKeyPair / encryptForPublicKey / unwrapBatchKey', () => {
+describe('generateUserKeyPair / encryptForPublicKey / unwrapBatchKey (BATCH-005, WEB-016)', () => {
   it('wraps and unwraps a batch key round-trip', async () => {
     const { publicKey, privateKeyHandle } = await generateUserKeyPair();
 
@@ -79,7 +79,7 @@ describe('generateUserKeyPair / encryptForPublicKey / unwrapBatchKey', () => {
   });
 });
 
-describe('privateKeyMatchesPublicKey', () => {
+describe('privateKeyMatchesPublicKey (WEB-061)', () => {
   it('accepts a private key with its own public key and rejects another key pair', async () => {
     const mine = await generateUserKeyPair();
     const other = await generateUserKeyPair();
@@ -90,7 +90,7 @@ describe('privateKeyMatchesPublicKey', () => {
   });
 });
 
-describe('verifyBatch', () => {
+describe('verifyBatch (BATCH-006, WEB-017)', () => {
   const zeros = '0'.repeat(64);
 
   it('returns "verified" when both hashes are zeros and events list is empty', async () => {
@@ -133,7 +133,7 @@ describe('verifyBatch', () => {
   });
 });
 
-describe('decompressGzip', () => {
+describe('decompressGzip (BATCH-002, WEB-016)', () => {
   it('decompresses gzip-compressed data', async () => {
     const original = new TextEncoder().encode('hello, world!');
 

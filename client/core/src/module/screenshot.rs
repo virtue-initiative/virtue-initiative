@@ -435,6 +435,7 @@ mod tests {
         upload
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn disabled_never_plans_a_capture() {
         let mut state = ScreenshotState::default();
@@ -445,6 +446,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn enabled_with_no_prior_schedule_captures_immediately() {
         let mut state = ScreenshotState::default();
@@ -457,6 +459,7 @@ mod tests {
         assert!(state.next_screenshot_at_ms.is_some());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn not_due_before_the_drawn_time() {
         let mut state = ScreenshotState::default();
@@ -469,6 +472,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn locked_screen_skips_capture_and_reschedules() {
         let mut state = ScreenshotState::default();
@@ -488,6 +492,7 @@ mod tests {
         )));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn static_frame_is_suppressed_but_capture_failure_is_reported() {
         use crate::testing::fixtures::solid_png_screenshot;
@@ -506,6 +511,7 @@ mod tests {
         assert!(matches!(outcome, CaptureOutcome::StaticFrame));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn changed_frame_uploads() {
         use crate::testing::fixtures::solid_png_screenshot;
@@ -524,6 +530,7 @@ mod tests {
         assert!(matches!(outcome, CaptureOutcome::Uploaded { .. }));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn capture_failure_reported() {
         let hooks = TestPlatformHooks::new();
@@ -538,6 +545,7 @@ mod tests {
         assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
     }
 
+    // CORE-004: per-image scoring behind its feature flag.
     #[test]
     fn per_image_scoring_needs_its_feature_flag() {
         let mut upload = authenticated_upload();
@@ -563,6 +571,7 @@ mod tests {
         );
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_bypasses_the_interval_due_gate() {
         let mut state = ScreenshotState::default();
@@ -578,6 +587,7 @@ mod tests {
         );
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_still_respects_locked_or_screensaver() {
         let mut state = ScreenshotState::default();
@@ -588,6 +598,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_is_a_noop_when_disabled() {
         let state = ScreenshotState::default();
@@ -596,6 +607,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn draw_next_screenshot_is_deterministic_given_a_fixed_uniform() {
         let rng = TestRandomSource::new();

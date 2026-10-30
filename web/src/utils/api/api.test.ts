@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { describeError } from './api';
 
-describe('describeError', () => {
+describe('describeError (WEB-010)', () => {
   it('returns the message from a normal Error', () => {
     expect(describeError(new Error('boom'), 'fallback')).toBe('boom');
   });

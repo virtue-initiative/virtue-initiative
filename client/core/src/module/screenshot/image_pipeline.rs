@@ -66,6 +66,7 @@ fn target_dimensions(width: u32, height: u32) -> (u32, u32) {
     (shrink(width), shrink(height))
 }
 
+// CORE-004: the compressed WebP output.
 #[cfg(test)]
 mod tests {
     use super::*;

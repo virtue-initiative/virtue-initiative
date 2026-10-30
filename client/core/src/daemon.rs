@@ -971,6 +971,7 @@ mod tests {
 
     use crate::testing::Scenario;
 
+    // CORE-014: the loop can be started again after a stop.
     /// Android's accessibility service starts and stops this same loop
     /// repeatedly within one process (pause/resume monitoring, logout, the
     /// service reconnecting) — `run_forever` must tolerate being called

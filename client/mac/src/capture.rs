@@ -337,6 +337,7 @@ impl LifecycleHooks for MacPlatformHooks {
 }
 
 #[cfg(test)]
+// CLIENT-018: macOS last login and logout times parsed from `last`.
 mod tests {
     use chrono::{Local, TimeZone};
 

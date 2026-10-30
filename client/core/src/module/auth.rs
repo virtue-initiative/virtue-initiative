@@ -70,6 +70,7 @@ mod tests {
     use super::*;
     use crate::testing::MockApiClient;
 
+    // CORE-008: login.
     #[test]
     fn login_success_sets_state_and_enables_screenshots() {
         let mut auth = AuthState::default();
@@ -101,6 +102,7 @@ mod tests {
         assert!(screenshot.enabled);
     }
 
+    // CORE-008: login.
     #[test]
     fn login_while_authenticated_revokes_previous_session_first() {
         let mut auth = AuthState::default();
@@ -136,6 +138,7 @@ mod tests {
         assert_eq!(api.state().logout_calls.len(), 1);
     }
 
+    // CORE-008: login.
     #[test]
     fn login_uses_device_name_override_when_present() {
         let mut auth = AuthState::default();
@@ -157,6 +160,7 @@ mod tests {
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
     }
 
+    // CORE-008: login.
     #[test]
     fn login_failure_leaves_state_logged_out() {
         let mut auth = AuthState::default();
@@ -181,6 +185,7 @@ mod tests {
         assert!(!screenshot.enabled);
     }
 
+    // CORE-009: logout.
     #[test]
     fn logout_without_session_does_not_call_the_server() {
         let mut auth = AuthState::default();
@@ -191,6 +196,7 @@ mod tests {
         assert!(api.state().logout_calls.is_empty());
     }
 
+    // CORE-009: logout.
     #[test]
     fn logout_with_session_revokes_and_disables_screenshots() {
         let mut auth = AuthState::default();

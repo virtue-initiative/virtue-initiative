@@ -23,7 +23,7 @@ function renderAuth(mode: 'login' | 'signup' | 'forgot-password' = 'login') {
   );
 }
 
-describe('Auth — login', () => {
+describe('Auth — login (WEB-029)', () => {
   it('renders email and password fields', () => {
     renderAuth('login');
     expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
@@ -73,7 +73,7 @@ describe('Auth — login', () => {
   });
 });
 
-describe('Auth — signup', () => {
+describe('Auth — signup (WEB-030)', () => {
   it('renders email field for signup mode', () => {
     renderAuth('signup');
     expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
@@ -102,7 +102,7 @@ describe('Auth — signup', () => {
 });
 
 describe('Auth — finish signup', () => {
-  it('renders a read-only email field populated from the signup token', async () => {
+  it('renders a read-only email field populated from the signup token (WEB-031)', async () => {
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
 
@@ -118,7 +118,7 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   });
 
-  it('blocks account creation until the terms are accepted', async () => {
+  it('blocks account creation until the terms are accepted (WEB-031)', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
@@ -136,7 +136,7 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   });
 
-  it('rejects a password shorter than 12 characters', async () => {
+  it('rejects a password shorter than 12 characters (WEB-021, WEB-031)', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
@@ -161,7 +161,7 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   });
 
-  it('creates the account when the password is long enough', async () => {
+  it('creates the account when the password is long enough (WEB-031, WEB-021)', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
@@ -200,7 +200,7 @@ describe('Auth — finish signup', () => {
     // The real argon2id derivation runs here, so allow past the default timeout.
   }, 15000);
 
-  it('sends the newsletter opt-in only when the box is ticked', async () => {
+  it('sends the newsletter opt-in only when the box is ticked (WEB-031)', async () => {
     const user = userEvent.setup();
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
@@ -231,7 +231,7 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   }, 15000);
 
-  it('warns about a breached password without blocking submission', async () => {
+  it('warns about a breached password without blocking submission (WEB-021)', async () => {
     const password = 'password123456';
     const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(password));
     const hash = Array.from(new Uint8Array(digest))
@@ -268,7 +268,7 @@ describe('Auth — finish signup', () => {
     window.history.pushState({}, '', '/');
   });
 
-  it('links to the Terms of Use and Privacy Policy', async () => {
+  it('links to the Terms of Use and Privacy Policy (WEB-031)', async () => {
     window.history.pushState({}, '', '/signup?signup_token=test-token');
     renderAuth('signup');
 
@@ -287,7 +287,7 @@ describe('Auth — finish signup', () => {
   });
 });
 
-describe('Auth — forgot password', () => {
+describe('Auth — forgot password (WEB-032)', () => {
   it('renders the forgot password hint', () => {
     renderAuth('forgot-password');
     expect(

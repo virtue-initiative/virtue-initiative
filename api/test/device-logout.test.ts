@@ -18,7 +18,7 @@ beforeAll(() => {
 
 beforeEach(clearDB);
 
-describe('POST /d/logout', () => {
+describe('POST /d/logout (API-037)', () => {
   it('revokes the device session, soft-deletes the device, and resets its hash state', async () => {
     const { cookie } = await signupAndGetCookie('logout@example.com');
     const device = await createDeviceForUser(

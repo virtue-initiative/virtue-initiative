@@ -99,6 +99,7 @@ mod tests {
         assert!(logs_contain("internal error"));
     }
 
+    // HASH-014: only unexpected (5xx) errors are logged as internal errors.
     #[traced_test]
     #[test]
     fn non_5xx_errors_are_not_logged_as_internal() {

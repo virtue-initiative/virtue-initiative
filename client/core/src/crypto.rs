@@ -136,6 +136,7 @@ mod tests {
         }
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn generate_batch_key_produces_32_distinct_bytes() {
         let engine = CryptoEngine;
@@ -145,6 +146,7 @@ mod tests {
         assert_ne!(key1, key2, "two keys must differ");
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn encrypt_batch_blob_nonce_is_first_12_bytes() {
         let engine = CryptoEngine;
@@ -154,6 +156,7 @@ mod tests {
         assert_eq!(blob.len(), 12 + plaintext.len() + 16);
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn encrypt_batch_blob_round_trips() {
         let engine = CryptoEngine;
@@ -166,6 +169,7 @@ mod tests {
         assert_eq!(decrypted.as_slice(), plaintext);
     }
 
+    // API-016: password_auth derivation.
     #[test]
     fn derive_password_auth_is_deterministic() {
         let params = low_cost_params();
@@ -177,6 +181,7 @@ mod tests {
         assert_ne!(out1, [0_u8; 32]);
     }
 
+    // API-016: password_auth derivation.
     #[test]
     fn derive_password_auth_changes_with_different_inputs() {
         let params = low_cost_params();
@@ -185,6 +190,7 @@ mod tests {
         assert_ne!(out1, out2);
     }
 
+    // BATCH-006: the content hash.
     #[test]
     fn compute_event_hash_is_deterministic() {
         let h1 = compute_event_hash(b"hello");
@@ -194,6 +200,7 @@ mod tests {
         assert_ne!(h1, h3);
     }
 
+    // BATCH-005: wrapping the batch key for a recipient.
     #[test]
     fn wrap_and_unwrap_batch_key_round_trips() {
         let mut csprng = HpkeOsRng.unwrap_err();

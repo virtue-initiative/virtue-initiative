@@ -802,6 +802,7 @@ mod tests {
         state
     }
 
+    // CORE-005: events are not queued without device credentials.
     #[test]
     fn enqueue_without_credentials_is_a_noop() {
         let mut state = UploadState::default();
@@ -809,6 +810,7 @@ mod tests {
         assert!(state.pending_hash_events.is_empty());
     }
 
+    // CORE-005: a heartbeat forces an upload and bypasses the screen-locked hold.
     #[test]
     fn enqueue_heartbeat_forces_flush_and_bypasses_lock() {
         let mut state = authenticated_state();
@@ -818,6 +820,7 @@ mod tests {
         assert!(state.bypass_lock);
     }
 
+    // CORE-005: a high-risk event forces an upload but not past the screen-locked hold.
     #[test]
     fn enqueue_high_risk_forces_flush_but_not_lock_bypass() {
         let mut state = authenticated_state();
@@ -833,6 +836,7 @@ mod tests {
         assert!(!state.bypass_lock);
     }
 
+    // CORE-005: a hashed event moves on to the batch queue (BATCH-006).
     #[test]
     fn hash_retry_round_trip_moves_event_into_batch_queue() {
         let mut state = authenticated_state();
@@ -850,6 +854,7 @@ mod tests {
         assert_eq!(state.next_hash_seq, 1);
     }
 
+    // CORE-005: no batch is uploaded while the screen is locked.
     #[test]
     fn batch_plan_none_when_lock_gate_blocks_and_not_bypassed() {
         let mut state = authenticated_state();
@@ -863,6 +868,7 @@ mod tests {
         assert!(plan_batch(&state, 1_000, 60_000, false).is_none());
     }
 
+    // CORE-005: an uploaded batch drains the queue.
     #[test]
     fn batch_upload_round_trip_drains_queue_and_advances_state() {
         let mut state = authenticated_state();
@@ -1055,6 +1061,7 @@ mod tests {
         );
     }
 
+    // CORE-005, API-038: event_counts use the rounded risk percentage.
     /// The medium/high counts use the rounded percentage, like the web app's
     /// "N% concern (Level)" label, so a digest never disagrees with the log feed.
     #[test]
@@ -1075,6 +1082,7 @@ mod tests {
         assert_eq!(batch.high_risk_count, 2);
     }
 
+    // CORE-009: an upload result that arrives after logout is discarded.
     #[test]
     fn commit_ignores_outcome_from_a_stale_session() {
         let mut state = authenticated_state();

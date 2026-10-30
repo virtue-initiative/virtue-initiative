@@ -132,12 +132,14 @@ pub fn prune_old_logs(dir: &std::path::Path, policy: &FileLogPolicy) -> std::io:
 mod tests {
     use super::*;
 
+    // CORE-023: logging.
     #[test]
     fn default_filter_directive_is_debug_regardless_of_build_type() {
         assert_eq!(default_filter_directive(true), "info,virtue_core=debug");
         assert_eq!(default_filter_directive(false), "info,virtue_core=debug");
     }
 
+    // CORE-023: logging.
     #[test]
     fn prune_old_logs_keeps_only_newest_files() {
         let dir = std::env::temp_dir().join(format!(
@@ -225,6 +227,7 @@ mod tests {
         file.set_modified(mtime).unwrap();
     }
 
+    // CORE-023, API-042: the bug report log excerpt.
     #[test]
     fn recent_logs_includes_every_file_written_in_the_past_day_oldest_first() {
         let dir = temp_log_dir("recent-logs-window");
@@ -255,6 +258,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    // CORE-023, API-042: the bug report log excerpt.
     #[test]
     fn recent_logs_falls_back_to_the_newest_file_when_nothing_is_recent() {
         let dir = temp_log_dir("recent-logs-stale");

@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-029: Store checks run 4 hours after success, and retry after 5 minutes doubling up to 1 hour after failures.
 public sealed class StoreUpdateRetryPolicyTests
 {
     [Fact]

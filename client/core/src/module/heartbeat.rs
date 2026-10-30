@@ -30,6 +30,7 @@ pub fn next_heartbeat_at_ms(state: &HeartbeatState, upload: &UploadState) -> Opt
     Some(state.last_heartbeat_ms + HEARTBEAT_INTERVAL_MS)
 }
 
+// CORE-006: the daily heartbeat event.
 #[cfg(test)]
 mod tests {
     use super::*;

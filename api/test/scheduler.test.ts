@@ -95,7 +95,7 @@ async function listDailyDigests() {
   return (await listEmailDeliveries()).filter((delivery) => delivery.kind === 'daily_digest');
 }
 
-describe('Notification scheduler', () => {
+describe('Notification scheduler (API-057)', () => {
   it('sends a daily digest at the configured local hour using the prior 24 hours', async () => {
     const now = Date.UTC(2026, 0, 6, 11, 5, 0);
     const previousWindowStart = Date.UTC(2026, 0, 5, 11, 0, 0);
@@ -492,7 +492,7 @@ describe('Notification scheduler', () => {
     expect(await listDailyDigests()).toEqual([]);
   });
 
-  it('counts a digest to a permanently bounced address as skipped, not sent', async () => {
+  it('counts a digest to a permanently bounced address as skipped, not sent (API-056)', async () => {
     const now = Date.UTC(2026, 0, 6, 6, 5, 0);
     const { cookie: ownerCookie } = await signupAndGetCookie('bounce-owner@example.com', 'pw');
     await addVerifiedWatcher(ownerCookie, 'bounce-watcher@example.com');
@@ -629,7 +629,7 @@ describe('Notification scheduler', () => {
   });
 });
 
-describe('Notification scheduler D1 use', () => {
+describe('Notification scheduler D1 use (API-057)', () => {
   // Counts the statements a run prepares.
   function countingEnv() {
     const counts = { statements: 0 };
@@ -714,7 +714,7 @@ describe('Notification scheduler D1 use', () => {
   });
 });
 
-describe('createSendPacer', () => {
+describe('createSendPacer (API-057)', () => {
   it('spaces sends at least the interval apart', async () => {
     vi.useFakeTimers();
     const pace = createSendPacer(100);

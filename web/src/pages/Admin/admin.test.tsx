@@ -17,7 +17,7 @@ describe('Admin', () => {
     window.localStorage.clear();
   });
 
-  it('renders the 404 page when the API answers 403', async () => {
+  it('renders the 404 page when the API answers 403 (WEB-026)', async () => {
     server.use(
       http.get(`${BASE}/admin/analytics`, () =>
         HttpResponse.json({ error: 'Forbidden' }, { status: 403 }),
@@ -35,7 +35,7 @@ describe('Admin', () => {
     expect(screen.queryByRole('heading', { name: /^admin$/i })).not.toBeInTheDocument();
   });
 
-  it('renders stat tiles from the latest snapshot', async () => {
+  it('renders stat tiles from the latest snapshot (WEB-066)', async () => {
     renderWithClient(<Admin />);
 
     expect(await screen.findByRole('heading', { name: /^admin$/i })).toBeInTheDocument();
@@ -53,7 +53,7 @@ describe('Admin', () => {
     expect(tiles[5]).toHaveTextContent('1.2 per person with any');
   });
 
-  it('draws one chart per variable and lets any be hidden or shown', async () => {
+  it('draws one chart per variable and lets any be hidden or shown (WEB-067)', async () => {
     const user = userEvent.setup();
     renderWithClient(<Admin />);
 
@@ -77,7 +77,7 @@ describe('Admin', () => {
     expect(document.querySelectorAll('.admin-trend')).toHaveLength(count);
   });
 
-  it('offers a table view of the same variables', async () => {
+  it('offers a table view of the same variables (WEB-067)', async () => {
     const user = userEvent.setup();
     renderWithClient(<Admin />);
 
@@ -90,7 +90,7 @@ describe('Admin', () => {
     expect(screen.getByRole('cell', { name: '9,001' })).toBeInTheDocument();
   });
 
-  it('prompts for a refresh when no snapshot exists yet', async () => {
+  it('prompts for a refresh when no snapshot exists yet (WEB-066)', async () => {
     server.use(http.get(`${BASE}/admin/analytics`, () => HttpResponse.json([])));
 
     renderWithClient(<Admin />);
@@ -100,7 +100,7 @@ describe('Admin', () => {
     });
   });
 
-  it('calls the refresh endpoint and shows the new snapshot', async () => {
+  it('calls the refresh endpoint and shows the new snapshot (WEB-066)', async () => {
     let refreshed = 0;
     server.use(
       http.get(`${BASE}/admin/analytics`, () => HttpResponse.json([])),
@@ -128,7 +128,7 @@ describe('Admin', () => {
     });
   });
 
-  it('runs a preset and renders the results table', async () => {
+  it('runs a preset and renders the results table (WEB-068)', async () => {
     const user = userEvent.setup();
     renderWithClient(<Admin />);
 
@@ -142,7 +142,7 @@ describe('Admin', () => {
     });
   });
 
-  it('downloads the current result as CSV', async () => {
+  it('downloads the current result as CSV (WEB-068)', async () => {
     const blobs: Blob[] = [];
     // happy-dom lacks the object-URL statics, so define them for this test.
     const createObjectURL = vi.fn((blob: Blob) => {
@@ -167,7 +167,7 @@ describe('Admin', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
   });
 
-  it('runs raw SQL with the row limit and flags a truncated result', async () => {
+  it('runs raw SQL with the row limit and flags a truncated result (WEB-068)', async () => {
     let body: unknown;
     server.use(
       http.post(`${BASE}/admin/query`, async ({ request }) => {
@@ -193,7 +193,7 @@ describe('Admin', () => {
     });
   });
 
-  it('warns about an expensive result', async () => {
+  it('warns about an expensive result (WEB-068)', async () => {
     server.use(
       http.post(`${BASE}/admin/query`, () =>
         HttpResponse.json({ columns: ['n'], rows: [[1]], truncated: false, rows_read: 250_000 }),
@@ -212,7 +212,7 @@ describe('Admin', () => {
     });
   });
 
-  it('holds a full-scan query for confirmation and reruns it with allow_scan', async () => {
+  it('holds a full-scan query for confirmation and reruns it with allow_scan (WEB-068)', async () => {
     const bodies: unknown[] = [];
     server.use(
       http.post(`${BASE}/admin/query`, async ({ request }) => {
@@ -251,7 +251,7 @@ describe('Admin', () => {
     });
   });
 
-  it('lists feature flags with their rollout and overrides', async () => {
+  it('lists feature flags with their rollout and overrides (WEB-069)', async () => {
     renderWithClient(<Admin />);
 
     expect(await screen.findByRole('heading', { name: TEST_FEATURE_FLAG.key })).toBeInTheDocument();
@@ -262,7 +262,7 @@ describe('Admin', () => {
     ).toHaveValue(TEST_FEATURE_FLAG.description);
   });
 
-  it('creates a flag', async () => {
+  it('creates a flag (WEB-069)', async () => {
     let body: unknown;
     let key: unknown;
     server.use(
@@ -299,7 +299,7 @@ describe('Admin', () => {
     });
   });
 
-  it('sets and removes a user override', async () => {
+  it('sets and removes a user override (WEB-069)', async () => {
     const bodies: unknown[] = [];
     server.use(
       http.put(`${BASE}/admin/flags/:key/users`, async ({ request }) => {
@@ -326,7 +326,7 @@ describe('Admin', () => {
     });
   });
 
-  it('deletes a flag after confirming', async () => {
+  it('deletes a flag after confirming (WEB-069, WEB-020)', async () => {
     let deleted: unknown;
     server.use(
       http.delete(`${BASE}/admin/flags/:key`, ({ params }) => {

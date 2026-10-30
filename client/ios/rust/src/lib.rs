@@ -585,6 +585,7 @@ fn into_c_result(result: Result<()>) -> *mut c_char {
 mod tests {
     use super::*;
 
+    // CLIENT-017: setting up logging twice in one process does not fail or panic.
     #[test]
     fn init_logging_is_idempotent_across_repeated_calls() {
         // `virtue_ios_native_init` can legitimately be called more than once per

@@ -12,7 +12,7 @@ import {
 beforeEach(clearDB);
 
 describe('Partner routes', () => {
-  it('creates, accepts, lists, and deletes a partnership without shared-key fields', async () => {
+  it('creates, accepts, lists, and deletes a partnership without shared-key fields (API-023, API-025, API-026, API-027)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'owner@example.com',
       'pw',
@@ -86,7 +86,7 @@ describe('Partner routes', () => {
     expect(deleteRes.status).toBe(204);
   });
 
-  it('supports inviting an email before the partner account exists', async () => {
+  it('supports inviting an email before the partner account exists (API-023, API-024, API-025, API-026)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } =
       await signupAndGetCookie('owner2@example.com');
     await markUserEmailVerified(ownerUserId);
@@ -158,7 +158,7 @@ describe('Partner routes', () => {
     expect(owned?.status).toBe('accepted');
   });
 
-  it('lets either side of an accepted partnership delete it via DELETE /partner/:id', async () => {
+  it('lets either side of an accepted partnership delete it via DELETE /partner/:id (API-027)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } = await signupAndGetCookie(
       'owner3@example.com',
       'pw',
@@ -210,7 +210,7 @@ describe('Partner routes', () => {
     expect(ownerList.watchers.find((partner) => partner.id === created.id)).toBeUndefined();
   });
 
-  it('prevents accepting your own invite link', async () => {
+  it('prevents accepting your own invite link (API-025)', async () => {
     const { cookie: ownerCookie, userId: ownerUserId } =
       await signupAndGetCookie('owner4@example.com');
     await markUserEmailVerified(ownerUserId);
