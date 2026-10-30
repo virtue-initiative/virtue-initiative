@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { authenticateWebSession } from '../middleware/auth';
-import { validateZ } from '../middleware/validation';
+import { requireUuidParam, validateZ } from '../middleware/validation';
 import {
   deleteDeviceById,
   findOwnedDevice,
@@ -67,6 +67,7 @@ devices.get('/', authenticateWebSession(), async (c) => {
 devices.patch(
   '/:id',
   authenticateWebSession(),
+  requireUuidParam(),
   validateZ('json', updateDeviceSchema),
   async (c) => {
     const deviceId = c.req.param('id');
@@ -83,7 +84,7 @@ devices.patch(
   },
 );
 
-devices.delete('/:id', authenticateWebSession(), async (c) => {
+devices.delete('/:id', authenticateWebSession(), requireUuidParam(), async (c) => {
   const deviceId = c.req.param('id');
   const device = await findOwnedDevice(c.env.DB, deviceId, c.get('sub'));
 

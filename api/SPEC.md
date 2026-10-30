@@ -205,7 +205,9 @@ There are **TWO** types of tokens:
 
 ### API-004 Validation
 
-The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.
+The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure. A body that is not valid JSON, on a route that takes JSON, MUST get **HTTP 400** with an `error` message.
+
+A path ID that is not a UUID names nothing, so the server MUST answer it as it answers an unknown ID, and MUST NOT answer **HTTP 500**. Authentication still comes first.
 
 ### API-005 Backwards compat
 

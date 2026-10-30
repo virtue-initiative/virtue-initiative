@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { authenticateWebSession } from '../middleware/auth';
-import { validateZ } from '../middleware/validation';
+import { requireUuidParam, validateZ } from '../middleware/validation';
 import {
   createLockedPassword,
   findOwnedLockedPassword,
@@ -94,7 +94,7 @@ lockedPasswords.get('/', authenticateWebSession(), async (c) => {
   );
 });
 
-lockedPasswords.post('/:id/reveal', authenticateWebSession(), async (c) => {
+lockedPasswords.post('/:id/reveal', authenticateWebSession(), requireUuidParam(), async (c) => {
   const id = c.req.param('id');
   const ownerId = c.get('sub');
   const entry = await findOwnedLockedPassword(c.env.DB, id, ownerId);
@@ -114,7 +114,7 @@ lockedPasswords.post('/:id/reveal', authenticateWebSession(), async (c) => {
   return c.json({ wrapped_value: entry.wrapped_value, accessed_at: accessedAt });
 });
 
-lockedPasswords.delete('/:id', authenticateWebSession(), async (c) => {
+lockedPasswords.delete('/:id', authenticateWebSession(), requireUuidParam(), async (c) => {
   const id = c.req.param('id');
   const entry = await findOwnedLockedPassword(c.env.DB, id, c.get('sub'));
 
@@ -127,7 +127,7 @@ lockedPasswords.delete('/:id', authenticateWebSession(), async (c) => {
   return c.body(null, 204);
 });
 
-lockedPasswords.post('/:id/restore', authenticateWebSession(), async (c) => {
+lockedPasswords.post('/:id/restore', authenticateWebSession(), requireUuidParam(), async (c) => {
   const id = c.req.param('id');
   const entry = await findOwnedLockedPassword(c.env.DB, id, c.get('sub'));
 
@@ -140,17 +140,22 @@ lockedPasswords.post('/:id/restore', authenticateWebSession(), async (c) => {
   return c.body(null, 204);
 });
 
-lockedPasswords.delete('/:id/permanent', authenticateWebSession(), async (c) => {
-  const id = c.req.param('id');
-  const entry = await findOwnedLockedPassword(c.env.DB, id, c.get('sub'));
+lockedPasswords.delete(
+  '/:id/permanent',
+  authenticateWebSession(),
+  requireUuidParam(),
+  async (c) => {
+    const id = c.req.param('id');
+    const entry = await findOwnedLockedPassword(c.env.DB, id, c.get('sub'));
 
-  if (!entry) {
-    return c.json({ error: 'Not found' }, 404);
-  }
+    if (!entry) {
+      return c.json({ error: 'Not found' }, 404);
+    }
 
-  await deleteLockedPasswordById(c.env.DB, id);
+    await deleteLockedPasswordById(c.env.DB, id);
 
-  return c.body(null, 204);
-});
+    return c.body(null, 204);
+  },
+);
 
 export default lockedPasswords;

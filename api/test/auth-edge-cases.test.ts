@@ -317,14 +317,14 @@ describe('Validation (API-004)', () => {
   });
 
   for (const path of ['/signup-request', '/login', '/password-reset']) {
-    // KNOWN-BUG: a body that is not valid JSON makes the route answer 500 "Internal server error" instead of 400
-    it.fails(`POST ${path} with a body that is not JSON answers 400 (API-004)`, async () => {
+    it(`POST ${path} with a body that is not JSON answers 400 (API-004)`, async () => {
       const res = await SELF.fetch(`${BASE}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{not json',
       });
       expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: unknown }).error).toEqual(expect.any(String));
     });
   }
 

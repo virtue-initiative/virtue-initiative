@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
 import admin from './routes/admin';
 import auth from './routes/auth';
 import bugReport from './routes/bug-report';
@@ -98,6 +99,10 @@ app.get('/r2/*', async (c) => {
 });
 
 app.onError((error, c) => {
+  // API-004: the validator throws this for a body that is not valid JSON.
+  if (error instanceof HTTPException) {
+    return c.json({ error: error.message }, error.status);
+  }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
 });

@@ -48,12 +48,20 @@ export function uuidToBytes(uuid: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+const DASHED_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX_UUID = /^[0-9a-f]{32}$/i;
+
+/** Whether `uuidToBytes` accepts this value. */
+export function isUuid(value: string): boolean {
+  return DASHED_UUID.test(value) || HEX_UUID.test(value);
+}
+
 function normalizeUuidString(uuid: string): string {
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
+  if (DASHED_UUID.test(uuid)) {
     return uuid.toLowerCase();
   }
 
-  if (/^[0-9a-f]{32}$/i.test(uuid)) {
+  if (HEX_UUID.test(uuid)) {
     const hex = uuid.toLowerCase();
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }

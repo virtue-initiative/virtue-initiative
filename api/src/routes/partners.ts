@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticateWebSession } from '../middleware/auth';
-import { validateZ } from '../middleware/validation';
+import { requireUuidParam, validateZ } from '../middleware/validation';
 import {
   acceptPartner,
   consumeEmailToken,
@@ -273,7 +273,7 @@ partners.get('/partner', authenticateWebSession(), async (c) => {
   });
 });
 
-partners.delete('/partner/:id', authenticateWebSession(), async (c) => {
+partners.delete('/partner/:id', authenticateWebSession(), requireUuidParam(), async (c) => {
   const userId = c.get('sub');
   const partnerId = c.req.param('id');
   const [partnership, currentUser] = await Promise.all([
