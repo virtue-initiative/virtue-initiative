@@ -12,6 +12,7 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { postPasswordReset } from './auth-helpers';
 import { TEST_OTHER_SNS_PRIVATE_KEY, TEST_SNS_CERT, TEST_SNS_PRIVATE_KEY } from './sns-test-keys';
 
 const SNS_ORIGIN = 'https://sns.us-east-1.amazonaws.com';
@@ -490,11 +491,7 @@ describe('Email webhooks', () => {
     expect(user?.email_verified).toBe(1);
 
     const before = (await listEmailDeliveries()).length;
-    const resetRes = await SELF.fetch(`${BASE}/password-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'soft@example.com' }),
-    });
+    const resetRes = await postPasswordReset('soft@example.com');
     expect(resetRes.status).toBe(204);
     expect((await listEmailDeliveries()).length).toBe(before + 1);
   });

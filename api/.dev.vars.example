@@ -36,6 +36,9 @@ EMAIL_DELIVERY_MODE=log
 # landing site use in dev.
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 
+# Key for the made-up salt of an email with no account (API-015). Any value works in dev.
+LOGIN_SALT_SECRET=dev-login-salt-secret
+
 # Where POST /bug-report emails get sent
 BUG_REPORT_EMAIL=help@virtueinitiative.org
 

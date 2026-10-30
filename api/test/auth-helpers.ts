@@ -1,4 +1,6 @@
-import { env, SELF } from 'cloudflare:test';
+import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test';
+import worker from '../src/index';
+import type { Env } from '../src/types/bindings';
 import {
   BASE,
   TEST_TURNSTILE_TOKEN,
@@ -66,10 +68,33 @@ export async function signupBody(email: string, token: string, extra = {}) {
   };
 }
 
+/**
+ * Sends POST /password-reset straight to the worker and waits for the work it does after
+ * responding (API-012), so the test can check what was sent. Each call gets its own IP, because
+ * the rate limiter's window outlives a single test.
+ */
+export async function postPasswordReset(email: string, bindings: Partial<Env> = {}) {
+  const ctx = createExecutionContext();
+  const res = await worker.fetch(
+    new Request(`${BASE}/password-reset`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'CF-Connecting-IP': crypto.randomUUID(),
+      },
+      body: JSON.stringify({ email }),
+    }),
+    { ...env, ...bindings },
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
+  return res;
+}
+
 /** Sends POST /password-reset and returns the token from the reset link, if one was emailed. */
 export async function requestPasswordResetToken(email: string): Promise<string> {
   const before = (await listEmailDeliveries()).length;
-  const res = await postJson('/password-reset', { email });
+  const res = await postPasswordReset(email);
   if (res.status !== 204) throw new Error(`password-reset failed: ${res.status}`);
   const delivery = (await listEmailDeliveries())
     .slice(before)

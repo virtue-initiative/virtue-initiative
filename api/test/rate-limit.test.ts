@@ -64,3 +64,42 @@ describe('Per-device rate limiting (API-034)', () => {
     expect(resB.status).toBe(200);
   });
 });
+
+describe('Per-IP rate limiting of the account lookup routes (API-012, API-015)', () => {
+  // Fires 130 for the reason given in the per-device test above.
+  it.each([
+    [
+      'POST /password-reset',
+      (ip: string) =>
+        SELF.fetch(`${BASE}/password-reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
+          body: JSON.stringify({ email: 'nobody@example.com' }),
+        }),
+      204,
+    ],
+    [
+      'GET /user/login-material',
+      (ip: string) =>
+        SELF.fetch(`${BASE}/user/login-material?email=nobody%40example.com`, {
+          headers: { 'CF-Connecting-IP': ip },
+        }),
+      200,
+    ],
+  ] as const)(
+    '%s answers 429 once one IP exceeds the rate, without limiting other IPs',
+    async (name, send, okStatus) => {
+      const ip = `limited-${name}`;
+      const responses = await Promise.all(Array.from({ length: 130 }, () => send(ip)));
+      const statuses = responses.map((res: Response) => res.status);
+      expect(statuses).toContain(okStatus);
+      expect(statuses).toContain(429);
+
+      const limited = responses.find((res: Response) => res.status === 429)!;
+      expect(await limited.json()).toEqual({ error: 'Too many requests' });
+
+      expect((await send(`other-${name}`)).status).toBe(okStatus);
+    },
+    20000,
+  );
+});

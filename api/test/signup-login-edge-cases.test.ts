@@ -1,5 +1,7 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF, env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createExecutionContext, fetchMock, SELF, env } from 'cloudflare:test';
+import worker from '../src/index';
+import type { Env } from '../src/types/bindings';
 import {
   BASE,
   TEST_TURNSTILE_TOKEN,
@@ -21,6 +23,7 @@ import {
   loginCookie,
   newPasswordMaterial,
   postJson,
+  postPasswordReset,
   recordBounce,
   requestPasswordResetToken,
   requestSignupToken,
@@ -379,7 +382,7 @@ describe('POST /signup/validate (API-011)', () => {
 describe('POST /password-reset (API-012)', () => {
   it('emails a reset link to an existing account, matching the address case-insensitively (API-012)', async () => {
     await signupAndGetCookie('reset@example.com');
-    const res = await postJson('/password-reset', { email: 'RESET@Example.com' });
+    const res = await postPasswordReset('RESET@Example.com');
     expect(res.status).toBe(204);
     expect(await res.text()).toBe('');
     const sent = await deliveriesOfKind('password_reset');
@@ -388,26 +391,29 @@ describe('POST /password-reset (API-012)', () => {
 
   it('answers an unknown address with the same response and sends no reset link (API-012)', async () => {
     await signupAndGetCookie('reset@example.com');
-    const known = await postJson('/password-reset', { email: 'reset@example.com' });
-    const unknown = await postJson('/password-reset', { email: 'nobody@example.com' });
+    const known = await postPasswordReset('reset@example.com');
+    const unknown = await postPasswordReset('nobody@example.com');
     expect(await snapshot(unknown)).toEqual(await snapshot(known));
     expect(
       (await deliveriesOfKind('password_reset')).map((delivery) => delivery.recipient_email),
     ).toEqual(['reset@example.com']);
   });
 
-  // KNOWN-BUG: an unknown address gets no email at all, where the spec says to send an "account does not exist" email
-  it.fails(
-    'sends an account-does-not-exist email to an unknown address (SHOULD) (API-012)',
-    async () => {
-      await postJson('/password-reset', { email: 'nobody@example.com' });
-      const toNobody = (await listEmailDeliveries()).filter(
-        (d) => d.recipient_email === 'nobody@example.com',
-      );
-      expect(toNobody).toHaveLength(1);
-      expect(toNobody[0]!.kind).not.toBe('password_reset');
-    },
-  );
+  it('sends no email of any kind to an unknown address (API-012)', async () => {
+    await postPasswordReset('nobody@example.com');
+    expect(await listEmailDeliveries()).toEqual([]);
+  });
+
+  it('answers the same when the reset email cannot be sent, and logs the failure (API-012)', async () => {
+    await signupAndGetCookie('reset@example.com');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // There is no network in tests, so a real SES send fails.
+    const failed = await postPasswordReset('reset@example.com', { EMAIL_DELIVERY_MODE: 'ses' });
+    const unknown = await postPasswordReset('nobody@example.com');
+    expect(await snapshot(failed)).toEqual(await snapshot(unknown));
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
 });
 
 /** Tokens that must not work as a password-reset token. */
@@ -603,15 +609,70 @@ describe('GET /user/login-material (API-015)', () => {
     expect(((await bare.json()) as { params: object }).params).toEqual(a.params);
   });
 
-  // KNOWN-BUG: an unknown email gets a fresh random salt on every request, which tells it apart from a real account whose salt is stable
-  it.fails('returns the same made-up salt each time for an unknown email (API-015)', async () => {
-    const first = (await (await material('nobody@example.com')).json()) as {
-      password_salt: string;
-    };
-    const second = (await (await material('nobody@example.com')).json()) as {
-      password_salt: string;
-    };
-    expect(second.password_salt).toBe(first.password_salt);
+  const saltOf = async (res: Response) =>
+    ((await res.json()) as { password_salt: string }).password_salt;
+
+  /** GET /user/login-material straight to the worker, with some env vars overridden. */
+  const materialWith = (email: string, bindings: Partial<Env>) =>
+    worker.fetch(
+      new Request(`${BASE}/user/login-material?email=${encodeURIComponent(email)}`),
+      { ...env, ...bindings },
+      createExecutionContext(),
+    );
+
+  it('returns the same made-up salt each time for an unknown email (API-015)', async () => {
+    const first = await saltOf(await material('nobody@example.com'));
+    expect(await saltOf(await material('nobody@example.com'))).toBe(first);
+  });
+
+  it('matches an unknown email case-insensitively, as for a real account (API-015)', async () => {
+    const salt = await saltOf(await material('nobody@example.com'));
+    expect(await saltOf(await material('NOBODY@Example.COM'))).toBe(salt);
+  });
+
+  it('gives different unknown emails different made-up salts (API-015)', async () => {
+    expect(await saltOf(await material('nobody@example.com'))).not.toBe(
+      await saltOf(await material('someone@example.com')),
+    );
+  });
+
+  it('derives the made-up salt from the normalized email and LOGIN_SALT_SECRET (API-015)', async () => {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode('secret-a'),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const mac = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode('nobody@example.com'),
+    );
+    const salt = await saltOf(
+      await materialWith('NOBODY@example.com', { LOGIN_SALT_SECRET: 'secret-a' }),
+    );
+    expect(salt).toBe(Buffer.from(mac).subarray(0, 16).toString('base64'));
+    expect(
+      await saltOf(await materialWith('nobody@example.com', { LOGIN_SALT_SECRET: 'secret-b' })),
+    ).not.toBe(salt);
+  });
+
+  it('still answers and logs an error when LOGIN_SALT_SECRET is not configured (API-015)', async () => {
+    await signupAndGetCookie('alice@example.com');
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unconfigured = { LOGIN_SALT_SECRET: undefined };
+
+    const unknown = await materialWith('nobody@example.com', unconfigured);
+    expect(unknown.status).toBe(200);
+    expect(Buffer.from(await saltOf(unknown), 'base64')).toHaveLength(16);
+
+    const existing = await materialWith('alice@example.com', unconfigured);
+    expect(existing.status).toBe(200);
+    expect(await saltOf(existing)).toBe(await passwordSaltFor('alice@example.com'));
+
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it('rejects an email that is not an email address with 400 (API-015)', async () => {
