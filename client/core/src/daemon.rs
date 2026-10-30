@@ -289,12 +289,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             auth,
             screenshot,
             upload,
+            errors,
             ..
         } = state;
         auth::login(
             auth,
             screenshot,
             upload,
+            errors,
             &self.api,
             &self.config.device_name,
             &self.config.platform_name,

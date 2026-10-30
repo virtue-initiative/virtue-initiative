@@ -153,7 +153,7 @@ fn login_revokes_the_existing_session_registers_a_device_and_enables_capture() {
     assert_eq!(
         api.logout_calls,
         vec!["scenario-device-refresh".to_string()],
-        "the previous session is revoked first"
+        "the previous session is revoked"
     );
     assert_eq!(api.register_device_calls.len(), 1);
     assert_eq!(
@@ -174,9 +174,55 @@ fn login_revokes_the_existing_session_registers_a_device_and_enables_capture() {
     assert!(state.screenshot.enabled);
 }
 
-// CORE-008: a failed login leaves the client logged out.
+// CORE-008: a successful login tries to deliver queued events with the old session before revoking it.
 #[test]
-fn a_failed_login_leaves_the_client_logged_out() {
+fn a_successful_login_uploads_queued_events_with_the_old_session() {
+    let mut scenario = Scenario::authenticated();
+    scenario.at_t(T0);
+    scenario.queue_upload(dev("before the login"));
+    scenario
+        .login("me@example.org", "secret", None)
+        .expect("login succeeds");
+
+    let api = scenario.api.state();
+    assert_eq!(api.batch_uploads.len(), 1);
+    assert_eq!(
+        api.batch_uploads[0].device_refresh_token,
+        "scenario-device-refresh"
+    );
+    assert_eq!(api.logout_calls.len(), 1);
+    drop(api);
+    let recent_errors = scenario.daemon.status().recent_errors;
+    assert!(recent_errors.iter().all(|e| e.context != "login_flush"));
+}
+
+// CORE-008: a failed upload of queued events does not fail the login, and is recorded.
+#[test]
+fn a_login_succeeds_when_the_queued_events_cannot_be_uploaded() {
+    let mut scenario = Scenario::authenticated();
+    scenario
+        .api
+        .program_batch(Err(CoreError::CommandFailed("api unreachable".into())));
+    scenario.at_t(T0);
+    scenario.queue_upload(dev("before the login"));
+    scenario
+        .login("me@example.org", "secret", None)
+        .expect("login succeeds");
+
+    assert_eq!(scenario.api.state().logout_calls.len(), 1);
+    let status = scenario.daemon.status();
+    assert!(status.is_authenticated);
+    assert!(
+        status
+            .recent_errors
+            .iter()
+            .any(|e| e.context == "login_flush")
+    );
+}
+
+// CORE-008: a failed login keeps the existing session.
+#[test]
+fn a_failed_login_keeps_the_existing_session() {
     let scenario = Scenario::authenticated();
     scenario
         .api
@@ -192,14 +238,15 @@ fn a_failed_login_leaves_the_client_logged_out() {
         handle.join().expect("loop must stop cleanly");
     });
 
+    assert!(scenario.api.state().logout_calls.is_empty());
     let state = persisted(&scenario);
-    assert!(state.auth.device_credentials.is_none());
-    assert!(!scenario.daemon.status().is_authenticated);
+    assert!(state.auth.device_credentials.is_some());
+    assert!(scenario.daemon.status().is_authenticated);
 }
 
-// CORE-008, CORE-005: after a failed login nothing is queued, as for any logged-out client.
+// CORE-008: a failed login keeps queued events and keeps queueing new ones.
 #[test]
-fn a_failed_login_leaves_nothing_queueing_events() {
+fn a_failed_login_keeps_queueing_events() {
     let mut scenario = Scenario::authenticated();
     scenario
         .api
@@ -209,25 +256,26 @@ fn a_failed_login_leaves_nothing_queueing_events() {
     assert!(scenario.login("me@example.org", "wrong", None).is_err());
 
     scenario.queue_upload(dev("after the failed login"));
-    assert!(scenario.state().upload.device_credentials.is_none());
-    assert!(queued_events(&scenario).is_empty());
+    assert!(scenario.state().upload.device_credentials.is_some());
+    assert_eq!(queued_events(&scenario).len(), 2);
 }
 
-// CORE-008, CORE-009: a failed login stops capture and clears the account, as a logout does.
+// CORE-008: a failed login keeps capture running and the account named.
 #[test]
-fn a_failed_login_stops_capture_and_clears_the_account() {
+fn a_failed_login_keeps_capture_and_the_account() {
     let mut scenario = Scenario::authenticated();
     scenario
         .api
         .program_register_device(Err(CoreError::CommandFailed("wrong password".into())));
     scenario.at_t(T0);
+    let account_email = scenario.state().auth.account_email.clone();
     assert!(scenario.state().screenshot.enabled);
     assert!(scenario.login("me@example.org", "wrong", None).is_err());
 
     let state = scenario.state();
-    assert!(!state.screenshot.enabled);
-    assert!(state.auth.account_email.is_none());
-    assert!(!scenario.daemon.status().is_authenticated);
+    assert!(state.screenshot.enabled);
+    assert_eq!(state.auth.account_email, account_email);
+    assert!(scenario.daemon.status().is_authenticated);
 }
 
 // CORE-009: logout revokes the session best-effort, clears the credentials and disables capture.

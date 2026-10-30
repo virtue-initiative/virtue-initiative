@@ -1,6 +1,7 @@
 mod batch;
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -306,6 +307,15 @@ pub struct HashRetryPlan {
     room: usize,
     next_hash_seq: u32,
     now_ms: i64,
+    /// When set, no new event starts uploading after this.
+    deadline: Option<Instant>,
+}
+
+impl HashRetryPlan {
+    pub fn with_deadline(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
 }
 
 /// Phase 4: decide whether hash retries should run this tick, and snapshot
@@ -343,6 +353,7 @@ pub fn plan_hash_retries(
         events: std::mem::take(&mut state.pending_hash_events),
         next_hash_seq: state.next_hash_seq,
         now_ms,
+        deadline: None,
     })
 }
 
@@ -374,6 +385,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         room,
         mut next_hash_seq,
         now_ms,
+        deadline,
     } = plan;
 
     let mut refreshed: Option<(String, DeviceSettings)> = None;
@@ -422,7 +434,11 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut stop = false;
 
     for event in events {
-        if stop || retried >= MAX_HASH_RETRIES_PER_LOOP || newly_hashed.len() >= room {
+        if stop
+            || retried >= MAX_HASH_RETRIES_PER_LOOP
+            || newly_hashed.len() >= room
+            || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
             still_pending.push(event);
             continue;
         }
@@ -834,6 +850,21 @@ mod tests {
         );
         assert!(state.force_flush);
         assert!(!state.bypass_lock);
+    }
+
+    // CORE-008: past its deadline, a hash pass starts no new upload and keeps the events.
+    #[test]
+    fn hash_retry_past_its_deadline_uploads_nothing() {
+        let mut state = authenticated_state();
+        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+
+        let api = MockApiClient::new();
+        let plan = plan_hash_retries(&mut state, 1_000, true).expect("expected a hash plan");
+        let outcome = execute_hash_retries(plan.with_deadline(Instant::now()), &api);
+
+        assert!(api.state().hash_uploads.is_empty());
+        assert!(outcome.newly_hashed.is_empty());
+        assert_eq!(outcome.still_pending.len(), 1);
     }
 
     // CORE-005: a hashed event moves on to the batch queue (BATCH-006).

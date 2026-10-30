@@ -114,7 +114,7 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 `login(email, password, device_name?) -> device_id`
 
-MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+MUST register a new device with the API, and only once that succeeds MUST revoke any existing device session. Before revoking it, it SHOULD try once to upload queued events with that session. That attempt MUST stop starting new requests once a time budget is spent, so that `login` still replies before callers give up, and a failure of that upload MUST NOT fail the login. Any events it leaves unsent MUST be recorded in `recent_errors` (CORE-018). On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave any existing session, its queued events and screenshot capture unchanged. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
 
 ### CORE-009 logout
 
