@@ -11,6 +11,7 @@ Run `just --list` to see the everyday build/dev/format/test/typecheck commands, 
 - Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
 - Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
+- If you add or change a test or a `SPEC.md`, run `just spec-check` from the repo root. It checks that every test cites an existing spec ID and that no spec section has lost its tests. `just spec-coverage` prints the coverage report. See `TESTING.md`.
 
 ## Repo-wide quick map
 

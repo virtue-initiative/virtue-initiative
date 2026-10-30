@@ -15,6 +15,15 @@ Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-0
 | `CORE`  | `client/core/SPEC.md`  |
 | `BATCH` | `batch-format/SPEC.md` |
 
+## Tests
+
+Read `TESTING.md` before writing or changing a test. In short:
+
+- Every test MUST cite the spec ID it proves, in its title (TypeScript) or a comment above it (Rust, C#, Kotlin, Swift). `just spec-check` enforces this. A self-test of a test helper cites `NO-SPEC` instead.
+- Test behavior through the component's public interface (HTTP, the `Scenario` DSL, what the user sees), so refactoring internals doesn't break tests.
+- A behavior change updates the spec, then a test citing it, then the code. A bug fix adds a test that fails without the fix.
+- When a test shows the code doesn't meet the spec and the fix is out of scope, mark the test `KNOWN-BUG` as `TESTING.md` describes instead of fixing or weakening it.
+
 ## Repo map
 
 - `api/` — Cloudflare Workers REST API (TypeScript, Hono, D1 SQLite, R2 object storage)
