@@ -31,12 +31,19 @@ function parseUserSettings(json: string | null): { email_frequency: string; time
   }
 }
 
+/** API-004: `onError` answers this as an unknown ID when `uuid` came from the path. */
+export class InvalidUuidError extends Error {
+  constructor(readonly uuid: string) {
+    super(`Invalid UUID: ${uuid}`);
+  }
+}
+
 export function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
 
   if (!hex) {
-    throw new Error(`Invalid UUID: ${uuid}`);
+    throw new InvalidUuidError(uuid);
   }
 
   const bytes = new Uint8Array(16);
@@ -48,25 +55,17 @@ export function uuidToBytes(uuid: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-const DASHED_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEX_UUID = /^[0-9a-f]{32}$/i;
-
-/** Whether `uuidToBytes` accepts this value. */
-export function isUuid(value: string): boolean {
-  return DASHED_UUID.test(value) || HEX_UUID.test(value);
-}
-
 function normalizeUuidString(uuid: string): string {
-  if (DASHED_UUID.test(uuid)) {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)) {
     return uuid.toLowerCase();
   }
 
-  if (HEX_UUID.test(uuid)) {
+  if (/^[0-9a-f]{32}$/i.test(uuid)) {
     const hex = uuid.toLowerCase();
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  throw new Error(`Invalid UUID: ${uuid}`);
+  throw new InvalidUuidError(uuid);
 }
 
 export function bytesToUuid(value: unknown): string {

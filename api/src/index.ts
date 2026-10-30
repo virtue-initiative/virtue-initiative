@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
+import { InvalidUuidError } from './lib/db';
 import admin from './routes/admin';
 import auth from './routes/auth';
 import bugReport from './routes/bug-report';
@@ -102,6 +103,10 @@ app.onError((error, c) => {
   // API-004: the validator throws this for a body that is not valid JSON.
   if (error instanceof HTTPException) {
     return c.json({ error: error.message }, error.status);
+  }
+  // API-004: a path ID that is not a UUID names nothing. Any other bad UUID is a server bug.
+  if (error instanceof InvalidUuidError && Object.values(c.req.param()).includes(error.uuid)) {
+    return c.json({ error: 'Not found' }, 404);
   }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
