@@ -290,7 +290,7 @@ export const api = {
       encrypted_priv_key?: string;
     },
   ) =>
-    req<{ ok: boolean }>('/password-reset/finalize', {
+    req<void>('/password-reset/finalize', {
       method: 'POST',
       body: JSON.stringify({ token, ...payload }),
     }),

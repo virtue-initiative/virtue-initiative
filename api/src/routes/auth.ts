@@ -848,7 +848,7 @@ auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), as
   });
   await consumeEmailToken(c.env.DB, record, Date.now());
 
-  return c.json({ ok: true });
+  return c.body(null, 204);
 });
 
 export default auth;
