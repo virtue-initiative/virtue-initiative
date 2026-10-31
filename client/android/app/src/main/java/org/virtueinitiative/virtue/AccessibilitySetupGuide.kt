@@ -113,7 +113,14 @@ object AccessibilitySetupGuide {
     /** Every step as a numbered card, for Setup Steps and the guide. */
     fun renderSteps(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {
         container.removeAllViews()
-        steps(context).forEachIndexed { index, step ->
+        val steps = steps(context)
+        // A single step needs no number or heading of its own: the page title
+        // already says what to do.
+        if (steps.size == 1) {
+            container.addView(stepContent(context, steps[0], onAction))
+            return
+        }
+        steps.forEachIndexed { index, step ->
             container.addView(context.card().apply {
                 (layoutParams as LinearLayout.LayoutParams).topMargin = if (index == 0) 0 else context.dp(12)
                 addView(LinearLayout(context).apply {
@@ -162,9 +169,9 @@ object AccessibilitySetupGuide {
                     strip.addView(LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         layoutParams = LinearLayout.LayoutParams(
-                            context.dp(210), LinearLayout.LayoutParams.WRAP_CONTENT
+                            context.dp(240), LinearLayout.LayoutParams.WRAP_CONTENT
                         ).apply { if (index > 0) marginStart = context.dp(12) }
-                        addView(screenshot(context, image, caption, context.dp(210)))
+                        addView(screenshot(context, image, caption, context.dp(240)))
                         addView(context.text("${index + 1}. $caption", 14f, R.color.ink_3, bold = true).topMargin(6))
                     })
                 }
