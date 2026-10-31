@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { useLocation } from 'preact-iso';
-import { useAPIContext, useDevices, usePartners, usePasswords, useUser } from '../utils/api';
+import {
+  SERVER_ERROR_MESSAGE,
+  describeError,
+  useAPIContext,
+  useDevices,
+  usePartners,
+  usePasswords,
+  useUser,
+} from '../utils/api';
 import { Avatar } from '@virtueinitiative/shared-web';
 import { DevicesIcon, PartnersIcon, LogsIcon, LockIcon, ReportIcon, SettingsIcon } from './icons';
+import { sendToast } from '../utils/toast';
 import { LANDING_URL } from '../utils/landing-url';
 import { ReportBugDialog } from './ReportBugDialog';
 
@@ -194,7 +203,10 @@ export function Sidebar() {
     acceptedWatchings.length + watchers.filter((partner) => partner.status === 'accepted').length;
 
   const logout = () => {
-    void api.logout();
+    api.logout().catch((err: unknown) => {
+      const message = describeError(err, SERVER_ERROR_MESSAGE);
+      if (message) sendToast(message, { isError: true });
+    });
   };
 
   const closeMobile = () => setMobileOpen(false);

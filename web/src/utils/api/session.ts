@@ -143,8 +143,16 @@ export class Session {
     return this.invalidated;
   }
 
+  /** WEB-007: retries a failed logout, and throws if the server session is still valid. */
   async logout(): Promise<void> {
-    await api.logout().catch(() => {});
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await api.logout();
+        break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+    }
     await this.invalidate();
   }
 

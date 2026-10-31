@@ -480,15 +480,15 @@ The server MUST respond with **HTTP 200**:
 
 ### API-018 `POST /logout`
 
-The client MUST authenticate with a **Web Token**.
+The client SHOULD authenticate with a **Web Token**, in the `refresh_token` cookie or the Authorization header (see API-003).
 
-The server MUST invalidate the session and clear the refresh_token.
+The server MUST invalidate every session the request names this way and clear the refresh_token. It MUST NOT invalidate a device session.
 
-The server MUST respond with **HTTP 204**.
+The server MUST respond with **HTTP 204**, including when the request carries no valid Web Token, so that a client can always finish logging out. If it cannot invalidate a session the request names, it MUST still clear the refresh_token and MUST respond **HTTP 500**, because that session is still valid.
 
 ### API-019 `GET /user`
 
-The client MUST authenticate with either token.
+The client MUST authenticate with a **Web Token**.
 
 The server MUST return the currently authenticated user.
 
@@ -831,7 +831,7 @@ The client MUST send
 }
 ```
 
-The server MUST validate the login (see `POST /login`) and create a long lived refresh token. Like `POST /login`, it SHOULD fill in a missing newsletter location.
+The server MUST validate the login (see `POST /login`) and create a long lived refresh token. For an unverified account it MUST behave as `POST /login` does, including the verification email and the `email_bounced` response, and MUST NOT register a device. Like `POST /login`, it SHOULD fill in a missing newsletter location.
 
 It should also return the device settings (see `GET /d/device`)
 

@@ -363,7 +363,11 @@ describe.each(ACTIONS)('Destructive action: $name (WEB-020)', (action) => {
     expect(action.remains()).toBeInTheDocument();
     release();
 
-    expect(await screen.findByText('The server said no')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.',
+      ),
+    ).toBeInTheDocument();
     expect(action.remains()).toBeInTheDocument();
     if (action.failure === 'dialog') expect(dialog).toHaveAttribute('open');
     // The controls come back, so the user can try again or cancel.

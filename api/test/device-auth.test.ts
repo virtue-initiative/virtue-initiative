@@ -162,24 +162,21 @@ describe('POST /d/device (API-035)', () => {
     expect(await list.json()).toEqual([]);
   });
 
-  // KNOWN-BUG: registering on an unverified account answers 403 but sends no verification email, where POST /login (which this must follow) sends one
-  it.fails(
-    'sends a verification email when the account is unverified, as POST /login does (API-035)',
-    async () => {
-      const { userId } = await signupAndGetCookie(EMAIL);
-      await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
-        .bind(uuidToBytes(userId))
-        .run();
-      const before = (await listEmailDeliveries()).length;
-      await register();
-      const sent = (await listEmailDeliveries()).slice(before);
-      expect(sent.map((d) => [d.kind, d.recipient_email])).toEqual([['email_verification', EMAIL]]);
-    },
-  );
+  it('sends a verification email when the account is unverified, as POST /login does (API-035)', async () => {
+    const { userId } = await signupAndGetCookie(EMAIL);
+    await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
+      .bind(uuidToBytes(userId))
+      .run();
+    const before = (await listEmailDeliveries()).length;
+    const res = await register();
+    const sent = (await listEmailDeliveries()).slice(before);
+    expect(sent.map((d) => [d.kind, d.recipient_email])).toEqual([['email_verification', EMAIL]]);
+    expect(await res.json()).toEqual({
+      error: 'Please verify your email before logging in. A verification email has been sent.',
+    });
+  });
 
-  // KNOWN-BUG: registering on an unverified account whose address bounced answers a plain 403 without code email_bounced, where POST /login answers 403 with code email_bounced
-  // This pins today's missing code, so it fails once the bug is fixed.
-  it('answers 403 without email_bounced yet for an unverified account with a bounced address (API-035)', async () => {
+  it('answers 403 with email_bounced for an unverified account with a bounced address, as POST /login does (API-035)', async () => {
     const { userId } = await signupAndGetCookie(EMAIL);
     await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
       .bind(uuidToBytes(userId))
@@ -187,7 +184,7 @@ describe('POST /d/device (API-035)', () => {
     await recordBounce(EMAIL);
     const res = await register();
     expect(res.status).toBe(403);
-    expect(await res.json()).not.toHaveProperty('code', 'email_bounced');
+    expect(await res.json()).toHaveProperty('code', 'email_bounced');
   });
 
   it('fills a missing newsletter location from the registration request and keeps an existing one (API-035)', async () => {
