@@ -111,9 +111,6 @@ struct SafariSetupState: Equatable {
         return true
     }
     var reportedOff: Bool { reportedOffAt != nil && !extensionTurnedOn }
-    /// Falls back to "a page was captured" when Safari can't report the
-    /// All Websites setting directly.
-    var allWebsitesAllowed: Bool { allSitesGranted ?? (lastFrameAt != nil) }
     var hasCaptured: Bool { lastFrameAt != nil }
 }
 
@@ -142,7 +139,7 @@ enum ExtensionCheck: Equatable {
 enum MonitoringState: Equatable {
     case signedOut
     case paused
-    /// Signed in, but the extension has never captured a page.
+    /// Signed in, but the extension is not known to be on.
     case needsSetup
     /// Worked before, but Safari now reports a missing permission.
     case needsPermission
@@ -190,6 +187,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastHeartbeat: String = "<none>"
     @Published private(set) var safariLastFrame: String = "<none>"
     @Published private(set) var safariLastPage: String = "<none>"
+    @Published private(set) var safariLastPageHost: String?
     @Published private(set) var safariLastError: String = "<none>"
     @Published private(set) var safariDaemonStatus: String = "Not started yet"
     /// True while a "Capture Next Safari Page" request waits for the extension.
@@ -245,10 +243,12 @@ final class MonitoringCoordinator: ObservableObject {
     func login() {
         guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             statusMessage = "Email is required"
+            loginError = "Email is required"
             return
         }
         guard !password.isEmpty else {
             statusMessage = "Password is required"
+            loginError = "Password is required"
             return
         }
 
@@ -463,6 +463,8 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
+        safariLastPageHost = defaults.string(forKey: VirtueShared.safariLastURLKey)
+            .flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines))?.host }
         forceCaptureRequested = defaults.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
         safariSetup = SafariSetupState(
             lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
@@ -580,7 +582,7 @@ final class MonitoringCoordinator: ObservableObject {
             monitoringState = .signedOut
         } else if !monitoringEnabled {
             monitoringState = .paused
-        } else if !setup.extensionTurnedOn || !setup.hasCaptured {
+        } else if !setup.extensionTurnedOn {
             monitoringState = .needsSetup
         } else if setup.allSitesGranted == false || setup.privateAllowed == false {
             monitoringState = .needsPermission
