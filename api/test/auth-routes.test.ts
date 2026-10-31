@@ -765,7 +765,7 @@ describe('Auth routes', () => {
         encrypted_priv_key: newPrivKey,
       }),
     });
-    expect(resetRes.status).toBe(200);
+    expect(resetRes.status).toBe(204);
 
     const storedUser = await env.DB.prepare(
       'SELECT password_hash, password_salt, pub_key, encrypted_priv_key FROM users WHERE email = ?',

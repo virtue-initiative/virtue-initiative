@@ -300,7 +300,7 @@ The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are
 
 If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter list (see API-058) after creating the account, already confirmed, because the signup verified the address. An existing unconfirmed row for the email SHOULD become confirmed. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
-The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
+The server SHOULD reject an invalid `verification_token` with **HTTP 400**. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
 The server MUST return a `refresh_token` cookie containing the refresh token.
 
@@ -365,12 +365,13 @@ The client MUST send a password-reset token.
 }
 ```
 
-The server MUST respond **HTTP 401** if the token is invalid or not found.
+The server MUST respond **HTTP 400** if the token is invalid or not found. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST respond **HTTP 200** with the account email.
 
 ```js
 {
+  "ok": true,
   "email": "user@example.com"
 }
 ```
@@ -391,7 +392,7 @@ The client MUST send the follow request data.
 
 The server SHOULD validate the `password_auth`, `password_salt` and `pub_key` in the same way as `/signup`
 
-The server MUST respond **HTTP 401** if the token is invalid or not found.
+The server MUST respond **HTTP 400** if the token is invalid or not found. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
@@ -464,7 +465,7 @@ The client MUST provide a email token in the body.
 }
 ```
 
-The server MUST return **HTTP 401** on an unknown or expired token.
+The server MUST return **HTTP 400** on an unknown or expired token. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST mark the email as verified and, if it is a email change request, change the email.
 
@@ -610,7 +611,7 @@ To get the information about an invite (often before signing up), the client MUS
 }
 ```
 
-The server MUST return **HTTP 401** for an invalid or unknown token.
+The server MUST return **HTTP 400** for an invalid or unknown token, including the token of an invite that was withdrawn. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 For a correct token, server MUST return **HTTP 200**.
 

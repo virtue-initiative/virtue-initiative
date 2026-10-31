@@ -289,26 +289,21 @@ describe('POST /signup (API-010)', () => {
     ],
   ];
 
-  it.each(tokenCases)('rejects %s and creates no account (API-010)', async (_name, make) => {
-    const token = await make();
-    const res = await postJson(
-      '/signup',
-      await signupBody('new@example.com', token, { password_auth: await passwordAuthFor('mine') }),
-    );
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
-    expect(res.headers.get('set-cookie')).toBeNull();
-    expect(await canLogIn('new@example.com', 'mine')).toBe(false);
-  });
-
-  for (const [name, make] of tokenCases) {
-    // KNOWN-BUG: POST /signup answers an invalid verification_token with 400 instead of 401
-    it.fails(`answers ${name} with 401 (API-010)`, async () => {
+  it.each(tokenCases)(
+    'rejects %s with 400 and creates no account (API-010)',
+    async (_name, make) => {
       const token = await make();
-      const res = await postJson('/signup', await signupBody('new@example.com', token));
-      expect(res.status).toBe(401);
-    });
-  }
+      const res = await postJson(
+        '/signup',
+        await signupBody('new@example.com', token, {
+          password_auth: await passwordAuthFor('mine'),
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(res.headers.get('set-cookie')).toBeNull();
+      expect(await canLogIn('new@example.com', 'mine')).toBe(false);
+    },
+  );
 
   it('burns a token used on a successful signup so a second signup cannot take over the account (API-010)', async () => {
     const token = await requestSignupToken('once@example.com');
@@ -475,20 +470,11 @@ describe('POST /password-reset/validate (API-013)', () => {
     },
   ];
 
-  it.each([...notResetTokens, usedToken])('does not accept %s (API-013)', async (_name, make) => {
+  it.each([...notResetTokens, usedToken])('answers %s with 400 (API-013)', async (_name, make) => {
     const res = await validate(await make());
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(400);
     expect(await res.json()).not.toHaveProperty('email');
   });
-
-  for (const [name, make] of [...notResetTokens, usedToken]) {
-    // KNOWN-BUG: an invalid or unknown reset token is answered with 400 instead of 401
-    it.fails(`answers ${name} with 401 (API-013)`, async () => {
-      const res = await validate(await make());
-      expect(res.status).toBe(401);
-    });
-  }
 });
 
 describe('POST /password-reset/finalize (API-014)', () => {
@@ -520,8 +506,7 @@ describe('POST /password-reset/finalize (API-014)', () => {
     });
   });
 
-  // KNOWN-BUG: finalize answers 200 with {"ok":true} instead of 204 with no body
-  it.fails('responds 204 with no body (API-014)', async () => {
+  it('responds 204 with no body (API-014)', async () => {
     await signupAndGetCookie('reset@example.com');
     const res = await finalize(await requestPasswordResetToken('reset@example.com'));
     expect(res.status).toBe(204);
@@ -531,36 +516,27 @@ describe('POST /password-reset/finalize (API-014)', () => {
   it('can be used once: a second finalize with the same token changes nothing (API-014)', async () => {
     await signupAndGetCookie('reset@example.com', 'old-password');
     const token = await requestPasswordResetToken('reset@example.com');
-    expect((await finalize(token, 'reset@example.com', 'first-reset')).status).toBeLessThan(300);
+    expect((await finalize(token, 'reset@example.com', 'first-reset')).status).toBe(204);
 
     const second = await finalize(token, 'reset@example.com', 'attacker');
-    expect(second.status).toBeGreaterThanOrEqual(400);
+    expect(second.status).toBe(400);
     expect(await canLogIn('reset@example.com', 'first-reset')).toBe(true);
     expect(await canLogIn('reset@example.com', 'attacker')).toBe(false);
   });
 
   it.each(notResetTokens)(
-    'does not accept %s and changes nothing (API-014)',
+    'answers %s with 400 and changes nothing (API-014)',
     async (_name, make) => {
       await signupAndGetCookie('victim@example.com', 'old-password');
       const res = await postJson('/password-reset/finalize', {
         token: await make(),
         ...(await newPasswordMaterial('victim@example.com', 'attacker')),
       });
-      expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(res.status).toBeLessThan(500);
+      expect(res.status).toBe(400);
       expect(await canLogIn('victim@example.com', 'old-password')).toBe(true);
       expect(await canLogIn('victim@example.com', 'attacker')).toBe(false);
     },
   );
-
-  for (const [name, make] of notResetTokens) {
-    // KNOWN-BUG: an invalid or unknown reset token is answered with 400 instead of 401
-    it.fails(`answers ${name} with 401 (API-014)`, async () => {
-      const res = await finalize(await make());
-      expect(res.status).toBe(401);
-    });
-  }
 
   it.each([
     ['password_auth that is not 32 bytes', { password_auth: Buffer.alloc(16).toString('base64') }],
@@ -822,20 +798,11 @@ describe('POST /email-verification/validate (API-017)', () => {
     ],
   ];
 
-  it.each(refused)('does not accept %s and issues no session (API-017)', async (_name, make) => {
+  it.each(refused)('answers %s with 400 and issues no session (API-017)', async (_name, make) => {
     const res = await verify(await make());
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(400);
     expect(res.headers.get('set-cookie')).toBeNull();
   });
-
-  for (const [name, make] of refused) {
-    // KNOWN-BUG: an unknown or expired email token is answered with 400 instead of 401
-    it.fails(`answers ${name} with 401 (API-017)`, async () => {
-      const res = await verify(await make());
-      expect(res.status).toBe(401);
-    });
-  }
 
   it('moves the account to the new address on an email change, and only the new one logs in (API-017)', async () => {
     const token = await emailChangeToken('old@example.com', 'New.Address@Example.com');
