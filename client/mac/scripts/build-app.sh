@@ -183,10 +183,15 @@ fi
 #    though the artifacts here are already fresh. Building it here instead,
 #    and telling that script to skip its own build via
 #    VIRTUE_MAC_RUST_PREBUILT below, avoids paying for that twice.
-for target in "${DAEMON_TARGETS[@]}"; do
-  rustup target add "$target" >/dev/null 2>&1 || true
-  VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $CARGO_PROFILE_FLAG --target "$target" -p virtue-mac -p virtue-mac-ffi
-done
+#
+#    scripts/remote-apple-build.sh sets VIRTUE_MAC_RUST_PREBUILT itself, because
+#    it has already cross-compiled all of this on Linux.
+if [[ -z "${VIRTUE_MAC_RUST_PREBUILT:-}" ]]; then
+  for target in "${DAEMON_TARGETS[@]}"; do
+    rustup target add "$target" >/dev/null 2>&1 || true
+    VIRTUE_BUILD_LABEL="$BUILD_LABEL" cargo build $CARGO_PROFILE_FLAG --target "$target" -p virtue-mac -p virtue-mac-ffi
+  done
+fi
 UNIVERSAL_DAEMON_DIR="target/macos-universal-daemon"
 mkdir -p "$UNIVERSAL_DAEMON_DIR"
 if [[ "${#DAEMON_TARGETS[@]}" -eq 1 ]]; then
@@ -234,6 +239,13 @@ export VIRTUE_MAC_RUST_PREBUILT=1
   if [[ -n "$XCODE_ARCHS" ]]; then
     XCODEBUILD_ARGS+=(ARCHS="${XCODE_ARCHS}" ONLY_ACTIVE_ARCH=NO)
   fi
+  # The hardened runtime only loads libraries signed by the same team, and an
+  # ad-hoc signature has no team, so an ad-hoc app can't load its own Sparkle or
+  # debug dylib and aborts at launch. Only notarization needs the hardened
+  # runtime, and an ad-hoc build can't be notarized anyway.
+  if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+    XCODEBUILD_ARGS+=(ENABLE_HARDENED_RUNTIME=NO)
+  fi
   xcodebuild "${XCODEBUILD_ARGS[@]}" build
 )
 
@@ -270,6 +282,10 @@ install -m 0755 "${UNIVERSAL_DAEMON_DIR}/virtue-daemon" "${APP_ROOT}/Contents/Ma
 #    executables that aren't Developer ID signed with a hardened runtime. So
 #    sign them explicitly, inside out — deepest first, each seal being
 #    included in the one above it.
+CODESIGN_ARGS=(--force --sign "$CODESIGN_IDENTITY")
+if [[ "$CODESIGN_IDENTITY" != "-" ]]; then
+  CODESIGN_ARGS+=(--options runtime)
+fi
 SPARKLE_VERSION_DIR="${APP_ROOT}/Contents/Frameworks/Sparkle.framework/Versions/B"
 # Deepest first; each seal is included in the one above it.
 SPARKLE_NESTED_CODE=(
@@ -281,16 +297,16 @@ SPARKLE_NESTED_CODE=(
 if [[ -d "$SPARKLE_VERSION_DIR" ]]; then
   for nested in "${SPARKLE_NESTED_CODE[@]}"; do
     if [[ -e "$nested" ]]; then
-      codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$nested"
+      codesign "${CODESIGN_ARGS[@]}" "$nested"
     fi
   done
   # Versioned framework: sign the version directory, not the .framework
   # symlink farm, which codesign rejects as an unrecognized bundle format.
-  codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$SPARKLE_VERSION_DIR"
+  codesign "${CODESIGN_ARGS[@]}" "$SPARKLE_VERSION_DIR"
 fi
 
-codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "${APP_ROOT}/Contents/MacOS/virtue-daemon"
-codesign --force --options runtime --sign "$CODESIGN_IDENTITY" "$APP_ROOT"
+codesign "${CODESIGN_ARGS[@]}" "${APP_ROOT}/Contents/MacOS/virtue-daemon"
+codesign "${CODESIGN_ARGS[@]}" "$APP_ROOT"
 
 # 5. Fail the build here rather than shipping a bundle whose nested Sparkle
 #    code is unsigned or mis-sealed — that failure mode is otherwise invisible

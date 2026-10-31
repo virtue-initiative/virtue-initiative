@@ -282,7 +282,17 @@ cmd_warm_windows() {
     win_ps <<EOF
 Set-Content -Path '$next/info' -Value "rev=$rev"
 if (Test-Path '$WIN_COW/base') { Remove-Item -Recurse -Force '$WIN_COW/base' }
-Rename-Item -Path '$next' -NewName 'base'
+# MSBuild and the C# compiler leave idle servers running that hold files open
+# for a few minutes after the build, and the rename is denied until they exit.
+for (\$attempt = 1; ; \$attempt++) {
+    try {
+        Rename-Item -Path '$next' -NewName 'base' -ErrorAction Stop
+        break
+    } catch {
+        if (\$attempt -ge 60) { throw }
+        Start-Sleep -Seconds 10
+    }
+}
 EOF
     echo "cow-cache: Windows base warmed at ${rev:0:9}."
 }
