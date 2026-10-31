@@ -102,7 +102,7 @@ app.get('/r2/*', async (c) => {
 app.onError((error, c) => {
   // API-004: the validator throws this for a body that is not valid JSON.
   if (error instanceof HTTPException) {
-    return c.json({ error: error.message }, error.status);
+    return error.res ?? c.json({ error: error.message }, error.status);
   }
   // API-004: a path ID that is not a UUID names nothing. Any other bad UUID is a server bug.
   if (error instanceof InvalidUuidError && Object.values(c.req.param()).includes(error.uuid)) {

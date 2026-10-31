@@ -53,7 +53,7 @@ app.route('/', webhook);
 app.onError((error, c) => {
   // DONATE-007: the validator throws this for a body that is not valid JSON.
   if (error instanceof HTTPException) {
-    return c.json({ error: error.message }, error.status);
+    return error.res ?? c.json({ error: error.message }, error.status);
   }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
