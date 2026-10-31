@@ -123,14 +123,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Home follows the monitoring state while it is on screen, so "Waiting for
+    // first capture" turns into "Monitoring active" without leaving the app.
+    private val homePoll = object : Runnable {
+        override fun run() {
+            if (screen == Screen.HOME) refreshUi()
+            binding.root.postDelayed(this, 3000)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         AppUpdater.uiVisible = true
+        binding.root.postDelayed(homePoll, 3000)
     }
 
     override fun onStop() {
         super.onStop()
         AppUpdater.uiVisible = false
+        binding.root.removeCallbacks(homePoll)
     }
 
     override fun onResume() {
@@ -257,6 +268,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render() {
+        if (screen != Screen.HOME) lastHomeKey = null
         detailsMessageView = null
         testButton = null
         when (screen) {
@@ -315,8 +327,9 @@ class MainActivity : AppCompatActivity() {
 
         // The sign-in form keeps focus and the keyboard while the user types, so
         // a refresh that changes nothing must not rebuild it.
-        val key = state.name
-        if (state == State.SIGNED_OUT && lastHomeKey == key && content.childCount > 0) return
+        val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
+        val key = "${state.name}/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
         content.removeAllViews()
