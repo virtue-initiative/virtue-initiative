@@ -73,14 +73,18 @@ export async function signupBody(email: string, token: string, extra = {}) {
  * responding (API-012), so the test can check what was sent. Each call gets its own IP, because
  * the rate limiter's window outlives a single test.
  */
-export async function postPasswordReset(email: string, bindings: Partial<Env> = {}) {
+export async function postPasswordReset(
+  email: string,
+  bindings: Partial<Env> = {},
+  ip: string = crypto.randomUUID(),
+) {
   const ctx = createExecutionContext();
   const res = await worker.fetch(
     new Request(`${BASE}/password-reset`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'CF-Connecting-IP': crypto.randomUUID(),
+        'CF-Connecting-IP': ip,
       },
       body: JSON.stringify({ email }),
     }),

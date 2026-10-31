@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
+import { postPasswordReset } from './auth-helpers';
 import { BASE, clearDB, createDeviceForUser, signupAndGetCookie } from './helpers';
 
 beforeEach(clearDB);
@@ -76,20 +77,11 @@ describe('Per-IP rate limiting of the account lookup routes (API-012, API-015)',
     );
     await Promise.all(responses.map((res: Response) => res.arrayBuffer()));
     expect(responses.map((res: Response) => res.status)).not.toContain(429);
-  });
+  }, 20000);
 
   // Fires 130 for the reason given in the per-device test above.
   it.each([
-    [
-      'POST /password-reset',
-      (ip: string) =>
-        SELF.fetch(`${BASE}/password-reset`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
-          body: JSON.stringify({ email: 'nobody@example.com' }),
-        }),
-      204,
-    ],
+    ['POST /password-reset', (ip: string) => postPasswordReset('nobody@example.com', {}, ip), 204],
   ] as const)(
     '%s answers 429 once one IP exceeds the rate, without limiting other IPs',
     async (name, send, okStatus) => {

@@ -411,7 +411,10 @@ describe('POST /password-reset (API-012)', () => {
     const failed = await postPasswordReset('reset@example.com', { EMAIL_DELIVERY_MODE: 'ses' });
     const unknown = await postPasswordReset('nobody@example.com');
     expect(await snapshot(failed)).toEqual(await snapshot(unknown));
-    expect(logged).toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledWith(
+      '[password-reset] failed to send reset email',
+      expect.anything(),
+    );
     logged.mockRestore();
   });
 });
