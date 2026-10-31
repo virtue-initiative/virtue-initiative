@@ -75,16 +75,16 @@ Each is a plain `struct FooState` (serde default) plus free functions — no
 trait, no event dispatch. A module that needs to enqueue work calls
 `upload::enqueue(&mut upload_state, now_ms, risk, kind)` directly.
 
-| Module                 | State                                                     | Key functions                                                                                                              |
-| ---------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `auth`                 | (writes into `AuthState`/`ScreenshotState`/`UploadState`) | `login()`, `logout()`                                                                                                      |
-| `lifecycle`            | `LifecycleState`                                          | `tick()` (late-wakeup check), `note_user_stop()`                                                                           |
-| `screenshot`           | `ScreenshotState`                                         | `plan()`, `plan_forced()` (on-demand capture, bypasses the interval gate), `capture_and_process()`, `commit()`             |
-| `upload`               | `UploadState`                                             | `enqueue()`, `plan_hash_retries`/`execute_hash_retries`/`commit_hash_retries`, `plan_batch`/`execute_batch`/`commit_batch` |
-| `capture_availability` | `CaptureAvailabilityState`                                | `note_failure()`, `tick()`                                                                                                 |
-| `heartbeat`            | `HeartbeatState`                                          | `tick()`                                                                                                                   |
-| `errors`               | `ErrorState`                                              | `record()`, `record_all()` (bounded recent-errors ring, CORE-018)                                                          |
-| `status`               | —                                                         | `build()` (pure `ServiceStatus` assembly from `&DaemonState` + `&Config`)                                                  |
+| Module                 | State                       | Key functions                                                                                                              |
+| ---------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `auth`                 | (writes into `DaemonState`) | `login()`, `logout()`                                                                                                      |
+| `lifecycle`            | `LifecycleState`            | `tick()` (late-wakeup check), `note_user_stop()`                                                                           |
+| `screenshot`           | `ScreenshotState`           | `plan()`, `plan_forced()` (on-demand capture, bypasses the interval gate), `capture_and_process()`, `commit()`             |
+| `upload`               | `UploadState`               | `enqueue()`, `plan_hash_retries`/`execute_hash_retries`/`commit_hash_retries`, `plan_batch`/`execute_batch`/`commit_batch` |
+| `capture_availability` | `CaptureAvailabilityState`  | `note_failure()`, `tick()`                                                                                                 |
+| `heartbeat`            | `HeartbeatState`            | `tick()`                                                                                                                   |
+| `errors`               | `ErrorState`                | `record()`, `record_all()` (bounded recent-errors ring, CORE-018)                                                          |
+| `status`               | —                           | `build()` (pure `ServiceStatus` assembly from `&DaemonState` + `&Config`)                                                  |
 
 `lifecycle::tick` compares actual vs. scheduled wakeup time each tick and
 alerts on a single late wakeup > 1 min or a last-10-array sum > 5 min,

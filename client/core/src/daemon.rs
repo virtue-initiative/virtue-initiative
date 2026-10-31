@@ -285,16 +285,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         device_name_override: Option<&str>,
         now_ms: i64,
     ) -> CoreResult<String> {
-        let DaemonState {
-            auth,
-            screenshot,
-            upload,
-            ..
-        } = state;
         auth::login(
-            auth,
-            screenshot,
-            upload,
+            state,
             &self.api,
             &self.config.device_name,
             &self.config.platform_name,
@@ -306,13 +298,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     fn apply_logout(&self, state: &mut DaemonState) {
-        let DaemonState {
-            auth,
-            screenshot,
-            upload,
-            ..
-        } = state;
-        auth::logout(auth, screenshot, upload, &self.api)
+        auth::logout(state, &self.api)
+    }
+
+    /// A logout nobody asked for: the server rejected the device. Keeps the
+    /// recent errors, which hold the reason (CORE-009).
+    fn apply_rejected_device_logout(&self, state: &mut DaemonState) {
+        let errors = std::mem::take(&mut state.errors);
+        self.apply_logout(state);
+        state.errors = errors;
     }
 
     fn apply_note_user_stop(&self, state: &mut DaemonState, now_ms: i64, source: &str) {
@@ -572,7 +566,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .clone();
         let (screen_active, should_logout) = self.run_phases(&mut working, now_ms);
         if should_logout {
-            self.apply_logout(&mut working);
+            self.apply_rejected_device_logout(&mut working);
         }
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
@@ -682,7 +676,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.with_locked_state(|working| {
             let (screen_active, should_logout) = self.run_phases(working, now_ms);
             if should_logout {
-                self.apply_logout(working);
+                self.apply_rejected_device_logout(working);
             }
             working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
             working.last_tick_at_ms = Some(now_ms);
@@ -697,7 +691,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             self.apply_flush_batch_now(working, now_ms);
             let (_, should_logout) = self.run_phases(working, now_ms);
             if should_logout {
-                self.apply_logout(working);
+                self.apply_rejected_device_logout(working);
             }
         });
     }
