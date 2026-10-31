@@ -40,6 +40,7 @@ object AccessibilitySetupGuide {
         val title: String,
         val body: CharSequence,
         @DrawableRes val images: List<Int> = emptyList(),
+        val captions: List<String> = emptyList(),
         val action: Action? = null,
     )
 
@@ -148,25 +149,54 @@ object AccessibilitySetupGuide {
                     )
                 ) { onAction(action) }.topMargin(12))
             }
-            step.images.forEach { image ->
-                addView(ShapeableImageView(context).apply {
-                    setImageResource(image)
-                    adjustViewBounds = true
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                    maxHeight = context.dp(300)
-                    contentDescription = context.getString(R.string.a11y_screenshot_description, step.title)
-                    shapeAppearanceModel = ShapeAppearanceModel.builder()
-                        .setAllCornerSizes(context.dp(6).toFloat())
-                        .build()
-                    strokeColor = ColorStateList.valueOf(context.color(R.color.border))
-                    strokeWidth = context.dp(1).toFloat()
-                    val inset = context.dp(1) / 2
-                    setPadding(inset, inset, inset, inset)
+            if (step.images.size == 1) {
+                addView(screenshot(context, step.images[0], step.title, 0).apply {
+                    (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(12)
+                })
+            } else if (step.images.size > 1) {
+                // Several screenshots of one trip through Settings: a strip to
+                // swipe, each captioned with what it shows.
+                val strip = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                step.images.forEachIndexed { index, image ->
+                    val caption = step.captions.getOrNull(index).orEmpty()
+                    strip.addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        layoutParams = LinearLayout.LayoutParams(
+                            context.dp(210), LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { if (index > 0) marginStart = context.dp(12) }
+                        addView(screenshot(context, image, caption, context.dp(210)))
+                        addView(context.text("${index + 1}. $caption", 14f, R.color.ink_3, bold = true).topMargin(6))
+                    })
+                }
+                addView(android.widget.HorizontalScrollView(context).apply {
+                    isHorizontalScrollBarEnabled = false
+                    clipToPadding = false
+                    addView(strip)
                     layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { topMargin = context.dp(12) }
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { topMargin = context.dp(16) }
                 })
             }
+        }
+
+    private fun screenshot(context: Context, image: Int, title: String, widthPx: Int) =
+        ShapeableImageView(context).apply {
+            setImageResource(image)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            if (widthPx == 0) maxHeight = context.dp(300)
+            contentDescription = context.getString(R.string.a11y_screenshot_description, title)
+            shapeAppearanceModel = ShapeAppearanceModel.builder()
+                .setAllCornerSizes(context.dp(6).toFloat())
+                .build()
+            strokeColor = ColorStateList.valueOf(context.color(R.color.border))
+            strokeWidth = context.dp(1).toFloat()
+            val inset = context.dp(1) / 2
+            setPadding(inset, inset, inset, inset)
+            layoutParams = LinearLayout.LayoutParams(
+                if (widthPx == 0) LinearLayout.LayoutParams.WRAP_CONTENT else widthPx,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
         }
 
     private fun numberBadge(context: Context, number: Int) = TextView(context).apply {
@@ -217,6 +247,11 @@ object AccessibilitySetupGuide {
                         backBody,
                     ),
                     images = listOf(listImage(), toggleImage(), allowImage()),
+                    captions = listOf(
+                        context.getString(R.string.a11y_step_open_title),
+                        context.getString(R.string.a11y_step_toggle_title),
+                        context.getString(R.string.a11y_step_allow_title),
+                    ),
                     action = Action.ACCESSIBILITY_SETTINGS,
                 ),
             )
@@ -268,6 +303,10 @@ object AccessibilitySetupGuide {
                     backBody,
                 ),
                 images = listOf(toggleImage(), allowImage()),
+                captions = listOf(
+                    context.getString(R.string.a11y_step_toggle_title),
+                    context.getString(R.string.a11y_step_allow_title),
+                ),
                 action = Action.ACCESSIBILITY_SETTINGS,
             ),
         )
