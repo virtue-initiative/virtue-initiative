@@ -52,8 +52,6 @@ class MainActivity : AppCompatActivity() {
 
     private var screen = Screen.HOME
     private var lastHomeKey: String? = null
-    private var wizardIndex = 0
-    private val expandedSteps = mutableSetOf<Int>()
     private var advancedOpen = false
 
     // Sign-in form state. The form is rebuilt when Home refreshes, so what the
@@ -349,24 +347,11 @@ class MainActivity : AppCompatActivity() {
                     ).apply { topMargin = dp(8) }
                 }
                 content.addView(guide)
-                renderWizard(guide)
+                AccessibilitySetupGuide.renderGuide(this, guide, ::handleGuideAction)
             }
             State.SIGNED_OUT -> renderSignIn(content)
             else -> renderStatusFocus(content, state, json)
         }
-    }
-
-    private fun renderWizard(container: LinearLayout) {
-        AccessibilitySetupGuide.renderWizard(
-            this,
-            container,
-            wizardIndex,
-            onIndex = { index ->
-                wizardIndex = index
-                renderWizard(container)
-            },
-            onAction = ::handleGuideAction,
-        )
     }
 
     private fun renderStatusFocus(content: LinearLayout, state: State, json: JSONObject) {
@@ -633,7 +618,7 @@ class MainActivity : AppCompatActivity() {
             ).apply { topMargin = dp(16) }
         }
         content.addView(list)
-        AccessibilitySetupGuide.renderAccordion(this, list, expandedSteps, ::handleGuideAction)
+        AccessibilitySetupGuide.renderSteps(this, list, ::handleGuideAction)
     }
 
     private fun openAccessibilitySettings() {
