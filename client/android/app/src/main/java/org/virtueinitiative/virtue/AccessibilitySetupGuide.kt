@@ -154,6 +154,7 @@ object AccessibilitySetupGuide {
         container.removeAllViews()
         steps(context).forEachIndexed { index, step ->
             val body = stepContent(context, step, onAction).apply {
+                setPadding(0, 0, 0, context.dp(12))
                 visibility = if (index in expanded) View.VISIBLE else View.GONE
             }
             val chevron = ImageView(context).apply {
@@ -190,7 +191,7 @@ object AccessibilitySetupGuide {
                 })
             }
             container.addView(context.card().apply {
-                setPadding(context.dp(16), context.dp(4), context.dp(16), context.dp(12))
+                setPadding(context.dp(16), context.dp(4), context.dp(16), context.dp(4))
                 (layoutParams as LinearLayout.LayoutParams).topMargin = if (index == 0) 0 else context.dp(10)
                 addView(header)
                 addView(body)
