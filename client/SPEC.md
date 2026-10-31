@@ -67,7 +67,7 @@ Every app MUST show whether the user is signed in and a one-line monitoring stat
 - Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021).
 - macOS window headline, first match wins: "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Screen Recording off"; "Monitoring active"; otherwise "Starting…".
 - Windows: see CLIENT-027.
-- Android headline: "Signed out"; "Monitoring active" (loop running); "Monitoring paused" (user paused); otherwise "Waiting for first capture".
+- Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
 - iOS headline: "Signed out"; "Monitoring paused"; "Setup not finished"; "Safari permission needed"; "Monitoring active" (CLIENT-032).
 - Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status`.
 
@@ -99,7 +99,7 @@ A signed-in user MUST be able to request a screenshot now. The app MUST call COR
 
 While waiting, the app MUST show "Screenshot uploading…" and MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
 
-- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: window button and a tray item shown only while signed in; the tray reports the outcome in a notification balloon. Android: status card button.
+- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: window button and a tray item shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
 - iOS: "Capture Next Safari Page" only records the request; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
 
 ## CLIENT-009 Permissions
@@ -187,7 +187,7 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 - Platform details MUST be included and MUST never be empty: Linux "Linux <kernel>; <NAME> <VERSION>" from `/etc/os-release` (quotes stripped; a missing NAME drops that part; `unknown` when nothing is known); macOS "<product> <version> (Build <build>)" or "macOS (unknown version)"; Windows "<product>; <version> (Build <build>)" or "Windows (unknown version)".
 - Logs: GUIs offer a checkbox, on by default, to attach recent logs (CLIENT-017). Linux always attaches the last day of the service journal when there is one, and says how many KB it is. Logs MUST be redacted of known secrets and trimmed to the size limit, keeping the newest bytes.
 - Linux MUST list exactly what will be sent and ask "Send this report?" (default Yes); `--yes` skips it, `--message` and `--contact-email` skip the prompts.
-- Success MUST show "Thanks — your report was sent to the Virtue Initiative team." Failure MUST show the error; GUIs keep the form open.
+- Success MUST show "Thanks, your report was sent to the Virtue Initiative team." Failure MUST show the error; GUIs keep the form open.
 
 > OPEN: the log checkbox says "last two days" on macOS and iOS and "last day" on Windows and Android, but all four attach the same files (those modified in the last 24 hours) — which wording is right?
 
@@ -321,6 +321,12 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - The setup guide MUST match the running Android version. On Android 13+ it MUST add the "Allow restricted settings" steps for apps installed from a downloaded file, and on Android 13 and 14 also when the first launch was such an install (an in-app update does not lift the block there).
 - The persistent notification "Monitoring active" (channel "Virtue monitoring") MUST be shown while signed in. If Android refuses to start it, monitoring MUST continue without it.
 - Restarting the loop MUST queue the resume (CORE-022) rather than wait for it, and MUST wait up to 15 s for a previous loop to finish stopping.
+- Home MUST show a top app bar with the V logo and "Virtue Initiative" (together one link to the website) and an overflow menu labelled "More options", and below it exactly one focus area chosen by the headline state:
+  - Accessibility is off: the setup guide one step at a time, with the title "Turn on Accessibility", the intro, "Step N of M", a progress bar, and Back and Next buttons. It MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
+  - signed out (Accessibility on): the sign-in form (CLIENT-004), whose password field has a show and hide control;
+  - active, waiting for first capture or paused: a ring, the headline, one sentence and buttons. Active and waiting MUST offer "Add partners" (no partners) or "Add more partners", which open the Partners page on the website, and "Pause Monitoring", which MUST ask for confirmation first. Paused MUST offer "Resume Monitoring".
+- The overflow menu MUST list Setup Steps, Status Details, What Virtue Monitors, Report an Issue and, only when signed in, Sign Out (which MUST ask for confirmation, then stop the loop and remove the persistent notification), with the build label as a last item that cannot be selected. Each item MUST open a full screen with a back arrow, and Back MUST return to Home. Setup Steps MUST list all steps of the guide, each expandable.
+- Status Details MUST open with a summary (state, headline, one sentence), then sections Account, Android, Screenshots and Problems of rows with a status dot, label and value, and a hint only when the user must act. The Android section MUST show Accessibility, Notifications and Battery; Notifications off and a restricted battery setting MUST be shown as a warning, not as an error. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the "Open log file" and "Take Test Screenshot" buttons.
 
 ## CLIENT-031 Android: updates
 
