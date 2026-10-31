@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.Gravity
+import android.text.SpannableStringBuilder
 import android.util.TypedValue
 import android.view.View
 import android.widget.ImageView
@@ -38,7 +39,7 @@ object AccessibilitySetupGuide {
     data class Step(
         val title: String,
         val body: CharSequence,
-        @DrawableRes val image: Int? = null,
+        @DrawableRes val images: List<Int> = emptyList(),
         val action: Action? = null,
     )
 
@@ -136,7 +137,18 @@ object AccessibilitySetupGuide {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
             )
             addView(bodyText(context, step.body))
-            step.image?.let { image ->
+            step.action?.let { action ->
+                addView(context.filledButton(
+                    context.getString(
+                        when (action) {
+                            Action.ACCESSIBILITY_SETTINGS -> R.string.btn_open_accessibility_settings
+                            Action.APP_INFO -> R.string.btn_open_app_info
+                            Action.APP_LIST -> R.string.btn_open_app_list
+                        }
+                    )
+                ) { onAction(action) }.topMargin(12))
+            }
+            step.images.forEach { image ->
                 addView(ShapeableImageView(context).apply {
                     setImageResource(image)
                     adjustViewBounds = true
@@ -154,17 +166,6 @@ object AccessibilitySetupGuide {
                         LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
                     ).apply { topMargin = context.dp(12) }
                 })
-            }
-            step.action?.let { action ->
-                addView(context.filledButton(
-                    context.getString(
-                        when (action) {
-                            Action.ACCESSIBILITY_SETTINGS -> R.string.btn_open_accessibility_settings
-                            Action.APP_INFO -> R.string.btn_open_app_info
-                            Action.APP_LIST -> R.string.btn_open_app_list
-                        }
-                    )
-                ) { onAction(action) }.topMargin(12))
             }
         }
 
@@ -200,31 +201,24 @@ object AccessibilitySetupGuide {
             context.getString(R.string.a11y_toggle_use_service)
         }
 
-        val allow = Step(
-            title = context.getString(R.string.a11y_step_allow_title),
-            body = html(context.getString(R.string.a11y_step_allow_body)),
-            image = allowImage(),
-        )
-        val back = Step(
-            title = context.getString(R.string.a11y_step_return_title),
-            body = html(context.getString(R.string.a11y_step_return_body)),
-        )
+        val allowBody = html(context.getString(R.string.a11y_step_allow_body))
+        val backBody = html(context.getString(R.string.a11y_step_return_body))
 
+        // Opening Settings, turning the service on and allowing it are one trip
+        // out of the app and back, so they are one step with one button.
         if (!restricted) {
             return listOf(
                 Step(
-                    title = context.getString(R.string.a11y_step_open_title),
-                    body = html(context.getString(R.string.a11y_step_open_body, section, serviceLabel)),
-                    image = listImage(),
+                    title = context.getString(R.string.a11y_step_toggle_title),
+                    body = join(
+                        html(context.getString(R.string.a11y_step_open_body, section, serviceLabel)),
+                        html(context.getString(R.string.a11y_step_toggle_body, toggleLabel)),
+                        allowBody,
+                        backBody,
+                    ),
+                    images = listOf(listImage(), toggleImage(), allowImage()),
                     action = Action.ACCESSIBILITY_SETTINGS,
                 ),
-                Step(
-                    title = context.getString(R.string.a11y_step_toggle_title),
-                    body = html(context.getString(R.string.a11y_step_toggle_body, toggleLabel)),
-                    image = toggleImage(),
-                ),
-                allow,
-                back,
             )
         }
 
@@ -240,13 +234,13 @@ object AccessibilitySetupGuide {
             Step(
                 title = context.getString(R.string.a11y_step_open_title),
                 body = html(context.getString(R.string.a11y_step_open_body_restricted, section, serviceLabel)),
-                image = listImage(),
+                images = listOf(listImage()),
                 action = Action.ACCESSIBILITY_SETTINGS,
             ),
             Step(
                 title = context.getString(R.string.a11y_step_warning_title),
                 body = html(context.getString(R.string.a11y_step_warning_body, warningTitle, warningButton)),
-                image = warningImage(),
+                images = listOf(warningImage()),
             ),
             // Android 13 only offers "Allow restricted settings" when App info
             // is reached from Settings' own app list, not when another app
@@ -255,25 +249,27 @@ object AccessibilitySetupGuide {
                 Step(
                     title = context.getString(R.string.a11y_step_unlock_title),
                     body = html(context.getString(R.string.a11y_step_unlock_body)),
-                    image = menuImage(),
+                    images = listOf(menuImage()),
                     action = Action.APP_INFO,
                 )
             } else {
                 Step(
                     title = context.getString(R.string.a11y_step_unlock_title),
                     body = html(context.getString(R.string.a11y_step_unlock_body_from_list)),
-                    image = menuImage(),
+                    images = listOf(menuImage()),
                     action = Action.APP_LIST,
                 )
             },
             Step(
                 title = context.getString(R.string.a11y_step_toggle_title),
-                body = html(context.getString(R.string.a11y_step_toggle_body_restricted, serviceLabel, toggleLabel)),
-                image = toggleImage(),
+                body = join(
+                    html(context.getString(R.string.a11y_step_toggle_body_restricted, serviceLabel, toggleLabel)),
+                    allowBody,
+                    backBody,
+                ),
+                images = listOf(toggleImage(), allowImage()),
                 action = Action.ACCESSIBILITY_SETTINGS,
             ),
-            allow,
-            back,
         )
     }
 
@@ -325,6 +321,14 @@ object AccessibilitySetupGuide {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
     }
+
+    private fun join(vararg parts: CharSequence): CharSequence =
+        SpannableStringBuilder().apply {
+            parts.forEachIndexed { index, part ->
+                if (index > 0) append(" ")
+                append(part)
+            }
+        }
 
     private fun html(source: String): CharSequence =
         HtmlCompat.fromHtml(source, HtmlCompat.FROM_HTML_MODE_LEGACY)
