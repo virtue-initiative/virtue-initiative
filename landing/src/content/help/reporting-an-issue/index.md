@@ -37,7 +37,7 @@ happened and send it.
   Virtue icon in the system tray and choose **Report an Issue**.
 - **Mac:** Click **Report an Issue** in the Virtue window.
 - **Android:** Tap **Report an Issue** on the main screen.
-- **iPhone and iPad:** Tap **Report an Issue** at the bottom of the Virtue app.
+- **iPhone and iPad:** Tap the menu button at the top right of the Virtue app, then tap **Report an Issue**.
 - **Linux:** Run `virtue report-issue` in a terminal and follow the prompts.
 
 ## What gets sent
