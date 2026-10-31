@@ -18,6 +18,7 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { postPasswordReset } from './auth-helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 import { CURRENT_HASH_PARAMS, verifyPasswordAuth } from '../src/lib/password';
 
@@ -728,11 +729,7 @@ describe('Auth routes', () => {
     const { userId } = await signupAndGetCookie('reset@example.com', 'old-password', 'Reset User');
     await markUserEmailVerified(userId);
 
-    const requestRes = await SELF.fetch(`${BASE}/password-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'reset@example.com' }),
-    });
+    const requestRes = await postPasswordReset('reset@example.com');
     expect(requestRes.status).toBe(204);
 
     const deliveries = await listEmailDeliveries();
@@ -814,11 +811,7 @@ describe('Auth routes', () => {
       const otherCookie = await loginCookie(email, 'old-password');
       const device = await createDeviceForUser(email, 'old-password', 'Laptop', 'linux');
 
-      await SELF.fetch(`${BASE}/password-reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
+      await postPasswordReset(email);
       const pendingReset = await latestEmailToken('password_reset');
       expect(pendingReset?.consumed_at).toBeNull();
 

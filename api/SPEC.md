@@ -347,9 +347,11 @@ The client MUST send the email to request a password reset:
 }
 ```
 
-If the account exists, the server SHOULD send a password reset email, otherwise it SHOULD send an account does not exist email.
+If the account exists, the server SHOULD send a password reset email. It MUST NOT send any email to an address with no account, because this endpoint has no Turnstile check and could otherwise be used to send mail to anyone.
 
-The server SHOULD always respond with **HTTP 204**.
+The server SHOULD always respond with **HTTP 204**. It MUST look up the account and send the email only after responding, so that neither the response nor its timing reveals whether the account exists, and a failure to send MUST NOT change the response.
+
+The server SHOULD rate limit this endpoint by client IP before looking up the account, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded.
 
 ### API-013 `POST /password-reset/validate`
 
@@ -399,6 +401,8 @@ The client MAY send an email as a query param `?email=[email]`.
 
 The server MUST return an indistinguishable response for existing and non-existing emails.
 
+The server MUST NOT apply the shared per-IP rate limit to this endpoint, because every login calls it first and people sharing an IP would be locked out.
+
 If the client did not provide an email, the server MUST respond (**HTTP 200**) with the current argon2 hashing parameters:
 
 ```js
@@ -407,7 +411,7 @@ If the client did not provide an email, the server MUST respond (**HTTP 200**) w
 }
 ```
 
-If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist.
+If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist. The made up salt MUST be an HMAC-SHA256 of the normalized email (trimmed and lowercased), keyed with the `LOGIN_SALT_SECRET` secret and truncated to `salt_length` bytes, so that repeating the request gives the same salt, as it does for a real account. The server MUST compute it for every email, before looking up the account. If the secret is not configured, the server MUST log an error and use a random salt rather than fail the request.
 
 ```js
 {

@@ -1,4 +1,5 @@
 export interface Env {
+  // A new secret also goes in scripts/check-deploy-secrets.ts, which checks them before deploys.
   DB: D1Database;
   // The donations worker's database (api-donate/), which holds the newsletter list.
   DONATE_DB: D1Database;
@@ -23,6 +24,10 @@ export interface Env {
   SNS_TOPIC_ARNS?: string;
   // Cloudflare Turnstile secret for the signup and newsletter forms. Unset rejects them.
   TURNSTILE_SECRET_KEY?: string;
+  // HMAC key for the made-up salt of an unknown email (API-015). Unset falls back to a random
+  // salt. Rotating it changes every made-up salt but no real one, which shows anyone who saved
+  // salts which were real, so rotate it only after a leak.
+  LOGIN_SALT_SECRET?: string;
 }
 
 export interface Variables {

@@ -3,7 +3,7 @@ import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
-import { rateLimitByDevice } from '../middleware/rate-limit';
+import { rateLimitByDevice, rateLimitByIp } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
   changeUserPassword,
@@ -55,8 +55,8 @@ import {
 import {
   CURRENT_HASH_PARAMS,
   HASH_PARAMS_VERSION,
-  generatePasswordSalt,
   hashPasswordAuth,
+  madeUpPasswordSalt,
   verifyPasswordAuth,
 } from '../lib/password';
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
@@ -379,10 +379,13 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
     return c.json({ params: buildHashParamsResponse() });
   }
 
-  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+  const normalizedEmail = email.trim().toLowerCase();
+  // API-015: computed for every email, so a real account takes the same work as an unknown one.
+  const madeUpSalt = await madeUpPasswordSalt(c.env.LOGIN_SALT_SECRET, normalizedEmail);
+  const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
   return c.json({
-    password_salt: encodeBase64(user?.password_salt ?? generatePasswordSalt()),
+    password_salt: encodeBase64(user?.password_salt ?? madeUpSalt),
     params: buildHashParamsResponse(),
   });
 });
@@ -786,16 +789,26 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   });
 });
 
-auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {
-  const { email } = c.req.valid('json');
-  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+auth.post(
+  '/password-reset',
+  rateLimitByIp(),
+  validateZ('json', passwordResetRequestSchema),
+  async (c) => {
+    const { email } = c.req.valid('json');
 
-  if (user) {
-    await sendPasswordResetEmail(c, user);
-  }
+    // API-012: runs after the response, so neither its timing nor a failure reveals the account.
+    c.executionCtx.waitUntil(
+      (async () => {
+        const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+        if (user) {
+          await sendPasswordResetEmail(c, user);
+        }
+      })().catch((err) => console.error('[password-reset] failed to send reset email', err)),
+    );
 
-  return c.body(null, 204);
-});
+    return c.body(null, 204);
+  },
+);
 
 auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSchema), async (c) => {
   const { token } = c.req.valid('json');

@@ -22,6 +22,7 @@ import {
   login,
   loginCookie,
   postJson,
+  postPasswordReset,
   recordBounce,
   requestPasswordResetToken,
   snapshot,
@@ -330,7 +331,7 @@ describe('Validation (API-004)', () => {
 
   it('sends nothing and creates nothing for a request that fails validation (API-004)', async () => {
     await postJson('/signup-request', { email: 'nope', turnstile_token: TEST_TURNSTILE_TOKEN });
-    await postJson('/password-reset', { email: 'nope' });
+    await postPasswordReset('nope');
     expect(await listEmailDeliveries()).toHaveLength(0);
   });
 });
@@ -357,7 +358,7 @@ describe('Status codes (API-006)', () => {
         return postJson('/signup-request', { email: EMAIL, turnstile_token: TEST_TURNSTILE_TOKEN });
       },
     ],
-    ['POST /password-reset', async () => postJson('/password-reset', { email: EMAIL })],
+    ['POST /password-reset', async () => postPasswordReset(EMAIL)],
     [
       'POST /login',
       async () => {
