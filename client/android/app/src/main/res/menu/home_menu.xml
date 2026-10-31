@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/menu_setup_steps"
+        android:title="@string/menu_setup_steps"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_status_details"
+        android:title="@string/btn_status_details"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_what_virtue_monitors"
+        android:title="@string/menu_what_virtue_monitors"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_report_issue"
+        android:title="@string/btn_report_bug"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_sign_out"
+        android:title="@string/btn_sign_out"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/menu_build"
+        android:enabled="false"
+        android:title=""
+        app:showAsAction="never" />
+</menu>

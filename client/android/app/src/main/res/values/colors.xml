@@ -28,8 +28,9 @@
     <color name="ink_3">#6A6655</color>
     <color name="ink_4">#9C9682</color>
 
-    <!-- Status -->
-    <color name="status_success">#4F7A5A</color>
-    <color name="status_warning">#9C6B2E</color>
-    <color name="status_danger">#EF4444</color>
+    <!-- Status: the same semantic colors as the other clients (CLIENT-030) -->
+    <color name="good">#2F7D4F</color>
+    <color name="ochre">#A67F3D</color>
+    <color name="bad">#C0392B</color>
+    <color name="logo">#163026</color>
 </resources>

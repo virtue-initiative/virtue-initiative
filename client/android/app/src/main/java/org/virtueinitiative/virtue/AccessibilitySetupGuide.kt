@@ -6,14 +6,21 @@ import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.PowerManager
 import android.view.Gravity
+import android.text.SpannableStringBuilder
+import android.util.TypedValue
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.AccessibilityDelegateCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.core.text.HtmlCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.imageview.ShapeableImageView
@@ -29,12 +36,13 @@ import com.google.android.material.shape.ShapeAppearanceModel
  * steps when that block applies.
  */
 object AccessibilitySetupGuide {
-    enum class Action { ACCESSIBILITY_SETTINGS, APP_INFO, APP_LIST }
+    enum class Action { REQUEST_PERMISSIONS, ACCESSIBILITY_SETTINGS, APP_INFO, APP_LIST }
 
-    private data class Step(
+    data class Step(
         val title: String,
         val body: CharSequence,
-        @DrawableRes val image: Int? = null,
+        @DrawableRes val images: List<Int> = emptyList(),
+        val captions: List<String> = emptyList(),
         val action: Action? = null,
     )
 
@@ -80,22 +88,152 @@ object AccessibilitySetupGuide {
         source == PackageInstaller.PACKAGE_SOURCE_LOCAL_FILE ||
             source == PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE
 
-    /** Fills [container] with the guide for this device's current state. */
-    fun render(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {
+    /** The title, intro and every step on one page, for Home while Accessibility is off (CLIENT-030). */
+    fun renderGuide(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {
         container.removeAllViews()
-        val restricted = isRestricted(context)
-
-        container.addView(bodyText(context, context.getString(R.string.a11y_guide_intro)))
-        if (restricted) {
+        container.addView(context.text(context.getString(R.string.a11y_guide_title), 26f, bold = true).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
+        })
+        container.addView(bodyText(context, context.getString(R.string.a11y_guide_intro)).apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(8)
+        })
+        if (isRestricted(context)) {
             container.addView(bodyText(context, context.getString(R.string.a11y_guide_restricted_note)).apply {
-                (layoutParams as LinearLayout.LayoutParams).topMargin = dp(context, 8)
+                (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(8)
             })
         }
+        val list = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = context.dp(20) }
+        }
+        container.addView(list)
+        renderSteps(context, list, onAction)
+    }
 
-        steps(context, restricted).forEachIndexed { index, step ->
-            container.addView(stepView(context, index + 1, step, onAction))
+    /** Every step as a numbered card, for Setup Steps and the guide. */
+    fun renderSteps(context: Context, container: LinearLayout, onAction: (Action) -> Unit) {
+        container.removeAllViews()
+        val steps = steps(context)
+        // A single step needs no number or heading of its own: the page title
+        // already says what to do.
+        if (steps.size == 1) {
+            container.addView(stepContent(context, steps[0], onAction))
+            return
+        }
+        steps.forEachIndexed { index, step ->
+            container.addView(context.card().apply {
+                (layoutParams as LinearLayout.LayoutParams).topMargin = if (index == 0) 0 else context.dp(12)
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(numberBadge(context, index + 1))
+                    addView(context.text(step.title, 18f, bold = true).apply {
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                        ViewCompat.setAccessibilityHeading(this, true)
+                    })
+                })
+                addView(stepContent(context, step, onAction).topMargin(10))
+            })
         }
     }
+
+    /** The body, screenshot and button of one step. */
+    private fun stepContent(context: Context, step: Step, onAction: (Action) -> Unit): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            addView(bodyText(context, step.body))
+            step.action?.let { action ->
+                addView(context.filledButton(
+                    context.getString(
+                        when (action) {
+                            Action.REQUEST_PERMISSIONS -> R.string.btn_request_permissions
+                            Action.ACCESSIBILITY_SETTINGS -> R.string.btn_open_accessibility_settings
+                            Action.APP_INFO -> R.string.btn_open_app_info
+                            Action.APP_LIST -> R.string.btn_open_app_list
+                        }
+                    )
+                ) { onAction(action) }.apply {
+                    if (action == Action.REQUEST_PERMISSIONS && permissionsGranted(context)) {
+                        text = context.getString(R.string.btn_permissions_allowed)
+                        isEnabled = false
+                    }
+                }.topMargin(12))
+            }
+            if (step.images.size == 1) {
+                addView(screenshot(context, step.images[0], step.title, 0).apply {
+                    (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(12)
+                })
+            } else if (step.images.size > 1) {
+                // Several screenshots of one trip through Settings, each captioned
+                // with what it shows.
+                step.images.forEachIndexed { index, image ->
+                    val caption = step.captions.getOrNull(index).orEmpty()
+                    addView(context.text("${index + 1}. $caption", 14f, R.color.ink_3, bold = true).topMargin(16))
+                    addView(screenshot(context, image, caption, context.dp(240)).apply {
+                        (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(6)
+                    })
+                }
+            }
+        }
+
+    private fun screenshot(context: Context, image: Int, title: String, widthPx: Int) =
+        ShapeableImageView(context).apply {
+            setImageResource(image)
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            if (widthPx == 0) maxHeight = context.dp(300)
+            contentDescription = context.getString(R.string.a11y_screenshot_description, title)
+            shapeAppearanceModel = ShapeAppearanceModel.builder()
+                .setAllCornerSizes(context.dp(6).toFloat())
+                .build()
+            strokeColor = ColorStateList.valueOf(context.color(R.color.border))
+            strokeWidth = context.dp(1).toFloat()
+            val inset = context.dp(1) / 2
+            setPadding(inset, inset, inset, inset)
+            layoutParams = LinearLayout.LayoutParams(
+                if (widthPx == 0) LinearLayout.LayoutParams.WRAP_CONTENT else widthPx,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
+        }
+
+    private fun numberBadge(context: Context, number: Int) = TextView(context).apply {
+        text = number.toString()
+        gravity = Gravity.CENTER
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(context.color(R.color.surface))
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(context.color(R.color.virtue_forest))
+        }
+        layoutParams = LinearLayout.LayoutParams(context.dp(26), context.dp(26)).apply {
+            marginEnd = context.dp(12)
+        }
+    }
+
+    /** Whether both optional permissions the first step asks for are already granted. */
+    fun permissionsGranted(context: Context): Boolean {
+        val notifications = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val battery = context.getSystemService(PowerManager::class.java)
+            .isIgnoringBatteryOptimizations(context.packageName)
+        return notifications && battery
+    }
+
+    /** The guide's steps for this device's Android version (CLIENT-030). */
+    fun steps(context: Context): List<Step> =
+        listOf(
+            Step(
+                title = context.getString(R.string.a11y_step_permissions_title),
+                body = context.getString(R.string.a11y_step_permissions_body),
+                action = Action.REQUEST_PERMISSIONS,
+            )
+        ) + steps(context, isRestricted(context))
 
     private fun steps(context: Context, restricted: Boolean): List<Step> {
         val sdk = Build.VERSION.SDK_INT
@@ -110,31 +248,29 @@ object AccessibilitySetupGuide {
             context.getString(R.string.a11y_toggle_use_service)
         }
 
-        val allow = Step(
-            title = context.getString(R.string.a11y_step_allow_title),
-            body = html(context.getString(R.string.a11y_step_allow_body)),
-            image = allowImage(),
-        )
-        val back = Step(
-            title = context.getString(R.string.a11y_step_return_title),
-            body = html(context.getString(R.string.a11y_step_return_body)),
-        )
+        val allowBody = html(context.getString(R.string.a11y_step_allow_body))
+        val backBody = html(context.getString(R.string.a11y_step_return_body))
 
+        // Opening Settings, turning the service on and allowing it are one trip
+        // out of the app and back, so they are one step with one button.
         if (!restricted) {
             return listOf(
                 Step(
-                    title = context.getString(R.string.a11y_step_open_title),
-                    body = html(context.getString(R.string.a11y_step_open_body, section, serviceLabel)),
-                    image = listImage(),
+                    title = context.getString(R.string.a11y_step_toggle_title),
+                    body = join(
+                        html(context.getString(R.string.a11y_step_open_body, section, serviceLabel)),
+                        html(context.getString(R.string.a11y_step_toggle_body, toggleLabel)),
+                        allowBody,
+                        backBody,
+                    ),
+                    images = listOf(listImage(), toggleImage(), allowImage()),
+                    captions = listOf(
+                        context.getString(R.string.a11y_step_open_title),
+                        context.getString(R.string.a11y_step_toggle_title),
+                        context.getString(R.string.a11y_step_allow_title),
+                    ),
                     action = Action.ACCESSIBILITY_SETTINGS,
                 ),
-                Step(
-                    title = context.getString(R.string.a11y_step_toggle_title),
-                    body = html(context.getString(R.string.a11y_step_toggle_body, toggleLabel)),
-                    image = toggleImage(),
-                ),
-                allow,
-                back,
             )
         }
 
@@ -150,13 +286,13 @@ object AccessibilitySetupGuide {
             Step(
                 title = context.getString(R.string.a11y_step_open_title),
                 body = html(context.getString(R.string.a11y_step_open_body_restricted, section, serviceLabel)),
-                image = listImage(),
+                images = listOf(listImage()),
                 action = Action.ACCESSIBILITY_SETTINGS,
             ),
             Step(
                 title = context.getString(R.string.a11y_step_warning_title),
                 body = html(context.getString(R.string.a11y_step_warning_body, warningTitle, warningButton)),
-                image = warningImage(),
+                images = listOf(warningImage()),
             ),
             // Android 13 only offers "Allow restricted settings" when App info
             // is reached from Settings' own app list, not when another app
@@ -165,25 +301,31 @@ object AccessibilitySetupGuide {
                 Step(
                     title = context.getString(R.string.a11y_step_unlock_title),
                     body = html(context.getString(R.string.a11y_step_unlock_body)),
-                    image = menuImage(),
+                    images = listOf(menuImage()),
                     action = Action.APP_INFO,
                 )
             } else {
                 Step(
                     title = context.getString(R.string.a11y_step_unlock_title),
                     body = html(context.getString(R.string.a11y_step_unlock_body_from_list)),
-                    image = menuImage(),
+                    images = listOf(menuImage()),
                     action = Action.APP_LIST,
                 )
             },
             Step(
                 title = context.getString(R.string.a11y_step_toggle_title),
-                body = html(context.getString(R.string.a11y_step_toggle_body_restricted, serviceLabel, toggleLabel)),
-                image = toggleImage(),
+                body = join(
+                    html(context.getString(R.string.a11y_step_toggle_body_restricted, serviceLabel, toggleLabel)),
+                    allowBody,
+                    backBody,
+                ),
+                images = listOf(toggleImage(), allowImage()),
+                captions = listOf(
+                    context.getString(R.string.a11y_step_toggle_title),
+                    context.getString(R.string.a11y_step_allow_title),
+                ),
                 action = Action.ACCESSIBILITY_SETTINGS,
             ),
-            allow,
-            back,
         )
     }
 
@@ -226,101 +368,23 @@ object AccessibilitySetupGuide {
         else -> R.drawable.a11y_allow_v10
     }
 
-    private fun stepView(context: Context, number: Int, step: Step, onAction: (Action) -> Unit): View {
-        val forest = ContextCompat.getColor(context, R.color.virtue_forest)
-        val surface = ContextCompat.getColor(context, R.color.surface)
-        val border = ContextCompat.getColor(context, R.color.border)
-
-        val row = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(context, 18) }
-        }
-
-        row.addView(TextView(context).apply {
-            text = number.toString()
-            gravity = Gravity.CENTER
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(surface)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(forest)
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(context, 26), dp(context, 26)).apply {
-                marginEnd = dp(context, 12)
-            }
-        })
-
-        val column = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        row.addView(column)
-
-        column.addView(TextView(context).apply {
-            text = step.title
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(ContextCompat.getColor(context, R.color.ink))
-            minHeight = dp(context, 26)
-            gravity = Gravity.CENTER_VERTICAL
-        })
-
-        column.addView(bodyText(context, step.body).apply {
-            (layoutParams as LinearLayout.LayoutParams).topMargin = dp(context, 2)
-        })
-
-        step.image?.let { image ->
-            column.addView(ShapeableImageView(context).apply {
-                setImageResource(image)
-                adjustViewBounds = true
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                maxHeight = dp(context, 300)
-                contentDescription = context.getString(R.string.a11y_screenshot_description, step.title)
-                shapeAppearanceModel = ShapeAppearanceModel.builder()
-                    .setAllCornerSizes(dp(context, 6).toFloat())
-                    .build()
-                strokeColor = ColorStateList.valueOf(border)
-                strokeWidth = dp(context, 1).toFloat()
-                val inset = dp(context, 1) / 2
-                setPadding(inset, inset, inset, inset)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(context, 10) }
-            })
-        }
-
-        step.action?.let { action ->
-            column.addView(MaterialButton(context).apply {
-                text = context.getString(
-                    when (action) {
-                        Action.ACCESSIBILITY_SETTINGS -> R.string.btn_open_accessibility_settings
-                        Action.APP_INFO -> R.string.btn_open_app_info
-                        Action.APP_LIST -> R.string.btn_open_app_list
-                    }
-                )
-                backgroundTintList = ColorStateList.valueOf(forest)
-                setOnClickListener { onAction(action) }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = dp(context, 8) }
-            })
-        }
-
-        return row
-    }
-
     private fun bodyText(context: Context, text: CharSequence) = TextView(context).apply {
         this.text = text
-        textSize = 14f
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
         setLineSpacing(dp(context, 2).toFloat(), 1f)
         setTextColor(ContextCompat.getColor(context, R.color.ink_2))
         layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
     }
+
+    private fun join(vararg parts: CharSequence): CharSequence =
+        SpannableStringBuilder().apply {
+            parts.forEachIndexed { index, part ->
+                if (index > 0) append(" ")
+                append(part)
+            }
+        }
 
     private fun html(source: String): CharSequence =
         HtmlCompat.fromHtml(source, HtmlCompat.FROM_HTML_MODE_LEGACY)

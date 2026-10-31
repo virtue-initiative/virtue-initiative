@@ -31,7 +31,7 @@ The API URL, capture interval and batch window are fixed at build time on every 
 - Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. Before `virtue login`, the daemon runs with capture disabled.
 - macOS: the first launch MUST open the main window, request Screen Recording (CLIENT-025), register the app as a login item, and install and start the daemon LaunchAgent (CLIENT-024).
 - Windows: the app is installed from the Microsoft Store as an MSIX. Launching it MUST start monitoring in-process, create the tray icon, register the watchdog (CLIENT-028) and show the main window.
-- Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). Every launch MUST ask for the notification permission (Android 13+) and for exemption from battery optimization when either is missing.
+- Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). The app MUST NOT ask for the notification permission (Android 13+) or for exemption from battery optimization when it opens; the setup guide's first step MUST explain why both are wanted and offer a "Request Permissions" button that asks for them (CLIENT-030).
 - iOS: after sign-in the user MUST be guided to turn on the Safari extension (CLIENT-032). Nothing is monitored until they do.
 
 ## CLIENT-004 Signing in
@@ -67,7 +67,7 @@ Every app MUST show whether the user is signed in and a one-line monitoring stat
 - Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021).
 - macOS window headline, first match wins: "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Screen Recording off"; "Monitoring active"; otherwise "Starting…".
 - Windows: see CLIENT-027.
-- Android headline: "Signed out"; "Monitoring active" (loop running); "Monitoring paused" (user paused); otherwise "Waiting for first capture".
+- Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
 - iOS headline: "Signed out"; "Monitoring paused"; "Setup not finished"; "Safari permission needed"; "Monitoring active" (CLIENT-032).
 - Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status`.
 
@@ -99,7 +99,7 @@ A signed-in user MUST be able to request a screenshot now. The app MUST call COR
 
 While waiting, the app MUST show "Screenshot uploading…" and MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
 
-- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: window button and a tray item shown only while signed in; the tray reports the outcome in a notification balloon. Android: status card button.
+- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: window button and a tray item shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
 - iOS: "Capture Next Safari Page" only records the request; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
 
 ## CLIENT-009 Permissions
@@ -109,7 +109,7 @@ A missing capture permission MUST be explained in the app with steps to fix it. 
 - Linux: no OS permission. Capture needs a graphical session and a capture tool (CLIENT-018); `virtue login` probes it (CLIENT-020).
 - macOS: Screen Recording (CLIENT-025).
 - Windows: none.
-- Android: the Accessibility service is the capture permission (CLIENT-030). Notifications and battery-optimization exemption are requested on each launch but are not required to capture.
+- Android: the Accessibility service is the capture permission (CLIENT-030). Notifications and battery-optimization exemption are requested only from the setup guide's "Request Permissions" button and are not required to capture.
 - iOS: the Safari extension, its All Websites access and Private Browsing access (CLIENT-032).
 
 ## CLIENT-010 Starting automatically and staying running
@@ -187,7 +187,7 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 - Platform details MUST be included and MUST never be empty: Linux "Linux <kernel>; <NAME> <VERSION>" from `/etc/os-release` (quotes stripped; a missing NAME drops that part; `unknown` when nothing is known); macOS "<product> <version> (Build <build>)" or "macOS (unknown version)"; Windows "<product>; <version> (Build <build>)" or "Windows (unknown version)".
 - Logs: GUIs offer a checkbox, on by default, to attach recent logs (CLIENT-017). Linux always attaches the last day of the service journal when there is one, and says how many KB it is. Logs MUST be redacted of known secrets and trimmed to the size limit, keeping the newest bytes.
 - Linux MUST list exactly what will be sent and ask "Send this report?" (default Yes); `--yes` skips it, `--message` and `--contact-email` skip the prompts.
-- Success MUST show "Thanks — your report was sent to the Virtue Initiative team." Failure MUST show the error; GUIs keep the form open.
+- Success MUST show "Thanks, your report was sent to the Virtue Initiative team." Failure MUST show the error; GUIs keep the form open.
 
 > OPEN: the log checkbox says "last two days" on macOS and iOS and "last day" on Windows and Android, but all four attach the same files (those modified in the last 24 hours) — which wording is right?
 
@@ -321,6 +321,12 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - The setup guide MUST match the running Android version. On Android 13+ it MUST add the "Allow restricted settings" steps for apps installed from a downloaded file, and on Android 13 and 14 also when the first launch was such an install (an in-app update does not lift the block there).
 - The persistent notification "Monitoring active" (channel "Virtue monitoring") MUST be shown while signed in. If Android refuses to start it, monitoring MUST continue without it.
 - Restarting the loop MUST queue the resume (CORE-022) rather than wait for it, and MUST wait up to 15 s for a previous loop to finish stopping.
+- Home MUST show a top app bar with the V logo and "Virtue Initiative" (together one link to the website) and an overflow menu labelled "More options", and below it exactly one focus area chosen by the headline state:
+  - Accessibility is off: the setup guide with all its steps on one page, under the title "Turn on Accessibility" and the intro. The first step MUST always be "Allow permissions": it says why Virtue wants notifications (the persistent "Monitoring active" notification) and unrestricted battery use (so Android does not stop Virtue in the background), and its "Request Permissions" button asks for the notification permission and then for the battery exemption. Once both are granted the button MUST read "Permissions Allowed" and be disabled. The guide MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
+  - signed out (Accessibility on): the sign-in form (CLIENT-004), whose password field has a show and hide control;
+  - active, waiting for first capture or paused: a ring, the headline, one sentence and buttons. Active and waiting MUST offer "Add partners" (no partners) or "Add more partners", which open the Partners page on the website, and "Pause Monitoring", which MUST ask for confirmation first. Paused MUST offer "Resume Monitoring".
+- The overflow menu MUST list Setup Steps, Status Details, What Virtue Monitors, Report an Issue and, only when signed in, Sign Out (which MUST ask for confirmation, then stop the loop and remove the persistent notification), with the build label as a last item that cannot be selected. Each item MUST open a full screen with a back arrow, and Back MUST return to Home. Setup Steps MUST list all steps of the guide.
+- Status Details MUST open with a summary (state, headline, one sentence), then sections Account, Android, Screenshots and Problems of rows with a status dot, label and value, and a hint only when the user must act. The Android section MUST show Accessibility, Notifications and Battery; Notifications off and a restricted battery setting MUST be shown as a warning, not as an error. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the "Open log file" and "Take Test Screenshot" buttons.
 
 ## CLIENT-031 Android: updates
 
