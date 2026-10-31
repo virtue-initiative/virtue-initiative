@@ -727,17 +727,13 @@ describe('DELETE /partner/:id (API-027)', () => {
     expect(res.status).toBe(404);
   });
 
-  // KNOWN-BUG: an id that is not a UUID makes the code answer 500 (uuidToBytes throws) instead of 404.
-  it.fails(
-    'answers 404 for an id that is not a UUID, since no such partnership exists (API-027)',
-    async () => {
-      const { owner } = await ownerAndPartner();
+  it('answers 404 for an id that is not a UUID, since no such partnership exists (API-004, API-027)', async () => {
+    const { owner } = await ownerAndPartner();
 
-      const res = await removePartnership(owner.cookie, 'abc');
+    const res = await removePartnership(owner.cookie, 'abc');
 
-      expect(res.status).toBe(404);
-    },
-  );
+    expect(res.status).toBe(404);
+  });
 
   it('answers 204 with an empty body, then 404 when asked again (API-027)', async () => {
     const { owner, partner } = await ownerAndPartner();

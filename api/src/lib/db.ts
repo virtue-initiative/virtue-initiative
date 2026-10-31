@@ -31,12 +31,19 @@ function parseUserSettings(json: string | null): { email_frequency: string; time
   }
 }
 
+/** API-004: `onError` answers this as an unknown ID when `uuid` came from the path. */
+export class InvalidUuidError extends Error {
+  constructor(readonly uuid: string) {
+    super(`Invalid UUID: ${uuid}`);
+  }
+}
+
 export function uuidToBytes(uuid: string): ArrayBuffer {
   const normalized = normalizeUuidString(uuid);
   const hex = normalized.replace(/-/g, '');
 
   if (!hex) {
-    throw new Error(`Invalid UUID: ${uuid}`);
+    throw new InvalidUuidError(uuid);
   }
 
   const bytes = new Uint8Array(16);
@@ -58,7 +65,7 @@ function normalizeUuidString(uuid: string): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  throw new Error(`Invalid UUID: ${uuid}`);
+  throw new InvalidUuidError(uuid);
 }
 
 export function bytesToUuid(value: unknown): string {

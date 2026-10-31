@@ -58,10 +58,13 @@ describe('POST /checkout validation (DONATE-007)', () => {
     expect(res.status).toBe(400);
   });
 
-  // KNOWN-BUG: malformed JSON makes the validator throw an HTTPException(400), which app.onError turns into a 500
-  it.fails('rejects malformed JSON with 400', async () => {
-    expect((await postCheckout('{"amount": 25,', true)).status).toBe(400);
-    expect((await postCheckout('', true)).status).toBe(400);
+  it.each([
+    ['a truncated body', '{"amount": 25,'],
+    ['an empty body', ''],
+  ])('rejects %s with 400', async (_name, body) => {
+    const res = await postCheckout(body, true);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: unknown }).error).toEqual(expect.any(String));
   });
 
   it('rejects a request without a JSON content type with 400', async () => {
