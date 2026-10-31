@@ -220,6 +220,11 @@ linux-test:
 mac-build *args:
     ./client/mac/scripts/build-app.sh {{args}}
 
+# Build the macOS app from Linux: Rust here, Swift on the Mac. Run the script with --help for all options.
+[group('mac')]
+mac-remote *args:
+    ./client/scripts/remote-apple-build.sh --platform mac {{args}}
+
 # --- windows -------------------------------------------------------------
 
 # Build the Windows MSIX package (Windows only). Run `client/windows/scripts/build-msix.ps1 -?` for all params.
@@ -282,3 +287,8 @@ android-force-idle:
 [group('ios')]
 ios-build *args:
     ./client/ios/scripts/build-ios.sh {{args}}
+
+# Build the iOS app from Linux: Rust here, Swift on the Mac. Run the script with --help for all options.
+[group('ios')]
+ios-remote *args:
+    ./client/scripts/remote-apple-build.sh --platform ios {{args}}
