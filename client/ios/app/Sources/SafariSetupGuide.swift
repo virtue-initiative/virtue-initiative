@@ -62,7 +62,7 @@ struct SetupProgress {
         case (.allowPrivate, nil):
             return "Virtue can't check this setting. Make sure it's on."
         case (.allowAllWebsites, false) where setup.allSitesGranted == false:
-            return "Safari reports this is no longer allowed."
+            return "Safari reports this is not allowed."
         case (.allowPrivate, false) where setup.privateAllowed == false:
             return "Safari reports this is turned off."
         default:
@@ -170,10 +170,17 @@ struct SetupWizard: View {
         SetupProgress(setup: coordinator.safariSetup, loggedIn: coordinator.loggedIn)
     }
 
+    // The wizard only shows while signed in, so Back stops at step 2.
     private var step: SetupStep { selected ?? progress.current ?? .tryIt }
     private var needsPermission: Bool { coordinator.monitoringState == .needsPermission }
 
     var body: some View {
+        content
+            // Follow the first unfinished step again whenever it changes.
+            .onChange(of: progress.current) { _ in selected = nil }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
                 StatusRing(
@@ -220,7 +227,7 @@ struct SetupWizard: View {
             HStack(spacing: 10) {
                 Button("Back") { move(-1) }
                     .buttonStyle(VirtueButtonStyle(fullWidth: true))
-                    .disabled(step == SetupStep.allCases.first)
+                    .disabled(step == .turnOnExtension)
                 Button("Next") { move(1) }
                     .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
                     .disabled(step == SetupStep.allCases.last)

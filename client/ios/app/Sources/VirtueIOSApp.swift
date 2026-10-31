@@ -49,6 +49,11 @@ struct ContentView: View {
                     }
                 }
         }
+        // Pop back to Home only once sign-out has finished, so Home never
+        // shows a stale active state with working buttons while it runs.
+        .onChange(of: coordinator.loggedIn) { loggedIn in
+            if !loggedIn { path = [] }
+        }
         .alert("Report sent", isPresented: $showReportSent) {
             Button("OK") {}
         } message: {
@@ -66,7 +71,6 @@ struct ContentView: View {
         .alert("Sign out?", isPresented: $showLogoutConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Sign Out", role: .destructive) {
-                path = []
                 coordinator.logout()
             }
         } message: {
@@ -261,7 +265,12 @@ private struct StatusFocus: View {
     private let partnersURL = URL(string: "https://app.virtueinitiative.org/partners")!
 
     private var paused: Bool { coordinator.monitoringState == .paused }
-    private var hasPartners: Bool { (coordinator.coreStatus?.partnerCount ?? 0) > 0 }
+    /// A missing count means unknown, not zero, so it never claims there are
+    /// no partners.
+    private var partnersTitle: String {
+        guard let count = coordinator.coreStatus?.partnerCount else { return "Manage partners" }
+        return count > 0 ? "Add more partners" : "Add partners"
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -281,6 +290,14 @@ private struct StatusFocus: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let error = coordinator.actionError {
+                Text(error)
+                    .font(.subheadline)
+                    .foregroundStyle(VirtueBrand.bad)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             VStack(spacing: 10) {
                 if paused {
                     Button("Resume Monitoring") {
@@ -289,7 +306,7 @@ private struct StatusFocus: View {
                     }
                     .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
                 } else {
-                    Button(hasPartners ? "Add more partners" : "Add partners") {
+                    Button(partnersTitle) {
                         openURL(partnersURL)
                     }
                     .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
@@ -473,6 +490,7 @@ private struct StatusDetailsView: View {
 
     @ViewBuilder
     private var accessRow: some View {
+        let progress = SetupProgress(setup: setup, loggedIn: coordinator.loggedIn)
         let missing = [
             setup.allSitesGranted == false ? "All websites" : nil,
             setup.privateAllowed == false ? "Private Browsing" : nil,
@@ -485,10 +503,10 @@ private struct StatusDetailsView: View {
                 valueColor: VirtueBrand.bad,
                 hint: "Allow it in Settings so Virtue can see every page."
             )
-        } else if setup.allSitesGranted == true && setup.privateAllowed == true {
+        } else if progress.isDone(.allowAllWebsites) == true && setup.privateAllowed == true {
             DetailRow(kind: .good, label: "Access", value: "All websites and Private Browsing")
         } else {
-            DetailRow(kind: .warn, label: "Access", value: "Not confirmed", valueColor: VirtueBrand.link)
+            DetailRow(kind: .warn, label: "Access", value: "Not confirmed")
         }
     }
 
@@ -502,6 +520,8 @@ private struct StatusDetailsView: View {
                     value: coordinator.formatStatusTimestamp(ms),
                     hint: coordinator.safariLastPageHost.map { "Last page: \($0)" }
                 )
+            } else if status == nil {
+                DetailRow(kind: .neutral, label: "Last screenshot", value: "Unknown")
             } else {
                 DetailRow(
                     kind: .warn,
@@ -510,18 +530,24 @@ private struct StatusDetailsView: View {
                     hint: "Open a web page in Safari to take the first one."
                 )
             }
-            DetailRow(
-                kind: pending == 0 ? .good : .warn,
-                label: "Waiting to upload",
-                value: pending == 0 ? "None" : "\(pending) screenshot\(pending == 1 ? "" : "s")",
-                hint: status?.lastBatchAtMs.map { "Last upload at \(Self.shortTime($0))." }
-            )
+            if status == nil {
+                DetailRow(kind: .neutral, label: "Waiting to upload", value: "Unknown")
+            } else {
+                DetailRow(
+                    kind: pending == 0 ? .good : .warn,
+                    label: "Waiting to upload",
+                    value: pending == 0 ? "None" : "\(pending) screenshot\(pending == 1 ? "" : "s")",
+                    hint: status?.lastBatchAtMs.map { "Last upload: \(coordinator.formatStatusTimestamp($0))" }
+                )
+            }
         }
     }
 
     private var problemsSection: some View {
         Section("Problems") {
-            if let error = status?.recentErrors?.first {
+            if status == nil {
+                DetailRow(kind: .neutral, label: "Recent problems", value: "Unknown")
+            } else if let error = status?.recentErrors?.first {
                 DetailRow(
                     kind: .bad,
                     label: "Recent problems",
@@ -565,6 +591,18 @@ private struct StatusDetailsView: View {
                 DetailRow(label: "Last frame", value: coordinator.safariLastFrame)
                 DetailRow(label: "Last page", value: coordinator.safariLastPage)
                 DetailRow(label: "Last error", value: coordinator.safariLastError)
+                DetailRow(label: "Status", value: coordinator.statusMessage)
+                if let errors = status?.recentErrors, !errors.isEmpty {
+                    ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
+                        DetailRow(
+                            label: "Recent error",
+                            value: error.message,
+                            hint: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
+                        )
+                    }
+                } else {
+                    DetailRow(label: "Recent errors", value: "<none>")
+                }
 
                 Button(
                     coordinator.forceCaptureRequested
@@ -581,13 +619,6 @@ private struct StatusDetailsView: View {
             }
             .listRowBackground(VirtueBrand.surface)
         }
-    }
-
-    private static func shortTime(_ ms: Int64) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(ms) / 1000))
     }
 }
 
@@ -696,7 +727,7 @@ extension MonitoringState {
         case .needsPermission:
             return "The Safari extension is missing a permission. Allow it in Settings so Virtue can see every page."
         case .active:
-            return "Everything is working. Screenshots are being taken and uploaded."
+            return "The Safari extension is on. Virtue takes screenshots as you browse in Safari."
         }
     }
 }

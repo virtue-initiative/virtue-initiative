@@ -72,6 +72,7 @@ struct ReportBugSheet: View {
         .background(VirtueBrand.bg)
         .navigationTitle("Report an Issue")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isSending)
         .onAppear {
             if contactEmail.isEmpty {
                 contactEmail = coordinator.accountEmail ?? ""

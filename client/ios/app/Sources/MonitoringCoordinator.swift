@@ -141,19 +141,10 @@ enum MonitoringState: Equatable {
     case paused
     /// Signed in, but the extension is not known to be on.
     case needsSetup
-    /// Worked before, but Safari now reports a missing permission.
+    /// Safari reports that All Websites or Private Browsing is not allowed.
+    /// This can happen before anything has ever been captured.
     case needsPermission
     case active
-
-    var summary: String {
-        switch self {
-        case .signedOut: return "signed out"
-        case .paused: return "paused"
-        case .needsSetup: return "setup not finished"
-        case .needsPermission: return "needs Safari permission"
-        case .active: return "active"
-        }
-    }
 }
 
 final class MonitoringCoordinator: ObservableObject {
@@ -161,7 +152,11 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var password: String = ""
     @Published var deviceName: String = ""
 
+    /// The latest progress or failure message, shown under Advanced in
+    /// Status Details.
     @Published private(set) var statusMessage: String = "Not initialized"
+    /// A failed Pause or Resume, shown on Home until the next attempt.
+    @Published private(set) var actionError: String?
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String? = nil
@@ -175,8 +170,6 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var currentApiBaseUrl: String = VirtueShared.defaultBaseApiUrl
     @Published private(set) var lastCoreLoop: String = "<none>"
-    @Published private(set) var lastCoreScreenshot: String = "<none>"
-    @Published private(set) var lastCoreBatch: String = "<none>"
     @Published private(set) var lastCoreScreenshotAttempt: String = "<none>"
     /// The full shared status payload (CORE-010) the Status Details sheet
     /// renders; the scalars above stay for the main screen's own bindings.
@@ -313,6 +306,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func toggleMonitoring() {
+        guard !isSigningOut else { return }
+        actionError = nil
         let nextValue = !monitoringEnabled
         guard !nextValue else {
             Task { @MainActor in
@@ -321,6 +316,7 @@ final class MonitoringCoordinator: ObservableObject {
                 }.value
                 if let error {
                     statusMessage = "Resume request failed: \(error)"
+                    actionError = "Could not resume monitoring. \(error)"
                     refreshCoreStatus()
                     refreshSafariStatus()
                     return
@@ -339,6 +335,7 @@ final class MonitoringCoordinator: ObservableObject {
             }.value
             if let error {
                 statusMessage = "Pause request failed: \(error)"
+                actionError = "Could not pause monitoring. \(error)"
                 refreshCoreStatus()
                 refreshSafariStatus()
                 return
@@ -485,6 +482,7 @@ final class MonitoringCoordinator: ObservableObject {
             safariLastHeartbeat = "<none>"
             safariLastFrame = "<none>"
             safariLastPage = "<none>"
+            safariLastPageHost = nil
             safariLastError = "<none>"
             safariDaemonStatus = "Paused"
             return
@@ -560,9 +558,7 @@ final class MonitoringCoordinator: ObservableObject {
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
-        lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
         lastCoreScreenshotAttempt = formatMillisTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
-        lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)
         coreStatus = serviceStatus
         if let apiBaseUrl = serviceStatus?.apiBaseUrl, !apiBaseUrl.isEmpty {
             currentApiBaseUrl = apiBaseUrl
