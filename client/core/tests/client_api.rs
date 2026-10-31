@@ -11,8 +11,8 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::*;
-use virtue_core::CoreError;
 use virtue_core::testing::Scenario;
+use virtue_core::{CoreError, DaemonState};
 
 // ── CORE-007: how the methods behave ─────────────────────────────────────────
 
@@ -174,9 +174,30 @@ fn login_revokes_the_existing_session_registers_a_device_and_enables_capture() {
     assert!(state.screenshot.enabled);
 }
 
-// CORE-008: a successful login tries to deliver queued events with the old session before revoking it.
+// CORE-008: a successful login tries to deliver the pending batch with the old session.
 #[test]
-fn a_successful_login_uploads_queued_events_with_the_old_session() {
+fn a_successful_login_uploads_the_pending_batch_with_the_old_session() {
+    let mut scenario = held_scenario();
+    let uploaded_before = scenario.api.state().batch_uploads.len();
+    assert!(!scenario.state().upload.pending_batch_events.is_empty());
+    scenario
+        .login("me@example.org", "secret", None)
+        .expect("login succeeds");
+
+    let api = scenario.api.state();
+    assert_eq!(api.batch_uploads.len(), uploaded_before + 1);
+    assert_eq!(
+        api.batch_uploads[uploaded_before].device_refresh_token,
+        "scenario-device-refresh"
+    );
+    assert_eq!(api.logout_calls.len(), 1);
+    drop(api);
+    assert!(scenario.state().upload.pending_batch_events.is_empty());
+}
+
+// CORE-008: events still waiting for the hash server are discarded, not flushed.
+#[test]
+fn a_login_discards_events_not_yet_hashed() {
     let mut scenario = Scenario::authenticated();
     scenario.at_t(T0);
     scenario.queue_upload(dev("before the login"));
@@ -185,39 +206,116 @@ fn a_successful_login_uploads_queued_events_with_the_old_session() {
         .expect("login succeeds");
 
     let api = scenario.api.state();
-    assert_eq!(api.batch_uploads.len(), 1);
-    assert_eq!(
-        api.batch_uploads[0].device_refresh_token,
-        "scenario-device-refresh"
-    );
-    assert_eq!(api.logout_calls.len(), 1);
+    assert!(api.hash_uploads.is_empty());
+    assert!(api.batch_uploads.is_empty());
     drop(api);
-    let recent_errors = scenario.daemon.status().recent_errors;
-    assert!(recent_errors.iter().all(|e| e.context != "login_flush"));
+    assert!(queued_events(&scenario).is_empty());
 }
 
-// CORE-008: a failed upload of queued events does not fail the login, and is recorded.
+// CORE-008: a failed upload of the pending batch does not fail the login.
 #[test]
-fn a_login_succeeds_when_the_queued_events_cannot_be_uploaded() {
-    let mut scenario = Scenario::authenticated();
+fn a_login_succeeds_when_the_pending_batch_cannot_be_uploaded() {
+    let mut scenario = held_scenario();
     scenario
         .api
         .program_batch(Err(CoreError::CommandFailed("api unreachable".into())));
-    scenario.at_t(T0);
-    scenario.queue_upload(dev("before the login"));
     scenario
         .login("me@example.org", "secret", None)
         .expect("login succeeds");
 
     assert_eq!(scenario.api.state().logout_calls.len(), 1);
-    let status = scenario.daemon.status();
-    assert!(status.is_authenticated);
-    assert!(
-        status
-            .recent_errors
-            .iter()
-            .any(|e| e.context == "login_flush")
-    );
+    assert!(scenario.daemon.status().is_authenticated);
+    assert!(queued_events(&scenario).is_empty());
+}
+
+// CORE-008: a failed flush leaves no backoff behind, so the new session uploads straight away.
+#[test]
+fn the_new_session_uploads_at_once_after_a_failed_flush() {
+    let mut scenario = held_scenario();
+    scenario
+        .api
+        .program_batch(Err(CoreError::CommandFailed("api unreachable".into())));
+    scenario.with_state_mut(|s| {
+        s.upload.hash_backoff.current_backoff_ms = 20 * 60 * 1_000;
+        s.upload.batch_backoff.current_backoff_ms = 20 * 60 * 1_000;
+    });
+    scenario
+        .login("me@example.org", "secret", None)
+        .expect("login succeeds");
+    let hashed_before = scenario.api.state().hash_uploads.len();
+    let uploaded_before = scenario.api.state().batch_uploads.len();
+
+    scenario.at_t(T0 + 60_000).tick();
+
+    let api = scenario.api.state();
+    assert!(api.hash_uploads.len() > hashed_before);
+    assert!(api.batch_uploads.len() > uploaded_before);
+}
+
+/// Dirties every part of the state a new session must not inherit.
+fn dirty_state(scenario: &mut Scenario) {
+    scenario.with_state_mut(|s| {
+        s.lifecycle.late_wakeups.push_back(600_000);
+        s.lifecycle.last_seen_login_ms = Some(T0);
+        s.lifecycle.last_seen_logout_ms = Some(T0);
+        s.lifecycle.monitoring_stopped = true;
+        s.lifecycle.restart_times.push_back(T0);
+        s.lifecycle.last_restart_alert_at_ms = Some(T0);
+        s.screenshot.last_capture_at_ms = Some(T0);
+        s.upload.next_hash_seq = 7;
+        s.upload.last_batch_at_ms = Some(T0);
+        s.upload.force_flush = true;
+        s.upload.bypass_lock = true;
+        s.upload.hash_backoff.current_backoff_ms = 60_000;
+        s.upload.batch_backoff.current_backoff_ms = 60_000;
+        s.capture_availability.recent_failures_ms.push(T0);
+        s.heartbeat.last_heartbeat_ms = T0;
+        s.next_wakeup_at_ms = T0;
+        s.last_tick_at_ms = Some(T0);
+    });
+}
+
+/// Fails unless everything `dirty_state` set was reset.
+fn assert_old_state_is_gone(state: &DaemonState) {
+    assert!(state.lifecycle.late_wakeups.is_empty());
+    assert_eq!(state.lifecycle.last_seen_login_ms, None);
+    assert_eq!(state.lifecycle.last_seen_logout_ms, None);
+    assert!(!state.lifecycle.monitoring_stopped);
+    assert!(state.lifecycle.restart_times.is_empty());
+    assert_eq!(state.lifecycle.last_restart_alert_at_ms, None);
+    assert_eq!(state.screenshot.last_capture_at_ms, None);
+    assert_eq!(state.upload.next_hash_seq, 0);
+    assert_eq!(state.upload.last_batch_at_ms, None);
+    assert!(!state.upload.force_flush);
+    assert!(!state.upload.bypass_lock);
+    assert_eq!(state.upload.hash_backoff.current_backoff_ms, 0);
+    assert_eq!(state.upload.batch_backoff.current_backoff_ms, 0);
+    assert!(state.capture_availability.recent_failures_ms.is_empty());
+    assert_eq!(state.heartbeat.last_heartbeat_ms, 0);
+    assert_eq!(state.next_wakeup_at_ms, 0);
+    assert_eq!(state.last_tick_at_ms, None);
+    assert!(state.errors.recent.is_empty());
+}
+
+// CORE-008: a new session starts from a fresh state, with the old session's errors gone too.
+#[test]
+fn a_login_starts_from_a_fresh_state() {
+    let mut scenario = Scenario::authenticated();
+    scenario
+        .api
+        .program_hash(Err(CoreError::CommandFailed("hash server down".into())));
+    scenario.at_t(T0).tick();
+    assert!(!scenario.daemon.status().recent_errors.is_empty());
+    dirty_state(&mut scenario);
+
+    scenario
+        .login("new@example.org", "secret", None)
+        .expect("login succeeds");
+
+    let state = scenario.state();
+    assert_old_state_is_gone(&state);
+    assert_eq!(state.auth.account_email.as_deref(), Some("new@example.org"));
+    assert!(state.screenshot.enabled);
 }
 
 // CORE-008: a failed login keeps the existing session.
@@ -312,7 +410,25 @@ fn logout_clears_credentials_and_capture_even_when_the_revoke_fails() {
     assert!(queued_events(&scenario).is_empty());
 }
 
-// CORE-009: a device the server no longer knows is logged out locally.
+// CORE-009: logout resets the whole state, including the recent errors.
+#[test]
+fn logout_resets_the_whole_state() {
+    let mut scenario = Scenario::authenticated();
+    scenario
+        .api
+        .program_hash(Err(CoreError::CommandFailed("hash server down".into())));
+    scenario.at_t(T0).tick();
+    assert!(!scenario.daemon.status().recent_errors.is_empty());
+    dirty_state(&mut scenario);
+
+    scenario.logout().expect("logout succeeds");
+
+    let state = scenario.state();
+    assert_old_state_is_gone(&state);
+    assert_eq!(state.auth.account_email, None);
+}
+
+// CORE-009: a device the server no longer knows is logged out locally, and the reason stays visible.
 #[test]
 fn a_device_the_server_rejects_is_logged_out() {
     for status in [401, 404] {
@@ -329,7 +445,14 @@ fn a_device_the_server_rejects_is_logged_out() {
             "HTTP {status} on the batch upload should log the device out"
         );
         assert!(!state.screenshot.enabled);
-        assert!(!scenario.status().is_authenticated);
+        let service_status = scenario.status();
+        assert!(!service_status.is_authenticated);
+        assert!(
+            service_status
+                .recent_errors
+                .iter()
+                .any(|e| e.message.contains("logging out"))
+        );
     }
 }
 

@@ -1,7 +1,6 @@
 mod batch;
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -170,29 +169,6 @@ pub struct UploadState {
 }
 
 impl UploadState {
-    pub fn reset_for_login(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.next_hash_seq = 0;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
-    pub fn reset_for_logout(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = 0;
-        self.settings = None;
-        self.device_credentials = None;
-        self.next_hash_seq = 0;
-        self.hash_token_cache = None;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
     pub fn pending_request_count(&self) -> usize {
         self.pending_hash_events.len() + usize::from(!self.pending_batch_events.is_empty())
     }
@@ -307,15 +283,6 @@ pub struct HashRetryPlan {
     room: usize,
     next_hash_seq: u32,
     now_ms: i64,
-    /// When set, no new event starts uploading after this.
-    deadline: Option<Instant>,
-}
-
-impl HashRetryPlan {
-    pub fn with_deadline(mut self, deadline: Instant) -> Self {
-        self.deadline = Some(deadline);
-        self
-    }
 }
 
 /// Phase 4: decide whether hash retries should run this tick, and snapshot
@@ -353,7 +320,6 @@ pub fn plan_hash_retries(
         events: std::mem::take(&mut state.pending_hash_events),
         next_hash_seq: state.next_hash_seq,
         now_ms,
-        deadline: None,
     })
 }
 
@@ -385,7 +351,6 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         room,
         mut next_hash_seq,
         now_ms,
-        deadline,
     } = plan;
 
     let mut refreshed: Option<(String, DeviceSettings)> = None;
@@ -434,11 +399,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut stop = false;
 
     for event in events {
-        if stop
-            || retried >= MAX_HASH_RETRIES_PER_LOOP
-            || newly_hashed.len() >= room
-            || deadline.is_some_and(|deadline| Instant::now() >= deadline)
-        {
+        if stop || retried >= MAX_HASH_RETRIES_PER_LOOP || newly_hashed.len() >= room {
             still_pending.push(event);
             continue;
         }
@@ -852,21 +813,6 @@ mod tests {
         assert!(!state.bypass_lock);
     }
 
-    // CORE-008: past its deadline, a hash pass starts no new upload and keeps the events.
-    #[test]
-    fn hash_retry_past_its_deadline_uploads_nothing() {
-        let mut state = authenticated_state();
-        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
-
-        let api = MockApiClient::new();
-        let plan = plan_hash_retries(&mut state, 1_000, true).expect("expected a hash plan");
-        let outcome = execute_hash_retries(plan.with_deadline(Instant::now()), &api);
-
-        assert!(api.state().hash_uploads.is_empty());
-        assert!(outcome.newly_hashed.is_empty());
-        assert_eq!(outcome.still_pending.len(), 1);
-    }
-
     // CORE-005: a hashed event moves on to the batch queue (BATCH-006).
     #[test]
     fn hash_retry_round_trip_moves_event_into_batch_queue() {
@@ -1129,7 +1075,7 @@ mod tests {
         let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
 
         // Logout races the in-flight (unlocked) network call.
-        state.reset_for_logout();
+        state = UploadState::default();
 
         let outcome = execute_batch(plan, &api);
         let should_logout = commit_batch(&mut state, outcome, 1_000);
