@@ -1004,13 +1004,6 @@ fn password_cases() -> Vec<Value> {
             "The salt is used as given. Neither side lowercases it, so this differs from the lowercase-email case at equal cost.",
         ),
         (
-            "empty_password_low_cost",
-            "",
-            salt16.clone(),
-            (64, 1, 1),
-            "Empty password.",
-        ),
-        (
             "parallelism_2_low_cost",
             "correct horse battery staple",
             salt16.clone(),

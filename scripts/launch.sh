@@ -230,6 +230,7 @@ if [ -n "$DOMAIN" ]; then
         --var "APP_URL:https://app.${DOMAIN}.localhost" \
         --var "LANDING_URL:https://${DOMAIN}.localhost" \
         --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
+        --var "DEV_R2_ROUTE:true" \
         --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
         "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
@@ -254,6 +255,7 @@ else
         --var "APP_URL:http://localhost:${WEB_PORT}" \
         --var "LANDING_URL:http://localhost:${LANDING_PORT}" \
         --var "R2_URL:http://localhost:${API_PORT}/r2" \
+        --var "DEV_R2_ROUTE:true" \
         --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
         "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "http://localhost:${LANDING_PORT}"

@@ -531,7 +531,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
-    // CLIENT-008: a failed Test Screenshot request shows the error.
+    // CLIENT-008: a failed Test Screenshot request shows "Test screenshot failed: <error>".
     [Fact]
     public async Task ForceCaptureAsync_ReturnsNullAndSetsErrorTextOnFailure()
     {
@@ -544,7 +544,7 @@ public sealed class SessionViewModelTests
         var result = await viewModel.ForceCaptureAsync();
 
         Assert.Null(result);
-        Assert.Equal("monitoring is not running", viewModel.ErrorText);
+        Assert.Equal("Test screenshot failed: monitoring is not running", viewModel.ErrorText);
     }
 
     // CLIENT-027: the tray menu offers Report an Issue (design test).

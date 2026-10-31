@@ -522,7 +522,7 @@ describe('POST /d/batch response (API-038)', () => {
     expect(claims).toMatchObject({ sub: device.id, type: 'device' });
 
     // The file is where the url says, and the owner's GET /data lists the same batch.
-    const object = await SELF.fetch(`${BASE}${new URL(body.url).pathname.replace(/^/, '/r2')}`);
+    const object = await SELF.fetch(body.url);
     expect(new Uint8Array(await object.arrayBuffer())).toEqual(file);
     const data = (await (
       await SELF.fetch(`${BASE}/data?since=0`, { headers: authHeaders(cookie) })

@@ -22,6 +22,8 @@ API_BASE_PATH=/api
 
 # Public base URL for R2 batch blobs
 R2_URL=http://localhost:8787/r2
+# Serves GET /r2/*, which those batch URLs point at (API-040). Never set this in a deployed environment.
+DEV_R2_ROUTE=true
 
 # Base URL of the standalone hash-server (see ../hash-server/), which must be running
 # separately — this API only talks to it as a client (see lib/hash-server.ts and

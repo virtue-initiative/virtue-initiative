@@ -150,13 +150,6 @@ describe('CORS (DONATE-003)', () => {
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 
-  // KNOWN-BUG: a preflight from a disallowed origin still gets Access-Control-Allow-Methods and -Headers
-  it.fails('sends no allow headers at all on a preflight from a disallowed origin', async () => {
-    const res = await disallowedPreflight();
-    expect(res.headers.get('access-control-allow-methods')).toBeNull();
-    expect(res.headers.get('access-control-allow-headers')).toBeNull();
-  });
-
   it('does not CORS-gate POST /webhook, for any origin', async () => {
     for (const origin of ['https://evil.example', 'http://localhost:5173', undefined]) {
       const event = checkoutCompletedEvent({

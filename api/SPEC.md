@@ -926,7 +926,7 @@ The server MUST return **HTTP 200** with the device's refreshed settings alongsi
 
 ### API-040 `GET /r2/*`
 
-This forwards to R2. Only used in dev. It SHOULD be disabled in production.
+This forwards to R2. Only used in dev. The server MUST serve it only when the `DEV_R2_ROUTE` variable is `true`, which only a local dev environment sets. Otherwise it MUST respond **HTTP 404**.
 
 ### API-041 `POST /email/sns`
 

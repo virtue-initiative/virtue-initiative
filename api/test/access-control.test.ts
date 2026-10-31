@@ -479,6 +479,22 @@ describe('GET /r2/* access (API-040)', () => {
 
     expect(res.status).toBe(404);
   });
+
+  it('answers 404 for a real object without DEV_R2_ROUTE (API-040)', async () => {
+    const key = 'user/someone/batches/real.enc';
+    await env.BUCKET.put(key, BATCH_BYTES);
+    const request = new Request(`${BASE}/r2/${key}`);
+
+    const res = await worker.fetch(
+      request,
+      { ...env, DEV_R2_ROUTE: undefined },
+      createExecutionContext(),
+    );
+    // An R2 stream left unread breaks the test pool's isolated storage.
+    await res.arrayBuffer();
+
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('locked password access (API-043 to API-049)', () => {

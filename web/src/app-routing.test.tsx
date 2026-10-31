@@ -129,9 +129,7 @@ describe('Pages and navigation (WEB-002)', () => {
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
   });
 
-  // KNOWN-BUG: the "invalid or expired" result of /verify-email is a bare paragraph with no heading, so the page has none to name it.
-  // The spec wants a heading. This pins today's page, so it fails once the bug is fixed.
-  it('shows no heading yet for an invalid email link (WEB-002)', async () => {
+  it('names the page with a heading for an invalid email link (WEB-002, WEB-033)', async () => {
     server.use(
       http.post(`${API}/email-verification/validate`, () =>
         HttpResponse.json({ error: 'Invalid token' }, { status: 400 }),
@@ -140,7 +138,7 @@ describe('Pages and navigation (WEB-002)', () => {
     visit('/verify-email?token=bad');
     render(<App />);
     await screen.findByText('This verification link is invalid or has expired.');
-    expect(screen.queryAllByRole('heading')).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: 'Verification failed' })).toBeInTheDocument();
   });
 });
 

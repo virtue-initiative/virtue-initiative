@@ -377,7 +377,15 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         ForceCapturePayload? result = null;
         await RunBusyAsync(async () =>
         {
-            result = await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
+            try
+            {
+                result = await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
+            }
+            catch (Exception ex)
+            {
+                // CLIENT-008: RunBusyAsync shows this message as the error.
+                throw new InvalidOperationException($"Test screenshot failed: {ex.Message}", ex);
+            }
             await RefreshInternalAsync();
             StatusText = BuildStatusText();
         }, "Screenshot uploading...");

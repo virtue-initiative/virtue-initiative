@@ -83,6 +83,11 @@ app.route('/d', deviceOnly);
 app.route('/admin', admin);
 
 app.get('/r2/*', async (c) => {
+  // API-040: only local dev turns this on.
+  if (c.env.DEV_R2_ROUTE !== 'true') {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
   const key = c.req.path.replace(/^\/r2\//, '');
   const object = await c.env.BUCKET.get(key);
 
