@@ -169,29 +169,6 @@ pub struct UploadState {
 }
 
 impl UploadState {
-    pub fn reset_for_login(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.next_hash_seq = 0;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
-    pub fn reset_for_logout(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = 0;
-        self.settings = None;
-        self.device_credentials = None;
-        self.next_hash_seq = 0;
-        self.hash_token_cache = None;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
     pub fn pending_request_count(&self) -> usize {
         self.pending_hash_events.len() + usize::from(!self.pending_batch_events.is_empty())
     }
@@ -1098,7 +1075,7 @@ mod tests {
         let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
 
         // Logout races the in-flight (unlocked) network call.
-        state.reset_for_logout();
+        state = UploadState::default();
 
         let outcome = execute_batch(plan, &api);
         let should_logout = commit_batch(&mut state, outcome, 1_000);

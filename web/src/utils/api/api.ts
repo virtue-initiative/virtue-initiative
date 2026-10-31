@@ -79,6 +79,8 @@ export type {
 const BASE =
   ((import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
+export const SERVER_ERROR_MESSAGE =
+  'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.';
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
@@ -191,6 +193,10 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     } else if (message === 'Not found') {
       message = 'Requested resource was not found.';
     }
+    // WEB-071
+    if (res.status >= 500) {
+      message = SERVER_ERROR_MESSAGE;
+    }
 
     throw Object.assign(new Error(message), {
       status: res.status,
@@ -290,7 +296,7 @@ export const api = {
       encrypted_priv_key?: string;
     },
   ) =>
-    req<{ ok: boolean }>('/password-reset/finalize', {
+    req<void>('/password-reset/finalize', {
       method: 'POST',
       body: JSON.stringify({ token, ...payload }),
     }),

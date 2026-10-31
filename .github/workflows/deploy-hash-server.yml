@@ -47,6 +47,18 @@ jobs:
             echo "name=staging-virtue-hash" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check required secrets
+        env:
+          HASH_SERVER_SSH_KEY: ${{ secrets.HASH_SERVER_SSH_KEY }}
+          HASH_SERVER_HOST: ${{ secrets.HASH_SERVER_HOST }}
+        run: |
+          for name in HASH_SERVER_SSH_KEY HASH_SERVER_HOST; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "::error::The $name secret is not set."
+              exit 1
+            fi
+          done
+
       - name: Set up SSH
         run: |
           install -m 700 -d ~/.ssh

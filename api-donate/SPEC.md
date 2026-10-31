@@ -43,7 +43,7 @@ Creates a Stripe Checkout session and returns the URL to redirect the donor to. 
 
 #### DONATE-007 Validation
 
-`amount` MUST be a number greater than 0 and at most 100000, in whole or fractional US dollars. `recurring` MUST be a boolean. A request that fails this, including a non-positive amount, MUST get **HTTP 400** and MUST NOT call Stripe. The 400 body is the validator's default error body.
+`amount` MUST be a number greater than 0 and at most 100000, in whole or fractional US dollars. `recurring` MUST be a boolean. A request that fails this, including a non-positive amount, MUST get **HTTP 400** and MUST NOT call Stripe. The 400 body is the validator's default error body. A body that is not valid JSON MUST also get **HTTP 400**, with an `error` message.
 
 > OPEN: the schema accepts fractional amounts, which are rounded to the nearest cent (`amount * 100`), so `0.001` becomes 0 cents and is rejected by Stripe as a 500, and Stripe's minimum charge is not checked — should the server enforce a minimum and whole cents, and return 400?
 

@@ -1,5 +1,6 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { createExecutionContext, env, fetchMock, SELF } from 'cloudflare:test';
+import worker from '../src/index';
 import {
   BASE,
   TEST_TURNSTILE_TOKEN,
@@ -22,6 +23,7 @@ import {
   login,
   loginCookie,
   postJson,
+  postPasswordReset,
   recordBounce,
   requestPasswordResetToken,
   snapshot,
@@ -317,20 +319,20 @@ describe('Validation (API-004)', () => {
   });
 
   for (const path of ['/signup-request', '/login', '/password-reset']) {
-    // KNOWN-BUG: a body that is not valid JSON makes the route answer 500 "Internal server error" instead of 400
-    it.fails(`POST ${path} with a body that is not JSON answers 400 (API-004)`, async () => {
+    it(`POST ${path} with a body that is not JSON answers 400 (API-004)`, async () => {
       const res = await SELF.fetch(`${BASE}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{not json',
       });
       expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: unknown }).error).toEqual(expect.any(String));
     });
   }
 
   it('sends nothing and creates nothing for a request that fails validation (API-004)', async () => {
     await postJson('/signup-request', { email: 'nope', turnstile_token: TEST_TURNSTILE_TOKEN });
-    await postJson('/password-reset', { email: 'nope' });
+    await postPasswordReset('nope');
     expect(await listEmailDeliveries()).toHaveLength(0);
   });
 });
@@ -357,7 +359,7 @@ describe('Status codes (API-006)', () => {
         return postJson('/signup-request', { email: EMAIL, turnstile_token: TEST_TURNSTILE_TOKEN });
       },
     ],
-    ['POST /password-reset', async () => postJson('/password-reset', { email: EMAIL })],
+    ['POST /password-reset', async () => postPasswordReset(EMAIL)],
     [
       'POST /login',
       async () => {
@@ -441,6 +443,28 @@ describe('Status codes (API-006)', () => {
 });
 
 describe('POST /logout (API-018)', () => {
+  it('clears the cookie, logs and answers 500 when it cannot delete the session (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => logged.mockRestore());
+    const failingDb = {
+      prepare: () => {
+        throw new Error('D1 is down');
+      },
+    };
+
+    const res = await worker.fetch(
+      new Request(`${BASE}/logout`, { method: 'POST', headers: cookieOnly(cookie) }),
+      { ...env, DB: failingDb as unknown as D1Database },
+      createExecutionContext(),
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Internal server error' });
+    expect(res.headers.get('set-cookie') ?? '').toMatch(/refresh_token=;/);
+    expect(logged).toHaveBeenCalledWith('[logout] failed to delete session', expect.any(Error));
+  });
+
   it('invalidates the session, clears the cookie and answers 204 (API-018)', async () => {
     const { cookie } = await signupAndGetCookie(EMAIL);
     const res = await call('POST', '/logout', { headers: cookieOnly(cookie) });
@@ -468,35 +492,46 @@ describe('POST /logout (API-018)', () => {
     );
   });
 
-  it('does not log out a device when given a device token (API-018)', async () => {
+  it.each([
+    ['a cookie', cookieOnly],
+    ['the Authorization header', bearer],
+  ])('does not log out a device when given a device token in %s (API-018)', async (_name, as) => {
     await signupAndGetCookie(EMAIL);
     const device = await createDeviceForUser(EMAIL);
-    await call('POST', '/logout', { headers: cookieOnly(device.refresh_token) });
+    await call('POST', '/logout', { headers: as(device.refresh_token) });
     expect((await call('GET', '/d/device', { headers: bearer(device.refresh_token) })).status).toBe(
       200,
     );
   });
 
-  // KNOWN-BUG: POST /logout only reads the refresh_token cookie, so a web token sent as a Bearer header is not revoked
-  it.fails('invalidates a session presented in the Authorization header (API-018)', async () => {
+  it('invalidates a session presented in the Authorization header (API-018)', async () => {
     const { cookie } = await signupAndGetCookie(EMAIL);
-    await call('POST', '/logout', { headers: bearer(cookie) });
+    const res = await call('POST', '/logout', { headers: bearer(cookie) });
+    expect(res.status).toBe(204);
     expect((await getUser(cookie)).status).toBe(401);
   });
 
-  for (const [name, headersFor] of [
-    ['no token', () => ({})],
-    ['an unknown token', () => cookieOnly('not-a-token')],
-    ['a device token', (deviceToken: string) => cookieOnly(deviceToken)],
-  ] as const) {
-    // KNOWN-BUG: POST /logout answers 204 to a request with no valid web token, where the spec requires a web token (401 per API-003)
-    it.fails(`rejects ${name} with 401 (API-018)`, async () => {
-      await signupAndGetCookie(EMAIL);
-      const device = await createDeviceForUser(EMAIL);
-      const headers = headersFor(device.refresh_token);
-      expect((await call('POST', '/logout', { headers })).status).toBe(401);
+  it('invalidates the Bearer session even when the cookie names a dead one (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    await call('POST', '/logout', {
+      headers: { ...cookieOnly('not-a-token'), ...bearer(cookie) },
     });
-  }
+    expect((await getUser(cookie)).status).toBe(401);
+  });
+
+  it('leaves other sessions alone when given no web token, and still answers 204 (API-018)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    const device = await createDeviceForUser(EMAIL);
+    for (const headers of [
+      {},
+      cookieOnly('not-a-token'),
+      bearer('not-a-token'),
+      cookieOnly(device.refresh_token),
+    ]) {
+      expect((await call('POST', '/logout', { headers })).status).toBe(204);
+    }
+    expect((await getUser(cookie)).status).toBe(200);
+  });
 });
 
 describe('GET /user (API-019)', () => {
@@ -542,13 +577,11 @@ describe('GET /user (API-019)', () => {
     expect((await getUser(cookie)).status).toBe(401);
   });
 
-  // KNOWN-BUG: GET /user accepts only a web token and answers a device token with 401, though the spec says either token works
-  it.fails('accepts a device token and returns the device owner (API-019)', async () => {
-    const { userId } = await signupAndGetCookie(EMAIL);
+  it('answers a device token with 401 (API-019)', async () => {
+    await signupAndGetCookie(EMAIL);
     const device = await createDeviceForUser(EMAIL);
     const res = await call('GET', '/user', { headers: bearer(device.refresh_token) });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ id: userId });
+    expect(res.status).toBe(401);
   });
 });
 

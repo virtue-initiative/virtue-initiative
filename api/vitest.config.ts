@@ -19,6 +19,7 @@ export default defineWorkersConfig({
             DEV_R2_ROUTE: 'true',
             // Checked by the siteverify stub in test/setup.ts.
             TURNSTILE_SECRET_KEY: 'test-turnstile-secret',
+            LOGIN_SALT_SECRET: 'test-login-salt-secret',
             SNS_TOPIC_ARNS:
               'arn:aws:sns:us-east-1:111111111111:old-ses-events, arn:aws:sns:us-east-1:222222222222:ses-events',
             // Intercepted by fetchMock's hash-server test double — see test/hash-server-mock.ts.

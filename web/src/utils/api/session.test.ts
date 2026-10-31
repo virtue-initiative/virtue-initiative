@@ -149,3 +149,40 @@ describe('Session.changePassword (WEB-061)', () => {
     expect(changeRequests).toHaveLength(0);
   });
 });
+
+describe('Session.logout (WEB-007, WEB-071)', () => {
+  it('retries a failed logout and signs out once the server accepts it', async () => {
+    const session = await Session.fromLogin(EMAIL, OLD_PASSWORD);
+    let calls = 0;
+    server.use(
+      http.post(`${BASE}/logout`, () => {
+        calls += 1;
+        return calls < 3
+          ? HttpResponse.json({ error: 'Internal server error' }, { status: 500 })
+          : new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    await session.logout();
+
+    expect(calls).toBe(3);
+    expect(localStorage.getItem('virtue_wrapping_key')).toBeNull();
+  });
+
+  it('stays signed in and reports the support message when every attempt fails', async () => {
+    const session = await Session.fromLogin(EMAIL, OLD_PASSWORD);
+    let calls = 0;
+    server.use(
+      http.post(`${BASE}/logout`, () => {
+        calls += 1;
+        return HttpResponse.json({ error: 'Internal server error' }, { status: 500 });
+      }),
+    );
+
+    await expect(session.logout()).rejects.toThrow(
+      'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.',
+    );
+    expect(calls).toBe(3);
+    expect(localStorage.getItem('virtue_wrapping_key')).not.toBeNull();
+  });
+});

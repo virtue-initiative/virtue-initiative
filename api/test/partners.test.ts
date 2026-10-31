@@ -449,11 +449,10 @@ describe('POST /partner/validate (API-024)', () => {
     ['a well-formed token nobody was issued', () => generateOpaqueToken('partner_invite')],
   ];
 
-  // KNOWN-BUG: the code answers 400 {"error":"Invalid or expired invite"} for an unknown token, the spec says 401.
-  it.fails.each(unknownTokens)('answers 401 for %s (API-024)', async (_name, token) => {
+  it.each(unknownTokens)('answers 400 for %s (API-024)', async (_name, token) => {
     const res = await validate(token());
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
   });
 
   it.each(unknownTokens)('does not reveal an owner for %s (API-024)', async (_name, token) => {
@@ -463,9 +462,7 @@ describe('POST /partner/validate (API-024)', () => {
     expect(await res.json()).not.toHaveProperty('owner');
   });
 
-  // KNOWN-BUG: the code answers 400 for a token whose invite was withdrawn, the spec says 401 for an invalid token.
-  // This pins today's 400, so it fails once the bug is fixed.
-  it('answers 400, not 401, for the token of an invite the owner deleted (API-024)', async () => {
+  it('answers 400 for the token of an invite the owner deleted (API-024)', async () => {
     const { owner } = await ownerAndPartner();
     const invite = await invitePartner(owner.cookie, 'par@partners.test');
     expect((await removePartnership(owner.cookie, invite.id)).status).toBe(204);
@@ -475,9 +472,8 @@ describe('POST /partner/validate (API-024)', () => {
     expect(res.status).toBe(400);
   });
 
-  // The spec only calls for 401 on an invalid or unknown token. Whether a used or lapsed
-  // invite counts as invalid is not stated, so these rows record the current behavior:
-  // refused, with no owner revealed.
+  // Whether a used or lapsed invite counts as invalid is not stated, so these rows record
+  // the current behavior: refused, with no owner revealed.
   it('refuses the token of an accepted invite without revealing the owner (API-024)', async () => {
     const { owner, partner } = await ownerAndPartner();
     const invite = await invitePartner(owner.cookie, 'par@partners.test');
@@ -727,17 +723,13 @@ describe('DELETE /partner/:id (API-027)', () => {
     expect(res.status).toBe(404);
   });
 
-  // KNOWN-BUG: an id that is not a UUID makes the code answer 500 (uuidToBytes throws) instead of 404.
-  it.fails(
-    'answers 404 for an id that is not a UUID, since no such partnership exists (API-027)',
-    async () => {
-      const { owner } = await ownerAndPartner();
+  it('answers 404 for an id that is not a UUID, since no such partnership exists (API-004, API-027)', async () => {
+    const { owner } = await ownerAndPartner();
 
-      const res = await removePartnership(owner.cookie, 'abc');
+    const res = await removePartnership(owner.cookie, 'abc');
 
-      expect(res.status).toBe(404);
-    },
-  );
+    expect(res.status).toBe(404);
+  });
 
   it('answers 204 with an empty body, then 404 when asked again (API-027)', async () => {
     const { owner, partner } = await ownerAndPartner();

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createExecutionContext, env, fetchMock, SELF } from 'cloudflare:test';
 import worker from '../src/index';
 import {
@@ -636,7 +636,7 @@ describe('who a device upload reaches (API-038)', () => {
   });
 });
 
-describe('malformed ids in the path', () => {
+describe('malformed ids in the path (API-004)', () => {
   const rows: Array<[string, string, string, string]> = [
     ['API-030', 'PATCH', '/device/abc', 'name'],
     ['API-031', 'DELETE', '/device/abc', ''],
@@ -646,8 +646,7 @@ describe('malformed ids in the path', () => {
     ['API-049', 'DELETE', '/locked-password/abc/permanent', ''],
   ];
 
-  // KNOWN-BUG: an id that is not a UUID makes the code answer 500 (uuidToBytes throws) instead of 404.
-  it.fails.each(rows)(
+  it.each(rows)(
     '%s: %s %s answers 404, since no such resource exists (API-030, API-031, API-046, API-047, API-048, API-049)',
     async (_id, method, path, field) => {
       const owner = await signupAndGetCookie('malformed@ac.test');
@@ -661,4 +660,50 @@ describe('malformed ids in the path', () => {
       expect(res.status).toBe(404);
     },
   );
+
+  it.each(['1', 'zzzzzzzz-zzzz-4zzz-8zzz-zzzzzzzzzzzz', `${'0'.repeat(32)}0`])(
+    'answers 404 for the id %s',
+    async (id) => {
+      const owner = await signupAndGetCookie('malformed@ac.test');
+      const res = await SELF.fetch(`${BASE}/device/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(owner.cookie),
+      });
+      expect(res.status).toBe(404);
+    },
+  );
+
+  it('checks the session before the id (API-003)', async () => {
+    const res = await SELF.fetch(`${BASE}/device/abc`, { method: 'DELETE' });
+    expect(res.status).toBe(401);
+  });
+
+  it('answers 500 and logs a bad UUID that did not come from the path (API-004)', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => logged.mockRestore());
+    const corruptDb = {
+      prepare: () => ({ bind: () => ({ first: async () => ({ id: 'not-a-uuid' }) }) }),
+    };
+
+    const res = await worker.fetch(
+      new Request(`${BASE}/user/login-material?email=corrupt%40ac.test`),
+      { ...env, DB: corruptDb as unknown as D1Database },
+      createExecutionContext(),
+    );
+
+    expect(res.status).toBe(500);
+    expect(logged).toHaveBeenCalled();
+  });
+
+  it('answers an invalid body on a malformed id as it does on an unknown id (API-004, API-030)', async () => {
+    const owner = await signupAndGetCookie('malformed@ac.test');
+    for (const id of ['abc', '00000000-0000-4000-8000-000000000000']) {
+      const res = await SELF.fetch(`${BASE}/device/${id}`, {
+        method: 'PATCH',
+        headers: authHeaders(owner.cookie),
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
 });

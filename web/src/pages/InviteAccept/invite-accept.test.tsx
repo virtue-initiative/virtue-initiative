@@ -160,7 +160,11 @@ describe('Invite acceptance (WEB-053)', () => {
       openLink();
       await user.click(await screen.findByRole('button', { name: 'Done' }));
 
-      expect(await screen.findByText('Could not save settings')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.',
+        ),
+      ).toBeInTheDocument();
       expect(window.location.pathname).toBe('/invite-accept');
       expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
     });

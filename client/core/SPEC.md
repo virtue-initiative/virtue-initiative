@@ -114,13 +114,13 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 `login(email, password, device_name?) -> device_id`
 
-MUST revoke any existing device session first, then register a new device with the API. On success MUST store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. On failure MUST leave the client logged out. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+MUST register a new device with the API before anything else. On failure MUST leave the persisted state unchanged, including any existing session, its queued events and screenshot capture. On success, it SHOULD try once to upload the pending batch with any existing session, and a failure of that upload MUST NOT fail the login. It MUST then log out (CORE-009), so that queued events still unsent are discarded and the new session shares no state with the old one. It MUST then store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
 
 ### CORE-009 logout
 
 `logout()`
 
-MUST best-effort revoke the device session with the API, MUST clear stored device credentials, and MUST disable screenshot capture. A batch upload that was in flight when the device logged out MUST have its result discarded, so that it cannot restore queued events.
+MUST best-effort revoke the device session with the API, and MUST reset all persisted state to its initial value, which clears stored device credentials and queued events and disables screenshot capture. A logout the daemon performs because the server rejected the device MUST keep `recent_errors` (CORE-018), so that the reason stays visible. A batch upload that was in flight when the device logged out MUST have its result discarded, so that it cannot restore queued events.
 
 ### CORE-010 status
 

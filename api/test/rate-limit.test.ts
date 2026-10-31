@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF } from 'cloudflare:test';
+import { postPasswordReset } from './auth-helpers';
 import { BASE, clearDB, createDeviceForUser, signupAndGetCookie } from './helpers';
 
 beforeEach(clearDB);
@@ -63,4 +64,38 @@ describe('Per-device rate limiting (API-034)', () => {
     expect(resA.status).toBe(200);
     expect(resB.status).toBe(200);
   });
+});
+
+describe('Per-IP rate limiting of the account lookup routes (API-012, API-015)', () => {
+  it('does not limit GET /user/login-material, which every login calls first (API-015)', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 130 }, () =>
+        SELF.fetch(`${BASE}/user/login-material?email=nobody%40example.com`, {
+          headers: { 'CF-Connecting-IP': 'shared-by-many-logins' },
+        }),
+      ),
+    );
+    await Promise.all(responses.map((res: Response) => res.arrayBuffer()));
+    expect(responses.map((res: Response) => res.status)).not.toContain(429);
+  }, 20000);
+
+  // Fires 130 for the reason given in the per-device test above.
+  it.each([
+    ['POST /password-reset', (ip: string) => postPasswordReset('nobody@example.com', {}, ip), 204],
+  ] as const)(
+    '%s answers 429 once one IP exceeds the rate, without limiting other IPs',
+    async (name, send, okStatus) => {
+      const ip = `limited-${name}`;
+      const responses = await Promise.all(Array.from({ length: 130 }, () => send(ip)));
+      const statuses = responses.map((res: Response) => res.status);
+      expect(statuses).toContain(okStatus);
+      expect(statuses).toContain(429);
+
+      const limited = responses.find((res: Response) => res.status === 429)!;
+      expect(await limited.json()).toEqual({ error: 'Too many requests' });
+
+      expect((await send(`other-${name}`)).status).toBe(okStatus);
+    },
+    20000,
+  );
 });

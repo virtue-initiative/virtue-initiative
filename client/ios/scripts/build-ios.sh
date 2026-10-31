@@ -12,6 +12,8 @@ DESTINATION="generic/platform=iOS Simulator"
 TEAM_ID="${TEAM_ID:-}"
 BUNDLE_ID="${BUNDLE_ID:-org.virtueinitiative.virtueios}"
 CODE_SIGNING_ALLOWED="${CODE_SIGNING_ALLOWED:-YES}"
+ARCH=""
+SDK=""
 
 source "${CLIENT_ROOT}/scripts/version.sh"
 
@@ -30,6 +32,11 @@ Options:
   --configuration <Debug|Release>          Default: ${CONFIGURATION}
   --derived-data <path>                    Default: ${DERIVED_DATA_PATH}
   --code-signing-allowed <YES|NO>          Default: ${CODE_SIGNING_ALLOWED}
+  --arch <x86_64|arm64>                    Build only this arch. Default: Xcode's choice
+  --sdk <iphonesimulator|iphoneos>         Build the app target against an SDK instead of the scheme
+                                           against a destination. Xcode finds no destinations when no
+                                           simulator runtime exactly matches its SDK, as on a Mac with
+                                           Xcode 16.4 and the iOS 18.6 runtime.
 EOF
 }
 
@@ -59,6 +66,14 @@ while [[ $# -gt 0 ]]; do
       CODE_SIGNING_ALLOWED="$2"
       shift 2
       ;;
+    --arch)
+      ARCH="$2"
+      shift 2
+      ;;
+    --sdk)
+      SDK="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -73,16 +88,29 @@ done
 
 ARGS=(
   -project "$PROJECT_PATH"
-  -scheme "$SCHEME"
   -configuration "$CONFIGURATION"
-  -destination "$DESTINATION"
-  -derivedDataPath "$DERIVED_DATA_PATH"
   VIRTUE_APP_BUNDLE_ID="$BUNDLE_ID"
   MARKETING_VERSION="$MARKETING_VERSION"
   CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
   VIRTUE_BUILD_LABEL="$VIRTUE_BUILD_LABEL"
   CODE_SIGNING_ALLOWED="$CODE_SIGNING_ALLOWED"
 )
+
+if [[ -n "$SDK" ]]; then
+  # -derivedDataPath needs a scheme. These put the output in the same places.
+  ARGS+=(
+    -target "$SCHEME"
+    -sdk "$SDK"
+    SYMROOT="$DERIVED_DATA_PATH/Build/Products"
+    OBJROOT="$DERIVED_DATA_PATH/Build/Intermediates.noindex"
+  )
+else
+  ARGS+=(-scheme "$SCHEME" -destination "$DESTINATION" -derivedDataPath "$DERIVED_DATA_PATH")
+fi
+
+if [[ -n "$ARCH" ]]; then
+  ARGS+=(ARCHS="$ARCH" ONLY_ACTIVE_ARCH=NO)
+fi
 
 if [[ -n "$TEAM_ID" ]]; then
   ARGS+=(

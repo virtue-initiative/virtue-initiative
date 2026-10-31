@@ -3,7 +3,7 @@ import { getCookie, deleteCookie, setCookie } from 'hono/cookie';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
-import { rateLimitByDevice } from '../middleware/rate-limit';
+import { rateLimitByDevice, rateLimitByIp } from '../middleware/rate-limit';
 import { validateZ } from '../middleware/validation';
 import {
   changeUserPassword,
@@ -17,7 +17,6 @@ import {
   findPermanentEmailBounce,
   findUserByEmail,
   findUserById,
-  invalidateEmailTokens,
   updateUser,
   consumeEmailToken,
 } from '../lib/db';
@@ -27,11 +26,12 @@ import {
   renderEmailVerificationTemplate,
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
-  HELP_EMAIL,
 } from '../lib/email/templates';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
+import { issueEmailToken } from '../lib/email-tokens';
+import { sendVerificationEmail, unverifiedLoginResponse } from '../lib/email-verification';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser } from '../lib/serializers';
 import {
@@ -55,8 +55,8 @@ import {
 import {
   CURRENT_HASH_PARAMS,
   HASH_PARAMS_VERSION,
-  generatePasswordSalt,
   hashPasswordAuth,
+  madeUpPasswordSalt,
   verifyPasswordAuth,
 } from '../lib/password';
 import { assertTokenPurpose, generateOpaqueToken, hashOpaqueToken } from '../lib/tokens';
@@ -157,58 +157,6 @@ async function createSession(
   });
 
   return refreshToken;
-}
-
-async function issueEmailToken(
-  db: D1Database,
-  user: { id: string; email: string },
-  purpose: 'email_change' | 'email_verification' | 'password_reset',
-  ttlMs: number,
-) {
-  await invalidateEmailTokens(db, user.id, purpose);
-  const token = generateOpaqueToken(purpose);
-  const id = uuidv4();
-  const now = Date.now();
-
-  await createEmailToken(db, {
-    id,
-    user_id: user.id,
-    email: user.email,
-    purpose,
-    token_hash: hashOpaqueToken(token),
-    expires_at: now + ttlMs,
-    created_at: now,
-  });
-
-  return { id, token };
-}
-
-async function sendVerificationEmail(
-  c: Context<{ Bindings: Env; Variables: Variables }>,
-  user: { id: string; email: string; name?: string | null },
-  { id: tokenId, token }: { id: string; token: string },
-  purpose: 'email_change' | 'email_verification' = 'email_change',
-) {
-  const verifyUrl = `${c.env.APP_URL}/verify-email?token=${encodeURIComponent(token)}`;
-  const email = renderEmailVerificationTemplate({
-    appName: c.env.APP_NAME,
-    appUrl: c.env.APP_URL,
-    recipientName: user.name,
-    verifyUrl,
-  });
-
-  return sendEmail({
-    env: c.env,
-    db: c.env.DB,
-    kind: 'email_verification',
-    recipient: user.email,
-    subject: email.subject,
-    text: email.text,
-    html: email.html,
-    related_user_id: user.id,
-    email_token_id: tokenId,
-    metadata: { purpose, verifyUrl },
-  });
 }
 
 async function sendSignupConfirmationEmail(
@@ -379,10 +327,13 @@ auth.get('/user/login-material', validateZ('query', loginMaterialQuerySchema), a
     return c.json({ params: buildHashParamsResponse() });
   }
 
-  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+  const normalizedEmail = email.trim().toLowerCase();
+  // API-015: computed for every email, so a real account takes the same work as an unknown one.
+  const madeUpSalt = await madeUpPasswordSalt(c.env.LOGIN_SALT_SECRET, normalizedEmail);
+  const user = await findUserByEmail(c.env.DB, normalizedEmail);
 
   return c.json({
-    password_salt: encodeBase64(user?.password_salt ?? generatePasswordSalt()),
+    password_salt: encodeBase64(user?.password_salt ?? madeUpSalt),
     params: buildHashParamsResponse(),
   });
 });
@@ -546,31 +497,7 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
   }
 
   if (result.status === 'unverified') {
-    const verificationToken = await issueEmailToken(
-      c.env.DB,
-      result.user,
-      'email_verification',
-      EMAIL_VERIFICATION_TTL_MS,
-    );
-    const sent = await sendVerificationEmail(
-      c,
-      result.user,
-      verificationToken,
-      'email_verification',
-    );
-    if (sent.bounce_id) {
-      return c.json(
-        {
-          error: `Email to your address bounced, so we could not send a verification email. Email ${HELP_EMAIL} for help.`,
-          code: 'email_bounced',
-        },
-        403,
-      );
-    }
-    return c.json(
-      { error: 'Please verify your email before logging in. A verification email has been sent.' },
-      403,
-    );
+    return unverifiedLoginResponse(c, result.user);
   }
 
   const { user } = result;
@@ -587,16 +514,29 @@ auth.post('/login', validateZ('json', loginSchema), async (c) => {
 });
 
 auth.post('/logout', async (c) => {
-  const refreshToken = getCookie(c, 'refresh_token');
-  if (refreshToken) {
+  const authHeader = c.req.header('Authorization');
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+  let deleteFailed = false;
+  for (const refreshToken of [getCookie(c, 'refresh_token'), bearerToken]) {
+    if (!refreshToken) continue;
     try {
       assertTokenPurpose(refreshToken, 'web_session');
-      await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
     } catch {
       // Malformed or foreign-purpose token — nothing to delete.
+      continue;
+    }
+    try {
+      await deleteSessionByRefreshTokenHash(c.env.DB, hashOpaqueToken(refreshToken), 'web');
+    } catch (err) {
+      console.error('[logout] failed to delete session', err);
+      deleteFailed = true;
     }
   }
   deleteCookie(c, 'refresh_token', { path: '/' });
+  // API-018: the session is still valid, so this is not a successful logout.
+  if (deleteFailed) {
+    return c.json({ error: 'Internal server error' }, 500);
+  }
   return c.body(null, 204);
 });
 
@@ -786,16 +726,26 @@ auth.post('/email-verification/validate', validateZ('json', verifyEmailSchema), 
   });
 });
 
-auth.post('/password-reset', validateZ('json', passwordResetRequestSchema), async (c) => {
-  const { email } = c.req.valid('json');
-  const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+auth.post(
+  '/password-reset',
+  rateLimitByIp(),
+  validateZ('json', passwordResetRequestSchema),
+  async (c) => {
+    const { email } = c.req.valid('json');
 
-  if (user) {
-    await sendPasswordResetEmail(c, user);
-  }
+    // API-012: runs after the response, so neither its timing nor a failure reveals the account.
+    c.executionCtx.waitUntil(
+      (async () => {
+        const user = await findUserByEmail(c.env.DB, email.trim().toLowerCase());
+        if (user) {
+          await sendPasswordResetEmail(c, user);
+        }
+      })().catch((err) => console.error('[password-reset] failed to send reset email', err)),
+    );
 
-  return c.body(null, 204);
-});
+    return c.body(null, 204);
+  },
+);
 
 auth.post('/password-reset/validate', validateZ('json', passwordResetValidateSchema), async (c) => {
   const { token } = c.req.valid('json');
@@ -848,7 +798,7 @@ auth.post('/password-reset/finalize', validateZ('json', passwordResetSchema), as
   });
   await consumeEmailToken(c.env.DB, record, Date.now());
 
-  return c.json({ ok: true });
+  return c.body(null, 204);
 });
 
 export default auth;

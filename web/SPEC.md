@@ -60,9 +60,13 @@ When any request is answered with HTTP 401 (API-003), the app MUST end the sessi
 
 ### WEB-007 Logging out
 
-Logging out MUST call API-018, MUST clear this browser's log cache (WEB-013) and the saved key, and MUST then show the login page. A failure of API-018 MUST NOT stop the local logout.
+Logging out MUST call API-018, MUST clear this browser's log cache (WEB-013) and the saved key, and MUST then show the login page. If API-018 fails, the app MUST retry it twice. If it still fails, the app MUST stay signed in and show the message in WEB-071, because the server session is still valid.
 
 > OPEN: the login page after a manual logout carries `to=<the page the user was on>`, so the next account to log in on that browser lands on the previous account's page (for example another person's logs) — should a manual logout drop `to`?
+
+### WEB-071 Unexpected server errors
+
+When the server answers a request with a status of 500 or above, the app MUST show "Something went wrong, please try again. If this continues, contact help@virtueinitiative.org." in place of the server's own message.
 
 ### WEB-008 Messages across a reload
 
