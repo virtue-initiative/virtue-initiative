@@ -103,6 +103,10 @@
     <string name="a11y_guide_step_of">Step %1$d of %2$d</string>
     <string name="setup_steps_on">Accessibility is on. Virtue can capture screenshots.</string>
     <string name="setup_steps_off">Virtue only works after Accessibility is turned on.</string>
+    <string name="a11y_step_permissions_title">Allow permissions</string>
+    <string name="a11y_step_permissions_body">Virtue asks for two permissions so it keeps running. Notifications let Virtue show the \"Monitoring active\" notification while it is on. Unrestricted battery use stops Android from closing Virtue in the background. Neither one is needed to take screenshots.</string>
+    <string name="btn_request_permissions">Request Permissions</string>
+    <string name="btn_permissions_allowed">Permissions Allowed</string>
     <string name="a11y_step_expand">Show step %1$d, %2$s</string>
 
     <!-- What Virtue monitors (full screen). Keep in step with

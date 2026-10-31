@@ -74,9 +74,11 @@ class MainActivity : AppCompatActivity() {
         override fun handleOnBackPressed() = showScreen(Screen.HOME)
     }
 
+    // The battery question follows the notification one, so the two system
+    // prompts never stack.
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) {}
+    ) { requestBatteryExemption() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -95,7 +97,6 @@ class MainActivity : AppCompatActivity() {
 
         KeepAliveWorker.schedule(this)
         AppUpdater.checkSoon(this)
-        requestBackgroundFriendlySettings()
         showScreen(Screen.HOME)
         handleIntent(intent)
     }
@@ -326,7 +327,7 @@ class MainActivity : AppCompatActivity() {
         // The sign-in form keeps focus and the keyboard while the user types, so
         // a refresh that changes nothing must not rebuild it.
         val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
-        val key = "${state.name}/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        val key = "${state.name}/${AccessibilitySetupGuide.permissionsGranted(this)}/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
         if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
@@ -638,30 +639,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleGuideAction(action: AccessibilitySetupGuide.Action) {
         when (action) {
+            AccessibilitySetupGuide.Action.REQUEST_PERMISSIONS -> requestPermissions()
             AccessibilitySetupGuide.Action.ACCESSIBILITY_SETTINGS -> openAccessibilitySettings()
             AccessibilitySetupGuide.Action.APP_INFO -> openAppInfo()
             AccessibilitySetupGuide.Action.APP_LIST -> openAppList()
         }
     }
 
-    private fun requestBackgroundFriendlySettings() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+    /** The guide's "Request Permissions" button (CLIENT-030). Neither is needed to capture. */
+    private fun requestPermissions() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            requestBatteryExemption()
         }
+    }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(PowerManager::class.java)
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                runCatching {
-                    startActivity(
-                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                            .setData(Uri.parse("package:$packageName"))
-                    )
-                }
+    private fun requestBatteryExemption() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        .setData(Uri.parse("package:$packageName"))
+                )
             }
         }
     }

@@ -31,7 +31,7 @@ The API URL, capture interval and batch window are fixed at build time on every 
 - Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. Before `virtue login`, the daemon runs with capture disabled.
 - macOS: the first launch MUST open the main window, request Screen Recording (CLIENT-025), register the app as a login item, and install and start the daemon LaunchAgent (CLIENT-024).
 - Windows: the app is installed from the Microsoft Store as an MSIX. Launching it MUST start monitoring in-process, create the tray icon, register the watchdog (CLIENT-028) and show the main window.
-- Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). Every launch MUST ask for the notification permission (Android 13+) and for exemption from battery optimization when either is missing.
+- Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). The app MUST NOT ask for the notification permission (Android 13+) or for exemption from battery optimization when it opens; the setup guide's first step MUST explain why both are wanted and offer a "Request Permissions" button that asks for them (CLIENT-030).
 - iOS: after sign-in the user MUST be guided to turn on the Safari extension (CLIENT-032). Nothing is monitored until they do.
 
 ## CLIENT-004 Signing in
@@ -109,7 +109,7 @@ A missing capture permission MUST be explained in the app with steps to fix it. 
 - Linux: no OS permission. Capture needs a graphical session and a capture tool (CLIENT-018); `virtue login` probes it (CLIENT-020).
 - macOS: Screen Recording (CLIENT-025).
 - Windows: none.
-- Android: the Accessibility service is the capture permission (CLIENT-030). Notifications and battery-optimization exemption are requested on each launch but are not required to capture.
+- Android: the Accessibility service is the capture permission (CLIENT-030). Notifications and battery-optimization exemption are requested only from the setup guide's "Request Permissions" button and are not required to capture.
 - iOS: the Safari extension, its All Websites access and Private Browsing access (CLIENT-032).
 
 ## CLIENT-010 Starting automatically and staying running
@@ -322,7 +322,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - The persistent notification "Monitoring active" (channel "Virtue monitoring") MUST be shown while signed in. If Android refuses to start it, monitoring MUST continue without it.
 - Restarting the loop MUST queue the resume (CORE-022) rather than wait for it, and MUST wait up to 15 s for a previous loop to finish stopping.
 - Home MUST show a top app bar with the V logo and "Virtue Initiative" (together one link to the website) and an overflow menu labelled "More options", and below it exactly one focus area chosen by the headline state:
-  - Accessibility is off: the setup guide with all its steps on one page, under the title "Turn on Accessibility" and the intro. It MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
+  - Accessibility is off: the setup guide with all its steps on one page, under the title "Turn on Accessibility" and the intro. The first step MUST always be "Allow permissions": it says why Virtue wants notifications (the persistent "Monitoring active" notification) and unrestricted battery use (so Android does not stop Virtue in the background), and its "Request Permissions" button asks for the notification permission and then for the battery exemption. Once both are granted the button MUST read "Permissions Allowed" and be disabled. The guide MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
   - signed out (Accessibility on): the sign-in form (CLIENT-004), whose password field has a show and hide control;
   - active, waiting for first capture or paused: a ring, the headline, one sentence and buttons. Active and waiting MUST offer "Add partners" (no partners) or "Add more partners", which open the Partners page on the website, and "Pause Monitoring", which MUST ask for confirmation first. Paused MUST offer "Resume Monitoring".
 - The overflow menu MUST list Setup Steps, Status Details, What Virtue Monitors, Report an Issue and, only when signed in, Sign Out (which MUST ask for confirmation, then stop the loop and remove the persistent notification), with the build label as a last item that cannot be selected. Each item MUST open a full screen with a back arrow, and Back MUST return to Home. Setup Steps MUST list all steps of the guide.

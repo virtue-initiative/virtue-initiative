@@ -6,6 +6,7 @@ import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.PowerManager
 import android.view.Gravity
 import android.text.SpannableStringBuilder
 import android.util.TypedValue
@@ -15,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.AccessibilityDelegateCompat
 import androidx.core.view.ViewCompat
@@ -34,7 +36,7 @@ import com.google.android.material.shape.ShapeAppearanceModel
  * steps when that block applies.
  */
 object AccessibilitySetupGuide {
-    enum class Action { ACCESSIBILITY_SETTINGS, APP_INFO, APP_LIST }
+    enum class Action { REQUEST_PERMISSIONS, ACCESSIBILITY_SETTINGS, APP_INFO, APP_LIST }
 
     data class Step(
         val title: String,
@@ -149,40 +151,33 @@ object AccessibilitySetupGuide {
                 addView(context.filledButton(
                     context.getString(
                         when (action) {
+                            Action.REQUEST_PERMISSIONS -> R.string.btn_request_permissions
                             Action.ACCESSIBILITY_SETTINGS -> R.string.btn_open_accessibility_settings
                             Action.APP_INFO -> R.string.btn_open_app_info
                             Action.APP_LIST -> R.string.btn_open_app_list
                         }
                     )
-                ) { onAction(action) }.topMargin(12))
+                ) { onAction(action) }.apply {
+                    if (action == Action.REQUEST_PERMISSIONS && permissionsGranted(context)) {
+                        text = context.getString(R.string.btn_permissions_allowed)
+                        isEnabled = false
+                    }
+                }.topMargin(12))
             }
             if (step.images.size == 1) {
                 addView(screenshot(context, step.images[0], step.title, 0).apply {
                     (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(12)
                 })
             } else if (step.images.size > 1) {
-                // Several screenshots of one trip through Settings: a strip to
-                // swipe, each captioned with what it shows.
-                val strip = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                // Several screenshots of one trip through Settings, each captioned
+                // with what it shows.
                 step.images.forEachIndexed { index, image ->
                     val caption = step.captions.getOrNull(index).orEmpty()
-                    strip.addView(LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(
-                            context.dp(240), LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { if (index > 0) marginStart = context.dp(12) }
-                        addView(screenshot(context, image, caption, context.dp(240)))
-                        addView(context.text("${index + 1}. $caption", 14f, R.color.ink_3, bold = true).topMargin(6))
+                    addView(context.text("${index + 1}. $caption", 14f, R.color.ink_3, bold = true).topMargin(16))
+                    addView(screenshot(context, image, caption, context.dp(240)).apply {
+                        (layoutParams as LinearLayout.LayoutParams).topMargin = context.dp(6)
                     })
                 }
-                addView(android.widget.HorizontalScrollView(context).apply {
-                    isHorizontalScrollBarEnabled = false
-                    clipToPadding = false
-                    addView(strip)
-                    layoutParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { topMargin = context.dp(16) }
-                })
             }
         }
 
@@ -222,8 +217,23 @@ object AccessibilitySetupGuide {
         }
     }
 
+    /** Whether both optional permissions the first step asks for are already granted. */
+    fun permissionsGranted(context: Context): Boolean {
+        val notifications = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        val battery = context.getSystemService(PowerManager::class.java)
+            .isIgnoringBatteryOptimizations(context.packageName)
+        return notifications && battery
+    }
+
     /** The guide's steps for this device's Android version (CLIENT-030). */
-    fun steps(context: Context): List<Step> = steps(context, isRestricted(context))
+    fun steps(context: Context): List<Step> =
+        listOf(
+            Step(
+                title = context.getString(R.string.a11y_step_permissions_title),
+                body = context.getString(R.string.a11y_step_permissions_body),
+                action = Action.REQUEST_PERMISSIONS,
+            )
+        ) + steps(context, isRestricted(context))
 
     private fun steps(context: Context, restricted: Boolean): List<Step> {
         val sdk = Build.VERSION.SDK_INT
