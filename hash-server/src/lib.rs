@@ -56,6 +56,8 @@ pub fn router(state: AppState) -> ApiVersion<Router> {
                 .get(routes::hash::get_many)
                 .delete(routes::hash::reset),
         )
+        .fallback(|| async { error::ApiError::NotFound })
+        .method_not_allowed_fallback(|| async { error::ApiError::MethodNotAllowed })
         .layer(middleware::from_fn(logging::log_request))
         .with_state(state);
 

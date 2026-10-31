@@ -63,29 +63,28 @@ async fn query_and_auth_errors_have_the_documented_shape() {
     }
 }
 
-// HASH-002, HASH-004: the 410 for an unsupported version is an error response too.
+// HASH-002, HASH-004: the 410 for an unsupported version is an error response too, and
+// keeps the `error` field that old clients show.
 #[tokio::test]
-#[should_panic(expected = "KNOWN-BUG")]
 async fn gone_response_has_the_documented_error_shape() {
     let s = spawn_server().await;
     let resp = s.client.get(s.url("/v2/hash")).send().await.unwrap();
     assert_eq!(resp.status(), 410);
     let body: Value = resp.json().await.unwrap();
-    assert!(
-        body["code"].is_string() && body["message"].is_string(),
-        "KNOWN-BUG: the 410 Gone body has an `error` field but no code or message: {body}"
-    );
+    assert_eq!(body["code"], "gone", "{body}");
+    assert!(body["message"].as_str().is_some_and(|m| !m.is_empty()));
+    assert_eq!(body["error"], body["message"], "{body}");
 }
 
 // HASH-002: unknown routes and unsupported methods are error responses too.
 #[tokio::test]
-#[should_panic(expected = "KNOWN-BUG")]
 async fn unknown_route_and_method_have_the_documented_error_shape() {
     let s = spawn_server().await;
-    for (method, path, status) in [
-        (Method::GET, "/nope", 404),
-        (Method::PUT, "/hash", 405),
-        (Method::POST, "/", 405),
+    for (method, path, status, code) in [
+        (Method::GET, "/nope", 404, "not_found"),
+        (Method::GET, "/v0.1/nope", 404, "not_found"),
+        (Method::PUT, "/hash", 405, "method_not_allowed"),
+        (Method::POST, "/", 405, "method_not_allowed"),
     ] {
         let resp = s
             .client
@@ -93,31 +92,74 @@ async fn unknown_route_and_method_have_the_documented_error_shape() {
             .send()
             .await
             .unwrap();
-        assert_eq!(resp.status(), status, "{method} {path}");
-        let body: Value = resp.json().await.unwrap_or(Value::Null);
-        assert!(
-            body["code"].is_string() && body["message"].is_string(),
-            "KNOWN-BUG: axum's default 404 and 405 responses have an empty body, not the error shape: {method} {path}: {body}"
-        );
+        assert_error_shape(resp, status, code).await;
+    }
+}
+
+// HASH-002: a 405 still names the methods the route allows.
+#[tokio::test]
+async fn method_not_allowed_keeps_the_allow_header() {
+    let s = spawn_server().await;
+    let resp = s.client.put(s.url("/hash")).send().await.unwrap();
+    assert_eq!(resp.status(), 405);
+    let allow = resp.headers()["allow"].to_str().unwrap().to_string();
+    for method in ["GET", "POST", "DELETE"] {
+        assert!(allow.contains(method), "{allow}");
     }
 }
 
 // HASH-002: a repeated query parameter is a malformed query and gets the error shape.
 #[tokio::test]
-#[should_panic(expected = "KNOWN-BUG")]
 async fn repeated_query_parameter_has_the_documented_error_shape() {
     let s = spawn_server().await;
-    let resp = s
+    let get = s
         .get_devices(&format!("devices={DEVICE_A}&devices={DEVICE_B}"))
         .await;
-    assert_eq!(resp.status(), 400);
-    let text = resp.text().await.unwrap();
-    let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-    assert_eq!(
-        body["code"], "invalid_query",
-        "KNOWN-BUG: a repeated `devices` parameter gets axum's plain-text 400, not the error shape: {text}"
-    );
-    assert!(body["message"].is_string(), "{body}");
+    assert_error_shape(get, 400, "invalid_query").await;
+
+    let delete = s
+        .client
+        .delete(s.url(&format!("/hash?device={DEVICE_A}&device={DEVICE_B}")))
+        .header(
+            "Authorization",
+            format!("Bearer {}", s.token("api", "server")),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_error_shape(delete, 400, "invalid_query").await;
+}
+
+// HASH-002: a body too large to read is an invalid body, and the token is checked first.
+#[tokio::test]
+async fn oversized_body_has_the_documented_error_shape() {
+    let s = spawn_server().await;
+    let token = s.token(DEVICE_A, "device");
+    let oversized = vec![0; 2 * 1024 * 1024 + 1];
+    let resp = s.post_raw(&token, oversized.clone()).await;
+    assert_error_shape(resp, 400, "invalid_body").await;
+
+    let resp = s
+        .client
+        .post(s.url("/hash"))
+        .body(oversized)
+        .send()
+        .await
+        .unwrap();
+    assert_error_shape(resp, 401, "unauthorized").await;
+}
+
+// HASH-002: authentication comes before a query the server cannot parse.
+#[tokio::test]
+async fn repeated_query_parameter_without_a_token_is_unauthorized() {
+    let s = spawn_server().await;
+    let resp = s
+        .client
+        .get(s.url(&format!("/hash?devices={DEVICE_A}&devices={DEVICE_B}")))
+        .send()
+        .await
+        .unwrap();
+    assert_error_shape(resp, 401, "unauthorized").await;
 }
 
 fn base64url(bytes: &[u8]) -> String {
@@ -368,24 +410,33 @@ async fn server_token_sub_is_ignored() {
     assert_eq!(resp.status(), 200);
 }
 
-// HASH-007, HASH-008: a server token does not need a sub at all.
+// HASH-007, HASH-008: a server token does not need a sub at all, or a string one.
 #[tokio::test]
-#[should_panic(expected = "KNOWN-BUG")]
-async fn server_token_without_sub_is_accepted() {
+async fn server_token_without_a_string_sub_is_accepted() {
     let s = spawn_server().await;
-    let token = s.token_with(json!({ "type": "server", "exp": now() + 3600 }));
-    let resp = s
-        .client
-        .get(s.url(&format!("/hash?devices={DEVICE_A}")))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        200,
-        "KNOWN-BUG: a server token with no sub claim is rejected with 401 because sub is parsed as required"
-    );
+    for claims in [
+        json!({ "type": "server", "exp": now() + 3600 }),
+        json!({ "sub": 42, "type": "server", "exp": now() + 3600 }),
+    ] {
+        let token = s.token_with(claims.clone());
+        let resp = s
+            .client
+            .get(s.url(&format!("/hash?devices={DEVICE_A}")))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "{claims}");
+    }
+}
+
+// HASH-006: a device token must name its device with a string sub.
+#[tokio::test]
+async fn device_token_with_a_non_string_sub_is_rejected() {
+    let s = spawn_server().await;
+    let token = s.token_with(json!({ "sub": 42, "type": "device", "exp": now() + 3600 }));
+    let resp = s.post_raw(&token, post_body(1, 1, [0; 32])).await;
+    assert_error_shape(resp, 401, "unauthorized").await;
 }
 
 // HASH-006: the token's sub is the device id, so two devices keep separate state.
