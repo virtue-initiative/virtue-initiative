@@ -507,7 +507,7 @@ describe('POST /password-reset/finalize (API-014)', () => {
   it('can be used once: a second finalize with the same token changes nothing (API-014)', async () => {
     await signupAndGetCookie('reset@example.com', 'old-password');
     const token = await requestPasswordResetToken('reset@example.com');
-    expect((await finalize(token, 'reset@example.com', 'first-reset')).status).toBeLessThan(300);
+    expect((await finalize(token, 'reset@example.com', 'first-reset')).status).toBe(204);
 
     const second = await finalize(token, 'reset@example.com', 'attacker');
     expect(second.status).toBe(400);
