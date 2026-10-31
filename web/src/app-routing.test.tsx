@@ -382,22 +382,27 @@ describe('Logging out (WEB-007)', () => {
     expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument();
   });
 
-  it.each([
-    ['an error response', () => HttpResponse.json({ error: 'boom' }, { status: 500 })],
-    ['a network failure', () => HttpResponse.error()],
-  ])(
-    'still logs out locally when the logout request fails with %s (WEB-007)',
-    async (_name, respond) => {
-      server.use(http.post(`${API}/logout`, respond));
-      const user = await openedApp();
+  it('retries a failed logout request, then stays signed in and shows the support message (WEB-007, WEB-071)', async () => {
+    const logoutCalls = vi.fn();
+    server.use(
+      http.post(`${API}/logout`, () => {
+        logoutCalls();
+        return HttpResponse.json({ error: 'boom' }, { status: 500 });
+      }),
+    );
+    const user = await openedApp();
 
-      await clickLogOut(user);
+    await clickLogOut(user);
 
-      expect(await screen.findByRole('heading', { name: 'The Virtue Initiative' })).toBeVisible();
-      expect(clearCache).toHaveBeenCalled();
-      expect(localStorage.getItem(WRAPPING_KEY_STORAGE)).toBeNull();
-    },
-  );
+    expect(
+      await screen.findByText(
+        'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.',
+      ),
+    ).toBeInTheDocument();
+    expect(logoutCalls).toHaveBeenCalledTimes(3);
+    expect(localStorage.getItem(WRAPPING_KEY_STORAGE)).not.toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
+  });
 
   it('stays logged out after a reload (WEB-007)', async () => {
     const user = await openedApp();

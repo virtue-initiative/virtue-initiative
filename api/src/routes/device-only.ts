@@ -315,9 +315,9 @@ deviceOnly.post(
         `[batch] device ${device.id} sent end_time ${end_time - createdAt} ms in the future; clamped`,
       );
     }
-    if (startTime !== start_time) {
+    if (start_time > end_time) {
       console.warn(
-        `[batch] device ${device.id} sent start_time ${start_time - endTime} ms after end_time; clamped`,
+        `[batch] device ${device.id} sent start_time ${start_time - end_time} ms after end_time; clamped`,
       );
     }
 
