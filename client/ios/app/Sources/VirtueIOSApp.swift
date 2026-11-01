@@ -92,17 +92,22 @@ private struct HomeView: View {
     let onPause: () -> Void
     @ScaledMetric(relativeTo: .title3) private var titleSize: CGFloat = 19
 
+    private static let topID = "home-top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                focus
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    focus { proxy.scrollTo(Self.topID, anchor: .top) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .id(Self.topID)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .scrollDismissesKeyboard(.interactively)
+            .background(VirtueBrand.bg)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .background(VirtueBrand.bg)
     }
 
     private var header: some View {
@@ -131,12 +136,12 @@ private struct HomeView: View {
     }
 
     @ViewBuilder
-    private var focus: some View {
+    private func focus(scrollToTop: @escaping () -> Void) -> some View {
         switch coordinator.monitoringState {
         case .signedOut:
             SignInForm(coordinator: coordinator)
         case .needsSetup, .needsPermission:
-            SetupWizard(coordinator: coordinator)
+            SetupWizard(coordinator: coordinator, onStepChange: scrollToTop)
         case .active, .paused:
             StatusFocus(coordinator: coordinator, onPause: onPause)
         }
@@ -549,10 +554,9 @@ private struct StatusDetailsView: View {
                 DetailRow(kind: .neutral, label: "Recent problems", value: "Unknown")
             } else if let error = status?.recentErrors?.first {
                 DetailRow(
-                    kind: .bad,
+                    kind: Date().timeIntervalSince1970 * 1000 - Double(error.atMs) < 86_400_000 ? .warn : .neutral,
                     label: "Recent problems",
                     value: error.message,
-                    valueColor: VirtueBrand.bad,
                     hint: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
                 )
             } else {

@@ -90,7 +90,12 @@ fun Context.filledButton(text: CharSequence, onClick: () -> Unit): MaterialButto
 fun Context.tonalButton(text: CharSequence, onClick: () -> Unit): MaterialButton =
     filledButton(text, onClick).apply {
         backgroundTintList = ColorStateList.valueOf(color(R.color.bg_subtle))
-        setTextColor(color(R.color.ink))
+        setTextColor(
+            ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
+                intArrayOf(color(R.color.ink), color(R.color.ink_4)),
+            )
+        )
         rippleColor = ColorStateList.valueOf(color(R.color.border))
     }
 

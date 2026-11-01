@@ -32,7 +32,10 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -41,6 +44,26 @@ import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/**
+ * What must outlive the activity. A rotation recreates it while a native call
+ * keeps running, so the guards against a second call and that call's outcome
+ * live here (CLIENT-030). The password is here too, because it must not go in
+ * the saved instance state.
+ */
+private object Session {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    var activity: MainActivity? = null
+
+    var passwordDraft = ""
+    var loginError: String? = null
+    var signingIn = false
+    var capturing = false
+    var detailsMessage: String? = null
+    var sendingReport = false
+    var reportError: String? = null
+    var installing = false
+}
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -57,15 +80,18 @@ class MainActivity : AppCompatActivity() {
     // Sign-in form state. The form is rebuilt when Home refreshes, so what the
     // user typed lives here rather than in the views.
     private var emailDraft = ""
-    private var passwordDraft = ""
     private var deviceDraft = ""
-    private var loginError: String? = null
-    private var signingIn = false
     private var loginErrorView: TextView? = null
     private var loginButton: com.google.android.material.button.MaterialButton? = null
+    private var installButton: com.google.android.material.button.MaterialButton? = null
+
+    // Report an Issue form state. A null email means the form was not touched
+    // yet, so it starts from the account's email.
+    private var reportMessageDraft = ""
+    private var reportEmailDraft: String? = null
+    private var reportLogsDraft = true
 
     // Transient line in Status Details > Advanced (test screenshot, log file).
-    private var detailsMessage: String? = null
     private var detailsMessageView: TextView? = null
     private var testButton: com.google.android.material.button.MaterialButton? = null
 
@@ -82,6 +108,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Session.activity = this
+        savedInstanceState?.let(::restoreState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         applyWindowInsets()
@@ -92,13 +120,40 @@ class MainActivity : AppCompatActivity() {
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
-            loginError = getString(R.string.msg_core_init_failed, initError)
+            Session.loginError = getString(R.string.msg_core_init_failed, initError)
         }
 
         KeepAliveWorker.schedule(this)
         AppUpdater.checkSoon(this)
-        showScreen(Screen.HOME)
+        showScreen(screen)
         handleIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(KEY_SCREEN, screen.name)
+        outState.putBoolean(KEY_ADVANCED_OPEN, advancedOpen)
+        outState.putString(KEY_EMAIL, emailDraft)
+        outState.putString(KEY_DEVICE, deviceDraft)
+        outState.putString(KEY_REPORT_MESSAGE, reportMessageDraft)
+        outState.putString(KEY_REPORT_EMAIL, reportEmailDraft)
+        outState.putBoolean(KEY_REPORT_LOGS, reportLogsDraft)
+    }
+
+    private fun restoreState(saved: Bundle) {
+        screen = saved.getString(KEY_SCREEN)?.let { name -> Screen.entries.find { it.name == name } } ?: Screen.HOME
+        advancedOpen = saved.getBoolean(KEY_ADVANCED_OPEN)
+        emailDraft = saved.getString(KEY_EMAIL).orEmpty()
+        deviceDraft = saved.getString(KEY_DEVICE).orEmpty()
+        reportMessageDraft = saved.getString(KEY_REPORT_MESSAGE).orEmpty()
+        reportEmailDraft = saved.getString(KEY_REPORT_EMAIL)
+        reportLogsDraft = saved.getBoolean(KEY_REPORT_LOGS, true)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (Session.activity === this) Session.activity = null
+        if (isFinishing) Session.passwordDraft = ""
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -116,9 +171,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun installUpdate() {
-        lifecycleScope.launch {
-            val started = withContext(Dispatchers.IO) { AppUpdater.installReadyUpdate(this@MainActivity) }
-            if (!started) refreshUi()
+        // Each call commits its own install session, so a double tap would
+        // show two prompts.
+        if (Session.installing) return
+        Session.installing = true
+        installButton?.isEnabled = false
+        val app = applicationContext
+        Session.scope.launch {
+            val started = withContext(Dispatchers.IO) { AppUpdater.installReadyUpdate(app) }
+            Session.installing = false
+            Session.activity?.apply {
+                installButton?.isEnabled = true
+                if (!started) refreshUi()
+            }
         }
     }
 
@@ -173,6 +238,12 @@ class MainActivity : AppCompatActivity() {
     // ---- Navigation -------------------------------------------------------
 
     private fun showScreen(next: Screen) {
+        if (screen == Screen.REPORT && next != Screen.REPORT) {
+            reportMessageDraft = ""
+            reportEmailDraft = null
+            reportLogsDraft = true
+            Session.reportError = null
+        }
         screen = next
         backCallback.isEnabled = next != Screen.HOME
         currentFocus?.clearFocus()
@@ -193,7 +264,7 @@ class MainActivity : AppCompatActivity() {
             toolbar.menu.findItem(R.id.menu_sign_out).title = tinted(getString(R.string.btn_sign_out), R.color.bad)
             toolbar.menu.findItem(R.id.menu_build).title =
                 tinted(getString(R.string.menu_build, BuildConfig.VIRTUE_BUILD_LABEL), R.color.ink_3)
-            toolbar.menu.findItem(R.id.menu_sign_out).isVisible = NativeBridge.nativeIsLoggedIn()
+            toolbar.menu.findItem(R.id.menu_sign_out).isVisible = signedIn(statusJson())
         } else {
             brandView.visibility = View.GONE
             toolbar.title = when (screen) {
@@ -259,9 +330,6 @@ class MainActivity : AppCompatActivity() {
     private fun refreshUi() {
         if (screen == Screen.REPORT || screen == Screen.MONITORS) return
         val y = binding.scroll.scrollY
-        if (screen == Screen.HOME) {
-            binding.toolbar.menu.findItem(R.id.menu_sign_out)?.isVisible = NativeBridge.nativeIsLoggedIn()
-        }
         render()
         if (y > 0) binding.scroll.post { binding.scroll.scrollTo(0, y) }
     }
@@ -284,11 +352,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun lastScreenshotMs(json: JSONObject): Long = json.optLong("last_screenshot_at_ms", 0)
 
+    // Read from the status snapshot, which is held in memory. Home polls this,
+    // and nativeIsLoggedIn parses the whole state file on each call.
+    private fun signedIn(json: JSONObject): Boolean = json.optBoolean("is_authenticated", false)
+
     private fun currentState(json: JSONObject = statusJson()): State {
         val connected = VirtueAccessibilityService.isConnected()
         return when {
             !connected -> State.A11Y_OFF
-            !NativeBridge.nativeIsLoggedIn() -> State.SIGNED_OUT
+            !signedIn(json) -> State.SIGNED_OUT
             VirtueAccessibilityService.isPaused() -> State.PAUSED
             VirtueAccessibilityService.isEnabled() ->
                 if (lastScreenshotMs(json) > 0) State.ACTIVE else State.WAITING
@@ -323,20 +395,27 @@ class MainActivity : AppCompatActivity() {
         val content = binding.content
         val json = statusJson()
         val state = currentState(json)
+        binding.toolbar.menu.findItem(R.id.menu_sign_out)?.isVisible = signedIn(json)
 
         // The sign-in form keeps focus and the keyboard while the user types, so
-        // a refresh that changes nothing must not rebuild it.
+        // a refresh that changes nothing must not rebuild it. Only the guide
+        // shows the permissions, so nothing else pays for asking Android.
         val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
-        val key = "${state.name}/${AccessibilitySetupGuide.permissionsGranted(this)}/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        val permissions = state == State.A11Y_OFF && AccessibilitySetupGuide.permissionsGranted(this)
+        val key = "${state.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
         if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
         content.removeAllViews()
         loginErrorView = null
         loginButton = null
+        installButton = null
 
         AppUpdater.readyVersion(this)?.let { version ->
-            content.addView(tonalButton(getString(R.string.btn_install_update, version)) { installUpdate() }.topMargin(8))
+            val install = tonalButton(getString(R.string.btn_install_update, version)) { installUpdate() }
+            install.isEnabled = !Session.installing
+            installButton = install
+            content.addView(install.topMargin(8))
         }
 
         when (state) {
@@ -391,6 +470,8 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Sign in ----------------------------------------------------------
 
+    // inputType decides single or multiple lines by itself. Calling setSingleLine
+    // on top would replace the password field's masking.
     private fun outlinedField(hint: String, input: Int, ime: Int, autofill: String?): Pair<TextInputLayout, TextInputEditText> {
         val layout = TextInputLayout(
             this, null, com.google.android.material.R.attr.textInputOutlinedStyle
@@ -403,7 +484,6 @@ class MainActivity : AppCompatActivity() {
         val edit = TextInputEditText(layout.context).apply {
             inputType = input
             imeOptions = ime
-            setSingleLine()
             if (autofill != null) setAutofillHints(autofill)
         }
         layout.addView(edit)
@@ -450,10 +530,10 @@ class MainActivity : AppCompatActivity() {
             null,
         )
         email.setText(emailDraft)
-        password.setText(passwordDraft)
+        password.setText(Session.passwordDraft)
         device.setText(deviceDraft)
         email.doAfterTextChanged { emailDraft = it?.toString().orEmpty(); showLoginError(null) }
-        password.doAfterTextChanged { passwordDraft = it?.toString().orEmpty(); showLoginError(null) }
+        password.doAfterTextChanged { Session.passwordDraft = it?.toString().orEmpty(); showLoginError(null) }
         device.doAfterTextChanged { deviceDraft = it?.toString().orEmpty() }
         device.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_DONE) { login(); true } else false
@@ -467,10 +547,10 @@ class MainActivity : AppCompatActivity() {
         }.topMargin(12) as TextView
         loginErrorView = error
         content.addView(error)
-        showLoginError(loginError)
+        showLoginError(Session.loginError)
 
-        val button = filledButton(getString(if (signingIn) R.string.btn_signing_in else R.string.btn_sign_in)) { login() }
-        button.isEnabled = !signingIn
+        val button = filledButton(getString(if (Session.signingIn) R.string.btn_signing_in else R.string.btn_sign_in)) { login() }
+        button.isEnabled = !Session.signingIn
         loginButton = button
         content.addView(button.topMargin(16))
         content.addView(linkText(getString(R.string.btn_sign_up)) {
@@ -479,12 +559,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLoginError(message: String?) {
-        loginError = message
+        Session.loginError = message
         loginErrorView?.text = message.orEmpty()
         loginErrorView?.visibility = if (message == null) View.GONE else View.VISIBLE
     }
 
     private fun login() {
+        // A second login would revoke the first one's new device (CORE-008),
+        // which partners may be alerted about. The keyboard's Done action gets
+        // here too, not only the button.
+        if (Session.signingIn) return
+
         // nativeLogin() blocks waiting for a reply from the daemon loop thread,
         // so the loop must already be running before we call it. The loop is
         // only ever started by the accessibility service (on connect, or via
@@ -499,7 +584,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val email = emailDraft.trim()
-        val password = passwordDraft
+        val password = Session.passwordDraft
         val deviceName = deviceDraft.trim().ifBlank { null } ?: deviceName()
 
         if (email.isBlank() || password.isBlank()) {
@@ -508,36 +593,45 @@ class MainActivity : AppCompatActivity() {
         }
 
         showLoginError(null)
-        signingIn = true
+        Session.signingIn = true
         loginButton?.isEnabled = false
         loginButton?.text = getString(R.string.btn_signing_in)
-        lifecycleScope.launch {
+        val app = applicationContext
+        Session.scope.launch {
             val error = withContext(Dispatchers.IO) {
                 var result = NativeBridge.nativeLogin(email, password, deviceName)
                 if (result != null && result.contains("serialization error")) {
                     // Corrupted state files — wipe core-data and retry
                     android.util.Log.w("MainActivity", "Login serialization error, wiping core-data and retrying")
-                    filesDir.resolve("core-data").deleteRecursively()
+                    app.filesDir.resolve("core-data").deleteRecursively()
                     result = NativeBridge.nativeLogin(email, password, deviceName)
                 }
                 result
             }
-            signingIn = false
-            loginButton?.isEnabled = true
-            loginButton?.text = getString(R.string.btn_sign_in)
-
+            Session.signingIn = false
             if (error == null) {
-                AccountEmailStore.save(this@MainActivity, email)
-                passwordDraft = ""
-                lastHomeKey = null
-                configureToolbar()
-                refreshUi()
+                AccountEmailStore.save(app, email)
+                Session.passwordDraft = ""
+                Session.loginError = null
             } else {
                 // The API's messages (e.g. "Invalid email or password") carry no
                 // trailing period.
                 val detail = if (error.trimEnd().lastOrNull() in ".!?".toList()) error else "$error."
-                showLoginError(getString(R.string.msg_sign_in_failed, detail))
+                Session.loginError = app.getString(R.string.msg_sign_in_failed, detail)
             }
+            Session.activity?.onLoginFinished(error == null)
+        }
+    }
+
+    private fun onLoginFinished(succeeded: Boolean) {
+        loginButton?.isEnabled = true
+        loginButton?.text = getString(R.string.btn_sign_in)
+        if (succeeded) {
+            lastHomeKey = null
+            configureToolbar()
+            refreshUi()
+        } else {
+            showLoginError(Session.loginError)
         }
     }
 
@@ -548,26 +642,33 @@ class MainActivity : AppCompatActivity() {
             .setTitle(getString(R.string.dialog_sign_out_title))
             .setMessage(getString(R.string.dialog_sign_out_message))
             .setPositiveButton(getString(R.string.btn_sign_out)) { _, _ ->
-                lifecycleScope.launch {
+                val app = applicationContext
+                // nativeLogout() waits for the daemon loop, which a pause stopped.
+                if (VirtueAccessibilityService.isConnected() && !VirtueAccessibilityService.isEnabled()) {
+                    VirtueAccessibilityService.resume()
+                }
+                Session.scope.launch {
                     withContext(Dispatchers.IO) {
-                        NativeBridge.ensureInitialized(this@MainActivity)
+                        NativeBridge.ensureInitialized(app)
                         val error = NativeBridge.nativeLogout()
                         if (error != null) {
                             // Native logout failed (e.g. corrupted auth file) — delete directly
                             android.util.Log.w("MainActivity", "nativeLogout failed ($error), deleting auth file directly")
                             runCatching {
-                                filesDir.resolve("core-data/auth.json").delete()
+                                app.filesDir.resolve("core-data/auth.json").delete()
                             }
                         }
                     }
-                    AccountEmailStore.clear(this@MainActivity)
+                    AccountEmailStore.clear(app)
                     VirtueAccessibilityService.pause()
-                    ScreenshotService.stop(this@MainActivity)
-                    lastHomeKey = null
-                    emailDraft = ""
-                    passwordDraft = ""
-                    configureToolbar()
-                    refreshUi()
+                    ScreenshotService.stop(app)
+                    Session.passwordDraft = ""
+                    Session.activity?.apply {
+                        lastHomeKey = null
+                        emailDraft = ""
+                        configureToolbar()
+                        refreshUi()
+                    }
                 }
             }
             .setNegativeButton(getString(R.string.dialog_cancel), null)
@@ -646,21 +747,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** The guide's "Request Permissions" button (CLIENT-030). Neither is needed to capture. */
+    /**
+     * The guide's "Request Permissions" button (CLIENT-030). Neither is needed to
+     * capture. Each tap moves on to whatever is still missing, so it never does
+     * nothing while the button is enabled.
+     */
     private fun requestPermissions() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            requestBatteryExemption()
+        val notificationsOn = NotificationManagerCompat.from(this).areNotificationsEnabled()
+        when {
+            !notificationsOn && canPromptForNotifications() -> {
+                getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).edit()
+                    .putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            !batteryExempt() -> requestBatteryExemption()
+            !notificationsOn -> runCatching {
+                startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                )
+            }
         }
     }
 
+    /**
+     * Whether Android would show the notification prompt. Without the permission
+     * to ask for (Android 12 and older, or notifications turned off in the app's
+     * settings) it can't. After a second denial it silently refuses, which looks
+     * the same as never having asked, unless we remember asking.
+     */
+    private fun canPromptForNotifications(): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        val permission = Manifest.permission.POST_NOTIFICATIONS
+        if (checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED) return false
+        val asked = getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).getBoolean(KEY_NOTIFICATIONS_ASKED, false)
+        return !asked || shouldShowRequestPermissionRationale(permission)
+    }
+
+    private fun batteryExempt(): Boolean =
+        getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+
     private fun requestBatteryExemption() {
-        val pm = getSystemService(PowerManager::class.java)
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+        if (!batteryExempt()) {
             runCatching {
                 startActivity(
                     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
@@ -721,7 +849,7 @@ class MainActivity : AppCompatActivity() {
         // as the desktop clients', plus the Android-specific rows below.
         val json = statusJson()
         val state = currentState(json)
-        val loggedIn = NativeBridge.nativeIsLoggedIn()
+        val loggedIn = signedIn(json)
         val content = binding.content
         content.removeAllViews()
 
@@ -813,19 +941,24 @@ class MainActivity : AppCompatActivity() {
             DetailRow(null, getString(R.string.details_waiting_upload), (pendingHash + pendingBatch).toString()),
         )))
 
-        // Problems: the newest error, if any.
+        // Problems: the newest error, if any. Core never clears these, so an old
+        // one must not read as needing action.
         val recentErrors = json.optJSONArray("recent_errors")
-        val latest = recentErrors?.optJSONObject(0)
+        val errorRows = (0 until (recentErrors?.length() ?: 0)).mapNotNull { recentErrors?.optJSONObject(it) }.map { error ->
+            error.optLong("at_ms", 0) to DetailRow(
+                null, getString(R.string.details_recent_error), error.optString("message"),
+                "${formatTimestampMs(error.optLong("at_ms", 0))} · ${error.optString("context")}",
+            )
+        }
         content.addView(sectionLabel(getString(R.string.details_group_problems)))
         content.addView(detailGroup(listOf(
-            if (latest == null) {
-                DetailRow(Tone.GOOD, getString(R.string.details_recent_problems), getString(R.string.details_none))
-            } else {
-                DetailRow(
-                    Tone.BAD, getString(R.string.details_recent_problems), latest.optString("message"),
-                    "${formatTimestampMs(latest.optLong("at_ms", 0))} · ${latest.optString("context")}",
+            errorRows.firstOrNull()?.let { (atMs, row) ->
+                val fresh = System.currentTimeMillis() - atMs < DateUtils.DAY_IN_MILLIS
+                row.copy(
+                    tone = if (fresh) Tone.WARN else Tone.NEUTRAL,
+                    label = getString(R.string.details_recent_problems),
                 )
-            }
+            } ?: DetailRow(Tone.GOOD, getString(R.string.details_recent_problems), getString(R.string.details_none))
         )))
 
         // Advanced
@@ -867,15 +1000,17 @@ class MainActivity : AppCompatActivity() {
             DetailRow(null, "Last attempt", optTime("last_screenshot_attempt_at_ms")),
             DetailRow(null, "Last skip reason", skipReason),
             DetailRow(null, "Log file", logFile?.absolutePath ?: "—"),
-        )))
+        ) + errorRows.ifEmpty {
+            listOf(0L to DetailRow(null, getString(R.string.details_recent_errors), getString(R.string.details_none)))
+        }.map { it.second }))
         advancedBody.addView(tonalButton(getString(R.string.btn_open_log)) { openLogFile(logFile) }.topMargin(12))
         val test = tonalButton(getString(R.string.btn_take_test_screenshot)) { forceCapture() }
-        test.isEnabled = loggedIn
+        test.isEnabled = loggedIn && !Session.capturing
         testButton = test
         advancedBody.addView(test.topMargin(8))
-        val message = text(detailsMessage.orEmpty(), 14f, R.color.ink_3).apply {
+        val message = text(Session.detailsMessage.orEmpty(), 14f, R.color.ink_3).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = if (detailsMessage == null) View.GONE else View.VISIBLE
+            visibility = if (Session.detailsMessage == null) View.GONE else View.VISIBLE
         }.topMargin(8) as TextView
         detailsMessageView = message
         advancedBody.addView(message)
@@ -911,35 +1046,43 @@ class MainActivity : AppCompatActivity() {
 
     /** Shows [message] under the Advanced buttons, clearing it after 2.5 s when [clear] is set. */
     private fun showDetailsMessage(message: String, clear: Boolean) {
-        detailsMessage = message
-        detailsMessageView?.text = message
-        detailsMessageView?.visibility = View.VISIBLE
+        Session.detailsMessage = message
+        Session.activity?.detailsMessageView?.apply {
+            text = message
+            visibility = View.VISIBLE
+        }
         if (clear) {
-            binding.root.postDelayed({
-                if (detailsMessage == message) {
-                    detailsMessage = null
-                    detailsMessageView?.visibility = View.GONE
+            Session.scope.launch {
+                delay(2500)
+                if (Session.detailsMessage == message) {
+                    Session.detailsMessage = null
+                    Session.activity?.detailsMessageView?.visibility = View.GONE
                 }
-            }, 2500)
+            }
         }
     }
 
     private fun forceCapture() {
+        // CLIENT-008: no second request while one is running.
+        if (Session.capturing) return
+        Session.capturing = true
         testButton?.isEnabled = false
         showDetailsMessage(getString(R.string.msg_force_capture_started), clear = false)
-        lifecycleScope.launch {
+        val app = applicationContext
+        Session.scope.launch {
             // The native call waits for the batch to land, so its message
             // reports what actually happened rather than assuming an upload.
             val raw = withContext(Dispatchers.IO) {
                 NativeBridge.nativeForceCapture()
             }
-            testButton?.isEnabled = true
+            Session.capturing = false
+            Session.activity?.testButton?.isEnabled = true
 
             val report = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
             val error = if (report.isNull("error")) null else report.optString("error", "").ifBlank { null }
             val message = if (report.isNull("message")) "" else report.optString("message", "")
             if (error != null || message.isBlank()) {
-                showDetailsMessage(getString(R.string.msg_force_capture_failed, error ?: raw), clear = true)
+                showDetailsMessage(app.getString(R.string.msg_force_capture_failed, error ?: raw), clear = true)
             } else {
                 showDetailsMessage(message, clear = true)
             }
@@ -959,10 +1102,11 @@ class MainActivity : AppCompatActivity() {
             null,
         )
         message.apply {
-            setSingleLine(false)
             minLines = 4
             maxLines = 8
             gravity = Gravity.TOP or Gravity.START
+            setText(reportMessageDraft)
+            doAfterTextChanged { reportMessageDraft = it?.toString().orEmpty() }
         }
         messageLayout.topMargin(8)
         val (emailLayout, email) = outlinedField(
@@ -971,43 +1115,48 @@ class MainActivity : AppCompatActivity() {
             EditorInfo.IME_ACTION_DONE,
             View.AUTOFILL_HINT_EMAIL_ADDRESS,
         )
-        email.setText(AccountEmailStore.load(this).orEmpty())
+        email.setText(reportEmailDraft ?: AccountEmailStore.load(this).orEmpty())
+        email.doAfterTextChanged { reportEmailDraft = it?.toString().orEmpty() }
 
         val logs = MaterialCheckBox(this).apply {
             text = getString(R.string.report_bug_attach_logs)
-            isChecked = true
+            isChecked = reportLogsDraft
+            setOnCheckedChangeListener { _, checked -> reportLogsDraft = checked }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(12) }
         }
-        val error = text("", 14f, R.color.bad).apply {
-            visibility = View.GONE
+        val error = text(Session.reportError.orEmpty(), 14f, R.color.bad).apply {
+            visibility = if (Session.reportError == null) View.GONE else View.VISIBLE
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }.topMargin(8) as TextView
         val send = filledButton(getString(R.string.btn_send_report)) {}
+        send.isEnabled = !Session.sendingReport
 
         send.setOnClickListener {
+            if (Session.sendingReport) return@setOnClickListener
             val body = message.text?.toString()?.trim().orEmpty()
             if (body.isEmpty()) {
-                error.text = getString(R.string.report_bug_message_required)
+                Session.reportError = getString(R.string.report_bug_message_required)
+                error.text = Session.reportError
                 error.visibility = View.VISIBLE
                 return@setOnClickListener
             }
+            Session.reportError = null
             error.visibility = View.GONE
             val contactEmail = email.text?.toString()?.trim().orEmpty()
+            val attachLogs = logs.isChecked
+            val details = androidPlatformDetails()
+            val app = applicationContext
+            Session.sendingReport = true
             send.isEnabled = false
-            lifecycleScope.launch {
+            Session.scope.launch {
                 val failure = withContext(Dispatchers.IO) {
-                    NativeBridge.nativeReportIssue(body, contactEmail, logs.isChecked, androidPlatformDetails())
+                    NativeBridge.nativeReportIssue(body, contactEmail, attachLogs, details)
                 }
-                send.isEnabled = true
-                if (failure == null) {
-                    showScreen(Screen.HOME)
-                    showReportSentDialog()
-                } else {
-                    error.text = getString(R.string.report_bug_send_failed)
-                    error.visibility = View.VISIBLE
-                }
+                Session.sendingReport = false
+                if (failure != null) Session.reportError = app.getString(R.string.report_bug_send_failed)
+                Session.activity?.onReportFinished(failure == null)
             }
         }
 
@@ -1019,6 +1168,15 @@ class MainActivity : AppCompatActivity() {
         })
         content.addView(error)
         content.addView(send.topMargin(20))
+    }
+
+    private fun onReportFinished(sent: Boolean) {
+        if (sent) {
+            if (screen == Screen.REPORT) showScreen(Screen.HOME)
+            showReportSentDialog()
+        } else if (screen == Screen.REPORT) {
+            render()
+        }
     }
 
     private fun showReportSentDialog() {
@@ -1083,5 +1241,17 @@ class MainActivity : AppCompatActivity() {
     private fun formatTimestampMs(ms: Long): String {
         if (ms <= 0L) return "—"
         return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(ms))
+    }
+
+    private companion object {
+        const val KEY_SCREEN = "screen"
+        const val KEY_ADVANCED_OPEN = "advanced_open"
+        const val KEY_EMAIL = "email"
+        const val KEY_DEVICE = "device"
+        const val KEY_REPORT_MESSAGE = "report_message"
+        const val KEY_REPORT_EMAIL = "report_email"
+        const val KEY_REPORT_LOGS = "report_logs"
+        const val PREFS_PERMISSIONS = "permissions"
+        const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
     }
 }

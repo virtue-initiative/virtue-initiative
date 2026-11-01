@@ -143,6 +143,8 @@
     <string name="details_last_screenshot">Last screenshot</string>
     <string name="details_waiting_upload">Waiting to upload</string>
     <string name="details_recent_problems">Recent problems</string>
+    <string name="details_recent_error">Recent error</string>
+    <string name="details_recent_errors">Recent errors</string>
     <string name="details_none">None</string>
     <string name="summary_active">Everything is working. Screenshots are being taken and uploaded.</string>
     <string name="summary_signed_out">Sign in to start monitoring.</string>
