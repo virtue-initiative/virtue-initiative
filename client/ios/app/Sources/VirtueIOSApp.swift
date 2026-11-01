@@ -553,8 +553,11 @@ private struct StatusDetailsView: View {
             if status == nil {
                 DetailRow(kind: .neutral, label: "Recent problems", value: "Unknown")
             } else if let error = status?.recentErrors?.first {
+                let fresh = Date().timeIntervalSince1970 * 1000 - Double(error.atMs) < 86_400_000
                 DetailRow(
-                    kind: Date().timeIntervalSince1970 * 1000 - Double(error.atMs) < 86_400_000 ? .warn : .neutral,
+                    kind: fresh ? .warn : .neutral,
+                    // The warn dot's usual "Not yet" fits a setup step, not an error.
+                    kindLabel: fresh ? "Warning" : nil,
                     label: "Recent problems",
                     value: error.message,
                     hint: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
@@ -630,6 +633,7 @@ private struct StatusDetailsView: View {
 /// Stacks the label above the value at accessibility text sizes.
 private struct DetailRow: View {
     var kind: StatusKind?
+    var kindLabel: String?
     let label: String
     let value: String
     var valueColor: Color = VirtueBrand.text
@@ -661,7 +665,7 @@ private struct DetailRow: View {
 
     private var labelView: some View {
         HStack(spacing: 8) {
-            if let kind { StatusDot(kind: kind) }
+            if let kind { StatusDot(kind: kind, label: kindLabel) }
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.textMuted)
@@ -738,13 +742,14 @@ extension MonitoringState {
 
 struct StatusDot: View {
     let kind: StatusKind
+    var label: String?
 
     var body: some View {
         Circle()
             .fill(kind.color)
             .frame(width: 10, height: 10)
             .accessibilityElement()
-            .accessibilityLabel(kind.accessibilityLabel)
+            .accessibilityLabel(label ?? kind.accessibilityLabel)
     }
 }
 
