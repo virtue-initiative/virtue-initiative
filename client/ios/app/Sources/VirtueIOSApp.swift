@@ -92,17 +92,22 @@ private struct HomeView: View {
     let onPause: () -> Void
     @ScaledMetric(relativeTo: .title3) private var titleSize: CGFloat = 19
 
+    private static let topID = "home-top"
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                header
-                focus
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    focus { proxy.scrollTo(Self.topID, anchor: .top) }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .id(Self.topID)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .scrollDismissesKeyboard(.interactively)
+            .background(VirtueBrand.bg)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .background(VirtueBrand.bg)
     }
 
     private var header: some View {
@@ -131,12 +136,12 @@ private struct HomeView: View {
     }
 
     @ViewBuilder
-    private var focus: some View {
+    private func focus(scrollToTop: @escaping () -> Void) -> some View {
         switch coordinator.monitoringState {
         case .signedOut:
             SignInForm(coordinator: coordinator)
         case .needsSetup, .needsPermission:
-            SetupWizard(coordinator: coordinator)
+            SetupWizard(coordinator: coordinator, onStepChange: scrollToTop)
         case .active, .paused:
             StatusFocus(coordinator: coordinator, onPause: onPause)
         }
@@ -548,11 +553,13 @@ private struct StatusDetailsView: View {
             if status == nil {
                 DetailRow(kind: .neutral, label: "Recent problems", value: "Unknown")
             } else if let error = status?.recentErrors?.first {
+                let fresh = Date().timeIntervalSince1970 * 1000 - Double(error.atMs) < 86_400_000
                 DetailRow(
-                    kind: .bad,
+                    kind: fresh ? .warn : .neutral,
+                    // The warn dot's usual "Not yet" fits a setup step, not an error.
+                    kindLabel: fresh ? "Warning" : nil,
                     label: "Recent problems",
                     value: error.message,
-                    valueColor: VirtueBrand.bad,
                     hint: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
                 )
             } else {
@@ -626,6 +633,7 @@ private struct StatusDetailsView: View {
 /// Stacks the label above the value at accessibility text sizes.
 private struct DetailRow: View {
     var kind: StatusKind?
+    var kindLabel: String?
     let label: String
     let value: String
     var valueColor: Color = VirtueBrand.text
@@ -657,7 +665,7 @@ private struct DetailRow: View {
 
     private var labelView: some View {
         HStack(spacing: 8) {
-            if let kind { StatusDot(kind: kind) }
+            if let kind { StatusDot(kind: kind, label: kindLabel) }
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(VirtueBrand.textMuted)
@@ -734,13 +742,14 @@ extension MonitoringState {
 
 struct StatusDot: View {
     let kind: StatusKind
+    var label: String?
 
     var body: some View {
         Circle()
             .fill(kind.color)
             .frame(width: 10, height: 10)
             .accessibilityElement()
-            .accessibilityLabel(kind.accessibilityLabel)
+            .accessibilityLabel(label ?? kind.accessibilityLabel)
     }
 }
 

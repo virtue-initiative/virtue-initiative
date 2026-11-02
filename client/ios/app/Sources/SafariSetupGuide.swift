@@ -162,6 +162,9 @@ struct SafariSetupGuide: View {
 /// one step at a time, with Back and Next.
 struct SetupWizard: View {
     @ObservedObject var coordinator: MonitoringCoordinator
+    /// Each step is long enough to scroll, and Back and Next sit below it, so
+    /// Home scrolls back up to the start of the new step.
+    let onStepChange: () -> Void
     /// `nil` follows the first unfinished step, so the card moves on by
     /// itself when Virtue sees a step get done.
     @State private var selected: SetupStep?
@@ -178,6 +181,7 @@ struct SetupWizard: View {
         content
             // Follow the first unfinished step again whenever it changes.
             .onChange(of: progress.current) { _ in selected = nil }
+            .onChange(of: step) { _ in onStepChange() }
     }
 
     private var content: some View {
