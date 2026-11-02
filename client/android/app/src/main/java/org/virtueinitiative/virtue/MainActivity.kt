@@ -644,13 +644,18 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(getString(R.string.btn_sign_out)) { _, _ ->
                 val app = applicationContext
                 // nativeLogout() waits for the daemon loop, which a pause stopped.
-                if (VirtueAccessibilityService.isConnected() && !VirtueAccessibilityService.isEnabled()) {
+                val connected = VirtueAccessibilityService.isConnected()
+                if (connected && !VirtueAccessibilityService.isEnabled()) {
                     VirtueAccessibilityService.resume()
                 }
                 Session.scope.launch {
                     withContext(Dispatchers.IO) {
                         NativeBridge.ensureInitialized(app)
+                        // With Accessibility off no service runs the loop, so
+                        // run it here just long enough to log out.
+                        if (!connected) launch { NativeBridge.nativeRunDaemonLoop() }
                         val error = NativeBridge.nativeLogout()
+                        if (!connected) NativeBridge.nativeStopDaemon()
                         if (error != null) {
                             // Native logout failed (e.g. corrupted auth file) — delete directly
                             android.util.Log.w("MainActivity", "nativeLogout failed ($error), deleting auth file directly")
