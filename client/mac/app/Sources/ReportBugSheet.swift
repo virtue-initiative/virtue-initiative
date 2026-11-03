@@ -54,7 +54,7 @@ struct ReportIssueView: View {
                         .toggleStyle(AccentCheckboxStyle())
                     Text(
                         "Includes timestamps, monitoring status, and error messages. " +
-                        "No screenshots or window titles are included. Known tokens are redacted automatically."
+                        "No screenshots or window titles are included."
                     )
                     .font(.system(size: 12))
                     .foregroundStyle(VirtueBrand.textMuted)
