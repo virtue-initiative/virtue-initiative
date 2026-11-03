@@ -462,6 +462,10 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
+    var opensAtLogin: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
     private func loginErrorMessage(_ raw: String) -> String {
         let lower = raw.lowercased()
         if lower.contains("unauthorized") || lower.contains("bad request") || lower.contains("login failed") {

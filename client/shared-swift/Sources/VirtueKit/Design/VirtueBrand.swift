@@ -24,6 +24,13 @@ public enum VirtueBrand {
     public static let success = Color(red: 79.0 / 255.0, green: 122.0 / 255.0, blue: 90.0 / 255.0)
     /// Danger — matches --danger (#ef4444).
     public static let danger = Color(red: 239.0 / 255.0, green: 68.0 / 255.0, blue: 68.0 / 255.0)
+    /// The V in `landing/public/logo.svg` (#163026).
+    public static let logo = Color(red: 22.0 / 255.0, green: 48.0 / 255.0, blue: 38.0 / 255.0)
+    /// Status colors from the client redesign: working, needs action, and
+    /// starting or not yet (ochre).
+    public static let good = Color(red: 47.0 / 255.0, green: 125.0 / 255.0, blue: 79.0 / 255.0)
+    public static let bad = Color(red: 192.0 / 255.0, green: 57.0 / 255.0, blue: 43.0 / 255.0)
+    public static let warn = ochre
 }
 
 /// Spacing scale matching `shared-web/tokens.css` (`--space-1` … `--space-6`).

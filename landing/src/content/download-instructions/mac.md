@@ -17,8 +17,8 @@ Virtue needs macOS 13 or later. These screenshots are from macOS 15.
    ![The macOS prompt to quit and reopen Virtue, with Quit & Reopen highlighted](/images/mac-setup/mac_setup_quit_reopen.webp)
    If you clicked **Later**, click **Restart Virtue** in the Virtue window.
    ![The Virtue window, with Restart Virtue highlighted](/images/mac-setup/mac_setup_restart.webp)
-8. Sign in with your Virtue account.
-9. Check that the status says **Monitoring active**. To confirm everything works, click **Test Screenshot**. You should see a message that the screenshot uploaded.
+8. Log in with your Virtue account.
+9. Check that the status says **Monitoring active**. To confirm everything works, click the menu button (**⋯**) at the top right of the window, then click **Test Screenshot**. You should see a message that the screenshot uploaded.
    ![The Virtue window showing Monitoring active](/images/mac-setup/mac_setup_active.webp)
 
 Virtue takes a screenshot about every 5 minutes and uploads them about once an hour. You and your partners can see them on the Logs page of the website.
