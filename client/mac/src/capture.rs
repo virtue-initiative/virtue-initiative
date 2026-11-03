@@ -54,8 +54,9 @@ fn screen_capture_access_now() -> bool {
 }
 
 /// Runs `program check-screen-capture` and treats anything but a clean exit,
-/// including failing to start it, as no access.
-fn access_from_new_process(program: &std::path::Path) -> bool {
+/// including failing to start it, as no access. The app also calls this with
+/// the bundled daemon, to notice the permission changing while it runs.
+pub fn access_from_new_process(program: &std::path::Path) -> bool {
     Command::new(program)
         .arg(CHECK_ACCESS_SUBCOMMAND)
         .stdin(Stdio::null())

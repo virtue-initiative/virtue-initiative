@@ -46,6 +46,9 @@ private func virtue_mac_native_force_capture() -> UnsafeMutablePointer<CChar>?
 @_silgen_name("virtue_mac_native_has_capture_permission")
 private func virtue_mac_native_has_capture_permission() -> Bool
 
+@_silgen_name("virtue_mac_native_check_capture_permission_now")
+private func virtue_mac_native_check_capture_permission_now(_ daemonExePath: UnsafePointer<CChar>?) -> Bool
+
 @_silgen_name("virtue_mac_native_request_capture_permission")
 private func virtue_mac_native_request_capture_permission() -> Bool
 
@@ -188,6 +191,14 @@ enum NativeBridge {
 
     static func hasCapturePermission() -> Bool {
         virtue_mac_native_has_capture_permission()
+    }
+
+    /// Asks a new daemon process, so a change made while the app runs shows
+    /// up. Spawns a process, so call it off the main actor.
+    static func checkCapturePermissionNow(daemonExePath: String) -> Bool {
+        daemonExePath.withCString { pathCString in
+            virtue_mac_native_check_capture_permission_now(pathCString)
+        }
     }
 
     static func requestCapturePermission() -> Bool {

@@ -280,7 +280,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 - The app MUST request Screen Recording at every launch where it is missing, before sign-in. macOS shows its own prompt only once per app.
 - While it is missing, the window MUST show "Allow Screen Recording" in place of every other focus area, signed in or not, as two steps: "Turn on Virtue" with Open System Settings (deep link to the Screen Recording pane), and "Restart Virtue" with Restart Virtue. Test Screenshot MUST be disabled with the hint "Allow Screen Recording to use this feature".
-- macOS only reveals a grant to a new process, so the app MUST NOT re-check the permission while running; the user restarts through macOS's "Quit & Reopen" or Restart Virtue, and the relaunched app restarts the daemon.
+- macOS answers each process only once, so a process's own check goes stale when the permission changes. While its window is open, the app MUST re-check Screen Recording from a new process at every status poll and update the window when the permission is turned on or off. A new process sees either change at once, so no restart is needed, though restarting through macOS's "Quit & Reopen" or Restart Virtue still works.
 - For the same reason, the long-running daemon MUST check Screen Recording from a new process before each capture, so a grant removed while it runs is seen. Without the grant, `screencapture` returns only the desktop background, and that MUST NOT be uploaded as a screenshot: the attempt MUST fail as a capture failure (CLIENT-009).
 - The bundle id `org.virtueinitiative.virtue.mac`, the daemon name `virtue-daemon` and the signing team MUST stay fixed so updates keep the grant.
 

@@ -264,6 +264,8 @@ final class MonitoringCoordinator: ObservableObject {
         let statusJson: String?
         let loggedIn: Bool
         let deviceId: String?
+        /// Nil when no window is open to show it (CLIENT-025).
+        let screenRecordingGranted: Bool?
     }
 
     private func pollTick() {
@@ -272,17 +274,29 @@ final class MonitoringCoordinator: ObservableObject {
         }
         checkForReplacedBundle()
         isPolling = true
+        // Each check spawns a process, so only while a window can show it.
+        let checkScreenRecording = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
         Task {
-            let snapshot = await Task.detached(priority: .utility) { () -> PolledSnapshot in
+            let snapshot = await Task.detached(priority: .utility) { [daemonExePath] () -> PolledSnapshot in
+                let granted = checkScreenRecording
+                    ? NativeBridge.checkCapturePermissionNow(daemonExePath: daemonExePath)
+                    : nil
                 let status = NativeBridge.pollDaemonStatus()
                 guard status == .running else {
-                    return PolledSnapshot(status: status, statusJson: nil, loggedIn: false, deviceId: nil)
+                    return PolledSnapshot(
+                        status: status,
+                        statusJson: nil,
+                        loggedIn: false,
+                        deviceId: nil,
+                        screenRecordingGranted: granted
+                    )
                 }
                 return PolledSnapshot(
                     status: status,
                     statusJson: NativeBridge.getStatusJson(),
                     loggedIn: NativeBridge.isLoggedIn(),
-                    deviceId: NativeBridge.getDeviceId()
+                    deviceId: NativeBridge.getDeviceId(),
+                    screenRecordingGranted: granted
                 )
             }.value
             applyPolledSnapshot(snapshot)
@@ -291,6 +305,9 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func applyPolledSnapshot(_ snapshot: PolledSnapshot) {
+        if let granted = snapshot.screenRecordingGranted {
+            needsScreenRecording = !granted
+        }
         // Only suppresses the "stopped unexpectedly" false-negative during a
         // relaunch/launch restart race — must NOT also suppress recognizing
         // a genuinely successful `.running` poll, or the UI is stuck showing
@@ -332,9 +349,6 @@ final class MonitoringCoordinator: ObservableObject {
             lastLoopAt = status.lastLoopAtMs.map(formatMillisTimestamp) ?? "<none>"
             coreStatus = status
         }
-        // Deliberately no re-check of Screen Recording here: macOS caches the
-        // answer for the life of the process, so a grant only shows up after
-        // a relaunch (macOS's "Quit & Reopen", or `restartApp`).
     }
 
     private func refreshSessionState() {
