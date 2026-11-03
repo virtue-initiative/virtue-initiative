@@ -12,8 +12,16 @@ unsafe extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
+/// The hidden `virtue-daemon` subcommand that exits 0 only while Screen
+/// Recording is granted (see `screen_capture_access_now`).
+pub const CHECK_ACCESS_SUBCOMMAND: &str = "check-screen-capture";
+
 pub fn capture_screen() -> Result<Vec<u8>> {
-    if !has_screen_capture_access() {
+    capture_if_permitted(screen_capture_access_now)
+}
+
+fn capture_if_permitted(has_access: impl FnOnce() -> bool) -> Result<Vec<u8>> {
+    if !has_access() {
         return Err(anyhow!(
             "screen recording permission missing (grant Screen Recording permission in macOS)"
         ));
@@ -24,8 +32,37 @@ pub fn capture_screen() -> Result<Vec<u8>> {
         .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")
 }
 
+/// Whether this process may capture the screen. macOS answers once per
+/// process, so in the long-running daemon this keeps saying yes after the
+/// grant is removed (CLIENT-025).
 pub fn has_screen_capture_access() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// Asks a new copy of this executable, which gets a fresh answer from macOS.
+/// The in-process check would miss a grant removed since the daemon started,
+/// and `screencapture` would then raise macOS's prompt and return only the
+/// desktop background (CLIENT-025).
+fn screen_capture_access_now() -> bool {
+    match std::env::current_exe() {
+        Ok(exe) => access_from_new_process(&exe),
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot find own executable to check Screen Recording");
+            false
+        }
+    }
+}
+
+/// Runs `program check-screen-capture` and treats anything but a clean exit,
+/// including failing to start it, as no access.
+fn access_from_new_process(program: &std::path::Path) -> bool {
+    Command::new(program)
+        .arg(CHECK_ACCESS_SUBCOMMAND)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// Request screen capture access and return whether it is now granted.
@@ -333,6 +370,37 @@ impl LifecycleHooks for MacPlatformHooks {
         }
         let text = String::from_utf8_lossy(&output.stdout);
         Ok(parse_last_logout_mac(&text))
+    }
+}
+
+#[cfg(test)]
+// CLIENT-025: the daemon checks Screen Recording in a new process before
+// each capture, and a denied or failed check means no capture.
+mod permission_tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn access_follows_the_new_process_exit_status() {
+        let cases = [
+            ("/usr/bin/true", true),
+            ("/usr/bin/false", false),
+            ("/nonexistent/virtue-daemon", false),
+        ];
+        for (program, expected) in cases {
+            assert_eq!(
+                access_from_new_process(Path::new(program)),
+                expected,
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
+    fn denied_access_fails_as_a_permission_error() {
+        let err = capture_if_permitted(|| false).expect_err("capture must fail");
+        assert!(is_permission_missing_error(&err.to_string()), "{err}");
     }
 }
 

@@ -1,8 +1,9 @@
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 
+use virtue_mac::capture;
 use virtue_mac::config::{ClientPaths, build_core_config, load_service_status};
 use virtue_mac::daemon;
 use virtue_mac::runtime_env::apply_runtime_env;
@@ -24,6 +25,10 @@ enum Commands {
     Daemon,
     /// Print the current service status as plain text.
     Status,
+    /// Exit 0 only while Screen Recording is granted. The daemon runs this
+    /// before each capture, because its own answer never changes.
+    #[command(name = capture::CHECK_ACCESS_SUBCOMMAND, hide = true)]
+    CheckScreenCapture,
 }
 
 fn main() -> ExitCode {
@@ -38,6 +43,9 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
+    if let Commands::CheckScreenCapture = cli.command {
+        return check_screen_capture();
+    }
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
@@ -46,6 +54,15 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Daemon => daemon::run_daemon(&paths),
         Commands::Status => status(&paths),
+        Commands::CheckScreenCapture => check_screen_capture(),
+    }
+}
+
+fn check_screen_capture() -> Result<()> {
+    if capture::has_screen_capture_access() {
+        Ok(())
+    } else {
+        Err(anyhow!("Screen Recording is off"))
     }
 }
 
