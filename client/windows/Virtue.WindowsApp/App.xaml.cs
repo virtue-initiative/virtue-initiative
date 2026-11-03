@@ -64,7 +64,7 @@ public partial class App : Application
             _trayController = new TrayMenuController();
             _trayController.OpenRequested += (_, _) => ShowMainWindow();
             _trayController.ExitRequested += async (_, _) => await RequestResidentShutdownAsync();
-            _trayController.ReportBugRequested += async (_, _) => await ShowReportBugFromTrayAsync();
+            _trayController.ReportBugRequested += (_, _) => ShowReportBugFromTray();
             _trayController.ForceCaptureRequested += async (_, _) => await ForceCaptureAsync();
             _trayController.SessionLogoffObserved += (_, _) => HandleSessionLogoff();
             _trayController.SystemShutdownObserved += (_, _) => HandleSystemShutdown();
@@ -300,13 +300,10 @@ public partial class App : Application
         _ = _viewModel?.RefreshAsync();
     }
 
-    private async Task ShowReportBugFromTrayAsync()
+    private void ShowReportBugFromTray()
     {
         ShowMainWindow();
-        if (_mainWindow is not null)
-        {
-            await _mainWindow.ShowReportBugDialogAsync();
-        }
+        _mainWindow?.ShowReportIssue();
     }
 
     private async Task ForceCaptureAsync()

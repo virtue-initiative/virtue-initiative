@@ -106,7 +106,7 @@ public sealed class SessionViewModelTests
 
         Assert.Equal(("user@example.com", "secret", Environment.MachineName), fakeClient.LastLogin);
         Assert.True(viewModel.LoggedIn);
-        Assert.Equal("Monitoring is active on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring active", viewModel.Headline);
         Assert.Equal(string.Empty, viewModel.PasswordInput);
     }
 
@@ -196,7 +196,7 @@ public sealed class SessionViewModelTests
         await viewModel.StopMonitoringFromTrayExitAsync();
 
         Assert.True(fakeClient.StopMonitoringFromTrayExitCalled);
-        Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
     }
 
     // CLIENT-027: signed out clears the device id, error, queue count and last screenshot but keeps the typed email.
@@ -222,7 +222,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(0, viewModel.PendingRequestCount);
         Assert.Null(viewModel.LastScreenshotAtMs);
         Assert.Equal("stale@example.com", viewModel.EmailInput);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+        Assert.Equal("Signed out", viewModel.Headline);
     }
 
     // CLIENT-027: a signed-in session whose monitor reports signed out shows starting.
@@ -240,7 +240,7 @@ public sealed class SessionViewModelTests
 
         Assert.True(viewModel.LoggedIn);
         Assert.Equal("starting", viewModel.MonitorState);
-        Assert.Equal("Monitoring is starting for this device.", viewModel.StatusText);
+        Assert.Equal("Starting...", viewModel.Headline);
     }
 
     // CLIENT-027: the tray menu offers Open and Exit (design test).
@@ -320,7 +320,7 @@ public sealed class SessionViewModelTests
 
     // CLIENT-005: signing out reads as signed out.
     [Fact]
-    public async Task LogoutAsync_SignsOutAndUpdatesStatusText()
+    public async Task LogoutAsync_SignsOutAndUpdatesHeadline()
     {
         var fakeClient = new FakeRustInteropClient
         {
@@ -332,12 +332,12 @@ public sealed class SessionViewModelTests
         await viewModel.LogoutAsync();
 
         Assert.False(viewModel.LoggedIn);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+        Assert.Equal("Signed out", viewModel.Headline);
     }
 
     // CLIENT-011: Stop Monitoring stops monitoring and the status reads stopped.
     [Fact]
-    public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesStatusText()
+    public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesHeadline()
     {
         var fakeClient = new FakeRustInteropClient
         {
@@ -349,7 +349,60 @@ public sealed class SessionViewModelTests
         await viewModel.StopMonitoringAsync();
 
         Assert.True(fakeClient.StopMonitoringCalled);
-        Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
+    }
+
+    // CLIENT-027: the headline and its sentence for each state, first match wins.
+    [Theory]
+    [InlineData(false, "signed_out", null, null, "Signed out", "Sign in to start monitoring on this device.")]
+    [InlineData(true, "error", 123L, "upload failed", "Monitoring needs attention", "upload failed.")]
+    [InlineData(true, "error", null, null, "Monitoring needs attention", "Virtue could not start monitoring.")]
+    [InlineData(true, "stopped", 123L, null, "Monitoring stopped", "Monitoring is stopped on this device.")]
+    [InlineData(true, "running", null, null, "Starting...", "Virtue is getting ready. The first screenshot is taken within a few minutes.")]
+    [InlineData(true, "starting", null, null, "Starting...", "Virtue is getting ready. The first screenshot is taken within a few minutes.")]
+    public async Task RefreshAsync_HeadlineAndSentenceFollowTheState(
+        bool loggedIn, string monitorState, long? lastScreenshotAtMs, string? lastError, string expectedHeadline, string expectedSentence)
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, lastScreenshotAtMs, lastError),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(expectedHeadline, viewModel.Headline);
+        Assert.Equal(expectedSentence, viewModel.StatusSentence);
+    }
+
+    // CLIENT-027: once a screenshot has been taken the headline is active and the sentence gives its time.
+    [Fact]
+    public async Task RefreshAsync_ActiveSentenceGivesTheLastScreenshotTime()
+    {
+        const long lastScreenshotAtMs = 1_761_900_000_000;
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, lastScreenshotAtMs, null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("Monitoring active", viewModel.Headline);
+        Assert.Equal(
+            $"Virtue is capturing every screen. Last screenshot at {SessionViewModel.FormatShortTime(lastScreenshotAtMs)}.",
+            viewModel.StatusSentence);
+    }
+
+    // CLIENT-027: before the first status load the headline reads Loading.
+    [Fact]
+    public void BeforeAnyRefresh_HeadlineReadsLoading()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
+
+        Assert.Equal("Loading...", viewModel.Headline);
     }
 
     // CLIENT-027: the tray tooltip text for each monitor state.
