@@ -60,15 +60,16 @@ Response shapes shared with the web are defined as Zod schemas in `shared-web/ty
 `/admin/*` (see `SPEC.md` API-051) is gated by `src/middleware/admin.ts`, which checks the `admins` table. There is deliberately no API to grant admin; do it by hand:
 
 ```bash
-# local dev
-wrangler d1 execute DB --env staging --local \
-  --command "INSERT INTO admins (user_id, created_at) SELECT id, unixepoch() FROM users WHERE email = 'you@example.com'"
+# from api/; cf takes the database ID from cloudflare.config.ts, not the binding name
+# local dev (staging's DB ID)
+bun run cf d1 raw f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --local --persist-to .wrangler/state \
+  --sql "INSERT INTO admins (user_id, created_at) SELECT id, unixepoch() FROM users WHERE email = 'you@example.com'"
 # staging / prod
-wrangler d1 execute DB --env staging --remote --command "..."
-wrangler d1 execute DB --env prod --remote --command "..."
+bun run cf d1 query f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --sql "..."
+bun run cf d1 query 141a161a-a16b-41cb-a8b3-e5e40803391a --mode prod --sql "..."
 ```
 
-`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron in `wrangler.json` stores one per UTC day and deletes expired batches; the `5 * * * *` cron keeps doing the hourly notification and other retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
+`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron (`src/crons.ts`, registered by `cloudflare.config.ts`) stores one per UTC day and deletes expired batches; the `5 * * * *` cron keeps doing the hourly notification and other retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
 
 ```bash
 # against a running `bun run dev` / scripts/launch.sh API (port varies under launch.sh)

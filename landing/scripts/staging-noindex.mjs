@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 /**
  * Keeps the staging deployment out of search engines entirely. Runs after
- * `astro build --mode staging`, before `wrangler deploy --env staging`.
+ * `astro build --mode staging`, before `cf deploy --mode staging` ships it.
  *
  * - Writes a `_headers` file so Cloudflare sends `X-Robots-Tag: noindex` on
  *   every staging response. That covers images, the appcast, and other

@@ -58,7 +58,7 @@ Notes:
 
 - `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
 - Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
-- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per Worker (`bunx wrangler secret put ... --name staging-donate|donate`, since `cf` can't set a single secret yet).
 
 ### Web app
 
@@ -325,6 +325,19 @@ If you need to mirror deployment locally:
 
 These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
 
+### Cloudflare CLI (`cf`)
+
+The Workers use Cloudflare's `cf` CLI (pinned in each Worker's `package.json`; it is in beta and needs Node 24.22 or later), not Wrangler's own commands:
+
+- Each Worker's bindings, routes and crons live in its `cloudflare.config.ts`. `--mode prod` and `--mode staging` select the deployment; local dev and tests use `staging`, and `--mode launch` is staging under its own name for `scripts/launch.sh`. `wrangler.config.ts` beside it holds the few settings only Wrangler reads (dev port, static assets directory).
+- `cf` still runs Wrangler underneath to build, serve and deploy, so `wrangler` stays a dependency. Local D1 and R2 data stay in `api/.wrangler/state` (and `api-donate/.wrangler/state`).
+- Tools that only understand Wrangler's config (the Vitest pool, the seed script's platform proxy) get it through `scripts/cf-config.ts`, which converts `cloudflare.config.ts` into `<worker>/.cloudflare/wrangler.<mode>.json`. Scripts that need a D1 database ID or SQL access use the same module.
+- `cf`'s D1 commands take the database ID, not the binding: run migrations with the `db:migrate:*` scripts (`scripts/d1-migrate.ts`), and query local data with `bun run cf d1 raw <id> --mode staging --local --persist-to .wrangler/state --sql "..."` from `api/` (there is no local `cf d1 query`).
+- `cf deploy` builds `web/` and `landing/` with their framework (Vite, Astro) when it detects one, which needs a Cloudflare plugin these sites don't use. Their deploy scripts build `dist/` themselves, package it with `cf-wrangler build` (the Wrangler entry point `cf` itself calls) and ship that with `cf deploy --prebuilt`.
+- `cf dev` passes only `--port` (and `--mode`, `--host`, `--local`) on to Wrangler. To serve the API to VMs on the network, run `DEV_IP=0.0.0.0 bun run dev` (`api/wrangler.config.ts` reads it).
+- `cf` can't stream logs or set a single secret yet. Use `bunx wrangler tail <worker>` and `bunx wrangler secret put <NAME> --name <worker>` for those.
+- `cf` only finds Wrangler in a Worker's own `node_modules`, so `bunfig.toml` uses Bun's isolated linker. A package a workspace imports must be in that workspace's `package.json`, and root `scripts/` imports must be in the root one.
+
 ## Centralized dev config: `~/.config/virtue-dev.env` and `.env`
 
 The user typically works across several worktrees of this repo at once. Two plain shell files
@@ -339,12 +352,12 @@ in priority order (later wins over earlier, and real process/CI env vars always 
 
 Both are sourced by:
 
-- `scripts/launch.sh` — exports the merged values to the dev servers it starts, and passes the
-  `api/.dev.vars` keys below through to `wrangler dev` as `--var` flags, so they take effect
-  live without editing `.dev.vars`.
+- `scripts/launch.sh` — exports the merged values to the dev servers it starts, and writes the
+  `api/.dev.vars` keys below into `api/.dev.vars.launch` (a per-run copy of `.dev.vars` that
+  `cf dev --mode launch` reads instead), so they take effect live without editing `.dev.vars`.
 - `scripts/setup.sh` — sources them and copies any of the `.dev.vars` keys below that are set
   onto the freshly copied `.dev.vars` files, so a new worktree (or one run without `launch.sh`,
-  e.g. `wrangler dev` directly) still picks them up.
+  e.g. `bun run dev` directly) still picks them up.
 - `client/android/scripts/env.sh` — sources them as an override layer for the Android dev
   scripts (`build.sh`, `install.sh`, etc.), beneath its own built-in defaults.
 - `client/core/build.rs` — reads them (repo-root `.env` first) to fill in whichever of the
@@ -365,7 +378,7 @@ Recognized keys:
 
 Note: `APP_URL`, `LANDING_URL`, `R2_URL`, and `HASH_SERVER_URL` are _not_ on this list — `launch.sh`
 always computes them itself from the ports it picks that run, so overriding them here would have
-no effect under `launch.sh` (they'd only apply if you ran `wrangler dev` directly).
+no effect under `launch.sh` (they'd only apply if you ran `bun run dev` directly).
 
 ## Driving the web app in a browser
 

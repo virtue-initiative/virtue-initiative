@@ -1,0 +1,3 @@
+[install]
+# cf finds wrangler only in each Worker's own node_modules, so give every workspace one.
+linker = "isolated"

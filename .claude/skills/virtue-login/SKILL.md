@@ -17,7 +17,7 @@ account is:
 - email: `test1@virtueinitiative.org`
 - password: `test1@virtueinitiative.org`
 
-Local dev API: `http://localhost:8787` (this profile's wrangler dev server).
+Local dev API: `http://localhost:8787` (this profile's `cf dev` server).
 
 ## Steps
 
@@ -104,7 +104,7 @@ Expect `logged_in: true`, `running: true`, and `base_api_url: http://localhost:8
 
 ## Notes
 
-- The local dev API must be running (wrangler on `:8787`). If `status` shows
+- The local dev API must be running (`cf dev` on `:8787`). If `status` shows
   `logged_in: false` after a clean run, check that the dev server is up
   (`./scripts/dev-setup.sh`) and that port 8787 is listening.
 - Logging in again when already logged in re-registers a fresh device id — fine
