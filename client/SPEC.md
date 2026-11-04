@@ -75,13 +75,13 @@ Every app MUST show whether the user is signed in and a one-line monitoring stat
 
 Status Details MUST render the CORE-010 fields, grouped as:
 
-- Account: signed in, email, device name, partners (`<unknown>` when `partner_count` is absent).
+- Account: signed in, email, device name, partners.
 - Queues: waiting for hash, waiting in batch, last batch upload.
 - Capture: daemon state, last loop, last attempt, last screenshot, last skip reason.
 - Recent errors: each with its time, context and message, or a none marker.
 - Advanced: device id, API URL, hash base URL (`<default>` when unset), capture interval, batch window, and where the logs are (CLIENT-017).
 
-Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`. Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
+Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
 
 - macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot.
 - Linux `virtue status` MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.

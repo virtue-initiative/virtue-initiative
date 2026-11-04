@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 public struct VirtueButtonStyle: ButtonStyle {
     private let prominent: Bool
