@@ -836,8 +836,9 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shows the check line as a toast while a manual check is watched: kept
-    /// up while checking, then hidden 3 s after the outcome.
+    /// Shows the check line as a toast while a manual check is watched: up to
+    /// 30 s while checking, since a Store call can hang, then 3 s after the
+    /// outcome (CLIENT-027).
     /// </summary>
     private void ShowUpdateNotice()
     {
@@ -846,13 +847,21 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _updateNotice = text;
+        var checking = text == "Checking for updates...";
         _updateNoticeTimer ??= CreateUpdateNoticeTimer();
+        if (checking && _updateNotice == text)
+        {
+            // Already counting down the 30 s; don't restart it.
+            return;
+        }
+
+        _updateNotice = text;
         _updateNoticeTimer.Stop();
-        if (text != "Checking for updates...")
+        _updateNoticeTimer.Interval = TimeSpan.FromSeconds(checking ? 30 : 3);
+        _updateNoticeTimer.Start();
+        if (!checking)
         {
             _watchingUpdateCheck = false;
-            _updateNoticeTimer.Start();
         }
 
         SyncFromViewModel();
@@ -861,10 +870,11 @@ public sealed partial class MainWindow : Window
     private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateUpdateNoticeTimer()
     {
         var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(3);
         timer.IsRepeating = false;
         timer.Tick += (_, _) =>
         {
+            // A check still running after 30 s finishes in the menu line only.
+            _watchingUpdateCheck = false;
             _updateNotice = null;
             SyncFromViewModel();
         };
