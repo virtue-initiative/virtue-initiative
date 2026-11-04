@@ -1,6 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
@@ -53,17 +55,40 @@ fn screen_capture_access_now() -> bool {
     }
 }
 
+/// How long `access_from_new_process` waits before counting the check as
+/// no access, so a hung check can't stall a capture or the app's status poll.
+const CHECK_ACCESS_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Runs `program check-screen-capture` and treats anything but a clean exit,
-/// including failing to start it, as no access. The app also calls this with
-/// the bundled daemon, to notice the permission changing while it runs.
+/// including failing to start it or not exiting in time, as no access. The
+/// app also calls this with the bundled daemon, to notice the permission
+/// changing while it runs.
 pub fn access_from_new_process(program: &std::path::Path) -> bool {
-    Command::new(program)
+    access_from_new_process_within(program, CHECK_ACCESS_TIMEOUT)
+}
+
+fn access_from_new_process_within(program: &std::path::Path, timeout: Duration) -> bool {
+    let Ok(mut child) = Command::new(program)
         .arg(CHECK_ACCESS_SUBCOMMAND)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
 }
 
 /// Request screen capture access and return whether it is now granted.
@@ -396,6 +421,17 @@ mod permission_tests {
                 "{program}"
             );
         }
+    }
+
+    #[test]
+    fn a_check_that_never_exits_counts_as_no_access() {
+        // `yes` ignores its argument and never exits on its own.
+        let started = Instant::now();
+        assert!(!access_from_new_process_within(
+            Path::new("/usr/bin/yes"),
+            Duration::from_millis(200)
+        ));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

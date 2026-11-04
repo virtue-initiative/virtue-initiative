@@ -15,6 +15,9 @@ final class MonitoringCoordinator: ObservableObject {
     private static let statusPollInterval: TimeInterval = 2
     private static let stoppedTimeout: TimeInterval = 20
     private static let postRelaunchGrace: TimeInterval = 30
+    /// How often to re-check Screen Recording while no window is open, for
+    /// the menu bar's Test Screenshot (CLIENT-025).
+    private static let hiddenScreenRecordingCheckInterval: TimeInterval = 30
 
     @Published var email: String = ""
     @Published var password: String = ""
@@ -46,6 +49,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     private var statusTimer: Timer?
     private var isPolling = false
+    private var lastScreenRecordingCheck: Date?
     /// `VirtueBuildLabel` as it was on disk when this process launched, for
     /// detecting that the bundle has since been replaced. See
     /// `checkForReplacedBundle`.
@@ -264,7 +268,7 @@ final class MonitoringCoordinator: ObservableObject {
         let statusJson: String?
         let loggedIn: Bool
         let deviceId: String?
-        /// Nil when no window is open to show it (CLIENT-025).
+        /// Nil when this tick skipped the check (CLIENT-025).
         let screenRecordingGranted: Bool?
     }
 
@@ -274,8 +278,14 @@ final class MonitoringCoordinator: ObservableObject {
         }
         checkForReplacedBundle()
         isPolling = true
-        // Each check spawns a process, so only while a window can show it.
-        let checkScreenRecording = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        // Each check spawns a process, so every tick only while a window can
+        // show it, and every 30 s otherwise for the menu bar.
+        let windowVisible = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        let checkScreenRecording = windowVisible
+            || lastScreenRecordingCheck.map { Date().timeIntervalSince($0) >= Self.hiddenScreenRecordingCheckInterval } ?? true
+        if checkScreenRecording {
+            lastScreenRecordingCheck = Date()
+        }
         Task {
             let snapshot = await Task.detached(priority: .utility) { [daemonExePath] () -> PolledSnapshot in
                 let granted = checkScreenRecording
@@ -430,9 +440,8 @@ final class MonitoringCoordinator: ObservableObject {
     /// Relaunch this app from its (new) bundle and exit. `open` is used
     /// rather than re-exec'ing so the replacement process is started by
     /// launchservices against the new bundle, not inherited from this one.
-    /// For someone who turned on Screen Recording but picked "Later" on
-    /// macOS's "Quit & Reopen" prompt. The new instance kickstarts the daemon,
-    /// so it picks up the permission too.
+    /// Relaunch Virtue in the Stopped state (CLIENT-024). The new instance
+    /// kickstarts the daemon, so this restarts it too.
     func restartApp() {
         relaunchSelf()
     }
