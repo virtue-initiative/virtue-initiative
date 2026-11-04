@@ -105,8 +105,7 @@ describe('Feature flag admin routes', () => {
     expect(flag.created_at).toBe(flag.updated_at);
 
     const updated = (await (await putFlag(cookie, 'beta', { rollout_percent: 50 })).json()) as
-      | FeatureFlag
-      | undefined;
+      FeatureFlag | undefined;
     expect(updated).toMatchObject({ rollout_percent: 50, description: 'Beta' });
 
     await putFlag(cookie, 'alpha', { rollout_percent: 0 });
