@@ -7,6 +7,7 @@ import auth from './routes/auth';
 import bugReport from './routes/bug-report';
 import data from './routes/data';
 import deviceOnly from './routes/device-only';
+import devEmails from './routes/dev-emails';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import lockedPasswords from './routes/locked-password';
@@ -81,6 +82,7 @@ app.route('/locked-password', lockedPasswords);
 app.route('/data', data);
 app.route('/d', deviceOnly);
 app.route('/admin', admin);
+app.route('/dev', devEmails);
 
 app.get('/r2/*', async (c) => {
   // API-040: only local dev turns this on.

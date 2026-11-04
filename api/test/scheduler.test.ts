@@ -321,7 +321,7 @@ describe('Notification scheduler (API-057)', () => {
     const digestDeliveries = deliveries.filter((delivery) => delivery.kind === 'daily_digest');
     expect(digestDeliveries).toHaveLength(1);
     expect(digestDeliveries[0]?.recipient_email).toBe('multi-partner@example.com');
-    expect(digestDeliveries[0]?.text).toContain('Monitored accounts: 2');
+    expect(digestDeliveries[0]?.text).toContain('summary for 2 monitored accounts');
     expect(digestDeliveries[0]?.text).toContain('Owner One');
     expect(digestDeliveries[0]?.text).toContain('Owner Two');
     for (const id of [ownerOneId, ownerTwoId]) {
@@ -664,7 +664,7 @@ describe('Notification scheduler D1 use (API-057)', () => {
     const digests = await listDailyDigests();
     expect(digests.map((digest) => digest.recipient_email).sort()).toEqual(watcherEmails);
     for (const digest of digests) {
-      expect(digest.text).toContain('Monitored accounts: 2');
+      expect(digest.text).toContain('summary for 2 monitored accounts');
     }
     // The partnerships (with each recipient's bounce), and the watched users'
     // activity. Per digest, this was 3 statements before.

@@ -985,7 +985,7 @@ The server MUST run a digest job every hour. It MUST send each verified watcher 
 
 A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
 
-For each user watched, a digest MUST give the number of screenshots and of high risk alerts in the period it covers, name each of that user's devices that has no logs in the period, and link to that user's report for the period. A digest MUST NOT be sent to a watcher whose email is unverified or has a permanent bounce (see API-056).
+For each user watched, a digest MUST give the number of screenshots and of high risk alerts in the period it covers, name each of that user's devices that has no logs in the period, and link to that user's report for the period. A digest SHOULD be easy to scan: it SHOULD show those counts as figures, stand out when a count of alerts is above zero, group a device's missing days into one entry, and SHOULD NOT repeat totals when it covers one user. A digest MUST NOT be sent to a watcher whose email is unverified or has a permanent bounce (see API-056).
 
 A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
 
@@ -1201,3 +1201,9 @@ The client MUST send:
 ```
 
 The server MUST set the override for the user with that email, or remove it when `enabled` is `null`. It MUST respond **HTTP 404** if the flag or the user does not exist, and otherwise **HTTP 200** with the resulting `FeatureFlag`.
+
+### API-066 `GET /dev/emails`
+
+This previews every email template rendered with made-up data, inside a mock email client. Only used in dev. The server MUST serve it only when `EMAIL_DELIVERY_MODE` is `log`, which only a local dev environment sets. Otherwise it MUST respond **HTTP 404**.
+
+The query `t` selects a template by ID, defaulting to the first. With `raw=html` or `raw=text`, the server MUST respond with that template's HTML or plain text body alone. Otherwise it MUST respond with a page that lists the templates and shows the selected one, with its subject, sender and recipient, as HTML or plain text, at desktop or mobile width.

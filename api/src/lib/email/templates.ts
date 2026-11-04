@@ -10,6 +10,10 @@ const EMAIL_COLORS = {
   pageBg: '#f4efe3', // --bg / --paper
   surface: '#fbf7ea', // --surface / --paper-3
   border: '#d9d1bc', // --border
+  danger: '#9b2c2c',
+  dangerBg: '#f6e3df',
+  warning: '#7a5200',
+  warningBg: '#f5ebd0',
 } as const;
 
 // Mirrors --font / --font-serif in shared-web/tokens.css. Custom web fonts
@@ -63,18 +67,20 @@ function paragraph(text: string) {
 }
 
 // Mirrors .vi-btn--primary in shared-web/components/Button/Button.css.
-function actionButton(url: string, label: string) {
-  return `<p style="${inlineStyle({ margin: '0 0 16px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
+// `compact` is a smaller button for the repeated links inside a list of sections.
+function actionButton(url: string, label: string, options: { compact?: boolean } = {}) {
+  const compact = options.compact ?? false;
+  return `<p style="${inlineStyle({ margin: compact ? '0' : '0 0 16px 0' })}"><a href="${escapeHtml(url)}" style="${inlineStyle(
     {
       display: 'inline-block',
       background: EMAIL_COLORS.accent,
       color: EMAIL_COLORS.textOnAccent,
       'text-decoration': 'none',
       'font-weight': '500',
-      'font-size': '14px',
+      'font-size': compact ? '13px' : '14px',
       'letter-spacing': '0.005em',
       'line-height': '1',
-      padding: '11px 13px',
+      padding: compact ? '9px 12px' : '11px 13px',
       'border-radius': '2px',
     },
   )}">${escapeHtml(label)}</a></p>`;
@@ -187,14 +193,14 @@ function withFooter(input: {
   const settingsUrl = getSettingsUrl(input.appUrl);
   const contentHtml = [
     ...input.htmlSections,
-    paragraph('Thanks,'),
-    paragraph(`${input.appName} team`),
     `<p style="${inlineStyle({
-      margin: '0',
+      margin: '8px 0 0 0',
+      padding: '16px 0 0 0',
+      'border-top': `1px solid ${EMAIL_COLORS.border}`,
       color: EMAIL_COLORS.textMuted,
       'font-size': '12px',
-      'line-height': '1.5',
-    })}">${themedLink(settingsUrl, 'Manage email preferences')}</p>`,
+      'line-height': '1.6',
+    })}">Thanks,<br />${escapeHtml(input.appName)} team<br />${themedLink(settingsUrl, 'Manage email preferences')}</p>`,
   ].join('');
 
   return {
@@ -667,6 +673,92 @@ export function renderLockedPasswordAccessedTemplate(input: {
   };
 }
 
+type StatTone = 'danger' | 'warning';
+
+// A row of equal tiles, each a big number over a label. A toned tile is tinted
+// only when its number is above zero, so an all-clear report stays quiet and a
+// problem is the first thing the eye lands on.
+function statRow(stats: Array<{ value: number; label: string; tone?: StatTone }>) {
+  const cells = stats
+    .map(({ value, label, tone }) => {
+      const active = tone !== undefined && value > 0;
+      const color = !active
+        ? EMAIL_COLORS.text
+        : tone === 'danger'
+          ? EMAIL_COLORS.danger
+          : EMAIL_COLORS.warning;
+      const background = !active
+        ? EMAIL_COLORS.pageBg
+        : tone === 'danger'
+          ? EMAIL_COLORS.dangerBg
+          : EMAIL_COLORS.warningBg;
+      return `<td width="${Math.floor(100 / stats.length)}%" style="${inlineStyle({
+        background,
+        'border-radius': '4px',
+        padding: '12px 14px',
+        'vertical-align': 'top',
+      })}">
+        <div style="${inlineStyle({
+          'font-family': EMAIL_FONTS.serif,
+          'font-size': '28px',
+          'line-height': '1.1',
+          color,
+        })}">${escapeHtml(value.toLocaleString('en-US'))}</div>
+        <div style="${inlineStyle({
+          'margin-top': '4px',
+          'font-size': '12px',
+          'line-height': '1.3',
+          color: active ? color : EMAIL_COLORS.textMuted,
+        })}">${escapeHtml(label)}</div>
+      </td>`;
+    })
+    .join('');
+
+  return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="${inlineStyle(
+    {
+      'border-collapse': 'separate',
+      'border-spacing': '6px 0',
+      margin: '0 -6px 16px -6px',
+      width: 'calc(100% + 12px)',
+    },
+  )}"><tr>${cells}</tr></table>`;
+}
+
+function missingLogsCallout(heading: string, entries: Array<{ name: string; detail?: string }>) {
+  const items = entries
+    .map(
+      ({ name, detail }) =>
+        `<li style="${inlineStyle({
+          margin: '0 0 4px 0',
+          color: EMAIL_COLORS.text,
+          'font-size': '14px',
+          'line-height': '1.5',
+        })}">${escapeHtml(name)}${
+          detail
+            ? ` <span style="${inlineStyle({ color: EMAIL_COLORS.textMuted })}">${escapeHtml(detail)}</span>`
+            : ''
+        }</li>`,
+    )
+    .join('');
+
+  return `<div style="${inlineStyle({
+    margin: '0 0 16px 0',
+    padding: '12px 14px',
+    background: EMAIL_COLORS.warningBg,
+    'border-left': `3px solid ${EMAIL_COLORS.warning}`,
+    'border-radius': '2px',
+  })}">
+    <p style="${inlineStyle({
+      margin: '0 0 8px 0',
+      color: EMAIL_COLORS.warning,
+      'font-size': '13px',
+      'font-weight': '600',
+      'line-height': '1.4',
+    })}">${escapeHtml(heading)}</p>
+    <ul style="${inlineStyle({ margin: '0', padding: '0 0 0 18px' })}">${items}</ul>
+  </div>`;
+}
+
 export function renderPartnerDigestTemplate(input: {
   cadence: DigestFrequency;
   partnerSummaries: Array<{
@@ -674,7 +766,11 @@ export function renderPartnerDigestTemplate(input: {
     ownerEmail: string;
     approxScreenshotCount: number;
     tamperCounts: Record<TamperSeverity, number>;
-    missingLogDays: string[];
+    /**
+     * Devices with no logs in the period. `days` lists the days missing, for a weekly digest;
+     * it is empty for a daily one, where the whole period is missing.
+     */
+    missingLogs: Array<{ deviceName: string; days: string[] }>;
     /** Web app report covering this digest's day or week for this person. */
     reportUrl: string;
   }>;
@@ -684,37 +780,31 @@ export function renderPartnerDigestTemplate(input: {
   const appName = normalizeAppName(input.appName);
   const periodLabel = input.cadence === 'weekly' ? 'Weekly' : 'Daily';
   const accountCount = input.partnerSummaries.length;
+  const ownerLabel = (summary: (typeof input.partnerSummaries)[number]) =>
+    summary.ownerName?.trim() || summary.ownerEmail;
   const summaryTarget =
     accountCount === 1
-      ? input.partnerSummaries[0]?.ownerName?.trim() || input.partnerSummaries[0]?.ownerEmail
+      ? ownerLabel(input.partnerSummaries[0]!)
       : `${accountCount} monitored accounts`;
-  const totalTamperCounts = input.partnerSummaries.reduce<Record<TamperSeverity, number>>(
-    (totals, summary) => ({
-      info: totals.info + summary.tamperCounts.info,
-      warning: totals.warning + summary.tamperCounts.warning,
-      critical: totals.critical + summary.tamperCounts.critical,
-    }),
-    { info: 0, warning: 0, critical: 0 },
-  );
-  const totalScreenshots = input.partnerSummaries.reduce(
-    (total, summary) => total + summary.approxScreenshotCount,
-    0,
-  );
   const missingLogHeading =
     input.cadence === 'weekly'
       ? 'Devices with at least one day without logs:'
       : 'Devices without logs in the last 24 hours:';
+  const missingLogLine = (log: { deviceName: string; days: string[] }) =>
+    log.days.length > 0
+      ? `${log.deviceName}: no logs on ${log.days.join(', ')}`
+      : `${log.deviceName}: no logs in the last 24 hours`;
 
   const partnerSections = input.partnerSummaries.flatMap((summary) => {
-    const owner = summary.ownerName?.trim() || summary.ownerEmail;
+    const owner = ownerLabel(summary);
     return [
       '',
       owner,
       `Approximate screenshots available: ${summary.approxScreenshotCount}`,
       `High risk alerts and screenshots: ${summary.tamperCounts.critical}`,
       `Medium risk alerts and screenshots: ${summary.tamperCounts.warning}`,
-      ...(summary.missingLogDays.length > 0
-        ? [missingLogHeading, ...summary.missingLogDays.map((line) => `- ${line}`)]
+      ...(summary.missingLogs.length > 0
+        ? [missingLogHeading, ...summary.missingLogs.map((log) => `- ${missingLogLine(log)}`)]
         : []),
       `Read ${owner}'s report: ${summary.reportUrl}`,
     ];
@@ -722,70 +812,53 @@ export function renderPartnerDigestTemplate(input: {
 
   // One person: a single call to action. Several: each section links its own report.
   const singleSummary = accountCount === 1 ? input.partnerSummaries[0] : undefined;
-  const singleOwner = singleSummary
-    ? singleSummary.ownerName?.trim() || singleSummary.ownerEmail
-    : null;
 
   const lines = [
     `${periodLabel} accountability summary for ${summaryTarget}`,
-    '',
-    `Monitored accounts: ${accountCount}`,
-    `Approximate screenshots available: ${totalScreenshots}`,
-    `High risk alerts and screenshots: ${totalTamperCounts.critical}`,
-    `Medium risk alerts and screenshots: ${totalTamperCounts.warning}`,
     ...partnerSections,
     '',
     DIGEST_NOTE,
   ];
 
-  const summaryItems = [
-    listItem(`Monitored accounts: ${accountCount}`),
-    listItem(`Approximate screenshots available: ${totalScreenshots}`),
-    listItem(`High risk alerts and screenshots: ${totalTamperCounts.critical}`),
-    listItem(`Medium risk alerts and screenshots: ${totalTamperCounts.warning}`),
-  ].join('');
+  const personBlock = (summary: (typeof input.partnerSummaries)[number], index: number) => {
+    const owner = ownerLabel(summary);
+    return `<div style="${inlineStyle({
+      margin: '0 0 16px 0',
+      padding: index === 0 ? '0' : '16px 0 0 0',
+      'border-top': index === 0 ? 'none' : `1px solid ${EMAIL_COLORS.border}`,
+    })}">
+      <p style="${inlineStyle({
+        margin: '0 0 10px 0',
+        color: EMAIL_COLORS.text,
+        'font-size': '16px',
+        'font-weight': '600',
+      })}">${escapeHtml(owner)}</p>
+      ${personStats(summary)}
+      ${actionButton(summary.reportUrl, `Read ${owner}'s report`, { compact: true })}
+    </div>`;
+  };
 
-  const partnerSummarySections = input.partnerSummaries
-    .map((summary) => {
-      const owner = summary.ownerName?.trim() || summary.ownerEmail;
-      const missingLogHtml =
-        summary.missingLogDays.length > 0
-          ? `<li style="${inlineStyle({
-              margin: '0 0 8px 0',
-              color: EMAIL_COLORS.text,
-              'font-size': '15px',
-              'line-height': '1.5',
-            })}">${escapeHtml(missingLogHeading)}<ul style="${inlineStyle({
-              margin: '8px 0 0 18px',
-              padding: '0',
-            })}">${summary.missingLogDays.map((line) => listItem(line)).join('')}</ul></li>`
-          : '';
+  const personStats = (summary: (typeof input.partnerSummaries)[number]) =>
+    statRow([
+      { value: summary.approxScreenshotCount, label: 'Screenshots' },
+      { value: summary.tamperCounts.critical, label: 'High risk', tone: 'danger' },
+      { value: summary.tamperCounts.warning, label: 'Medium risk', tone: 'warning' },
+    ]) +
+    (summary.missingLogs.length > 0
+      ? missingLogsCallout(
+          missingLogHeading,
+          summary.missingLogs.map((log) => ({
+            name: log.deviceName,
+            detail: log.days.length > 0 ? log.days.join(', ') : undefined,
+          })),
+        )
+      : '');
 
-      return `<div style="${inlineStyle({
-        margin: '0 0 16px 0',
-        padding: '16px',
-        border: `1px solid ${EMAIL_COLORS.border}`,
-        'border-radius': '4px',
-      })}">
-        <p style="${inlineStyle({
-          margin: '0 0 12px 0',
-          color: EMAIL_COLORS.text,
-          'font-size': '16px',
-          'font-weight': '600',
-        })}">${escapeHtml(owner)}</p>
-        <ul style="${inlineStyle({
-          margin: '0 0 0 18px',
-          padding: '0',
-        })}">
-          ${listItem(`Approximate screenshots available: ${summary.approxScreenshotCount}`)}
-          ${listItem(`High risk alerts and screenshots: ${summary.tamperCounts.critical}`)}
-          ${listItem(`Medium risk alerts and screenshots: ${summary.tamperCounts.warning}`)}
-          ${missingLogHtml}
-        </ul>
-        ${singleSummary ? '' : `<p style="${inlineStyle({ margin: '8px 0 0 0', 'font-size': '14px' })}">${themedLink(summary.reportUrl, `Read ${owner}'s report`)}</p>`}
-      </div>`;
-    })
-    .join('');
+  // One person's numbers sit directly under the intro. Several people each get a section.
+  // Counts are never summed across people.
+  const bodySections = singleSummary
+    ? [personStats(singleSummary)]
+    : [input.partnerSummaries.map(personBlock).join('')];
 
   const footer = withFooter({
     appName,
@@ -794,14 +867,10 @@ export function renderPartnerDigestTemplate(input: {
     textLines: lines,
     htmlSections: [
       paragraph(`${periodLabel} accountability summary for ${summaryTarget}.`),
-      `<ul style="${inlineStyle({
-        margin: '0 0 16px 18px',
-        padding: '0',
-      })}">${summaryItems}</ul>`,
-      partnerSummarySections,
+      ...bodySections,
       paragraph(DIGEST_NOTE),
       ...(singleSummary
-        ? [actionButton(singleSummary.reportUrl, `Read ${singleOwner}'s report`)]
+        ? [actionButton(singleSummary.reportUrl, `Read ${ownerLabel(singleSummary)}'s report`)]
         : []),
     ],
   });
