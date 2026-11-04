@@ -86,6 +86,12 @@ public sealed partial class MainWindow : Window
     private int _detailsColumns;
     private bool _reportDraftOpen;
 
+    // The menu closes on Check for Updates, so its result is also shown as a
+    // toast (CLIENT-027) while this is set.
+    private bool _watchingUpdateCheck;
+    private string? _updateNotice;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _updateNoticeTimer;
+
     // Only one ContentDialog may be open at a time; a second ShowAsync throws.
     private readonly SemaphoreSlim _dialogGate = new(1, 1);
 
@@ -579,7 +585,14 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(report);
 
         var updates = CreateMenuItem("Check for Updates", "");
-        updates.Click += (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
+        updates.Click += (_, _) =>
+        {
+            _watchingUpdateCheck = true;
+            CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
+            // The handler sets the check line through the dispatcher, and an
+            // unchanged line raises no change, so read it once that has run.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ShowUpdateNotice);
+        };
         menu.Items.Add(updates);
 
         if (ViewModel.LoggedIn)
@@ -814,7 +827,48 @@ public sealed partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(SessionViewModel.UpdateCheckStatusText))
+        {
+            ShowUpdateNotice();
+        }
+
         SyncFromViewModel();
+    }
+
+    /// <summary>
+    /// Shows the check line as a toast while a manual check is watched: kept
+    /// up while checking, then hidden 3 s after the outcome.
+    /// </summary>
+    private void ShowUpdateNotice()
+    {
+        if (!_watchingUpdateCheck || ViewModel.UpdateCheckStatusText is not { } text)
+        {
+            return;
+        }
+
+        _updateNotice = text;
+        _updateNoticeTimer ??= CreateUpdateNoticeTimer();
+        _updateNoticeTimer.Stop();
+        if (text != "Checking for updates...")
+        {
+            _watchingUpdateCheck = false;
+            _updateNoticeTimer.Start();
+        }
+
+        SyncFromViewModel();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateUpdateNoticeTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(3);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) =>
+        {
+            _updateNotice = null;
+            SyncFromViewModel();
+        };
+        return timer;
     }
 
     private void SyncFromViewModel()
@@ -866,10 +920,12 @@ public sealed partial class MainWindow : Window
         SetError(_detailsError, _screen == Screen.Details ? error : null);
 
         // The sign-in and report buttons already say what they are doing.
-        var toast = ViewModel.TransitionMessage;
-        var showToast = toast is not null && toast != "Signing in..." && toast != "Sending report...";
+        var transition = ViewModel.TransitionMessage;
+        var toast = transition is not null && transition != "Signing in..." && transition != "Sending report..."
+            ? transition
+            : _updateNotice;
         _toastText.Text = toast ?? string.Empty;
-        _toast.Visibility = VisibleIf(showToast);
+        _toast.Visibility = VisibleIf(toast is not null);
 
         if (_emailTextBox.Text != ViewModel.EmailInput)
         {
@@ -996,8 +1052,7 @@ public sealed partial class MainWindow : Window
     private string DetailsSentence() =>
         ViewModel.MonitorState switch
         {
-            "signed_out" => "Sign in to start monitoring.",
-            "error" or "stopped" or "loading" => ViewModel.StatusSentence,
+            "signed_out" or "error" or "stopped" or "loading" => ViewModel.StatusSentence,
             _ => ViewModel.LastScreenshotAtMs is null
                 ? "Waiting for the first screenshot."
                 : "Everything is working. Screenshots are being taken and uploaded.",
@@ -1043,7 +1098,7 @@ public sealed partial class MainWindow : Window
             var count = ViewModel.MonitorStatus?.PartnerCount;
             rows.Add(count switch
             {
-                null => new RowSpec(StatusKind.Neutral, "Partners", "<unknown>"),
+                null => new RowSpec(StatusKind.Neutral, "Partners", "Unknown"),
                 0 => new RowSpec(StatusKind.Warn, "Partners", "0", "Add a partner on the Virtue website so someone receives your reports."),
                 _ => new RowSpec(StatusKind.Good, "Partners", count.Value.ToString()),
             });
@@ -1085,7 +1140,7 @@ public sealed partial class MainWindow : Window
         {
             ("Device name", DisplayOrPlaceholder(status?.DeviceName)),
             ("Device ID", DisplayOrPlaceholder(ViewModel.DeviceId)),
-            ("API URL", DisplayOrPlaceholder(status?.ApiBaseUrl)),
+            ("API URL", string.IsNullOrWhiteSpace(status?.ApiBaseUrl) ? "<unknown>" : status!.ApiBaseUrl!),
             ("Hash base URL", string.IsNullOrWhiteSpace(status?.HashBaseUrl) ? "<default>" : status!.HashBaseUrl!),
             ("Capture interval", status?.CaptureIntervalSeconds is long capture ? $"{capture}s" : "<unknown>"),
             ("Batch window", status?.BatchWindowSeconds is long batch ? $"{batch}s" : "<unknown>"),
@@ -1168,7 +1223,11 @@ public sealed partial class MainWindow : Window
 
         _reportDraftOpen = false;
         await ShowMessageAsync("Report Sent", "Thanks, your report was sent to the Virtue Initiative team.");
-        Navigate(Screen.Home);
+        // Only leave the form; the user may have moved on while it sent.
+        if (_screen == Screen.Report)
+        {
+            Navigate(Screen.Home);
+        }
     }
 
     public async Task<bool> ShowStopMonitoringConfirmationAsync()
@@ -1465,7 +1524,7 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetName(row.Root, spec.Hint is null ? $"{spec.Label}: {spec.Value}" : $"{spec.Label}: {spec.Value}. {spec.Hint}");
     }
 
-    /// <summary>Setting even the same text clears a selection, so only set a change.</summary>
+    /// <summary>Re-setting text can clear a selection, so only set a change.</summary>
     private static void SetText(TextBlock block, string text)
     {
         if (block.Text != text)
