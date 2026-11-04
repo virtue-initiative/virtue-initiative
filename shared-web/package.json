@@ -14,8 +14,8 @@
     "preact": ">=10"
   },
   "devDependencies": {
-    "preact": "^10.29.1",
-    "prettier": "^3.8.3"
+    "preact": "^10.29.8",
+    "prettier": "^3.9.10"
   },
   "exports": {
     ".": "./index.ts",
@@ -30,6 +30,6 @@
     "./index.css": "./index.css"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   }
 }

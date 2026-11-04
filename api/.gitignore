@@ -7,3 +7,6 @@ dist
 .env
 .env.local
 worker-configuration.d.ts
+.cloudflare
+.dev.vars.*
+!.dev.vars.example

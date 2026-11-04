@@ -9,3 +9,4 @@ src/data/releases.json
 public/appcast.xml
 # Generated at build time by scripts/build-android-update.mjs
 public/android-update.json
+.cloudflare

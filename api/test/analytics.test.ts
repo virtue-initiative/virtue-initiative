@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import worker from '../src/index';
-import wranglerConfig from '../wrangler.json';
+import { CRONS } from '../src/crons';
 import { computeAnalyticsMetrics, snapshotAnalytics } from '../src/lib/analytics';
 import { perPersonAverage } from '../../shared-web/types';
 import { clearDB, createDeviceForUser, signupAndGetCookie, uuidToBytes } from './helpers';
@@ -214,10 +214,10 @@ describe('scheduled handler (API-051)', () => {
     expect(await snapshotCount()).toBe(1);
   });
 
-  it('has a branch for every cron in wrangler.json', async () => {
+  it('has a branch for every cron in cloudflare.config.ts', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      for (const cron of wranglerConfig.triggers.crons) {
+      for (const cron of CRONS) {
         await fire(cron);
       }
       expect(errors).not.toHaveBeenCalledWith(expect.stringMatching(/unhandled cron/i));

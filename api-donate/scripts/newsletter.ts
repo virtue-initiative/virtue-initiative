@@ -1,6 +1,6 @@
 /**
  * Newsletter CLI. Reads and writes the `newsletter_signups` table in this worker's D1 with
- * wrangler, and sends email through SES. Run from api-donate/ (see README.md, "Newsletter").
+ * cf, and sends email through SES. Run from api-donate/ (see README.md, "Newsletter").
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';

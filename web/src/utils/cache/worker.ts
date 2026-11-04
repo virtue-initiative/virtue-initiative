@@ -501,8 +501,7 @@ function sqlGetDecryptionStats(
 
   const totalBatches =
     (db.selectValue(`SELECT COUNT(*) FROM batches b WHERE ${batchWhere}`, batchBind) as
-      | number
-      | undefined) ?? 0;
+      number | undefined) ?? 0;
 
   const decryptedBatches =
     (db.selectValue(
@@ -545,8 +544,7 @@ function sqlGetDecryptionStats(
 
   const totalEvents =
     (db.selectValue(`SELECT COUNT(*) FROM events WHERE ${eventWhere}`, eventBind) as
-      | number
-      | undefined) ?? 0;
+      number | undefined) ?? 0;
   const totalScreenshots =
     (db.selectValue(
       `SELECT COUNT(*) FROM events WHERE ${eventWhere} AND image_w IS NOT NULL`,

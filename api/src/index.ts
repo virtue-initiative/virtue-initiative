@@ -24,11 +24,7 @@ import {
 } from './lib/retention';
 import { runNotificationSchedule } from './lib/scheduler';
 import { Env, Variables } from './types/bindings';
-
-// Must match wrangler.json "triggers.crons". Each tick runs only its own case,
-// so the daily snapshot never displaces hourly work: 00:05 still fires hourly.
-const HOURLY_CRON = '5 * * * *';
-const DAILY_CRON = '20 0 * * *';
+import { DAILY_CRON, HOURLY_CRON } from './crons';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
   getPath: (request, options) => {

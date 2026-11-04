@@ -46,7 +46,7 @@ spec-coverage:
 
 # --- api -----------------------------------------------------------------
 
-# Run the API worker locally (wrangler dev).
+# Run the API worker locally (cf dev).
 [group('api')]
 [working-directory: 'api']
 api-dev:
@@ -72,7 +72,7 @@ api-format:
 
 # --- api-donate ------------------------------------------------------------
 
-# Run the donations worker locally (wrangler dev).
+# Run the donations worker locally (cf dev).
 [group('api-donate')]
 [working-directory: 'api-donate']
 api-donate-dev:
