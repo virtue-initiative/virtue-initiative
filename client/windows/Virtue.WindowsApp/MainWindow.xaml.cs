@@ -84,6 +84,10 @@ public sealed partial class MainWindow : Window
     private bool _showAdvanced;
     private bool _detailsRenderQueued;
     private int _detailsColumns;
+    private bool _reportDraftOpen;
+
+    // Only one ContentDialog may be open at a time; a second ShowAsync throws.
+    private readonly SemaphoreSlim _dialogGate = new(1, 1);
 
     // Title bar.
     private readonly Grid _dragRegion = new();
@@ -117,9 +121,23 @@ public sealed partial class MainWindow : Window
     private readonly Button _signInButton = CreatePrimaryButton("Sign In");
     private string? _ringKey;
 
-    // Sub-screens.
+    // Sub-screens. Status Details is built once and updated in place, so the
+    // 5 s refresh keeps focus and text selection.
     private readonly ScrollViewer _detailsView = new();
     private readonly StackPanel _detailsContent = new() { Padding = new Thickness(28, 24, 28, 36) };
+    private readonly InfoBar _detailsError = CreateErrorBar();
+    private readonly Ellipse _summaryDot = CreateDot(StatusKind.Neutral, 14);
+    private readonly TextBlock _summaryHeadline = new();
+    private readonly TextBlock _summarySentence = new();
+    private readonly Grid _sectionsGrid = new() { ColumnSpacing = 24, RowSpacing = 28, Margin = new Thickness(0, 0, 0, 28) };
+    private readonly List<FrameworkElement> _sections = new();
+    private readonly RowGroup _screenshotsGroup = new();
+    private readonly RowGroup _accountGroup = new();
+    private readonly RowGroup _problemsGroup = new();
+    private readonly RowGroup _advancedGroup = new();
+    private readonly Button _advancedToggle = new();
+    private readonly FontIcon _advancedChevron = new() { FontSize = 11, Foreground = TextMutedBrush };
+    private readonly Button _openLogFolderButton = CreateSecondaryButton("Open log folder");
     private readonly ScrollViewer _monitorsView = new();
     private readonly ScrollViewer _reportView = new();
     private readonly TextBox _reportMessageBox = new();
@@ -663,14 +681,78 @@ public sealed partial class MainWindow : Window
         _detailsView.Content = _detailsContent;
         _detailsView.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         _detailsContent.MaxWidth = 840;
-        _detailsView.SizeChanged += (_, _) =>
+        _detailsView.SizeChanged += (_, _) => LayoutDetailSections();
+
+        _detailsError.Margin = new Thickness(0, 0, 0, 16);
+        _detailsContent.Children.Add(_detailsError);
+        _detailsContent.Children.Add(BuildDetailsSummary());
+
+        _sections.Add(CreateSection("Screenshots", _screenshotsGroup));
+        _sections.Add(CreateSection("Account", _accountGroup));
+        _sections.Add(CreateSection("Problems", _problemsGroup));
+        foreach (var section in _sections)
         {
-            if (_screen == Screen.Details && ColumnsFor(_detailsView.ActualWidth) != _detailsColumns)
+            _sectionsGrid.Children.Add(section);
+        }
+        _detailsContent.Children.Add(_sectionsGrid);
+
+        var advanced = new StackPanel { Spacing = 8 };
+        var toggleContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        toggleContent.Children.Add(new TextBlock { Text = "Advanced", FontSize = 14, Foreground = TextMutedBrush });
+        toggleContent.Children.Add(_advancedChevron);
+        _advancedToggle.Content = toggleContent;
+        _advancedToggle.Padding = new Thickness(4, 6, 6, 6);
+        StyleQuietButton(_advancedToggle);
+        _advancedToggle.Click += (_, _) => SetAdvancedOpen(!_showAdvanced);
+        advanced.Children.Add(_advancedToggle);
+
+        _openLogFolderButton.Click += (_, _) =>
+        {
+            if (ViewModel.MonitorStatus?.LogDirectory is { } logDirectory && !string.IsNullOrWhiteSpace(logDirectory))
             {
-                RenderDetails();
+                OpenLogFolder(logDirectory);
             }
         };
+        _advancedGroup.Footer.Child = _openLogFolderButton;
+        advanced.Children.Add(_advancedGroup.Root);
+        _detailsContent.Children.Add(advanced);
+        SetAdvancedOpen(false);
         return _detailsView;
+    }
+
+    private UIElement BuildDetailsSummary()
+    {
+        var panel = new Grid
+        {
+            ColumnSpacing = 12,
+            RowSpacing = 4,
+            Padding = new Thickness(2, 8, 2, 24),
+            Margin = new Thickness(0, 0, 0, 28),
+            BorderBrush = BorderBrushToken,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+        };
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        panel.Children.Add(_summaryDot);
+
+        _summaryHeadline.FontSize = 26;
+        _summaryHeadline.FontWeight = FontWeights.SemiBold;
+        _summaryHeadline.Foreground = TextBrush;
+        _summaryHeadline.TextWrapping = TextWrapping.Wrap;
+        AutomationProperties.SetHeadingLevel(_summaryHeadline, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
+        Grid.SetColumn(_summaryHeadline, 1);
+        panel.Children.Add(_summaryHeadline);
+
+        _summarySentence.FontSize = 14;
+        _summarySentence.Foreground = TextMutedBrush;
+        _summarySentence.TextWrapping = TextWrapping.Wrap;
+        Grid.SetRow(_summarySentence, 1);
+        Grid.SetColumn(_summarySentence, 1);
+        panel.Children.Add(_summarySentence);
+        return panel;
     }
 
     /// <summary>An error about what was typed goes away once the user edits it.</summary>
@@ -706,16 +788,21 @@ public sealed partial class MainWindow : Window
         switch (screen)
         {
             case Screen.Details:
-                _showAdvanced = false;
-                RenderDetails();
+                SetAdvancedOpen(false);
+                UpdateDetails();
                 _detailsView.ChangeView(null, 0, null, true);
                 _ = ViewModel.RefreshAsync();
                 break;
             case Screen.Report:
-                _reportMessageBox.Text = string.Empty;
-                _reportEmailBox.Text = ViewModel.LoggedIn ? ViewModel.AccountEmail : string.Empty;
-                _reportLogsCheckBox.IsChecked = true;
-                _reportError.IsOpen = false;
+                // Keep an unsent draft (CLIENT-027); start fresh after a send.
+                if (!_reportDraftOpen)
+                {
+                    _reportMessageBox.Text = string.Empty;
+                    _reportEmailBox.Text = ViewModel.LoggedIn ? ViewModel.AccountEmail : string.Empty;
+                    _reportLogsCheckBox.IsChecked = true;
+                    _reportDraftOpen = true;
+                }
+                SetError(_reportError, null);
                 _reportMessageBox.Focus(FocusState.Programmatic);
                 break;
         }
@@ -763,6 +850,8 @@ public sealed partial class MainWindow : Window
         _stopButton.Visibility = VisibleIf(signedIn);
 
         var busy = ViewModel.IsBusy;
+        // While an action runs others are ignored (CLIENT-027).
+        _stopButton.IsEnabled = !busy;
         _emailTextBox.IsEnabled = !busy;
         _passwordBox.IsEnabled = !busy;
         _deviceNameTextBox.IsEnabled = !busy;
@@ -774,6 +863,7 @@ public sealed partial class MainWindow : Window
         var error = ViewModel.ErrorText;
         SetError(_signInError, _screen == Screen.Home && signedOut ? error : null);
         SetError(_homeError, _screen == Screen.Home && !signedOut ? error : null);
+        SetError(_detailsError, _screen == Screen.Details ? error : null);
 
         // The sign-in and report buttons already say what they are doing.
         var toast = ViewModel.TransitionMessage;
@@ -847,82 +937,60 @@ public sealed partial class MainWindow : Window
             _detailsRenderQueued = false;
             if (_screen == Screen.Details)
             {
-                RenderDetails();
+                UpdateDetails();
             }
         });
     }
 
-    private void RenderDetails()
+    private void UpdateDetails()
     {
-        _detailsColumns = ColumnsFor(_detailsView.ActualWidth);
-        var children = _detailsContent.Children;
-        children.Clear();
-        children.Add(BuildDetailsSummary());
+        SetDotKind(_summaryDot, HomeKind());
+        SetText(_summaryHeadline, ViewModel.Headline);
+        SetText(_summarySentence, DetailsSentence());
 
-        var sections = new[] { BuildScreenshotsSection(), BuildAccountSection(), BuildProblemsSection() };
-        var grid = new Grid { ColumnSpacing = 24, RowSpacing = 28, Margin = new Thickness(0, 0, 0, 28) };
-        for (var c = 0; c < _detailsColumns; c++)
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        }
-
-        for (var i = 0; i < sections.Length; i++)
-        {
-            if (i % _detailsColumns == 0)
-            {
-                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            }
-
-            Grid.SetRow(sections[i], i / _detailsColumns);
-            Grid.SetColumn(sections[i], i % _detailsColumns);
-            grid.Children.Add(sections[i]);
-        }
-        children.Add(grid);
-        children.Add(BuildAdvanced());
+        SyncGroup(_screenshotsGroup, ScreenshotRows());
+        SyncGroup(_accountGroup, AccountRows());
+        SyncGroup(_problemsGroup, new[] { ProblemRow() });
+        SyncGroup(_advancedGroup, AdvancedRows().Select(r => new RowSpec(null, r.Label, r.Value)).ToList());
+        _advancedGroup.Footer.Visibility = VisibleIf(!string.IsNullOrWhiteSpace(ViewModel.MonitorStatus?.LogDirectory));
+        LayoutDetailSections();
     }
 
-    private UIElement BuildDetailsSummary()
+    /// <summary>Moves the sections between one and two columns; nothing is rebuilt.</summary>
+    private void LayoutDetailSections()
     {
-        var panel = new Grid
+        var columns = ColumnsFor(_detailsView.ActualWidth);
+        if (columns == _detailsColumns)
         {
-            ColumnSpacing = 12,
-            RowSpacing = 4,
-            Padding = new Thickness(2, 8, 2, 24),
-            Margin = new Thickness(0, 0, 0, 28),
-            BorderBrush = BorderBrushToken,
-            BorderThickness = new Thickness(0, 0, 0, 1),
-        };
-        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            return;
+        }
 
-        var dot = CreateDot(HomeKind(), 14);
-        panel.Children.Add(dot);
-
-        var headline = new TextBlock
+        _detailsColumns = columns;
+        _sectionsGrid.ColumnDefinitions.Clear();
+        _sectionsGrid.RowDefinitions.Clear();
+        for (var c = 0; c < columns; c++)
         {
-            Text = ViewModel.Headline,
-            FontSize = 26,
-            FontWeight = FontWeights.SemiBold,
-            Foreground = TextBrush,
-            TextWrapping = TextWrapping.Wrap,
-        };
-        AutomationProperties.SetHeadingLevel(headline, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
-        Grid.SetColumn(headline, 1);
-        panel.Children.Add(headline);
+            _sectionsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        }
 
-        var sentence = new TextBlock
+        for (var i = 0; i < _sections.Count; i++)
         {
-            Text = DetailsSentence(),
-            FontSize = 14,
-            Foreground = TextMutedBrush,
-            TextWrapping = TextWrapping.Wrap,
-        };
-        Grid.SetRow(sentence, 1);
-        Grid.SetColumn(sentence, 1);
-        panel.Children.Add(sentence);
-        return panel;
+            if (i % columns == 0)
+            {
+                _sectionsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+
+            Grid.SetRow(_sections[i], i / columns);
+            Grid.SetColumn(_sections[i], i % columns);
+        }
+    }
+
+    private void SetAdvancedOpen(bool open)
+    {
+        _showAdvanced = open;
+        _advancedChevron.Glyph = open ? "" : "";
+        AutomationProperties.SetName(_advancedToggle, open ? "Hide Advanced" : "Show Advanced");
+        _advancedGroup.Root.Visibility = VisibleIf(open);
     }
 
     private string DetailsSentence() =>
@@ -935,119 +1003,79 @@ public sealed partial class MainWindow : Window
                 : "Everything is working. Screenshots are being taken and uploaded.",
         };
 
-    private FrameworkElement BuildScreenshotsSection()
+    private List<RowSpec> ScreenshotRows()
     {
         var status = ViewModel.MonitorStatus;
         var signedIn = ViewModel.LoggedIn;
-        var rows = new List<UIElement>();
+        var rows = new List<RowSpec>();
         if (ViewModel.LastScreenshotAtMs is long last)
         {
-            rows.Add(CreateRow(StatusKind.Good, "Last screenshot", SessionViewModel.FormatShortTime(last)));
+            rows.Add(new RowSpec(StatusKind.Good, "Last screenshot", SessionViewModel.FormatShortTime(last)));
         }
         else if (signedIn)
         {
-            rows.Add(CreateRow(StatusKind.Warn, "Last screenshot", "None yet", "The first one is taken within a few minutes."));
+            rows.Add(new RowSpec(StatusKind.Warn, "Last screenshot", "None yet", "The first one is taken within a few minutes."));
         }
         else
         {
-            rows.Add(CreateRow(StatusKind.Neutral, "Last screenshot", "None"));
+            rows.Add(new RowSpec(StatusKind.Neutral, "Last screenshot", "None"));
         }
 
         if (status is null)
         {
-            rows.Add(CreateRow(StatusKind.Neutral, "Waiting to upload", "Unknown"));
+            rows.Add(new RowSpec(StatusKind.Neutral, "Waiting to upload", "Unknown"));
         }
         else
         {
             var waiting = status.PendingHashCount + status.PendingBatchCount;
-            rows.Add(CreateRow(signedIn ? StatusKind.Good : StatusKind.Neutral, "Waiting to upload", waiting.ToString()));
+            rows.Add(new RowSpec(signedIn ? StatusKind.Good : StatusKind.Neutral, "Waiting to upload", waiting.ToString()));
         }
 
-        return CreateSection("Screenshots", rows);
+        return rows;
     }
 
-    private FrameworkElement BuildAccountSection()
+    private List<RowSpec> AccountRows()
     {
-        var rows = new List<UIElement>();
+        var rows = new List<RowSpec>();
         if (ViewModel.LoggedIn)
         {
-            rows.Add(CreateRow(StatusKind.Good, "Signed in", string.IsNullOrWhiteSpace(ViewModel.AccountEmail) ? "Yes" : ViewModel.AccountEmail));
+            rows.Add(new RowSpec(StatusKind.Good, "Signed in", string.IsNullOrWhiteSpace(ViewModel.AccountEmail) ? "Yes" : ViewModel.AccountEmail));
             var count = ViewModel.MonitorStatus?.PartnerCount;
             rows.Add(count switch
             {
-                null => CreateRow(StatusKind.Neutral, "Partners", "Unknown"),
-                0 => CreateRow(StatusKind.Warn, "Partners", "0", "Add a partner on the Virtue website so someone receives your reports."),
-                _ => CreateRow(StatusKind.Good, "Partners", count.Value.ToString()),
+                null => new RowSpec(StatusKind.Neutral, "Partners", "<unknown>"),
+                0 => new RowSpec(StatusKind.Warn, "Partners", "0", "Add a partner on the Virtue website so someone receives your reports."),
+                _ => new RowSpec(StatusKind.Good, "Partners", count.Value.ToString()),
             });
         }
         else
         {
-            rows.Add(CreateRow(StatusKind.Neutral, "Signed in", ViewModel.HasLoadedStatus ? "No" : "Loading..."));
+            rows.Add(new RowSpec(StatusKind.Neutral, "Signed in", ViewModel.HasLoadedStatus ? "No" : "Loading..."));
         }
 
-        return CreateSection("Account", rows);
+        return rows;
     }
 
-    private FrameworkElement BuildProblemsSection()
+    private RowSpec ProblemRow()
     {
         var status = ViewModel.MonitorStatus;
-        UIElement row;
         if (ViewModel.MonitorState == "error" && !string.IsNullOrWhiteSpace(ViewModel.MonitorError))
         {
-            row = CreateRow(StatusKind.Bad, "Last problem", "Monitoring could not start", ViewModel.MonitorError);
+            return new RowSpec(StatusKind.Bad, "Last problem", "Monitoring could not start", ViewModel.MonitorError);
         }
-        else if (status?.RecentErrors is { Count: > 0 } errors)
+
+        if (status?.RecentErrors is { Count: > 0 } errors)
         {
             // A past error needs no action, so it reads as a warning for a
             // day and as neutral after that.
             var newest = errors.OrderByDescending(e => e.AtMs).First();
             var recent = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(newest.AtMs) < TimeSpan.FromDays(1);
-            row = CreateRow(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", SessionViewModel.FormatShortTime(newest.AtMs), newest.Message);
-        }
-        else if (status is null)
-        {
-            row = CreateRow(StatusKind.Neutral, "Recent problems", "Unknown");
-        }
-        else
-        {
-            row = CreateRow(StatusKind.Good, "Recent problems", "None");
+            return new RowSpec(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", SessionViewModel.FormatShortTime(newest.AtMs), newest.Message);
         }
 
-        return CreateSection("Problems", new List<UIElement> { row });
-    }
-
-    private UIElement BuildAdvanced()
-    {
-        var panel = new StackPanel { Spacing = 8 };
-
-        var chevron = new FontIcon { Glyph = _showAdvanced ? "" : "", FontSize = 11, Foreground = TextMutedBrush };
-        var toggleContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        toggleContent.Children.Add(new TextBlock { Text = "Advanced", FontSize = 14, Foreground = TextMutedBrush });
-        toggleContent.Children.Add(chevron);
-        var toggle = new Button { Content = toggleContent, Padding = new Thickness(4, 6, 6, 6) };
-        StyleQuietButton(toggle);
-        AutomationProperties.SetName(toggle, _showAdvanced ? "Hide Advanced" : "Show Advanced");
-        toggle.Click += (_, _) =>
-        {
-            _showAdvanced = !_showAdvanced;
-            RenderDetails();
-        };
-        panel.Children.Add(toggle);
-
-        if (_showAdvanced)
-        {
-            var rows = AdvancedRows().Select(r => (UIElement)CreateRow(null, r.Label, r.Value)).ToList();
-            var logDirectory = ViewModel.MonitorStatus?.LogDirectory;
-            if (!string.IsNullOrWhiteSpace(logDirectory))
-            {
-                var open = CreateSecondaryButton("Open log folder");
-                open.Click += (_, _) => OpenLogFolder(logDirectory!);
-                rows.Add(new Border { Padding = new Thickness(14, 12, 14, 12), Child = open });
-            }
-            panel.Children.Add(CreateGroup(rows));
-        }
-
-        return panel;
+        return status is null
+            ? new RowSpec(StatusKind.Neutral, "Recent problems", "Unknown")
+            : new RowSpec(StatusKind.Good, "Recent problems", "None");
     }
 
     private List<(string Label, string Value)> AdvancedRows()
@@ -1138,6 +1166,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        _reportDraftOpen = false;
         await ShowMessageAsync("Report Sent", "Thanks, your report was sent to the Virtue Initiative team.");
         Navigate(Screen.Home);
     }
@@ -1178,6 +1207,9 @@ public sealed partial class MainWindow : Window
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.None,
         };
+        // With no default button the dialog focuses its first button, the red
+        // action, so Enter would confirm. Start on Cancel instead (CLIENT-027).
+        dialog.Opened += (_, _) => FindDescendant<Button>(dialog, "CloseButton")?.Focus(FocusState.Programmatic);
         ApplyDialogTheme(dialog, (BadBrush, BadHoverBrush, BadHoverBrush));
         dialog.PrimaryButtonStyle = (Style)Application.Current.Resources["AccentButtonStyle"];
         var result = await ShowDialogAsync(dialog);
@@ -1197,15 +1229,44 @@ public sealed partial class MainWindow : Window
         await ShowDialogAsync(dialog);
     }
 
+    /// <summary>Shows the dialog once any dialog already open has closed.</summary>
     private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
     {
-        if (Content is FrameworkElement root)
+        await _dialogGate.WaitAsync();
+        try
         {
-            dialog.XamlRoot = root.XamlRoot;
-            dialog.RequestedTheme = ElementTheme.Light;
+            if (Content is FrameworkElement root)
+            {
+                dialog.XamlRoot = root.XamlRoot;
+                dialog.RequestedTheme = ElementTheme.Light;
+            }
+
+            return await dialog.ShowAsync();
+        }
+        finally
+        {
+            _dialogGate.Release();
+        }
+    }
+
+    private static T? FindDescendant<T>(DependencyObject parent, string name)
+        where T : FrameworkElement
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match && match.Name == name)
+            {
+                return match;
+            }
+
+            if (FindDescendant<T>(child, name) is { } found)
+            {
+                return found;
+            }
         }
 
-        return await dialog.ShowAsync();
+        return null;
     }
 
     private static void ApplyDialogTheme(ContentDialog dialog, (SolidColorBrush Normal, SolidColorBrush Hover, SolidColorBrush Pressed) accent)
@@ -1260,7 +1321,7 @@ public sealed partial class MainWindow : Window
             Child = content,
         };
 
-    private static FrameworkElement CreateSection(string title, IReadOnlyList<UIElement> rows)
+    private static FrameworkElement CreateSection(string title, RowGroup group)
     {
         var section = new StackPanel { Spacing = 10 };
         var heading = new TextBlock
@@ -1273,111 +1334,156 @@ public sealed partial class MainWindow : Window
         };
         AutomationProperties.SetHeadingLevel(heading, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level2);
         section.Children.Add(heading);
-        section.Children.Add(CreateGroup(rows));
+        section.Children.Add(group.Root);
         return section;
     }
 
-    private static Border CreateGroup(IReadOnlyList<UIElement> rows)
+    /// <summary>What one Status Details row shows.</summary>
+    private readonly record struct RowSpec(StatusKind? Kind, string Label, string Value, string? Hint = null);
+
+    /// <summary>
+    /// A bordered group of rows, with an optional footer under them. Rows are
+    /// reused by position, so a refresh only changes the text that changed.
+    /// </summary>
+    private sealed class RowGroup
     {
-        var stack = new StackPanel();
-        for (var i = 0; i < rows.Count; i++)
+        public RowGroup()
         {
-            if (i > 0)
+            var stack = new StackPanel();
+            stack.Children.Add(Rows);
+            stack.Children.Add(Footer);
+            Root = new Border
             {
-                stack.Children.Add(new Rectangle { Height = 1, Fill = BorderBrushToken });
-            }
-            stack.Children.Add(rows[i]);
+                Background = SurfaceBrush,
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = BorderBrushToken,
+                BorderThickness = new Thickness(1),
+                Child = stack,
+            };
         }
 
-        return new Border
+        public Border Root { get; }
+
+        public StackPanel Rows { get; } = new();
+
+        public Border Footer { get; } = new()
         {
-            Background = SurfaceBrush,
-            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(14, 12, 14, 12),
             BorderBrush = BorderBrushToken,
-            BorderThickness = new Thickness(1),
-            Child = stack,
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Visibility = Visibility.Collapsed,
         };
+
+        public List<DetailRow> Items { get; } = new();
     }
 
     /// <summary>
     /// Dot, muted label, right-aligned value, and a hint underneath only when
     /// the user must act. Long values wrap in the space the label leaves.
     /// </summary>
-    private static Grid CreateRow(StatusKind? kind, string label, string value, string? hint = null)
+    private sealed class DetailRow
     {
-        var row = new Grid { Padding = new Thickness(14), ColumnSpacing = 12, RowSpacing = 4 };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-        if (kind is { } k)
+        public DetailRow()
         {
-            var dot = CreateDot(k, 10);
-            dot.VerticalAlignment = VerticalAlignment.Top;
-            dot.Margin = new Thickness(0, 5, 0, 0);
-            row.Children.Add(dot);
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Root.Children.Add(Dot);
+            Grid.SetColumn(Label, 1);
+            Root.Children.Add(Label);
+            Grid.SetColumn(Value, 2);
+            Root.Children.Add(Value);
+            Grid.SetRow(Hint, 1);
+            Grid.SetColumn(Hint, 1);
+            Grid.SetColumnSpan(Hint, 2);
+            Root.Children.Add(Hint);
         }
-        else
-        {
-            row.ColumnSpacing = 0;
-        }
 
-        var labelBlock = new TextBlock
-        {
-            Text = label,
-            FontSize = 13,
-            Foreground = TextMutedBrush,
-            Margin = new Thickness(0, 1, kind is null ? 12 : 0, 0),
-            MaxWidth = 240,
-            TextWrapping = TextWrapping.Wrap,
-        };
-        Grid.SetColumn(labelBlock, 1);
-        row.Children.Add(labelBlock);
+        public Grid Root { get; } = new() { Padding = new Thickness(14), RowSpacing = 4, BorderBrush = BorderBrushToken };
 
-        var valueBlock = new TextBlock
+        public Ellipse Dot { get; } = new() { Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 5, 0, 0) };
+
+        public TextBlock Label { get; } = new() { FontSize = 13, Foreground = TextMutedBrush, MaxWidth = 240, TextWrapping = TextWrapping.Wrap };
+
+        public TextBlock Value { get; } = new()
         {
-            Text = value,
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
-            Foreground = kind switch
-            {
-                StatusKind.Bad => BadBrush,
-                StatusKind.Warn => LinkBrush,
-                _ => TextBrush,
-            },
             TextAlignment = TextAlignment.Right,
             HorizontalAlignment = HorizontalAlignment.Right,
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
         };
-        Grid.SetColumn(valueBlock, 2);
-        row.Children.Add(valueBlock);
 
-        if (hint is not null)
+        public TextBlock Hint { get; } = new() { FontSize = 12, Foreground = TextMutedBrush, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+    }
+
+    private static void SyncGroup(RowGroup group, IReadOnlyList<RowSpec> specs)
+    {
+        while (group.Items.Count < specs.Count)
         {
-            var hintBlock = new TextBlock
-            {
-                Text = hint,
-                FontSize = 12,
-                Foreground = TextMutedBrush,
-                TextWrapping = TextWrapping.Wrap,
-                IsTextSelectionEnabled = true,
-            };
-            Grid.SetRow(hintBlock, 1);
-            Grid.SetColumn(hintBlock, 1);
-            Grid.SetColumnSpan(hintBlock, 2);
-            row.Children.Add(hintBlock);
+            var row = new DetailRow();
+            row.Root.BorderThickness = new Thickness(0, group.Items.Count == 0 ? 0 : 1, 0, 0);
+            group.Items.Add(row);
+            group.Rows.Children.Add(row.Root);
         }
 
-        AutomationProperties.SetName(row, hint is null ? $"{label}: {value}" : $"{label}: {value}. {hint}");
-        return row;
+        while (group.Items.Count > specs.Count)
+        {
+            group.Items.RemoveAt(group.Items.Count - 1);
+            group.Rows.Children.RemoveAt(group.Rows.Children.Count - 1);
+        }
+
+        for (var i = 0; i < specs.Count; i++)
+        {
+            UpdateRow(group.Items[i], specs[i]);
+        }
+    }
+
+    private static void UpdateRow(DetailRow row, RowSpec spec)
+    {
+        row.Dot.Visibility = VisibleIf(spec.Kind is not null);
+        row.Root.ColumnSpacing = spec.Kind is null ? 0 : 12;
+        if (spec.Kind is { } kind)
+        {
+            SetDotKind(row.Dot, kind);
+        }
+
+        row.Label.Margin = new Thickness(0, 1, spec.Kind is null ? 12 : 0, 0);
+        SetText(row.Label, spec.Label);
+        SetText(row.Value, spec.Value);
+        row.Value.Foreground = spec.Kind switch
+        {
+            StatusKind.Bad => BadBrush,
+            StatusKind.Warn => LinkBrush,
+            _ => TextBrush,
+        };
+        SetText(row.Hint, spec.Hint ?? string.Empty);
+        row.Hint.Visibility = VisibleIf(spec.Hint is not null);
+        AutomationProperties.SetName(row.Root, spec.Hint is null ? $"{spec.Label}: {spec.Value}" : $"{spec.Label}: {spec.Value}. {spec.Hint}");
+    }
+
+    /// <summary>Setting even the same text clears a selection, so only set a change.</summary>
+    private static void SetText(TextBlock block, string text)
+    {
+        if (block.Text != text)
+        {
+            block.Text = text;
+        }
     }
 
     private static Ellipse CreateDot(StatusKind kind, double size)
     {
-        var dot = new Ellipse { Width = size, Height = size, Fill = KindBrush(kind), VerticalAlignment = VerticalAlignment.Center };
+        var dot = new Ellipse { Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
+        SetDotKind(dot, kind);
+        return dot;
+    }
+
+    private static void SetDotKind(Ellipse dot, StatusKind kind)
+    {
+        dot.Fill = KindBrush(kind);
         AutomationProperties.SetName(dot, kind switch
         {
             StatusKind.Good => "Working",
@@ -1385,7 +1491,6 @@ public sealed partial class MainWindow : Window
             StatusKind.Bad => "Needs attention",
             _ => "Not applicable",
         });
-        return dot;
     }
 
     private static SolidColorBrush KindBrush(StatusKind kind) =>
@@ -1517,12 +1622,16 @@ public sealed partial class MainWindow : Window
             Severity = InfoBarSeverity.Error,
             IsClosable = false,
             IsOpen = false,
+            Visibility = Visibility.Collapsed,
         };
 
     private static void SetError(InfoBar bar, string? message)
     {
+        var open = !string.IsNullOrWhiteSpace(message);
         bar.Message = message ?? string.Empty;
-        bar.IsOpen = !string.IsNullOrWhiteSpace(message);
+        bar.IsOpen = open;
+        // A closed InfoBar still takes its margin and panel spacing.
+        bar.Visibility = VisibleIf(open);
     }
 
     // Filled accent action (the primary button on each screen).

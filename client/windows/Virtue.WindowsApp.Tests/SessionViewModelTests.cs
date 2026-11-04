@@ -396,29 +396,33 @@ public sealed class SessionViewModelTests
             viewModel.StatusSentence);
     }
 
-    // CLIENT-027: before the first status load the headline reads Loading.
+    // CLIENT-027: before the first status load the headline reads Loading, with its sentence.
     [Fact]
     public void BeforeAnyRefresh_HeadlineReadsLoading()
     {
         var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
 
         Assert.Equal("Loading...", viewModel.Headline);
+        Assert.Equal("Checking your sign-in status...", viewModel.StatusSentence);
     }
 
-    // CLIENT-027: the tray tooltip text for each monitor state.
+    // CLIENT-027: the tray tooltip text for each monitor state; running and starting follow the headline.
     [Theory]
-    [InlineData("running", true, null, "Virtue: monitoring active")]
-    [InlineData("stopped", true, null, "Virtue: monitoring stopped")]
-    [InlineData("error", true, "upload failed", "Virtue: upload failed")]
-    [InlineData("error", true, null, "Virtue: monitoring error")]
-    [InlineData("signed_out", false, null, "Virtue: sign in required")]
+    [InlineData("running", true, 123L, null, "Virtue: monitoring active")]
+    [InlineData("starting", true, 123L, null, "Virtue: monitoring active")]
+    [InlineData("running", true, null, null, "Virtue: starting monitoring")]
+    [InlineData("starting", true, null, null, "Virtue: starting monitoring")]
+    [InlineData("stopped", true, null, null, "Virtue: monitoring stopped")]
+    [InlineData("error", true, null, "upload failed", "Virtue: upload failed")]
+    [InlineData("error", true, null, null, "Virtue: monitoring error")]
+    [InlineData("signed_out", false, null, null, "Virtue: sign in required")]
     public async Task RefreshAsync_TrayTooltipReflectsMonitorState(
-        string monitorState, bool loggedIn, string? lastError, string expectedTooltip)
+        string monitorState, bool loggedIn, long? lastScreenshotAtMs, string? lastError, string expectedTooltip)
     {
         var fakeClient = new FakeRustInteropClient
         {
             SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, null, lastError),
+            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, lastScreenshotAtMs, lastError),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 

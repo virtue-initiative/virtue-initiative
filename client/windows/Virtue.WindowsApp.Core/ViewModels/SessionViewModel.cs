@@ -222,6 +222,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         {
             if (SetProperty(ref _lastScreenshotAtMs, value))
             {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
                 RaiseHeadlineChanged();
             }
         }
@@ -243,12 +244,15 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string TrayTooltip =>
         BaseTrayTooltip + (_updateReady ? " (update ready)" : string.Empty);
 
+    // Running and starting follow the headline, so the tray never says active
+    // while the window still says starting.
     private string BaseTrayTooltip =>
         MonitorState switch
         {
             "loading" => "Virtue: loading status",
-            "running" => "Virtue: monitoring active",
-            "starting" => "Virtue: starting monitoring",
+            "running" or "starting" => LastScreenshotAtMs is null
+                ? "Virtue: starting monitoring"
+                : "Virtue: monitoring active",
             "error" => string.IsNullOrWhiteSpace(MonitorError)
                 ? "Virtue: monitoring error"
                 : $"Virtue: {MonitorError}",
