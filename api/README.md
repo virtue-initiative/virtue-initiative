@@ -29,7 +29,7 @@ npm run dev
 
 The API will be available at `http://localhost:8787`
 
-`npm run dev` uses the `staging` environment config, but Wrangler serves D1 and
+`npm run dev` uses the `staging` environment config, but `cf dev` serves D1 and
 R2 locally in development so it does not touch the real staging resources.
 
 With `API_BASE_PATH=/api`, the same worker will also accept `http://localhost:8787/api/*`
@@ -39,7 +39,7 @@ and strip that prefix before routing. That matches production setups where both
 To expose the dev server to VMs on your local network (for example libvirt guests):
 
 ```bash
-npm run dev -- --ip 0.0.0.0 --port 8787
+DEV_IP=0.0.0.0 npm run dev -- --port 8787
 ```
 
 From a libvirt VM on the default network, this is typically reachable at:
@@ -63,7 +63,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 ```
 
 Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in local `.dev.vars`, and in deployed
-environments upload at least the private key with `wrangler secret put`. The
+environments upload at least the private key with `bunx wrangler secret put <NAME> --name <worker>`. The
 public key can be shared with any other server that needs to verify tokens.
 The worker also exposes the verifier key at `GET /.well-known/jwks.json`.
 
@@ -71,8 +71,8 @@ Upload `LOGIN_SALT_SECRET` to each deployed environment before deploying, using
 a long random value such as `openssl rand -base64 32`. Rotate it only after a
 leak, because rotating it shows anyone who saved salts which ones were real.
 
-Ensure all the environment variables are set correctly (in `wrangler.json` and
-using `wrangler secret put`) and run
+Ensure all the environment variables are set correctly (in `cloudflare.config.ts` and
+using `bunx wrangler secret put`) and run
 
 ```bash
 npm run deploy:prod
