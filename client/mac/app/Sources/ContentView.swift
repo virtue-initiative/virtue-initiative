@@ -391,7 +391,7 @@ private struct SignInForm: View {
             .focused($focused, equals: .deviceName)
             .modifier(InputStyle(isFocused: focused == .deviceName))
 
-            Button(coordinator.isSigningIn ? "Signing In…" : "Log In", action: coordinator.login)
+            Button(coordinator.isSigningIn ? "Logging In…" : "Log In", action: coordinator.login)
                 .buttonStyle(VirtueButtonStyle(prominent: true, large: true))
                 .keyboardShortcut(.defaultAction)
                 .disabled(coordinator.isSigningIn)
