@@ -5,9 +5,9 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --env staging --local",
-    "deploy:prod": "wrangler deploy --env prod",
-    "deploy:staging": "wrangler deploy --env staging",
+    "dev": "cf dev --mode staging",
+    "deploy:prod": "cf deploy --mode prod",
+    "deploy:staging": "cf deploy --mode staging",
     "build": "echo 'No build step needed for Cloudflare Workers -- included in deploy'",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,9 +17,9 @@
     "db:clean:local": "rm -rf ./.wrangler/state/v3/d1 && rm -rf ./.wrangler/state/v3/r2",
     "db:clean:prod": "node scripts/clean-remote.mjs prod",
     "db:clean:staging": "node scripts/clean-remote.mjs staging",
-    "db:migrate:local": "wrangler d1 migrations apply DB --env staging --local && wrangler d1 migrations apply DONATE_DB --env staging --local",
-    "db:migrate:staging": "wrangler d1 migrations apply DB --env staging --remote",
-    "db:migrate:prod": "wrangler d1 migrations apply DB --env prod --remote"
+    "db:migrate:local": "bun ../scripts/d1-migrate.ts DB staging src/schema/migrations --local && bun ../scripts/d1-migrate.ts DONATE_DB staging ../api-donate/src/schema/migrations --local",
+    "db:migrate:staging": "bun ../scripts/d1-migrate.ts DB staging src/schema/migrations",
+    "db:migrate:prod": "bun ../scripts/d1-migrate.ts DB prod src/schema/migrations"
   },
   "keywords": [
     "cloudflare",
@@ -33,6 +33,7 @@
     "@cloudflare/workers-types": "^4.20260702.1",
     "@types/node": "^25.9.9",
     "@types/uuid": "^10.0.0",
+    "cf": "1.0.0-beta.27",
     "fast-check": "^4.10.2",
     "hono": "^4.13.16",
     "prettier": "^3.9.10",

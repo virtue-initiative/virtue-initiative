@@ -6,13 +6,12 @@
 //   bun scripts/check-deploy-secrets.ts staging        # or main, the branch being deployed
 //   bun scripts/check-deploy-secrets.ts --check-usage  # PR check, needs no credentials
 //
-// --check-usage fails when a Worker's code uses a value that no wrangler.json and no list below
-// accounts for, which is what a new secret looks like until it is added here.
+// --check-usage fails when a Worker's code uses a value that no cloudflare.config.ts and no list
+// below accounts for, which is what a new secret looks like until it is added here.
 import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-const ROOT = join(import.meta.dir, '..');
+import { ROOT, readWorkerConfig } from './cf-config';
 
 // Each Worker's `Env` points back here. The `web` and `landing` Workers only serve assets and
 // have no secrets.
@@ -27,23 +26,23 @@ const REQUIRED: Record<string, string[]> = {
   'api-donate': ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
 };
 
-// In `Env` but never deployed as a secret: the deploy passes COMMIT_SHA with --var, and only
-// local dev sets DEV_R2_ROUTE.
+// In `Env` but never deployed as a secret: api/cloudflare.config.ts adds COMMIT_SHA only when
+// the deploy sets it, and only local dev sets DEV_R2_ROUTE.
 const NOT_SECRETS = ['COMMIT_SHA', 'DEV_R2_ROUTE'];
 
-type Target = { project: string; env: string };
+type Target = { project: string; mode: string };
 
 // What .github/workflows/deploy.yml deploys for each branch.
 const TARGETS: Record<string, Target[]> = {
   main: [
-    { project: 'api', env: 'prod' },
-    { project: 'api-donate', env: 'prod' },
+    { project: 'api', mode: 'prod' },
+    { project: 'api-donate', mode: 'prod' },
   ],
   staging: [
-    { project: 'api', env: 'staging' },
-    { project: 'api-donate', env: 'staging' },
+    { project: 'api', mode: 'staging' },
+    { project: 'api-donate', mode: 'staging' },
     // The donate worker has no separate prod release, so staging pushes ship to prod too.
-    { project: 'api-donate', env: 'prod' },
+    { project: 'api-donate', mode: 'prod' },
   ],
 };
 
@@ -59,16 +58,21 @@ function parseSecretNames(stdout: string): Set<string> {
       // A notice, so keep looking.
     }
   }
-  throw new Error(`no secret list in wrangler's output:\n${stdout}`);
+  throw new Error(`no secret list in cf's output:\n${stdout}`);
 }
 
-function listSecrets({ project, env }: Target): Set<string> {
-  const res = spawnSync('bunx', ['wrangler', 'secret', 'list', '--env', env, '--format', 'json'], {
-    cwd: join(ROOT, project),
-    encoding: 'utf8',
-  });
+async function listSecrets({ project, mode }: Target): Promise<Set<string>> {
+  const { name } = await readWorkerConfig(project, mode);
+  const res = spawnSync(
+    'bun',
+    ['run', 'cf', 'workers', 'secrets', 'list', '--worker', name!, '--mode', mode],
+    {
+      cwd: join(ROOT, project),
+      encoding: 'utf8',
+    },
+  );
   if (res.status !== 0) {
-    throw new Error(res.stderr || res.stdout || `wrangler exited with ${res.status}`);
+    throw new Error(res.stderr || res.stdout || `cf exited with ${res.status}`);
   }
   return parseSecretNames(res.stdout);
 }
@@ -91,7 +95,7 @@ function usedNames(project: string): Set<string> {
   return names;
 }
 
-function checkUsage(): boolean {
+async function checkUsage(): Promise<boolean> {
   let ok = true;
   for (const [project, required] of Object.entries(REQUIRED)) {
     const used = usedNames(project);
@@ -101,8 +105,8 @@ function checkUsage(): boolean {
       );
       ok = false;
     }
-    const config = JSON.parse(readFileSync(join(ROOT, project, 'wrangler.json'), 'utf8'));
-    for (const [env, settings] of Object.entries<Record<string, any>>(config.env)) {
+    for (const mode of ['prod', 'staging']) {
+      const settings = await readWorkerConfig(project, mode);
       const known = new Set([
         ...required,
         ...NOT_SECRETS,
@@ -113,7 +117,7 @@ function checkUsage(): boolean {
       ]);
       for (const name of [...used].filter((name) => !known.has(name))) {
         console.error(
-          `${project} (${env}) uses ${name}, which is not in wrangler.json. If it is a secret, add it to scripts/check-deploy-secrets.ts.`,
+          `${project} (${mode}) uses ${name}, which is not in cloudflare.config.ts. If it is a secret, add it to scripts/check-deploy-secrets.ts.`,
         );
         ok = false;
       }
@@ -123,7 +127,7 @@ function checkUsage(): boolean {
 }
 
 if (process.argv[2] === '--check-usage') {
-  const ok = checkUsage();
+  const ok = await checkUsage();
   if (ok) console.log('Every value the Workers use is accounted for.');
   process.exit(ok ? 0 : 1);
 }
@@ -138,10 +142,10 @@ if (!targets) {
 
 let ok = true;
 for (const target of targets) {
-  const label = `${target.project} (${target.env})`;
+  const label = `${target.project} (${target.mode})`;
   let existing: Set<string>;
   try {
-    existing = listSecrets(target);
+    existing = await listSecrets(target);
   } catch (err) {
     // Not the same as a missing secret, so the fix below would mislead.
     console.error(`Could not list the secrets of ${label}: ${err}`);
@@ -150,9 +154,12 @@ for (const target of targets) {
   }
   const required = REQUIRED[target.project]!;
   const missing = required.filter((name) => !existing.has(name));
+  // cf can't prompt for a single secret yet, so this still uses Wrangler, which needs only the
+  // Worker's name.
+  const { name: worker } = await readWorkerConfig(target.project, target.mode);
   for (const name of missing) {
     console.error(
-      `${label} is missing ${name}. Set it with: cd ${target.project} && bunx wrangler secret put ${name} --env ${target.env}`,
+      `${label} is missing ${name}. Set it with: cd ${target.project} && bunx wrangler secret put ${name} --name ${worker}`,
     );
   }
   if (missing.length > 0) ok = false;

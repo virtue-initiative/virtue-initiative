@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import type { Subprocess } from 'bun';
+import { d1DatabaseId, d1Raw } from '../../scripts/cf-config';
 
 export const DEV_EMAIL = 'dev@dev.com';
 export const DEV_PASSWORD = 'devpassword';
@@ -131,7 +132,7 @@ export async function setupApiDevEnvironment(apiDir: string): Promise<void> {
   if (!(await Bun.file(devVars).exists())) {
     await Bun.write(devVars, await Bun.file(devVarsExample).text());
   }
-  if (!(await Bun.file(`${apiDir}/node_modules/.bin/wrangler`).exists())) {
+  if (!(await Bun.file(`${apiDir}/node_modules/cf/package.json`).exists())) {
     run(['bun', 'install'], { cwd: apiDir });
   }
   run(['bun', 'run', 'db:migrate:local'], { cwd: apiDir });
@@ -175,19 +176,16 @@ export function startApiDevServer(
   logPath: string,
 ): Subprocess {
   log('Starting api dev server');
-  return spawnLogged(
-    [
-      'bun',
-      'run',
-      'dev',
-      '--',
-      '--port',
-      String(apiPort),
-      '--var',
-      `HASH_SERVER_URL:${hashBaseUrl}`,
-    ],
-    { cwd: apiDir, logPath },
+  // cf dev can't pass --var on to Wrangler, so the override goes in .dev.vars.launch, which
+  // `--mode launch` reads in place of .dev.vars (as scripts/launch.sh does).
+  writeFileSync(
+    join(apiDir, '.dev.vars.launch'),
+    `${readFileSync(join(apiDir, '.dev.vars'), 'utf8')}\nHASH_SERVER_URL="${hashBaseUrl}"\n`,
   );
+  return spawnLogged(['bun', 'run', 'cf', 'dev', '--mode', 'launch', '--port', String(apiPort)], {
+    cwd: apiDir,
+    logPath,
+  });
 }
 
 export function seedDevUser(rootDir: string): void {
@@ -211,55 +209,36 @@ export function run(
   }
 }
 
+const API_DB_ID = await d1DatabaseId('api', 'staging', 'DB');
+
 /**
- * `wrangler d1 execute --json`, parsed directly -- no shell-out needed to extract fields.
+ * Rows from `cf d1 raw` against the API's local D1, one array per statement.
  * It opens the same local SQLite file as the running API, so it fails with SQLITE_BUSY
  * if the daemon's upload is writing at that moment; that is retried.
  */
-function d1QueryJson(
-  apiDir: string,
-  sql: string,
-): Array<{ results?: Array<Record<string, unknown>> }> {
+function d1QueryJson(apiDir: string, sql: string): Array<Record<string, unknown>[]> {
   for (let attempt = 1; ; attempt++) {
-    const result = Bun.spawnSync(
-      [
-        'bun',
-        'run',
-        'wrangler',
-        'd1',
-        'execute',
-        'staging-app-db',
-        '--local',
-        '--env',
-        'staging',
-        '--json',
-        '--command',
-        sql,
-      ],
-      { cwd: apiDir, stdout: 'pipe', stderr: 'pipe' },
-    );
-    const stderr = result.stderr.toString();
-    const output = stderr + result.stdout.toString();
-    if (result.success) {
-      process.stderr.write(stderr);
-      return JSON.parse(result.stdout.toString());
+    const result = d1Raw('api', API_DB_ID, 'staging', sql, join(apiDir, '.wrangler', 'state'));
+    if (result.ok) {
+      process.stderr.write(result.stderr);
+      return result.results;
     }
-    if (output.includes('SQLITE_BUSY') && attempt < 5) {
+    if (result.output.includes('SQLITE_BUSY') && attempt < 5) {
       console.log(`integration-test: local D1 busy, retrying (${attempt}/4)`);
       Bun.sleepSync(1000 * attempt);
       continue;
     }
-    process.stderr.write(output);
-    fail(`wrangler d1 execute failed for: ${sql}`);
+    process.stderr.write(result.output);
+    fail(`cf d1 raw failed for: ${sql}`);
   }
 }
 
 function d1QueryCount(apiDir: string, sql: string): number {
-  return (d1QueryJson(apiDir, sql)[0]?.results?.[0]?.c as number | undefined) ?? 0;
+  return (d1QueryJson(apiDir, sql)[0]?.[0]?.c as number | undefined) ?? 0;
 }
 
 function d1QueryValue(apiDir: string, sql: string): string {
-  return (d1QueryJson(apiDir, sql)[0]?.results?.[0]?.v as string | undefined) ?? '';
+  return (d1QueryJson(apiDir, sql)[0]?.[0]?.v as string | undefined) ?? '';
 }
 
 /** `hex(id)` from D1 (big-endian, no dashes, uppercase) back to a standard lowercase UUID string. */
@@ -304,30 +283,13 @@ async function hashServerLastReceived(
 
 function d1Dump(apiDir: string, label: string, sql: string): void {
   console.log(`--- ${label} (raw) ---`);
-  run(
-    [
-      'bun',
-      'run',
-      'wrangler',
-      'd1',
-      'execute',
-      'staging-app-db',
-      '--local',
-      '--env',
-      'staging',
-      '--command',
-      sql,
-    ],
-    {
-      cwd: apiDir,
-    },
-  );
+  console.table(d1QueryJson(apiDir, sql)[0]);
 }
 
 /**
  * Asserts a device row and at least one batch row landed in D1, and that the
  * standalone hash server actually ingested a hash for that device -- all
- * retried for a few seconds since a `wrangler d1 execute --local` CLI process
+ * retried for a few seconds since a `cf d1 raw --local` CLI process
  * reading the same on-disk D1 state can lag slightly behind Miniflare's
  * in-process view right after a write.
  *

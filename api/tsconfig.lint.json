@@ -1,8 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node"],
+    "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*", "worker-configuration.d.ts"],
+  "include": [
+    "src/**/*",
+    "worker-configuration.d.ts",
+    "cloudflare.config.ts",
+    "wrangler.config.ts"
+  ],
   "exclude": ["node_modules", "test/**/*"]
 }

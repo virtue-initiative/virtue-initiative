@@ -51,6 +51,7 @@ Read `TESTING.md` before writing or changing a test. In short:
 [`docs/development.md`](docs/development.md) covers setup, `launch.sh`, seeding, the shared Rust build cache, dev config files and building the Apple apps from Linux. The things agents trip on:
 
 - Start the stack with `./scripts/launch.sh` in the background, writing its output to a file. Never pipe it into `head`/`tail`, which wedges the API. Ports change every run; read them from its startup banner.
+- The Workers deploy and run through Cloudflare's `cf` CLI, not Wrangler: every `cf` command inside a Worker needs `--mode`, and D1 commands take database IDs. See "Cloudflare CLI (`cf`)" in `docs/development.md`.
 - `just seed` creates `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password) and a week of activity.
 - `EMAIL_DELIVERY_MODE=log` in `api/.dev.vars` prints outgoing emails, including token-bearing links, to the `[api]` log instead of sending them.
 - Check `web/` and `landing/` changes in a browser with `bunx playwright-cli` (the `playwright-cli` skill). See "Driving the web app in a browser" in `docs/development.md`.
