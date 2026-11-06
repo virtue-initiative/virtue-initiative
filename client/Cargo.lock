@@ -3885,6 +3885,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "virtue-core",
+ "wait-timeout",
 ]
 
 [[package]]

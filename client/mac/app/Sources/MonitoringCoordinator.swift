@@ -18,6 +18,8 @@ final class MonitoringCoordinator: ObservableObject {
     /// How often to re-check Screen Recording while no window is open, for
     /// the menu bar's Test Screenshot (CLIENT-025).
     private static let hiddenScreenRecordingCheckInterval: TimeInterval = 30
+    /// The main window's scene id. SwiftUI names its `NSWindow` after it.
+    nonisolated static let mainWindowID = "main"
 
     @Published var email: String = ""
     @Published var password: String = ""
@@ -279,7 +281,7 @@ final class MonitoringCoordinator: ObservableObject {
         let loggedIn: Bool
         let deviceId: String?
         /// Nil when this tick skipped the check (CLIENT-025).
-        let screenRecordingGranted: Bool?
+        let screenRecording: ScreenRecordingCheck?
     }
 
     private func pollTick() {
@@ -288,9 +290,12 @@ final class MonitoringCoordinator: ObservableObject {
         }
         checkForReplacedBundle()
         isPolling = true
-        // Each check spawns a process, so every tick only while a window can
-        // show it, and every 30 s otherwise for the menu bar.
-        let windowVisible = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        // Each check spawns a process, so every tick only while the main
+        // window can show it, and every 30 s otherwise for the menu bar.
+        // Other windows (About, Sparkle, alerts) don't show the result.
+        let windowVisible = NSApp.windows.contains {
+            $0.isVisible && $0.identifier?.rawValue.hasPrefix(Self.mainWindowID) == true
+        }
         let checkScreenRecording = windowVisible
             || lastScreenRecordingCheck.map { Date().timeIntervalSince($0) >= Self.hiddenScreenRecordingCheckInterval } ?? true
         if checkScreenRecording {
@@ -298,7 +303,7 @@ final class MonitoringCoordinator: ObservableObject {
         }
         Task {
             let snapshot = await Task.detached(priority: .utility) { [daemonExePath] () -> PolledSnapshot in
-                let granted = checkScreenRecording
+                let screenRecording = checkScreenRecording
                     ? NativeBridge.checkCapturePermissionNow(daemonExePath: daemonExePath)
                     : nil
                 let status = NativeBridge.pollDaemonStatus()
@@ -308,7 +313,7 @@ final class MonitoringCoordinator: ObservableObject {
                         statusJson: nil,
                         loggedIn: false,
                         deviceId: nil,
-                        screenRecordingGranted: granted
+                        screenRecording: screenRecording
                     )
                 }
                 return PolledSnapshot(
@@ -316,7 +321,7 @@ final class MonitoringCoordinator: ObservableObject {
                     statusJson: NativeBridge.getStatusJson(),
                     loggedIn: NativeBridge.isLoggedIn(),
                     deviceId: NativeBridge.getDeviceId(),
-                    screenRecordingGranted: granted
+                    screenRecording: screenRecording
                 )
             }.value
             applyPolledSnapshot(snapshot)
@@ -325,8 +330,13 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func applyPolledSnapshot(_ snapshot: PolledSnapshot) {
-        if let granted = snapshot.screenRecordingGranted {
-            needsScreenRecording = !granted
+        // A check that gave no answer (slow under load, or the daemon binary
+        // missing mid-update) is not a denial, so keep what's shown.
+        switch snapshot.screenRecording {
+        case .granted: needsScreenRecording = false
+        case .denied: needsScreenRecording = true
+        case .failed(let cause): NSLog("Screen Recording check failed: \(cause)")
+        case nil: break
         }
         // Only suppresses the "stopped unexpectedly" false-negative during a
         // relaunch/launch restart race — must NOT also suppress recognizing
@@ -447,15 +457,15 @@ final class MonitoringCoordinator: ObservableObject {
         updateController?.isUpdateSessionInProgress ?? false
     }
 
-    /// Relaunch this app from its (new) bundle and exit. `open` is used
-    /// rather than re-exec'ing so the replacement process is started by
-    /// launchservices against the new bundle, not inherited from this one.
-    /// Relaunch Virtue in the Stopped state (CLIENT-024). The new instance
+    /// From the Stopped state (CLIENT-024), relaunch Virtue. The new instance
     /// kickstarts the daemon, so this restarts it too.
     func restartApp() {
         relaunchSelf()
     }
 
+    /// Relaunch this app from its (new) bundle and exit. `open` is used
+    /// rather than re-exec'ing so the replacement process is started by
+    /// launchservices against the new bundle, not inherited from this one.
     private func relaunchSelf() {
         isRelaunchingIntoNewBundle = true
         let bundleURL = Bundle.main.bundleURL

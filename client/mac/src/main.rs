@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use virtue_mac::capture;
@@ -25,14 +25,26 @@ enum Commands {
     Daemon,
     /// Print the current service status as plain text.
     Status,
-    /// Exit 0 only while Screen Recording is granted. The daemon runs this
-    /// before each capture, because its own answer never changes.
+    /// Exit 0 while Screen Recording is granted, `CHECK_ACCESS_DENIED_EXIT`
+    /// while it isn't. The daemon runs this before each capture, because its
+    /// own answer never changes.
     #[command(name = capture::CHECK_ACCESS_SUBCOMMAND, hide = true)]
     CheckScreenCapture,
 }
 
 fn main() -> ExitCode {
-    match run() {
+    let cli = Cli::parse();
+    // Answered here, before any of `run`'s path, env or logging setup: it
+    // runs before every capture and every app poll, and must not create
+    // directories or log files each time.
+    if let Commands::CheckScreenCapture = cli.command {
+        return if capture::has_screen_capture_access() {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(capture::CHECK_ACCESS_DENIED_EXIT)
+        };
+    }
+    match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("error: {err:#}");
@@ -41,11 +53,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<()> {
-    let cli = Cli::parse();
-    if let Commands::CheckScreenCapture = cli.command {
-        return check_screen_capture();
-    }
+fn run(cli: Cli) -> Result<()> {
     let paths = ClientPaths::discover()?;
     paths.ensure_dirs()?;
     apply_runtime_env(&paths);
@@ -54,15 +62,7 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Daemon => daemon::run_daemon(&paths),
         Commands::Status => status(&paths),
-        Commands::CheckScreenCapture => check_screen_capture(),
-    }
-}
-
-fn check_screen_capture() -> Result<()> {
-    if capture::has_screen_capture_access() {
-        Ok(())
-    } else {
-        Err(anyhow!("Screen Recording is off"))
+        Commands::CheckScreenCapture => unreachable!("answered in main before any setup"),
     }
 }
 
