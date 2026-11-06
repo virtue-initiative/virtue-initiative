@@ -293,64 +293,36 @@ private struct ScreenRecordingSteps: View {
                 .foregroundStyle(VirtueBrand.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // The window moves on by itself once the permission is on, so
+            // there is no restart step (CLIENT-025).
             Card {
-                VStack(alignment: .leading, spacing: 22) {
-                    step(1, "Turn on Virtue", current: true) {
-                        Text("Open Privacy & Security, then Screen Recording. Turn on **Virtue**.")
-                        Button("Open System Settings") {
-                            coordinator.openScreenRecordingSettings()
-                        }
-                        .buttonStyle(VirtueButtonStyle(prominent: true))
-                        Image("ScreenRecordingSettings")
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .stroke(VirtueBrand.border, lineWidth: 1)
-                            )
-                            .accessibilityLabel("Privacy & Security settings, Screen Recording, with Virtue turned on")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Turn on Virtue")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Open Privacy & Security, then Screen Recording. Turn on **Virtue**.")
+                    Button("Open System Settings") {
+                        coordinator.openScreenRecordingSettings()
                     }
-                    // macOS only reports the grant to a fresh process, so this
-                    // covers anyone who clicked Later (CLIENT-025).
-                    step(2, "Restart Virtue", current: false) {
-                        Text("If you turned it on and clicked Later, click Restart Virtue.")
-                        Button("Restart Virtue") {
-                            coordinator.restartApp()
-                        }
-                        .buttonStyle(VirtueButtonStyle(prominent: true))
-                    }
+                    .buttonStyle(VirtueButtonStyle(prominent: true))
+                    Image("ScreenRecordingSettings")
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .stroke(VirtueBrand.border, lineWidth: 1)
+                        )
+                        .accessibilityLabel("Privacy & Security settings, Screen Recording, with Virtue turned on")
+                    Text("If macOS asks to quit and reopen Virtue, either choice works.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(VirtueBrand.textMuted)
                 }
+                .foregroundStyle(VirtueBrand.text)
+                .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func step<Body: View>(
-        _ number: Int,
-        _ title: String,
-        current: Bool,
-        @ViewBuilder body: () -> Body
-    ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number)")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(current ? Color.white : VirtueBrand.accent)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(current ? VirtueBrand.accent : VirtueBrand.bgSubtle))
-                .overlay(Circle().stroke(current ? Color.clear : VirtueBrand.border, lineWidth: 1))
-                .accessibilityLabel("Step \(number)")
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(VirtueBrand.text)
-                    .padding(.top, 3)
-                body()
-                    .foregroundStyle(VirtueBrand.text)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 }
 

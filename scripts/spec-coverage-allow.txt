@@ -40,7 +40,6 @@ CLIENT-014  todo: needs an OS-level or platform UI test harness
 CLIENT-022  todo: needs an OS-level or platform UI test harness
 CLIENT-023  todo: needs an OS-level or platform UI test harness
 CLIENT-024  todo: needs an OS-level or platform UI test harness
-CLIENT-025  todo: needs an OS-level or platform UI test harness
 CLIENT-026  todo: needs an OS-level or platform UI test harness
 CLIENT-030  todo: needs an OS-level or platform UI test harness
 CLIENT-032  todo: needs an OS-level or platform UI test harness

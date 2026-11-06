@@ -15,6 +15,11 @@ final class MonitoringCoordinator: ObservableObject {
     private static let statusPollInterval: TimeInterval = 2
     private static let stoppedTimeout: TimeInterval = 20
     private static let postRelaunchGrace: TimeInterval = 30
+    /// How often to re-check Screen Recording while no window is open, for
+    /// the menu bar's Test Screenshot (CLIENT-025).
+    private static let hiddenScreenRecordingCheckInterval: TimeInterval = 30
+    /// The main window's scene id. SwiftUI names its `NSWindow` after it.
+    nonisolated static let mainWindowID = "main"
 
     @Published var email: String = ""
     @Published var password: String = ""
@@ -51,6 +56,7 @@ final class MonitoringCoordinator: ObservableObject {
 
     private var statusTimer: Timer?
     private var isPolling = false
+    private var lastScreenRecordingCheck: Date?
     /// `VirtueBuildLabel` as it was on disk when this process launched, for
     /// detecting that the bundle has since been replaced. See
     /// `checkForReplacedBundle`.
@@ -274,6 +280,8 @@ final class MonitoringCoordinator: ObservableObject {
         let statusJson: String?
         let loggedIn: Bool
         let deviceId: String?
+        /// Nil when this tick skipped the check (CLIENT-025).
+        let screenRecording: ScreenRecordingCheck?
     }
 
     private func pollTick() {
@@ -282,17 +290,38 @@ final class MonitoringCoordinator: ObservableObject {
         }
         checkForReplacedBundle()
         isPolling = true
+        // Each check spawns a process, so every tick only while the main
+        // window can show it, and every 30 s otherwise for the menu bar.
+        // Other windows (About, Sparkle, alerts) don't show the result.
+        let windowVisible = NSApp.windows.contains {
+            $0.isVisible && $0.identifier?.rawValue.hasPrefix(Self.mainWindowID) == true
+        }
+        let checkScreenRecording = windowVisible
+            || lastScreenRecordingCheck.map { Date().timeIntervalSince($0) >= Self.hiddenScreenRecordingCheckInterval } ?? true
+        if checkScreenRecording {
+            lastScreenRecordingCheck = Date()
+        }
         Task {
-            let snapshot = await Task.detached(priority: .utility) { () -> PolledSnapshot in
+            let snapshot = await Task.detached(priority: .utility) { [daemonExePath] () -> PolledSnapshot in
+                let screenRecording = checkScreenRecording
+                    ? NativeBridge.checkCapturePermissionNow(daemonExePath: daemonExePath)
+                    : nil
                 let status = NativeBridge.pollDaemonStatus()
                 guard status == .running else {
-                    return PolledSnapshot(status: status, statusJson: nil, loggedIn: false, deviceId: nil)
+                    return PolledSnapshot(
+                        status: status,
+                        statusJson: nil,
+                        loggedIn: false,
+                        deviceId: nil,
+                        screenRecording: screenRecording
+                    )
                 }
                 return PolledSnapshot(
                     status: status,
                     statusJson: NativeBridge.getStatusJson(),
                     loggedIn: NativeBridge.isLoggedIn(),
-                    deviceId: NativeBridge.getDeviceId()
+                    deviceId: NativeBridge.getDeviceId(),
+                    screenRecording: screenRecording
                 )
             }.value
             applyPolledSnapshot(snapshot)
@@ -301,6 +330,14 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func applyPolledSnapshot(_ snapshot: PolledSnapshot) {
+        // A check that gave no answer (slow under load, or the daemon binary
+        // missing mid-update) is not a denial, so keep what's shown.
+        switch snapshot.screenRecording {
+        case .granted: needsScreenRecording = false
+        case .denied: needsScreenRecording = true
+        case .failed(let cause): NSLog("Screen Recording check failed: \(cause)")
+        case nil: break
+        }
         // Only suppresses the "stopped unexpectedly" false-negative during a
         // relaunch/launch restart race — must NOT also suppress recognizing
         // a genuinely successful `.running` poll, or the UI is stuck showing
@@ -342,9 +379,6 @@ final class MonitoringCoordinator: ObservableObject {
             lastLoopAt = status.lastLoopAtMs.map(formatMillisTimestamp) ?? "<none>"
             coreStatus = status
         }
-        // Deliberately no re-check of Screen Recording here: macOS caches the
-        // answer for the life of the process, so a grant only shows up after
-        // a relaunch (macOS's "Quit & Reopen", or `restartApp`).
     }
 
     private func refreshSessionState() {
@@ -423,16 +457,15 @@ final class MonitoringCoordinator: ObservableObject {
         updateController?.isUpdateSessionInProgress ?? false
     }
 
-    /// Relaunch this app from its (new) bundle and exit. `open` is used
-    /// rather than re-exec'ing so the replacement process is started by
-    /// launchservices against the new bundle, not inherited from this one.
-    /// For someone who turned on Screen Recording but picked "Later" on
-    /// macOS's "Quit & Reopen" prompt. The new instance kickstarts the daemon,
-    /// so it picks up the permission too.
+    /// From the Stopped state (CLIENT-024), relaunch Virtue. The new instance
+    /// kickstarts the daemon, so this restarts it too.
     func restartApp() {
         relaunchSelf()
     }
 
+    /// Relaunch this app from its (new) bundle and exit. `open` is used
+    /// rather than re-exec'ing so the replacement process is started by
+    /// launchservices against the new bundle, not inherited from this one.
     private func relaunchSelf() {
         isRelaunchingIntoNewBundle = true
         let bundleURL = Bundle.main.bundleURL

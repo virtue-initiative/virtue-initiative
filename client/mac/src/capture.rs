@@ -1,10 +1,12 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use uuid::Uuid;
 use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
+use wait_timeout::ChildExt;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -12,8 +14,61 @@ unsafe extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
+/// The hidden `virtue-daemon` subcommand that answers whether Screen
+/// Recording is granted, with exit code 0 or `CHECK_ACCESS_DENIED_EXIT`.
+pub const CHECK_ACCESS_SUBCOMMAND: &str = "check-screen-capture";
+
+/// The check's exit code when Screen Recording is off. Any other failure,
+/// such as clap's 2 from a binary without the subcommand, means the check
+/// itself failed.
+pub const CHECK_ACCESS_DENIED_EXIT: u8 = 1;
+
+/// How long a check may take before it counts as failed, so a hung check
+/// can't stall a capture or the app's status poll.
+pub const CHECK_ACCESS_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What a new process said about Screen Recording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessCheck {
+    Granted,
+    Denied,
+    /// The check gave no answer: it failed to start, timed out or exited
+    /// some other way. Holds the cause, for the logs.
+    Failed(String),
+}
+
 pub fn capture_screen() -> Result<Vec<u8>> {
-    if !has_screen_capture_access() {
+    match std::env::current_exe() {
+        Ok(exe) => capture_screen_checked_by(&exe),
+        Err(err) => capture_after_check(AccessCheck::Failed(format!(
+            "cannot find own executable: {err}"
+        ))),
+    }
+}
+
+/// Captures the screen if `checker check-screen-capture` allows it.
+/// `capture_screen` uses this executable, because the in-process check would
+/// miss a grant removed since the daemon started, and `screencapture` would
+/// then raise macOS's prompt and return only the desktop background
+/// (CLIENT-025).
+pub fn capture_screen_checked_by(checker: &Path) -> Result<Vec<u8>> {
+    capture_after_check(check_access_in_new_process(checker, CHECK_ACCESS_TIMEOUT))
+}
+
+fn capture_after_check(check: AccessCheck) -> Result<Vec<u8>> {
+    let granted = match check {
+        AccessCheck::Granted => true,
+        AccessCheck::Denied => false,
+        // Most likely the app was moved or is mid-update, so the executable
+        // isn't on disk. This process's own answer is only wrong if the
+        // permission also changed since it started, which is far rarer than
+        // refusing every capture until the daemon restarts.
+        AccessCheck::Failed(cause) => {
+            tracing::warn!(%cause, "Screen Recording check failed; using this process's own answer");
+            has_screen_capture_access()
+        }
+    };
+    if !granted {
         return Err(anyhow!(
             "screen recording permission missing (grant Screen Recording permission in macOS)"
         ));
@@ -24,8 +79,43 @@ pub fn capture_screen() -> Result<Vec<u8>> {
         .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")
 }
 
+/// Whether this process may capture the screen. macOS answers once per
+/// process, so in a long-running process this goes stale when the permission
+/// changes (CLIENT-025). Only `virtue-daemon check-screen-capture` and the
+/// launch-time request use it.
 pub fn has_screen_capture_access() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// Runs `program check-screen-capture`, which gets a fresh answer from macOS.
+/// The app also calls this with the bundled daemon, to notice the permission
+/// changing while it runs.
+pub fn check_access_in_new_process(program: &Path, timeout: Duration) -> AccessCheck {
+    let describe = || format!("{} {CHECK_ACCESS_SUBCOMMAND}", program.display());
+    let mut child = match Command::new(program)
+        .arg(CHECK_ACCESS_SUBCOMMAND)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => return AccessCheck::Failed(format!("cannot start {}: {err}", describe())),
+    };
+    let failure = match child.wait_timeout(timeout) {
+        Ok(Some(status)) if status.success() => return AccessCheck::Granted,
+        Ok(Some(status)) if status.code() == Some(i32::from(CHECK_ACCESS_DENIED_EXIT)) => {
+            return AccessCheck::Denied;
+        }
+        Ok(Some(status)) => {
+            return AccessCheck::Failed(format!("{} exited with {status}", describe()));
+        }
+        Ok(None) => format!("{} did not answer within {timeout:?}", describe()),
+        Err(err) => format!("waiting for {} failed: {err}", describe()),
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    AccessCheck::Failed(failure)
 }
 
 /// Request screen capture access and return whether it is now granted.
@@ -333,6 +423,55 @@ impl LifecycleHooks for MacPlatformHooks {
         }
         let text = String::from_utf8_lossy(&output.stdout);
         Ok(parse_last_logout_mac(&text))
+    }
+}
+
+#[cfg(test)]
+// CLIENT-025: the daemon checks Screen Recording in a new process before
+// each capture; only a clean denial means no access, and a denial means no
+// capture.
+mod permission_tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    fn check(program: &str) -> AccessCheck {
+        check_access_in_new_process(Path::new(program), CHECK_ACCESS_TIMEOUT)
+    }
+
+    #[test]
+    fn a_clean_exit_grants_and_the_denied_code_denies() {
+        assert_eq!(check("/usr/bin/true"), AccessCheck::Granted);
+        assert_eq!(check("/usr/bin/false"), AccessCheck::Denied);
+    }
+
+    #[test]
+    fn a_check_that_cannot_answer_is_a_failure_not_a_denial() {
+        // Missing executable, as when the app was moved while running.
+        assert!(matches!(
+            check("/nonexistent/virtue-daemon"),
+            AccessCheck::Failed(_)
+        ));
+        // Like an older binary without the subcommand, `diff` with one
+        // operand exits 2 for a usage error.
+        assert!(matches!(check("/usr/bin/diff"), AccessCheck::Failed(_)));
+    }
+
+    #[test]
+    fn a_check_that_never_exits_is_a_failure() {
+        // `yes` ignores its argument and never exits on its own.
+        let started = Instant::now();
+        let result =
+            check_access_in_new_process(Path::new("/usr/bin/yes"), Duration::from_millis(200));
+        assert!(matches!(result, AccessCheck::Failed(_)), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_denied_check_fails_the_capture_as_a_permission_error() {
+        let err =
+            capture_screen_checked_by(Path::new("/usr/bin/false")).expect_err("capture must fail");
+        assert!(is_permission_missing_error(&err.to_string()), "{err}");
     }
 }
 
