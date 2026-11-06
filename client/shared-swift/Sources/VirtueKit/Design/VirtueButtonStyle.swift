@@ -43,6 +43,7 @@ public struct VirtueButtonStyle: ButtonStyle {
                 )
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1.0 : 0.45)
+                .pointingHandCursor(isEnabled)
                 .animation(.easeInOut(duration: 0.1), value: configuration.isPressed)
         }
     }

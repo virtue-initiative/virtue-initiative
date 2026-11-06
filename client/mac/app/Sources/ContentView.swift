@@ -78,19 +78,7 @@ struct ContentView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             if screen == .home {
-                Link(destination: URL(string: "https://virtueinitiative.org")!) {
-                    HStack(spacing: 8) {
-                        VirtueLogoShape()
-                            .fill(VirtueBrand.logo)
-                            .frame(width: 19, height: 20)
-                        Text("Virtue Initiative")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(VirtueBrand.text)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help("Open virtueinitiative.org")
-                .accessibilityLabel("Virtue Initiative website")
+                WebsiteLink()
             } else {
                 HStack(spacing: 6) {
                     Button {
@@ -98,6 +86,7 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "chevron.backward")
                     }
+                    .pointingHandCursor()
                     .keyboardShortcut("[", modifiers: .command)
                     .help("Back")
                     .accessibilityLabel("Back")
@@ -194,6 +183,37 @@ struct ContentView: View {
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
+    }
+}
+
+/// The toolbar's logo and name. It sits where people grab to drag the window,
+/// so the hover background and cursor say it's a link (CLIENT-024).
+private struct WebsiteLink: View {
+    @State private var isHovering = false
+
+    var body: some View {
+        Link(destination: URL(string: "https://virtueinitiative.org")!) {
+            HStack(spacing: 8) {
+                VirtueLogoShape()
+                    .fill(VirtueBrand.logo)
+                    .frame(width: 19, height: 20)
+                Text("Virtue Initiative")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(VirtueBrand.text)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isHovering ? VirtueBrand.border.opacity(0.6) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .pointingHandCursor()
+        .help("Open virtueinitiative.org")
+        .accessibilityLabel("Virtue Initiative website")
     }
 }
 
@@ -380,6 +400,7 @@ private struct SignInForm: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .pointingHandCursor()
                 .padding(.trailing, 8)
                 .help(isPasswordVisible ? "Hide password" : "Show password")
                 .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
@@ -403,10 +424,13 @@ private struct SignInForm: View {
             )
             .font(.system(size: 13))
             .foregroundStyle(VirtueBrand.link)
+            .pointingHandCursor()
             .frame(maxWidth: .infinity)
 
-            if let loginError = coordinator.loginError {
-                Text(loginError)
+            // A daemon that failed to start would fail the login too, so say
+            // why up front (CLIENT-024).
+            ForEach([coordinator.loginError, coordinator.unexpectedStopMessage].compactMap { $0 }, id: \.self) { message in
+                Text(message.replacingOccurrences(of: "\n\n", with: " "))
                     .font(.system(size: 13))
                     .foregroundStyle(VirtueBrand.bad)
                     .fixedSize(horizontal: false, vertical: true)
@@ -529,6 +553,7 @@ private struct WhatVirtueMonitorsView: View {
                     Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/mac")!)
                         .font(.system(size: 14))
                         .foregroundStyle(VirtueBrand.link)
+                        .pointingHandCursor()
                 }
             }
             .frame(maxWidth: 400)

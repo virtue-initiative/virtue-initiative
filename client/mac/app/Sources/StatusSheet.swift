@@ -50,11 +50,24 @@ struct StatusDetailsView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// "Core initialization failed: …" and "Failed to start background
+    /// service: …" are Stopped too, so show the actual cause (CLIENT-024).
+    private var stopMessage: String? {
+        coordinator.unexpectedStopMessage?.replacingOccurrences(of: "\n\n", with: " ")
+    }
+
+    /// Recent errors are kept until logout, so one from weeks ago shouldn't
+    /// sit under "Everything is working." Advanced still lists them all.
+    private func isRecent(_ error: CoreStatusError) -> Bool {
+        let cutoffMs = Int64((Date().timeIntervalSince1970 - 24 * 60 * 60) * 1000)
+        return error.atMs >= cutoffMs
+    }
+
     private var summarySentence: String {
         switch state {
         case .needsScreenRecording: return "Allow Screen Recording to start monitoring."
         case .signedOut: return "Log in to start monitoring."
-        case .stopped: return "The background service is not running."
+        case .stopped: return stopMessage ?? "The background service is not running."
         case .active: return "Everything is working. Screenshots are being taken and uploaded."
         case .starting:
             return coordinator.daemonStatus == .running
@@ -71,8 +84,8 @@ struct StatusDetailsView: View {
                 StatusRow(kind: .good, label: "Screen Recording", value: "On")
             }
             RowDivider()
-            if coordinator.unexpectedStopMessage != nil {
-                StatusRow(kind: .bad, label: "Background service", value: "Stopped", hint: "Relaunch Virtue to start it again.")
+            if let stopMessage {
+                StatusRow(kind: .bad, label: "Background service", value: "Stopped", hint: stopMessage)
             } else if coordinator.daemonStatus == .running {
                 StatusRow(kind: .good, label: "Background service", value: "Running")
             } else {
@@ -125,7 +138,7 @@ struct StatusDetailsView: View {
         DetailSection("Problems") {
             if status == nil {
                 StatusRow(kind: .neutral, label: "Recent problems", value: "Unknown")
-            } else if let error = status?.recentErrors?.first {
+            } else if let error = status?.recentErrors?.first(where: isRecent) {
                 StatusRow(
                     kind: .warn,
                     label: "Recent problems",
@@ -155,6 +168,7 @@ struct StatusDetailsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .pointingHandCursor()
             .accessibilityLabel(showAdvanced ? "Hide Advanced" : "Show Advanced")
 
             if showAdvanced {
