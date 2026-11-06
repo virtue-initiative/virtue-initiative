@@ -30,10 +30,13 @@ struct VirtueMacApp: App {
         }
 
         Window("Virtue", id: "main") {
-            ContentView(coordinator: coordinator)
+            ContentView(coordinator: coordinator, updateController: updateController)
                 .tint(VirtueBrand.accent)
                 .preferredColorScheme(.light)
         }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .defaultSize(width: 560, height: 640)
         .windowResizability(.contentMinSize)
     }
 }

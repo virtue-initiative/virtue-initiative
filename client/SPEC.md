@@ -65,7 +65,7 @@ While signed out, no screenshots are taken (CORE-009):
 Every app MUST show whether the user is signed in and a one-line monitoring state, and MUST give access to Status Details (CLIENT-007).
 
 - Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021).
-- macOS window headline, first match wins: "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Screen Recording off"; "Monitoring active"; otherwise "Starting…".
+- macOS window headline, first match wins: "Screen Recording off"; "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Monitoring active" (daemon running and a screenshot has been taken); otherwise "Starting…".
 - Windows: see CLIENT-027.
 - Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
 - iOS headline: "Signed out"; "Monitoring paused"; "Setup not finished"; "Safari permission needed"; "Monitoring active" (CLIENT-032).
@@ -75,13 +75,13 @@ Every app MUST show whether the user is signed in and a one-line monitoring stat
 
 Status Details MUST render the CORE-010 fields, grouped as:
 
-- Account: signed in, email, device name, partners (`<unknown>` when `partner_count` is absent).
+- Account: signed in, email, device name, partners.
 - Queues: waiting for hash, waiting in batch, last batch upload.
 - Capture: daemon state, last loop, last attempt, last screenshot, last skip reason.
 - Recent errors: each with its time, context and message, or a none marker.
 - Advanced: device id, API URL, hash base URL (`<default>` when unset), capture interval, batch window, and where the logs are (CLIENT-017).
 
-Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`. Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
+Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
 
 - macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot.
 - Linux `virtue status` MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.
@@ -270,13 +270,16 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 - The app is a menu bar app that opens its window at launch. The menu MUST offer Open Virtue; Log In when signed out; Test Screenshot when signed in; Check for Updates when updates are enabled; and Quit or Stop Monitoring and Quit.
 - On launch the app MUST terminate any other running copy of itself before doing anything else.
-- The app MUST poll the daemon every 2 s. It MUST report "Virtue background service stopped unexpectedly. Relaunch the Virtue app to continue monitoring." only after the daemon has read as stopped for 20 s, and MUST NOT report it within 30 s of launch or after the user chose to quit. A failure to start the agent MUST be shown as "Failed to start background service: <error>".
+- The app MUST poll the daemon every 2 s. It MUST report "Virtue background service stopped unexpectedly. Relaunch the Virtue app to continue monitoring." only after the daemon has read as stopped for 20 s, and MUST NOT report it within 30 s of launch or after the user chose to quit. A failure to start the agent MUST be shown as "Failed to start background service: <error>", under the sign-in form while signed out; a core initialization failure likewise.
+- The window MUST have a toolbar with the V logo and "Virtue Initiative", together one link to the website, and an icon-only menu button labelled "Menu". The link, the back button and every button in the window MUST show the pointing-hand cursor on hover, and the link MUST also show a hover background. Below it MUST be exactly one focus area chosen by the headline (CLIENT-006): the Screen Recording steps (CLIENT-025); the sign-in form (CLIENT-004); or a ring, the headline, one sentence and buttons. Active and Starting MUST offer "Add partners" (no partners), "Add more partners" or, while the count is unknown, "Manage partners", which open the Partners page on the website, and "Stop Monitoring & Quit", with the same confirmation as the menu bar. Stopped MUST show the unexpected-stop message above and offer "Relaunch Virtue", which relaunches the app (and so restarts the daemon, CLIENT-010).
+- The window menu MUST offer Test Screenshot (signed in only), Status Details, What Virtue Monitors, Report an Issue, Check for Updates (when updates are enabled) and Sign Out (signed in only, with the CLIENT-005 confirmation), with the build label at the bottom. It MUST NOT offer Pause or Stop. Status Details, What Virtue Monitors and Report an Issue MUST replace the focus area with a back button. Instead of the partners link text in CLIENT-004, macOS MUST offer the partners button above.
+- Status Details MUST open with a summary (dot, headline, one sentence; when Stopped, the sentence and the background service hint are the unexpected-stop message), then sections This Mac (Screen Recording, background service), Screenshots (last screenshot, waiting to upload), Account (logged in, and partners while logged in) and Problems (the latest recent error from the last 24 hours, or "None") of rows with a status dot, label and value, and a hint under a row only when the user must act. The sections MUST flow into two columns when the window is wide enough. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the Reveal Logs button.
 - The daemon executable is `Contents/MacOS/virtue-daemon` inside the app, run by the agent `org.virtueinitiative.virtue.daemon` (`~/Library/LaunchAgents/org.virtueinitiative.virtue.daemon.plist`). `virtue-daemon status` MUST print `logged_in`, `running`, `pending_request_count`, `device_id`, `capture_interval_seconds`, `batch_window_seconds`, `base_api_url` and `backend: screencapture`, one per line.
 
 ## CLIENT-025 macOS: Screen Recording permission
 
 - The app MUST request Screen Recording at every launch where it is missing, before sign-in. macOS shows its own prompt only once per app.
-- While it is missing, the window MUST show an "Action Needed" card ("Allow Screen Recording") with Open System Settings (deep link to the Screen Recording pane) and Restart Virtue, and Test Screenshot MUST be disabled with the hint "Allow Screen Recording to use this feature".
+- While it is missing, the window MUST show "Allow Screen Recording" in place of every other focus area, signed in or not, as two steps: "Turn on Virtue" with Open System Settings (deep link to the Screen Recording pane), and "Restart Virtue" with Restart Virtue. Test Screenshot MUST be disabled with the hint "Allow Screen Recording to use this feature".
 - macOS only reveals a grant to a new process, so the app MUST NOT re-check the permission while running; the user restarts through macOS's "Quit & Reopen" or Restart Virtue, and the relaunched app restarts the daemon.
 - The bundle id `org.virtueinitiative.virtue.mac`, the daemon name `virtue-daemon` and the signing team MUST stay fixed so updates keep the grant.
 

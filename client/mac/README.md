@@ -152,12 +152,12 @@ The mac client stores shared core state under:
 
 The app requests Screen Recording at every launch where it is missing, before sign-in, so the
 first screenshot after sign-in never fails for lack of it (issue #632). macOS shows its prompt only
-once per app, ever, so after that the window's "Action Needed" card sends the user to
+once per app, ever, so after that the window's "Allow Screen Recording" steps send the user to
 `System Settings -> Privacy & Security -> Screen & System Audio Recording` (`Screen Recording`
 before macOS 15) with a deep link.
 
 macOS caches the permission answer for the life of a process, so a running app can't see a grant.
-The user picks up the grant with macOS's own "Quit & Reopen" prompt, or with the card's
+The user picks up the grant with macOS's own "Quit & Reopen" prompt, or with step 2's
 `Restart Virtue` button if they chose "Later". Either way the relaunched app kickstarts the daemon,
 which then starts with the permission. `Test Screenshot` stays disabled until then.
 

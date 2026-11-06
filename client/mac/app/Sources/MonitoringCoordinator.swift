@@ -39,6 +39,11 @@ final class MonitoringCoordinator: ObservableObject {
     /// renders. The scalars above stay for the main window's own bindings.
     @Published private(set) var coreStatus: CoreServiceStatus?
 
+    /// Read once at launch, after registering: `SMAppService.status` is a
+    /// synchronous call to a system service, too slow for a view body that
+    /// re-renders every poll.
+    private(set) var opensAtLogin = false
+
     @Published private(set) var isForceCapturing: Bool = false
     @Published private(set) var forceCaptureMessage: String?
 
@@ -111,6 +116,11 @@ final class MonitoringCoordinator: ObservableObject {
     // MARK: - Login / logout
 
     func login() {
+        // Return can submit while a login is in flight, and a second login
+        // would revoke the device the first one just registered.
+        guard !isSigningIn else {
+            return
+        }
         guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             loginError = "Email is required"
             return
@@ -452,6 +462,7 @@ final class MonitoringCoordinator: ObservableObject {
     /// (macOS 13+) does this without us hand-managing a second LaunchAgent
     /// plist — register is idempotent, so it's safe to call on every launch.
     private func registerAsLoginItem() {
+        defer { opensAtLogin = SMAppService.mainApp.status == .enabled }
         guard SMAppService.mainApp.status != .enabled else {
             return
         }
