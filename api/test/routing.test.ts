@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { createExecutionContext, env, SELF } from 'cloudflare:test';
+import worker from '../src/index';
 import { BASE, clearDB } from './helpers';
 
 beforeEach(clearDB);
@@ -73,5 +74,31 @@ describe('API version prefix (API-005)', () => {
     const res = await SELF.fetch(`${BASE}/api/v1/user`);
 
     expect(res.status).toBe(410);
+  });
+});
+
+describe('GET /dev/emails (API-066)', () => {
+  it('lists every template and serves a selected body alone', async () => {
+    const page = await SELF.fetch(`${BASE}/dev/emails`);
+    expect(page.status).toBe(200);
+    const pageHtml = await page.text();
+    expect(pageHtml).toContain('Daily summary for');
+    expect(pageHtml).toContain('Reset your');
+
+    const html = await SELF.fetch(`${BASE}/dev/emails?t=password-reset&raw=html`);
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain('<h1');
+
+    const text = await SELF.fetch(`${BASE}/dev/emails?t=password-reset&raw=text`);
+    expect(await text.text()).toContain('A password reset was requested');
+  });
+
+  it('answers 404 unless email is only logged', async () => {
+    const res = await worker.fetch(
+      new Request(`${BASE}/dev/emails`),
+      { ...env, EMAIL_DELIVERY_MODE: 'ses' },
+      createExecutionContext(),
+    );
+    expect(res.status).toBe(404);
   });
 });
