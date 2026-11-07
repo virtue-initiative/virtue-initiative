@@ -33,7 +33,7 @@ much easier to track down.
 Each app has a **Report an Issue** option that opens a short form. Describe what
 happened and send it.
 
-- **Windows:** Click **Report an Issue** in the main window, or right-click the
+- **Windows:** Open the menu (**☰**) in the main window and choose **Report an Issue**, or right-click the
   Virtue icon in the system tray and choose **Report an Issue**.
 - **Mac:** Click the menu button (**⋯**) at the top right of the Virtue window, then click **Report an Issue**.
 - **Android:** Tap **Report an Issue** on the main screen.

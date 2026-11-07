@@ -6,5 +6,8 @@
     <!-- The UI uses a fixed cream/ink palette. Pin the Light theme so any
          control state we don't restyle falls back to dark text rather than
          the white text of the Dark theme (#730). -->
-    <Application.Resources />
+    <Application.Resources>
+        <!-- Fluent styles for the InfoBar, ContentDialog and AccentButtonStyle the window uses. -->
+        <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+    </Application.Resources>
 </Application>

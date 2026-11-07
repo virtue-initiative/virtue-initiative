@@ -1,9 +1,21 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Virtue.WindowsApp.Core.Infrastructure;
 using Virtue.WindowsApp.Core.Interop;
 
 namespace Virtue.WindowsApp.Core.ViewModels;
+
+/// <summary>What the window and tray show, first match wins (CLIENT-027).</summary>
+public enum MonitorPhase
+{
+    Loading,
+    SignedOut,
+    Error,
+    Stopped,
+    Starting,
+    Active,
+}
 
 public sealed class SessionViewModel : INotifyPropertyChanged
 {
@@ -15,7 +27,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _emailInput = string.Empty;
     private string _passwordInput = string.Empty;
     private string _deviceNameInput = string.Empty;
-    private string _statusText = "Starting Virtue...";
     private string _monitorState = "loading";
     private string? _monitorError;
     private string? _deviceId;
@@ -32,6 +43,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string? _updateCountdownText;
     private string? _updateCheckStatusText;
     private bool _updateInstalling;
+    private bool _isCheckingForUpdates;
+    private Task _currentAction = Task.CompletedTask;
 
     public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
     {
@@ -42,6 +55,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// Raised every time the update check line is set, even to the same text,
+    /// so the window can show each result of a check it started.
+    /// </summary>
+    public event EventHandler? UpdateCheckReported;
 
     public DelegateCommand RefreshCommand { get; }
 
@@ -134,11 +153,59 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         set => SetProperty(ref _deviceNameInput, value);
     }
 
-    public string StatusText
+    /// <summary>
+    /// The one state the headline, ring, tray and Status Details all follow
+    /// (CLIENT-027). Active needs a screenshot, so a fresh sign-in reads as
+    /// starting until the first one.
+    /// </summary>
+    public MonitorPhase Phase =>
+        MonitorState switch
+        {
+            "loading" => MonitorPhase.Loading,
+            "signed_out" => MonitorPhase.SignedOut,
+            "error" => MonitorPhase.Error,
+            "stopped" => MonitorPhase.Stopped,
+            _ => LastScreenshotAtMs is null ? MonitorPhase.Starting : MonitorPhase.Active,
+        };
+
+    /// <summary>The window's headline (CLIENT-027).</summary>
+    public string Headline =>
+        Phase switch
+        {
+            MonitorPhase.Loading => "Loading...",
+            MonitorPhase.SignedOut => "Signed out",
+            MonitorPhase.Error => "Monitoring needs attention",
+            MonitorPhase.Stopped => "Monitoring stopped",
+            MonitorPhase.Active => "Monitoring active",
+            _ => "Starting...",
+        };
+
+    /// <summary>The one sentence under <see cref="Headline"/> (CLIENT-027).</summary>
+    public string StatusSentence =>
+        Phase switch
+        {
+            MonitorPhase.Loading => "Checking your sign-in status...",
+            MonitorPhase.SignedOut => "Sign in to start monitoring on this device.",
+            MonitorPhase.Error => string.IsNullOrWhiteSpace(MonitorError)
+                ? "Virtue could not start monitoring."
+                : WithTerminalPunctuation(MonitorError!.Trim()),
+            MonitorPhase.Stopped => "Monitoring is stopped on this device.",
+            MonitorPhase.Active => $"Virtue is capturing every screen. Last screenshot at {FormatShortTime(LastScreenshotAtMs!.Value)}.",
+            _ => "Virtue is getting ready. The first screenshot is taken within a few minutes.",
+        };
+
+    /// <summary>The local time, with the date in front when it isn't today.</summary>
+    public static string FormatShortTime(long unixMs)
     {
-        get => _statusText;
-        private set => SetProperty(ref _statusText, value);
+        var local = DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime();
+        var time = local.ToString("t", CultureInfo.CurrentCulture);
+        return local.Date == DateTimeOffset.Now.Date
+            ? time
+            : $"{local.ToString("M", CultureInfo.CurrentCulture)}, {time}";
     }
+
+    private static string WithTerminalPunctuation(string text) =>
+        text.EndsWith('.') || text.EndsWith('!') || text.EndsWith('?') ? text : text + ".";
 
     public string MonitorState
     {
@@ -149,6 +216,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(MonitorStateDisplay)));
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+                RaiseHeadlineChanged();
             }
         }
     }
@@ -161,6 +229,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             if (SetProperty(ref _monitorError, value))
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+                RaiseHeadlineChanged();
             }
         }
     }
@@ -180,7 +249,14 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public long? LastScreenshotAtMs
     {
         get => _lastScreenshotAtMs;
-        private set => SetProperty(ref _lastScreenshotAtMs, value);
+        private set
+        {
+            if (SetProperty(ref _lastScreenshotAtMs, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TrayTooltip)));
+                RaiseHeadlineChanged();
+            }
+        }
     }
 
     /// <summary>
@@ -199,17 +275,19 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string TrayTooltip =>
         BaseTrayTooltip + (_updateReady ? " (update ready)" : string.Empty);
 
+    // Running and starting follow the headline, so the tray never says active
+    // while the window still says starting.
     private string BaseTrayTooltip =>
-        MonitorState switch
+        Phase switch
         {
-            "loading" => "Virtue: loading status",
-            "running" => "Virtue: monitoring active",
-            "starting" => "Virtue: starting monitoring",
-            "error" => string.IsNullOrWhiteSpace(MonitorError)
+            MonitorPhase.Loading => "Virtue: loading status",
+            MonitorPhase.SignedOut => "Virtue: sign in required",
+            MonitorPhase.Error => string.IsNullOrWhiteSpace(MonitorError)
                 ? "Virtue: monitoring error"
                 : $"Virtue: {MonitorError}",
-            "signed_out" => "Virtue: sign in required",
-            _ => "Virtue: monitoring stopped",
+            MonitorPhase.Stopped => "Virtue: monitoring stopped",
+            MonitorPhase.Active => "Virtue: monitoring active",
+            _ => "Virtue: starting monitoring",
         };
 
     /// <summary>
@@ -266,7 +344,22 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     public string? UpdateCheckStatusText
     {
         get => _updateCheckStatusText;
-        set => SetProperty(ref _updateCheckStatusText, value);
+        private set => SetProperty(ref _updateCheckStatusText, value);
+    }
+
+    /// <summary>True from "Checking for updates..." until that check reports its outcome.</summary>
+    public bool IsCheckingForUpdates
+    {
+        get => _isCheckingForUpdates;
+        private set => SetProperty(ref _isCheckingForUpdates, value);
+    }
+
+    /// <summary>Sets the update check line (CLIENT-029) and raises <see cref="UpdateCheckReported"/>.</summary>
+    public void ReportUpdateCheck(string text, bool checking)
+    {
+        UpdateCheckStatusText = text;
+        IsCheckingForUpdates = checking;
+        UpdateCheckReported?.Invoke(this, EventArgs.Empty);
     }
 
     public string? UpdateCountdownText
@@ -324,7 +417,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _interopClient.Initialize();
             _interopClient.StartMonitoring();
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         });
     }
 
@@ -353,7 +445,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             await Task.Run(() => _interopClient.Login(email, password, deviceName));
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         }, "Signing in...");
     }
 
@@ -363,7 +454,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         {
             await Task.Run(() => _interopClient.Logout());
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         }, "Signing out...");
     }
 
@@ -387,7 +477,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
                 throw new InvalidOperationException($"Test screenshot failed: {ex.Message}", ex);
             }
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         }, "Screenshot uploading...");
         return result;
     }
@@ -408,7 +497,6 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         await RunBusyAsync(async () =>
         {
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         });
     }
 
@@ -497,21 +585,25 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     public async Task StopMonitoringAsync()
     {
+        await WaitForIdleAsync();
         await RunBusyAsync(async () =>
         {
             await Task.Run(() => _interopClient.StopMonitoring());
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         });
     }
 
+    /// <summary>
+    /// Exit waits for a running action instead of being ignored (CLIENT-027),
+    /// so the user stop is always recorded before the app closes.
+    /// </summary>
     public async Task StopMonitoringFromTrayExitAsync()
     {
+        await WaitForIdleAsync();
         await RunBusyAsync(async () =>
         {
             await Task.Run(() => _interopClient.StopMonitoringFromTrayExit());
             await RefreshInternalAsync();
-            StatusText = BuildStatusText();
         });
     }
 
@@ -522,6 +614,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             return;
         }
 
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _currentAction = done.Task;
         try
         {
             IsBusy = true;
@@ -535,13 +629,34 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         catch (Exception ex)
         {
             ErrorText = ex.Message;
-            StatusText = ex.Message;
         }
         finally
         {
             TransitionMessage = null;
             IsBusy = false;
+            done.SetResult();
         }
+    }
+
+    private async Task WaitForIdleAsync()
+    {
+        while (IsBusy)
+        {
+            await _currentAction;
+        }
+    }
+
+    /// <summary>Clears a shown error, for example when the user leaves the screen it belongs to.</summary>
+    public void ClearError()
+    {
+        ErrorText = null;
+    }
+
+    private void RaiseHeadlineChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Phase)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Headline)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusSentence)));
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -554,23 +669,5 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
-    }
-
-    private string BuildStatusText()
-    {
-        if (!LoggedIn)
-        {
-            return "Sign in to start monitoring.";
-        }
-
-        return MonitorState switch
-        {
-            "running" => "Monitoring is active on this device.",
-            "starting" => "Monitoring is starting for this device.",
-            "error" when !string.IsNullOrWhiteSpace(MonitorError) => $"Monitoring needs attention: {MonitorError}",
-            "error" => "Monitoring needs attention.",
-            "stopped" => "Monitoring is stopped on this device.",
-            _ => "Monitoring state is updating.",
-        };
     }
 }
