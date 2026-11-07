@@ -203,6 +203,9 @@
      min() lets it still shrink below that on narrow viewports. */
   width: min(620px, 100%);
   height: auto;
+  /* help-doc.css caps images at 600px tall, which squashes a tall
+     screenshot once its width is fixed above. */
+  max-height: none;
 }
 
 /* URL hash (e.g. /download#windows) selects the panel via :target — no JS.
@@ -282,5 +285,11 @@
 .instructions-tab-panel.help-doc .android-guide img,
 .instructions-tab-panel.help-doc img[src^='/images/android-setup/'],
 .instructions-tab-panel.help-doc img[src^='/images/ios-setup/'] {
+  width: min(360px, 100%);
+}
+
+/* A small macOS dialog, so it would be blown up past its native size at the
+   full desktop-screenshot width. */
+.instructions-tab-panel.help-doc img[src$='/mac_setup_quit_reopen.webp'] {
   width: min(360px, 100%);
 }
