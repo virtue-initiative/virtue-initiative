@@ -2,6 +2,7 @@ name: Client iOS Checks
 
 permissions:
   contents: write
+  pull-requests: read
 
 on:
   pull_request:
@@ -178,6 +179,7 @@ jobs:
           # testers' group — it would move them onto production data. Enforced
           # only on main: staging builds reaching extra groups is harmless.
           IOS_EXCLUSIVE_BETA_GROUP: ${{ github.ref_name == 'main' && 'true' || 'false' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # `main` always has a group name (literal above), so this can only be
@@ -192,6 +194,21 @@ jobs:
           export IOS_ASC_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${IOS_ASC_KEY_ID}.p8"
           # IOS_MARKETING_VERSION / IOS_BUILD_VERSION / IOS_WHATS_NEW come from
           # build-and-upload-testflight.sh via GITHUB_ENV.
+          # On main the "What to Test" text is the merged PR's section. A
+          # failed lookup or extraction keeps the build label, so distribution
+          # does not fail for it, but each fallback posts a warning annotation
+          # so it is not silent. Staging keeps the label.
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            if pr_body="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].body // ""')"; then
+              if notes="$(printf '%s' "$pr_body" | ../scripts/extract-testflight-notes.sh)"; then
+                export IOS_WHATS_NEW="$notes"
+              else
+                echo "::warning::Could not read the What to Test (iOS) section of the merged PR (see above); using the build label as the TestFlight text."
+              fi
+            else
+              echo "::warning::Could not look up the merged PR for this commit; using the build label as the TestFlight text."
+            fi
+          fi
           node ./scripts/distribute-testflight-build.mjs
         working-directory: client/ios
 
