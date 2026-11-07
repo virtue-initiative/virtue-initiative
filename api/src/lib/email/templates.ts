@@ -429,12 +429,14 @@ export function renderPartnerInviteTemplate(input: {
     appUrl: input.appUrl,
     headline: `${inviter} invited you`,
     textLines: [
-      `You were invited by ${inviter} to join them on ${appName}.`,
+      `You were invited by ${inviter} to be their accountability partner on ${appName}.`,
       '',
       `Open this invite link to sign in or create an account and accept: ${input.inviteUrl}`,
     ],
     htmlSections: [
-      paragraph(`You were invited by ${inviter} to join them on ${appName}.`),
+      paragraph(
+        `You were invited by ${inviter} to be their accountability partner on ${appName}. If you accept, you will be able to review their activity on their devices.`,
+      ),
       actionButton(input.inviteUrl, 'Accept invitation'),
     ],
   });
