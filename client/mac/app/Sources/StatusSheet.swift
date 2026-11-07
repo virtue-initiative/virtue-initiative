@@ -19,12 +19,23 @@ struct StatusDetailsView: View {
                 // fit, one column otherwise.
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 24) {
-                        VStack(spacing: 26) { thisMac; screenshots }
-                            .frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .top)
-                        VStack(spacing: 26) { account; problems }
-                            .frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .top)
+                        VStack(spacing: 26) {
+                            thisMac
+                            screenshots
+                        }
+                        .frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .top)
+                        VStack(spacing: 26) {
+                            account
+                            problems
+                        }
+                        .frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity, alignment: .top)
                     }
-                    VStack(spacing: 26) { thisMac; screenshots; account; problems }
+                    VStack(spacing: 26) {
+                        thisMac
+                        screenshots
+                        account
+                        problems
+                    }
                 }
                 advanced
             }
@@ -79,13 +90,16 @@ struct StatusDetailsView: View {
     private var thisMac: some View {
         DetailSection("This Mac") {
             if coordinator.needsScreenRecording {
-                StatusRow(kind: .bad, label: "Screen Recording", value: "Off", hint: "Allow it so Virtue can take screenshots.")
+                StatusRow(
+                    kind: .bad, label: "Screen Recording", value: "Off",
+                    hint: "Allow it so Virtue can take screenshots.")
             } else {
                 StatusRow(kind: .good, label: "Screen Recording", value: "On")
             }
             RowDivider()
             if let stopMessage {
-                StatusRow(kind: .bad, label: "Background service", value: "Stopped", hint: stopMessage)
+                StatusRow(
+                    kind: .bad, label: "Background service", value: "Stopped", hint: stopMessage)
             } else if coordinator.daemonStatus == .running {
                 StatusRow(kind: .good, label: "Background service", value: "Running")
             } else {
@@ -99,14 +113,18 @@ struct StatusDetailsView: View {
             if let last = status?.lastScreenshotAtMs {
                 StatusRow(kind: .good, label: "Last screenshot", value: shortTime(last))
             } else if coordinator.loggedIn {
-                StatusRow(kind: .warn, label: "Last screenshot", value: "None yet", hint: "The first one is taken within a few minutes.")
+                StatusRow(
+                    kind: .warn, label: "Last screenshot", value: "None yet",
+                    hint: "The first one is taken within a few minutes.")
             } else {
                 StatusRow(kind: .neutral, label: "Last screenshot", value: "None")
             }
             RowDivider()
             if let status {
                 let waiting = (status.pendingHashCount ?? 0) + (status.pendingBatchCount ?? 0)
-                StatusRow(kind: coordinator.loggedIn ? .good : .neutral, label: "Waiting to upload", value: "\(waiting)")
+                StatusRow(
+                    kind: coordinator.loggedIn ? .good : .neutral, label: "Waiting to upload",
+                    value: "\(waiting)")
             } else {
                 StatusRow(kind: .neutral, label: "Waiting to upload", value: "Unknown")
             }
@@ -116,14 +134,18 @@ struct StatusDetailsView: View {
     private var account: some View {
         DetailSection("Account") {
             if coordinator.loggedIn {
-                StatusRow(kind: .good, label: "Logged in", value: status?.accountEmail ?? coordinator.accountEmail ?? "Yes")
+                StatusRow(
+                    kind: .good, label: "Logged in",
+                    value: status?.accountEmail ?? coordinator.accountEmail ?? "Yes")
                 RowDivider()
                 if let count = status?.partnerCount {
                     StatusRow(
                         kind: count > 0 ? .good : .warn,
                         label: "Partners",
                         value: "\(count)",
-                        hint: count == 0 ? "Add a partner on the Virtue website so someone receives your reports." : nil
+                        hint: count == 0
+                            ? "Add a partner on the Virtue website so someone receives your reports."
+                            : nil
                     )
                 } else {
                     StatusRow(kind: .neutral, label: "Partners", value: "Unknown")
@@ -180,7 +202,9 @@ struct StatusDetailsView: View {
                     RowDivider()
                     HStack {
                         Button("Reveal Logs") {
-                            NSWorkspace.shared.activateFileViewerSelecting([coordinator.logDirectory])
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                coordinator.logDirectory
+                            ])
                         }
                         .buttonStyle(VirtueButtonStyle())
                         Spacer()
@@ -217,7 +241,11 @@ struct StatusDetailsView: View {
             rows.append(("Recent errors", "<none>"))
         } else {
             for error in errors {
-                rows.append(("\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)", error.message))
+                rows.append(
+                    (
+                        "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)",
+                        error.message
+                    ))
             }
         }
         if let message = coordinator.unexpectedStopMessage {

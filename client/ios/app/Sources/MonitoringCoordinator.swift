@@ -121,17 +121,19 @@ final class MonitoringCoordinator: ObservableObject {
             ) {
                 return groupRoot.appendingPathComponent("virtue", isDirectory: true)
             }
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask
-            ).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            let appSupport =
+                FileManager.default.urls(
+                    for: .applicationSupportDirectory,
+                    in: .userDomainMask
+                ).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
             return appSupport.appendingPathComponent("virtue", isDirectory: true)
         }()
 
         configDir = root.appendingPathComponent("config", isDirectory: true)
         dataDir = root.appendingPathComponent("data", isDirectory: true)
 
-        monitoringEnabled = readMonitoringEnabledPreference(defaults: sharedDefaults ?? UserDefaults.standard)
+        monitoringEnabled = readMonitoringEnabledPreference(
+            defaults: sharedDefaults ?? UserDefaults.standard)
         initializeCore()
         bindAppLifecycleState()
         refreshSessionState()
@@ -168,7 +170,8 @@ final class MonitoringCoordinator: ObservableObject {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let pw = password
         let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedDeviceName = trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
+        let resolvedDeviceName =
+            trimmedDeviceName.isEmpty ? UIDevice.current.name : trimmedDeviceName
         let configDirPath = configDir.path
         let dataDirPath = dataDir.path
 
@@ -180,7 +183,8 @@ final class MonitoringCoordinator: ObservableObject {
                 ) {
                     return initError
                 }
-                return NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+                return NativeBridge.login(
+                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
             }.value
             isSigningIn = false
             if let error {
@@ -260,7 +264,8 @@ final class MonitoringCoordinator: ObservableObject {
             setMonitoringEnabled(false)
             refreshCoreStatus()
             refreshSafariStatus()
-            statusMessage = "Monitoring paused. Safari capture will stop on the next extension heartbeat."
+            statusMessage =
+                "Monitoring paused. Safari capture will stop on the next extension heartbeat."
         }
     }
 
@@ -295,7 +300,8 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func initializeCore() {
         do {
-            try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: configDir, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         } catch {
             statusMessage = "Directory setup failed: \(error.localizedDescription)"
@@ -353,7 +359,8 @@ final class MonitoringCoordinator: ObservableObject {
         guard statusRefreshTimer == nil else {
             return
         }
-        statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+        statusRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) {
+            [weak self] _ in
             self?.refreshCoreStatus()
             self?.refreshSafariStatus()
         }
@@ -379,16 +386,22 @@ final class MonitoringCoordinator: ObservableObject {
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
         safariLastPageHost = defaults.string(forKey: VirtueShared.safariLastURLKey)
             .flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines))?.host }
-        forceCaptureRequested = defaults.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
+        forceCaptureRequested =
+            defaults.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
         safariSetup = SafariSetupState(
-            lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
-                .map(Date.init(timeIntervalSince1970:)),
+            lastMessageAt: timestamp(
+                forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults
+            )
+            .map(Date.init(timeIntervalSince1970:)),
             lastFrameAt: timestamp(forKey: VirtueShared.safariLastFrameAtKey, defaults: defaults)
                 .map(Date.init(timeIntervalSince1970:)),
-            allSitesGranted: defaults.object(forKey: VirtueShared.safariAllSitesGrantedKey) as? Bool,
+            allSitesGranted: defaults.object(forKey: VirtueShared.safariAllSitesGrantedKey)
+                as? Bool,
             privateAllowed: defaults.object(forKey: VirtueShared.safariPrivateAllowedKey) as? Bool,
-            reportedOffAt: timestamp(forKey: VirtueShared.safariReportedOffAtKey, defaults: defaults)
-                .map(Date.init(timeIntervalSince1970:))
+            reportedOffAt: timestamp(
+                forKey: VirtueShared.safariReportedOffAtKey, defaults: defaults
+            )
+            .map(Date.init(timeIntervalSince1970:))
         )
         resolveExtensionCheck()
         updateMonitoringState()
@@ -406,15 +419,18 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         let now = Date().timeIntervalSince1970
-        let lastHeartbeatAt = timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
+        let lastHeartbeatAt = timestamp(
+            forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
         let lastFrameAt = timestamp(forKey: VirtueShared.safariLastFrameAtKey, defaults: defaults)
-        let captureStateCode = defaults.object(forKey: VirtueShared.safariCaptureStateCodeKey) != nil
+        let captureStateCode =
+            defaults.object(forKey: VirtueShared.safariCaptureStateCodeKey) != nil
             ? defaults.integer(forKey: VirtueShared.safariCaptureStateCodeKey)
             : VirtueShared.captureStateUnknown
 
         if let lastHeartbeatAt {
             let heartbeatAge = max(0, now - lastHeartbeatAt)
-            safariLastHeartbeat = "\(relativeTime(Date(timeIntervalSince1970: lastHeartbeatAt))) (\(formatAbsoluteTime(lastHeartbeatAt)))"
+            safariLastHeartbeat =
+                "\(relativeTime(Date(timeIntervalSince1970: lastHeartbeatAt))) (\(formatAbsoluteTime(lastHeartbeatAt)))"
             if heartbeatAge <= VirtueShared.safariHeartbeatStaleThresholdSeconds {
                 safariCaptureHealth = "Active in Safari"
             } else {
@@ -426,14 +442,16 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         if let lastFrameAt {
-            safariLastFrame = "\(relativeTime(Date(timeIntervalSince1970: lastFrameAt))) (\(formatAbsoluteTime(lastFrameAt)))"
+            safariLastFrame =
+                "\(relativeTime(Date(timeIntervalSince1970: lastFrameAt))) (\(formatAbsoluteTime(lastFrameAt)))"
         } else {
             safariLastFrame = "<none>"
         }
 
-        let pageTitle = defaults.string(forKey: VirtueShared.safariLastTitleKey)?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
+        let pageTitle = defaults.string(forKey: VirtueShared.safariLastTitleKey)?
+            .trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
         let pageURL = defaults.string(forKey: VirtueShared.safariLastURLKey)?.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
@@ -446,9 +464,10 @@ final class MonitoringCoordinator: ObservableObject {
             safariLastPage = "<none>"
         }
 
-        let lastError = defaults.string(forKey: VirtueShared.safariLastErrorKey)?.trimmingCharacters(
-            in: .whitespacesAndNewlines
-        )
+        let lastError = defaults.string(forKey: VirtueShared.safariLastErrorKey)?
+            .trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
         safariLastError = (lastError?.isEmpty == false) ? lastError! : "<none>"
         safariPermissionSummary = deriveSafariPermissionSummary(
             captureStateCode: captureStateCode,
@@ -462,7 +481,9 @@ final class MonitoringCoordinator: ObservableObject {
             let running = defaults.bool(forKey: VirtueShared.safariDaemonRunningKey)
             if running {
                 safariDaemonStatus = "Running in Safari extension"
-            } else if let daemonError = defaults.string(forKey: VirtueShared.safariDaemonLastErrorKey), !daemonError.isEmpty {
+            } else if let daemonError = defaults.string(
+                forKey: VirtueShared.safariDaemonLastErrorKey), !daemonError.isEmpty
+            {
                 safariDaemonStatus = "Stopped with error: \(daemonError)"
             } else {
                 safariDaemonStatus = "Stopped"
@@ -531,7 +552,7 @@ final class MonitoringCoordinator: ObservableObject {
     /// partners see what reaches the server.
     func handleOpenURL(_ url: URL) {
         guard url.scheme == "virtueinitiative", url.host == "check-extension",
-              let defaults = sharedDefaults
+            let defaults = sharedDefaults
         else { return }
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func flag(_ name: String) -> Bool? {
@@ -567,8 +588,8 @@ final class MonitoringCoordinator: ObservableObject {
     /// only Safari runs the extension. `x-safari-https` needs iOS 17.
     func safariURL(for url: URL) -> URL {
         guard #available(iOS 17.0, *),
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme == "https"
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            components.scheme == "https"
         else {
             // There is no x-safari-http; plain http goes to the default browser.
             return url

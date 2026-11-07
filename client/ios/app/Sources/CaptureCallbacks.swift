@@ -1,5 +1,6 @@
 import Foundation
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_status")
 public func virtue_ios_capture_status() -> Int32 {
     // The app target no longer captures frames directly.
@@ -7,6 +8,7 @@ public func virtue_ios_capture_status() -> Int32 {
     2
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_png_write")
 public func virtue_ios_capture_png_write(
     _ outBuffer: UnsafeMutablePointer<UnsafePointer<UInt8>?>?,
@@ -20,6 +22,7 @@ public func virtue_ios_capture_png_write(
     return 1
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_png_release")
 public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ length: Int) {
     _ = buffer

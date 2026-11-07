@@ -132,7 +132,8 @@ extension UpdateController: SPUUpdaterDelegate {
     ) {
         MainActor.assumeIsolated {
             if let error = error as NSError?,
-               error.code != Int(SUError.noUpdateError.rawValue) {
+                error.code != Int(SUError.noUpdateError.rawValue)
+            {
                 statusMessage = "Update check failed: \(error.localizedDescription)"
                 NSLog("Sparkle update cycle failed: \(error)")
             } else {
