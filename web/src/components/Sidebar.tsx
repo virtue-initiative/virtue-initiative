@@ -342,7 +342,7 @@ export function Sidebar() {
                   active={onLogs && activeUserId === partner.user.id}
                   onNavigate={closeMobile}
                 >
-                  {(partner.user.name ?? partner.user.email) + ' logs'}
+                  {(partner.user.name ?? partner.user.email) + "'s logs"}
                 </NavLink>
               ))}
             </div>
