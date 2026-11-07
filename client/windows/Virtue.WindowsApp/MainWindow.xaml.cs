@@ -85,6 +85,13 @@ public sealed partial class MainWindow : Window
     private bool _detailsRenderQueued;
     private int _detailsColumns;
     private bool _reportDraftOpen;
+    private string? _reportValidationError;
+    private bool _syncQueued;
+
+    // A failure shows on the screen its action started from (CLIENT-027),
+    // even if the user has moved on while it ran.
+    private Screen _actionScreen = Screen.Home;
+    private Screen _errorScreen = Screen.Home;
 
     // The menu closes on Check for Updates, so its result is also shown as a
     // toast (CLIENT-027) while this is set.
@@ -98,6 +105,7 @@ public sealed partial class MainWindow : Window
     // Title bar.
     private readonly Grid _dragRegion = new();
     private readonly HyperlinkButton _brandLink = new();
+    private readonly Button _backButton = CreateIconButton("\uE72B", "Back", 36, 32);
     private readonly StackPanel _backTitle = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly TextBlock _screenTitle = new();
 
@@ -161,6 +169,7 @@ public sealed partial class MainWindow : Window
         Content = BuildContent();
         ConfigureTitleBar();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
+        ViewModel.UpdateCheckReported += (_, _) => ShowUpdateNotice();
         _appWindow.Closing += AppWindowOnClosing;
         SetInitialBounds();
         SetWindowIcon();
@@ -227,17 +236,7 @@ public sealed partial class MainWindow : Window
         var root = new Grid { Background = BgBrush, RequestedTheme = ElementTheme.Light };
         // WinUI would focus the first tab stop, the logo link, and draw its
         // keyboard focus ring as the window opens. Start on the content instead.
-        root.Loaded += (_, _) =>
-        {
-            if (_signInPanel.Visibility == Visibility.Visible)
-            {
-                _emailTextBox.Focus(FocusState.Programmatic);
-            }
-            else
-            {
-                _menuButton.Focus(FocusState.Pointer);
-            }
-        };
+        root.Loaded += (_, _) => FocusScreen(FocusState.Pointer);
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
@@ -321,17 +320,16 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetName(_brandLink, "Virtue Initiative website");
         ToolTipService.SetToolTip(_brandLink, "virtueinitiative.org");
 
-        var backButton = CreateIconButton("", "Back", 36, 32);
-        backButton.Click += (_, _) => Navigate(Screen.Home);
-        backButton.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.Left, Modifiers = VirtualKeyModifiers.Menu });
-        backButton.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.GoBack });
+        _backButton.Click += (_, _) => Navigate(Screen.Home);
+        _backButton.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.Left, Modifiers = VirtualKeyModifiers.Menu });
+        _backButton.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = VirtualKey.GoBack });
         _screenTitle.FontSize = 13;
         _screenTitle.FontWeight = FontWeights.SemiBold;
         _screenTitle.Foreground = TextBrush;
         _screenTitle.VerticalAlignment = VerticalAlignment.Center;
         _backTitle.Margin = new Thickness(6, 0, 0, 0);
         _backTitle.VerticalAlignment = VerticalAlignment.Center;
-        _backTitle.Children.Add(backButton);
+        _backTitle.Children.Add(_backButton);
         _backTitle.Children.Add(_screenTitle);
 
         var left = new Grid();
@@ -589,9 +587,6 @@ public sealed partial class MainWindow : Window
         {
             _watchingUpdateCheck = true;
             CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
-            // The handler sets the check line through the dispatcher, and an
-            // unchanged line raises no change, so read it once that has run.
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ShowUpdateNotice);
         };
         menu.Items.Add(updates);
 
@@ -781,8 +776,14 @@ public sealed partial class MainWindow : Window
 
     private void Navigate(Screen screen)
     {
+        // An error goes away when the user leaves its screen, but not one
+        // whose action is still running somewhere else.
+        if (screen != _screen && _errorScreen == _screen && !ViewModel.IsBusy)
+        {
+            ViewModel.ClearError();
+        }
+
         _screen = screen;
-        ViewModel.ClearError();
         _homeView.Visibility = VisibleIf(screen == Screen.Home);
         _detailsView.Visibility = VisibleIf(screen == Screen.Details);
         _monitorsView.Visibility = VisibleIf(screen == Screen.Monitors);
@@ -815,24 +816,85 @@ public sealed partial class MainWindow : Window
                     _reportLogsCheckBox.IsChecked = true;
                     _reportDraftOpen = true;
                 }
-                SetError(_reportError, null);
-                _reportMessageBox.Focus(FocusState.Programmatic);
+                _reportValidationError = null;
                 break;
         }
 
         SyncFromViewModel();
+        // After layout, since the screen was collapsed until now. Before the
+        // window has loaded, the Loaded handler focuses it instead.
+        if (Content is FrameworkElement { IsLoaded: true })
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FocusScreen(FocusState.Programmatic));
+        }
+    }
+
+    /// <summary>
+    /// Focuses the current screen's first control, so focus doesn't drop to
+    /// the start of the window when the focused screen is collapsed.
+    /// </summary>
+    private void FocusScreen(FocusState state)
+    {
+        switch (_screen)
+        {
+            case Screen.Home when _signInPanel.Visibility == Visibility.Visible:
+                _emailTextBox.Focus(FocusState.Programmatic);
+                break;
+            case Screen.Home:
+                _menuButton.Focus(state);
+                break;
+            case Screen.Report:
+                _reportMessageBox.Focus(FocusState.Programmatic);
+                break;
+            default:
+                _backButton.Focus(state);
+                break;
+        }
     }
 
     // ---- State -------------------------------------------------------------
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(SessionViewModel.UpdateCheckStatusText))
+        switch (e.PropertyName)
         {
-            ShowUpdateNotice();
+            case nameof(SessionViewModel.IsBusy) when ViewModel.IsBusy:
+                _actionScreen = _screen;
+                break;
+            case nameof(SessionViewModel.ErrorText) when ViewModel.ErrorText is not null:
+                // RunBusyAsync sets the error before it clears IsBusy.
+                _errorScreen = ViewModel.IsBusy ? _actionScreen : _screen;
+                break;
+            case nameof(SessionViewModel.LoggedIn) or nameof(SessionViewModel.AccountEmail):
+                // A draft belongs to the account it was started under (CLIENT-027).
+                if (_screen == Screen.Report)
+                {
+                    _reportEmailBox.Text = ViewModel.LoggedIn ? ViewModel.AccountEmail : string.Empty;
+                }
+                else
+                {
+                    _reportDraftOpen = false;
+                }
+                break;
         }
 
-        SyncFromViewModel();
+        QueueSync();
+    }
+
+    /// <summary>A refresh changes many properties; sync once after them.</summary>
+    private void QueueSync()
+    {
+        if (_syncQueued)
+        {
+            return;
+        }
+
+        _syncQueued = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _syncQueued = false;
+            SyncFromViewModel();
+        });
     }
 
     /// <summary>
@@ -847,7 +909,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var checking = text == "Checking for updates...";
+        var checking = ViewModel.IsCheckingForUpdates;
         _updateNoticeTimer ??= CreateUpdateNoticeTimer();
         if (checking && _updateNotice == text)
         {
@@ -884,6 +946,8 @@ public sealed partial class MainWindow : Window
     private void SyncFromViewModel()
     {
         _updateInfoBar.IsOpen = ViewModel.UpdateReady;
+        // A closed InfoBar still takes its margin.
+        _updateInfoBar.Visibility = VisibleIf(ViewModel.UpdateReady);
         _updateInfoBar.Message = ViewModel.UpdateInstalling
             ? "Installing the update. Virtue will close and restart itself within a minute."
             : ViewModel.UpdateCountdownText is { } countdown
@@ -907,7 +971,7 @@ public sealed partial class MainWindow : Window
             0 => "Add partners",
             _ => "Add more partners",
         };
-        var needsAttention = ViewModel.MonitorState is "error" or "stopped";
+        var needsAttention = ViewModel.Phase is MonitorPhase.Error or MonitorPhase.Stopped;
         var signedIn = ViewModel.HasLoadedStatus && ViewModel.LoggedIn;
         _partnersButton.Visibility = VisibleIf(signedIn && !needsAttention);
         _reportFromHomeButton.Visibility = VisibleIf(signedIn && needsAttention);
@@ -924,10 +988,11 @@ public sealed partial class MainWindow : Window
         _sendReportButton.IsEnabled = !busy;
         _sendReportButton.Content = busy && ViewModel.TransitionMessage == "Sending report..." ? "Sending..." : "Send Report";
 
-        var error = ViewModel.ErrorText;
+        var error = _errorScreen == _screen ? ViewModel.ErrorText : null;
         SetError(_signInError, _screen == Screen.Home && signedOut ? error : null);
         SetError(_homeError, _screen == Screen.Home && !signedOut ? error : null);
         SetError(_detailsError, _screen == Screen.Details ? error : null);
+        SetError(_reportError, _screen == Screen.Report ? _reportValidationError ?? error : null);
 
         // The sign-in and report buttons already say what they are doing.
         var transition = ViewModel.TransitionMessage;
@@ -959,11 +1024,12 @@ public sealed partial class MainWindow : Window
     }
 
     private StatusKind HomeKind() =>
-        ViewModel.MonitorState switch
+        ViewModel.Phase switch
         {
-            "loading" or "signed_out" => StatusKind.Neutral,
-            "error" or "stopped" => StatusKind.Bad,
-            _ => ViewModel.LastScreenshotAtMs is null ? StatusKind.Warn : StatusKind.Good,
+            MonitorPhase.Loading or MonitorPhase.SignedOut => StatusKind.Neutral,
+            MonitorPhase.Error or MonitorPhase.Stopped => StatusKind.Bad,
+            MonitorPhase.Active => StatusKind.Good,
+            _ => StatusKind.Warn,
         };
 
     private void UpdateRing(StatusKind kind)
@@ -1060,12 +1126,11 @@ public sealed partial class MainWindow : Window
     }
 
     private string DetailsSentence() =>
-        ViewModel.MonitorState switch
+        ViewModel.Phase switch
         {
-            "signed_out" or "error" or "stopped" or "loading" => ViewModel.StatusSentence,
-            _ => ViewModel.LastScreenshotAtMs is null
-                ? "Waiting for the first screenshot."
-                : "Everything is working. Screenshots are being taken and uploaded.",
+            MonitorPhase.Starting => "Waiting for the first screenshot.",
+            MonitorPhase.Active => "Everything is working. Screenshots are being taken and uploaded.",
+            _ => ViewModel.StatusSentence,
         };
 
     private List<RowSpec> ScreenshotRows()
@@ -1124,9 +1189,9 @@ public sealed partial class MainWindow : Window
     private RowSpec ProblemRow()
     {
         var status = ViewModel.MonitorStatus;
-        if (ViewModel.MonitorState == "error" && !string.IsNullOrWhiteSpace(ViewModel.MonitorError))
+        if (ViewModel.Phase == MonitorPhase.Error)
         {
-            return new RowSpec(StatusKind.Bad, "Last problem", "Monitoring could not start", ViewModel.MonitorError);
+            return new RowSpec(StatusKind.Bad, "Last problem", "Monitoring could not start", ViewModel.StatusSentence);
         }
 
         if (status?.RecentErrors is { Count: > 0 } errors)
@@ -1178,9 +1243,9 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        rows.Add(("Build", ViewModel.BuildLabelText.StartsWith("Build ", StringComparison.Ordinal)
-            ? ViewModel.BuildLabelText["Build ".Length..]
-            : ViewModel.BuildLabelText));
+        rows.Add(("Build", string.IsNullOrWhiteSpace(ViewModel.WindowsPackageVersion)
+            ? ViewModel.BuildLabel
+            : $"{ViewModel.BuildLabel} | Windows package {ViewModel.WindowsPackageVersion}"));
         rows.Add(("Logs", DisplayOrPlaceholder(status?.LogDirectory)));
         return rows;
     }
@@ -1213,12 +1278,13 @@ public sealed partial class MainWindow : Window
         var message = _reportMessageBox.Text.Trim();
         if (string.IsNullOrEmpty(message))
         {
-            SetError(_reportError, "Please describe the issue.");
+            _reportValidationError = "Please describe the issue.";
+            SyncFromViewModel();
             _reportMessageBox.Focus(FocusState.Programmatic);
             return;
         }
 
-        SetError(_reportError, null);
+        _reportValidationError = null;
         var contactEmail = _reportEmailBox.Text.Trim();
         var succeeded = await ViewModel.SubmitBugReportAsync(
             message,
@@ -1227,7 +1293,7 @@ public sealed partial class MainWindow : Window
 
         if (!succeeded)
         {
-            SetError(_reportError, ViewModel.ErrorText ?? "Failed to send the report.");
+            // The error shows on this screen through SyncFromViewModel.
             return;
         }
 

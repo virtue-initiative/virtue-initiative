@@ -72,7 +72,7 @@ public sealed class SessionViewModelTests
 
     // CLIENT-029: the update check line is exposed to the window (design test).
     [Fact]
-    public void UpdateCheckStatusText_RaisesPropertyChanged()
+    public void ReportUpdateCheck_SetsTheLineAndRaisesPropertyChanged()
     {
         var fakeClient = new FakeRustInteropClient();
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
@@ -81,10 +81,28 @@ public sealed class SessionViewModelTests
 
         var changed = new List<string?>();
         viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
-        viewModel.UpdateCheckStatusText = "No updates found.";
+        viewModel.ReportUpdateCheck("No updates found.", checking: false);
 
         Assert.Equal("No updates found.", viewModel.UpdateCheckStatusText);
         Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
+    }
+
+    // CLIENT-027: the window toasts each result of a check it started, even one that repeats the last line.
+    [Fact]
+    public void ReportUpdateCheck_ReportsEveryResultAndWhetherItIsStillChecking()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
+        var reports = 0;
+        viewModel.UpdateCheckReported += (_, _) => reports++;
+
+        viewModel.ReportUpdateCheck("Checking for updates...", checking: true);
+        Assert.True(viewModel.IsCheckingForUpdates);
+
+        viewModel.ReportUpdateCheck("Update already downloaded.", checking: false);
+        viewModel.ReportUpdateCheck("Update already downloaded.", checking: false);
+
+        Assert.False(viewModel.IsCheckingForUpdates);
+        Assert.Equal(3, reports);
     }
 
     // CLIENT-004: sign-in uses the machine name as the default device name, clears the password and refreshes status.
@@ -333,6 +351,72 @@ public sealed class SessionViewModelTests
 
         Assert.False(viewModel.LoggedIn);
         Assert.Equal("Signed out", viewModel.Headline);
+    }
+
+    // CLIENT-027: Exit during a running action waits for it, then still records the user stop.
+    [Fact]
+    public async Task StopMonitoringFromTrayExitAsync_WaitsForARunningAction()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
+            ForceScreenshotAndUploadGate = new ManualResetEventSlim(false),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var capture = viewModel.ForceCaptureAsync();
+        Assert.True(viewModel.IsBusy);
+        var exit = viewModel.StopMonitoringFromTrayExitAsync();
+        Assert.False(exit.IsCompleted);
+        Assert.False(fakeClient.StopMonitoringFromTrayExitCalled);
+
+        fakeClient.ForceScreenshotAndUploadGate.Set();
+        await capture;
+        await exit;
+
+        Assert.True(fakeClient.StopMonitoringFromTrayExitCalled);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
+    }
+
+    // CLIENT-027: the headline, tray and phase agree for a state the window does not list.
+    [Theory]
+    [InlineData(null, MonitorPhase.Starting, "Starting...", "Virtue: starting monitoring")]
+    [InlineData(123L, MonitorPhase.Active, "Monitoring active", "Virtue: monitoring active")]
+    public async Task RefreshAsync_UnlistedStateFollowsTheHeadlineEverywhere(
+        long? lastScreenshotAtMs, MonitorPhase expectedPhase, string expectedHeadline, string expectedTooltip)
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("paused", true, 0, lastScreenshotAtMs, null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(expectedPhase, viewModel.Phase);
+        Assert.Equal(expectedHeadline, viewModel.Headline);
+        Assert.Equal(expectedTooltip, viewModel.TrayTooltip);
+    }
+
+    // CLIENT-027: a screenshot from another day shows its date in the culture's own month-day order.
+    [Fact]
+    public void FormatShortTime_UsesTheCulturesMonthDayOrder()
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+            var lastWeek = DateTimeOffset.Now.AddDays(-7);
+            var text = SessionViewModel.FormatShortTime(lastWeek.ToUnixTimeMilliseconds());
+
+            Assert.StartsWith($"{lastWeek.ToLocalTime().Day} ", text);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 
     // CLIENT-011: Stop Monitoring stops monitoring and the status reads stopped.
@@ -837,8 +921,12 @@ public sealed class SessionViewModelTests
         public ForceCapturePayload ForceScreenshotAndUploadResult { get; set; } =
             new("uploaded", "Screenshot uploaded. Check the web logs page to view it.");
 
+        /// <summary>When set, the call blocks until the test sets it.</summary>
+        public ManualResetEventSlim? ForceScreenshotAndUploadGate { get; set; }
+
         public ForceCapturePayload ForceScreenshotAndUpload()
         {
+            ForceScreenshotAndUploadGate?.Wait(TimeSpan.FromSeconds(10));
             if (ForceScreenshotAndUploadError is not null)
             {
                 throw ForceScreenshotAndUploadError;

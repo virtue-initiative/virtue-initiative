@@ -349,7 +349,7 @@ public partial class App : Application
                 return;
             }
 
-            SetUpdateCheckStatus("Checking for updates...");
+            SetUpdateCheckStatus("Checking for updates...", checking: true);
             _updateManager.RequestCheckNow();
         };
         window.Activate();
@@ -619,15 +619,9 @@ public partial class App : Application
         return completion.Task;
     }
 
-    private void SetUpdateCheckStatus(string? text)
+    private void SetUpdateCheckStatus(string text, bool checking = false)
     {
-        _ = _dispatcherQueue?.TryEnqueue(() =>
-        {
-            if (_viewModel is not null)
-            {
-                _viewModel.UpdateCheckStatusText = text;
-            }
-        });
+        _ = _dispatcherQueue?.TryEnqueue(() => _viewModel?.ReportUpdateCheck(text, checking));
     }
 
     /// <summary>
