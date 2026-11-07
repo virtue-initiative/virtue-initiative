@@ -1,5 +1,7 @@
+#if canImport(DeclaredAgeRange) && canImport(PermissionKit)
 import DeclaredAgeRange
 import PermissionKit
+#endif
 import StoreKit
 import SwiftUI
 import UIKit
@@ -14,6 +16,10 @@ import UIKit
 ///
 /// The age range is never stored or sent anywhere, since the law only allows
 /// it to be used for this check.
+///
+/// The Apple frameworks it needs ship in the iOS 26 SDK. Built with an older
+/// SDK (a Mac that hasn't updated Xcode), the check compiles out and the gate
+/// is always open.
 @MainActor
 final class AgeAssurance: ObservableObject {
     enum Gate: Equatable {
@@ -53,6 +59,7 @@ final class AgeAssurance: ObservableObject {
     private var approvalListener: Task<Void, Never>?
 
     init() {
+        #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
         if #available(iOS 26.2, *) {
             gate = .checking
             approvalListener = Task { [weak self] in
@@ -66,12 +73,16 @@ final class AgeAssurance: ObservableObject {
             // aren't covered by it.
             gate = .allowed
         }
+        #else
+        gate = .allowed
+        #endif
         recordBaselineIfNeeded()
     }
 
     /// Runs on launch, and again on foreground while the gate is closed so a
     /// change in Settings or a parent's answer takes effect.
     func check() async {
+        #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
         guard #available(iOS 26.2, *), !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
@@ -118,9 +129,12 @@ final class AgeAssurance: ObservableObject {
         @unknown default:
             gate = .allowed
         }
+        #endif
     }
 
     // MARK: Significant changes
+
+    #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
 
     @available(iOS 26.2, *)
     private func handleSignificantChanges(isMinor: Bool) async {
@@ -219,6 +233,7 @@ final class AgeAssurance: ObservableObject {
         }
         return pending
     }
+    #endif
 
     private func markHandled(_ changes: [SignificantChange]) {
         let defaults = UserDefaults.standard
