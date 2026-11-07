@@ -1,6 +1,7 @@
 import SafariServices
 import SwiftUI
 import UIKit
+import VirtueKit
 
 /// The five setup steps. Each turns done from what the Safari extension
 /// reports (`SafariSetupState`), so "signed in" is never mistaken for
@@ -93,7 +94,7 @@ struct SafariSetupGuide: View {
                 .foregroundStyle(VirtueBrand.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-                Card {
+                Card(cornerRadius: VirtueRadius.cardLarge) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(SetupStep.allCases) { step in
                             stepRow(step)
@@ -213,7 +214,7 @@ struct SetupWizard: View {
             }
             .accessibilityHidden(true)
 
-            Card {
+            Card(cornerRadius: VirtueRadius.cardLarge) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(step.title)
                         .font(.headline)
@@ -230,10 +231,10 @@ struct SetupWizard: View {
 
             HStack(spacing: 10) {
                 Button("Back") { move(-1) }
-                    .buttonStyle(VirtueButtonStyle(fullWidth: true))
+                    .buttonStyle(IOSButtonStyle(fullWidth: true))
                     .disabled(step == .turnOnExtension)
                 Button("Next") { move(1) }
-                    .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                    .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                     .disabled(step == SetupStep.allCases.last)
             }
         }
@@ -339,7 +340,7 @@ struct SetupStepDetails: View {
         Button("Open Settings") {
             Task { await openSettings() }
         }
-        .buttonStyle(VirtueButtonStyle(prominent: true))
+        .buttonStyle(IOSButtonStyle(prominent: true))
     }
 
     private func openSettings() async {
@@ -399,7 +400,7 @@ struct ExtensionCheckButton: View {
         func body(content: Content) -> some View {
             switch style {
             case .prominent:
-                content.buttonStyle(VirtueButtonStyle(prominent: true))
+                content.buttonStyle(IOSButtonStyle(prominent: true))
             case .link:
                 content
                     .font(.subheadline)

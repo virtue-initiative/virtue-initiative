@@ -1,90 +1,7 @@
 import Combine
 import Foundation
 import UIKit
-
-/// One entry in the daemon's recent-errors ring — `virtue_core::StatusError`.
-struct CoreStatusError: Decodable {
-    let atMs: Int64
-    let context: String
-    let message: String
-
-    private enum CodingKeys: String, CodingKey {
-        case atMs = "at_ms"
-        case context
-        case message
-    }
-}
-
-/// Why the most recent capture attempt produced no screenshot —
-/// `virtue_core::StatusSkipReason`.
-enum CoreSkipReason: String, Decodable {
-    case staticScreen = "static_screen"
-    case lockedOrScreensaver = "locked_or_screensaver"
-    case captureFailed = "capture_failed"
-    case unknown
-
-    init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = CoreSkipReason(rawValue: raw) ?? .unknown
-    }
-
-    var label: String {
-        switch self {
-        case .staticScreen: return "Screen unchanged since the last upload"
-        case .lockedOrScreensaver: return "Screen locked or screensaver active"
-        case .captureFailed: return "Capture failed"
-        case .unknown: return "Unknown"
-        }
-    }
-}
-
-/// Mirrors `virtue_core::ServiceStatus` — the shared status-page payload
-/// (`client/core/SPEC.md` CORE-010) every platform renders. Kept as a local
-/// copy because the iOS app doesn't link `shared-swift`'s VirtueKit the way
-/// the Mac app does.
-struct CoreServiceStatus: Decodable {
-    let isRunning: Bool
-    let isAuthenticated: Bool
-    let accountEmail: String?
-    let deviceId: String?
-    let deviceName: String?
-    let partnerCount: Int?
-    let pendingHashCount: Int?
-    let pendingBatchCount: Int?
-    let pendingRequestCount: Int
-    let lastLoopAtMs: Int64?
-    let lastScreenshotAttemptAtMs: Int64?
-    let lastScreenshotAtMs: Int64?
-    let lastSkipReason: CoreSkipReason?
-    let lastBatchAtMs: Int64?
-    let recentErrors: [CoreStatusError]?
-    let apiBaseUrl: String?
-    let hashBaseUrl: String?
-    let captureIntervalSeconds: Int64?
-    let batchWindowSeconds: Int64?
-
-    private enum CodingKeys: String, CodingKey {
-        case isRunning = "is_running"
-        case isAuthenticated = "is_authenticated"
-        case accountEmail = "account_email"
-        case deviceId = "device_id"
-        case deviceName = "device_name"
-        case partnerCount = "partner_count"
-        case pendingHashCount = "pending_hash_count"
-        case pendingBatchCount = "pending_batch_count"
-        case pendingRequestCount = "pending_request_count"
-        case lastLoopAtMs = "last_loop_at_ms"
-        case lastScreenshotAttemptAtMs = "last_screenshot_attempt_at_ms"
-        case lastScreenshotAtMs = "last_screenshot_at_ms"
-        case lastSkipReason = "last_skip_reason"
-        case lastBatchAtMs = "last_batch_at_ms"
-        case recentErrors = "recent_errors"
-        case apiBaseUrl = "api_base_url"
-        case hashBaseUrl = "hash_base_url"
-        case captureIntervalSeconds = "capture_interval_seconds"
-        case batchWindowSeconds = "batch_window_seconds"
-    }
-}
+import VirtueKit
 
 /// What the app knows about Safari extension setup. The extension only runs
 /// while Safari does, so the app never sees it live: these are the last facts
@@ -695,13 +612,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func loadCoreStatus() -> CoreServiceStatus? {
-        guard let json = NativeBridge.getStatusJson(),
-              let data = json.data(using: .utf8),
-              !data.isEmpty
-        else {
-            return nil
-        }
-        return try? JSONDecoder().decode(CoreServiceStatus.self, from: data)
+        NativeBridge.getStatusJson().flatMap(CoreServiceStatus.decode(fromJson:))
     }
 
     private func timestamp(forKey key: String, defaults: UserDefaults) -> TimeInterval? {

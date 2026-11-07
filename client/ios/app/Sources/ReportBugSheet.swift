@@ -1,4 +1,5 @@
 import SwiftUI
+import VirtueKit
 
 /// "Report an Issue" screen, pushed from the menu. Ported from the Mac/Windows clients' report-issue
 /// dialogs: a message box, an optional contact email (pre-filled when signed
@@ -62,7 +63,7 @@ struct ReportBugSheet: View {
                 Button(isSending ? "Sending…" : "Send Report") {
                     send()
                 }
-                .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                 .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
