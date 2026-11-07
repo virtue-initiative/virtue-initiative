@@ -4,9 +4,10 @@ sidebar_position: 4
 
 # Block app installs (iPhone)
 
-Use Screen Time to stop new apps from being installed, such as non-Safari web browsers.
-You will need your accountability partner with you to set the passcode, so you cannot
-turn the block off yourself.
+You can use Screen Time to stop new apps from being installed, such as
+non-Safari web browsers. Virtue can only monitor Safari, so blocking other
+browsers is required. You will need your accountability partner with you to set
+the passcode, so you cannot turn the block off yourself.
 
 Finish [setting up Virtue](/download#ios), including the Safari extension,
 before you add Screen Time restrictions. Restrictions can stop the extension
@@ -27,8 +28,8 @@ from being turned on.
 6. Select **Don't Allow**.
    ![Installing Apps page with Don't Allow highlighted](./lockdown-dont-allow.png)
 
-The App Store icon disappears from the Home Screen. No new apps can be
-installed from the App Store, the web, or anywhere else.
+The App Store icon disappears from the Home Screen and no new apps can be
+installed.
 
 ## Lock it with a passcode only your partner knows
 
@@ -38,20 +39,20 @@ installed from the App Store, the web, or anywhere else.
    twice without you watching.
    ![The Set a Screen Time Passcode screen](./lockdown-set-passcode.png)
 
-Only your partner can turn this off now. Don't ask them for the passcode and
-don't watch them type it.
+Only your partner can turn this off now. Do not ask them for the passcode and
+do not watch them type it.
 
 ## Back up the passcode with an alert
 
 Your partner needs a backup of the passcode somewhere other than memory, in
-case they forget it or aren't reachable. A plain note or message is risky:
+case they forget it or are not reachable. A plain note or message is risky:
 if you ever come across it, the block is gone with no warning to anyone.
 
 Instead, use Virtue's own [locked passwords](/help/web/locked-passwords)
-feature. While your partner still has your phone, have them open your
-Passwords page and add a locked password there too, typing the Screen Time
+feature. While your partner still has your phone, have them open your Passwords
+page on the website and add a locked password there too, typing the Screen Time
 passcode in without letting you see it.
 
-If you ever reveal that entry, it's permanently flagged and every partner
-watching you is emailed immediately, so they'll know the passcode was found
+If you ever reveal that entry, it is permanently flagged and every partner
+watching you is emailed immediately, so they will know the passcode was found
 and can change it right away.

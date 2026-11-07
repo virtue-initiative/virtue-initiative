@@ -19,17 +19,17 @@ The Mac client has been rewritten from scratch, moving from Rust/AppKit to Swift
 
 ## Screenshot classification and text detection & redaction
 
-We added a small on device model that assigns a score to each screenshot based on how likely it is to contain NSFW content.
+We added a small on-device model that assigns a score to each screenshot based on how likely it is to contain NSFW content.
 
-![image classifcation](./nsfw-image-detection.png)
+![image classification](./nsfw-image-detection.png)
 
-We also added a OCR library for detecting text in screenshots. Currently, we use this for redacting text in screenshots, but eventually we would like to run the on-screen text through a classifer so that NSFW text (such as an explict story) is detected as well.
+We also added an OCR library for detecting text in screenshots. Currently, we use this for redacting text in screenshots, but eventually we would like to run the on-screen text through a classifier so that NSFW text (such as an explicit story) is detected as well.
 
 ![text redaction example](./text-redaction.png)
 
 ## Donations page
 
-We added a donations page powered by Stripe Checkout, making it easy to support the project directly. Donations are not currently tax-deductable, but we are working towards 501(c)3 status.
+We added a donations page powered by Stripe Checkout, making it easy to support the project directly. Donations are not currently tax-deductible, but we are working towards 501(c)(3) status.
 
 ![donations page](./donations-page.png)
 
@@ -39,7 +39,7 @@ Devices are now marked as deleted in the UI (but screenshots are still visible) 
 
 ## Better lifecycle & login handling
 
-We worked on improving our model for detecting unexpected gaps in monitoring. Our new model works on the assumption that a session begins when a user logs into their computer and ends when a user logs out of/shuts down their computer. Any gap in between (except suspend, i.e. closing the laptop lid), is detected as an unexpected gap and creates an alert that partners can see.
+We worked on improving our model for detecting unexpected gaps in monitoring. Our new model works on the assumption that a session begins when a user logs into their computer and ends when a user logs out of/shuts down their computer. Any gap in between (except suspend, i.e. closing the laptop lid) is detected as an unexpected gap and creates an alert that partners can see.
 
 We also allow you to set your device name when logging in (previously it could only be changed from the website).
 
@@ -79,7 +79,7 @@ On top of the above, this release includes a bunch of smaller fixes and polish a
 - [Match new theme on iOS](https://github.com/virtue-initiative/virtue-initiative/pull/440)
   - [Update iOS app to new design](https://github.com/virtue-initiative/virtue-initiative/issues/429)
 - [Android and windows style update](https://github.com/virtue-initiative/virtue-initiative/pull/441)
-  - [Update Andriod app to new design](https://github.com/virtue-initiative/virtue-initiative/issues/430)
+  - [Update Android app to new design](https://github.com/virtue-initiative/virtue-initiative/issues/430)
   - [Update windows app to new design](https://github.com/virtue-initiative/virtue-initiative/issues/432)
 - [Switch to bun, fix Preact JSX in Astro, fix API email links](https://github.com/virtue-initiative/virtue-initiative/pull/445)
 - [Fix #443: Replace custom DateRangePicker with native select](https://github.com/virtue-initiative/virtue-initiative/pull/446)
@@ -95,7 +95,7 @@ On top of the above, this release includes a bunch of smaller fixes and polish a
 - [Add Heartbeat log type to Rust core (#299)](https://github.com/virtue-initiative/virtue-initiative/pull/452)
   - [Send log once a day on devices that are online](https://github.com/virtue-initiative/virtue-initiative/issues/299)
 - [Run blocking calls off main thread on iOS and Windows](https://github.com/virtue-initiative/virtue-initiative/pull/442)
-  - [Windows doesn't show login error with invalid password](https://github.com/virtue-initiative/virtue-initiative/issues/413)
+  - [Windows does not show login error with invalid password](https://github.com/virtue-initiative/virtue-initiative/issues/413)
 - [Fix #453, #454: squarish sidebar style and auto-select first Logs child](https://github.com/virtue-initiative/virtue-initiative/pull/457)
   - [Clicking Logs in the sidebar should default select the first listed user instead of doing nothing](https://github.com/virtue-initiative/virtue-initiative/issues/453)
   - [Make some corners less rounded and normalize sidebar highlight](https://github.com/virtue-initiative/virtue-initiative/issues/454)
@@ -107,9 +107,9 @@ On top of the above, this release includes a bunch of smaller fixes and polish a
 - [Fix #461: use staging API URL by default in dev/staging builds](https://github.com/virtue-initiative/virtue-initiative/pull/463)
   - [Use the staging URL by default in dev builds](https://github.com/virtue-initiative/virtue-initiative/issues/461)
 - [Add skin/nsfw raw scores to screenshot logs and fix risk=0 on all platforms](https://github.com/virtue-initiative/virtue-initiative/pull/465)
-  - [MacOS doesn't get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/458)
-  - [Android doesn't get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/459)
-  - [iOS doesn't get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/460)
+  - [MacOS does not get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/458)
+  - [Android does not get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/459)
+  - [iOS does not get a screenshot rating](https://github.com/virtue-initiative/virtue-initiative/issues/460)
 - [Simplify API auth to session + device tokens (#466)](https://github.com/virtue-initiative/virtue-initiative/pull/469)
   - [Simplify API auth](https://github.com/virtue-initiative/virtue-initiative/issues/466)
 - [Fix #470: noindex meta tag on staging pages](https://github.com/virtue-initiative/virtue-initiative/pull/473)
@@ -120,7 +120,7 @@ On top of the above, this release includes a bunch of smaller fixes and polish a
 - [Fix false-positive Unexpected Restart / Unexpected Gap alerts on iOS](https://github.com/virtue-initiative/virtue-initiative/pull/481)
   - [Fixup "Unexpected Gap" and "Unexpected Restart" alerts on iOS](https://github.com/virtue-initiative/virtue-initiative/issues/435)
 - [Fix #467: replace direct-log endpoint with encrypted batch + notify pipeline](https://github.com/virtue-initiative/virtue-initiative/pull/478)
-  - [Remove seperate log endpoint](https://github.com/virtue-initiative/virtue-initiative/issues/467)
+  - [Remove separate log endpoint](https://github.com/virtue-initiative/virtue-initiative/issues/467)
 - [Trim issue/PR templates to 3 sections max](https://github.com/virtue-initiative/virtue-initiative/pull/487)
   - [Clean up feature/bug/pr templates](https://github.com/virtue-initiative/virtue-initiative/issues/479)
 - [Polish devices/logs UI: pending count, sidebar user display, loading state](https://github.com/virtue-initiative/virtue-initiative/pull/486)

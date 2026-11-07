@@ -11,7 +11,7 @@ import { Devices } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
-describe('Devices — device list', () => {
+describe('Devices — device list (WEB-034)', () => {
   it('renders device names once loaded', async () => {
     renderWithClient(<Devices />);
     await waitFor(() => {
@@ -27,7 +27,7 @@ describe('Devices — device list', () => {
     });
   });
 
-  it('shows a loading indicator instead of the empty state while the fetch is in flight', async () => {
+  it('shows a loading indicator instead of the empty state while the fetch is in flight (WEB-009)', async () => {
     let resolveDevices: (() => void) | undefined;
     server.use(
       http.get(
@@ -76,7 +76,7 @@ describe('Devices — device list', () => {
   });
 });
 
-describe('Devices — refresh on open', () => {
+describe('Devices — refresh on open (WEB-012, WEB-034)', () => {
   it('shows the cached devices on reopen and then refetches them', async () => {
     const user = userEvent.setup();
     function Harness() {
@@ -126,7 +126,7 @@ describe('Devices — refresh on open', () => {
   });
 });
 
-describe('Devices — Add device dialog', () => {
+describe('Devices — Add device dialog (WEB-036)', () => {
   it('opens the Add device dialog', async () => {
     const user = userEvent.setup();
     renderWithClient(<Devices />);
@@ -138,7 +138,7 @@ describe('Devices — Add device dialog', () => {
   });
 });
 
-describe('Devices — Device rename', () => {
+describe('Devices — Device rename (WEB-037)', () => {
   it('calls PATCH /device/:id on rename submit', async () => {
     let patchBody: unknown;
     let patchedId: string | undefined;
@@ -168,7 +168,7 @@ describe('Devices — Device rename', () => {
   });
 });
 
-describe('Devices — Device delete', () => {
+describe('Devices — Device delete (WEB-037, WEB-020)', () => {
   it('calls DELETE /device/:id after confirmation', async () => {
     let deletedId: string | undefined;
     server.use(

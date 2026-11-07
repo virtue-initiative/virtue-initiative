@@ -1,16 +1,17 @@
 pub mod fingerprint;
 pub mod image_pipeline;
+pub mod image_regions;
 pub mod risk_classifier;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::model::{ScreenshotSkipReason, StatusSkipReason, UploadKind};
+use crate::model::{DeviceSettings, ScreenshotSkipReason, StatusSkipReason, UploadKind};
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::upload::{self, UploadState};
 use crate::platform::ScreenshotHooks;
 use crate::rng::RandomSource;
-use risk_classifier::RiskClassifier;
+use risk_classifier::{RiskClassifier, Screen};
 use virtue_text_detection::ScreenshotOCR;
 
 #[cfg(not(test))]
@@ -81,6 +82,33 @@ pub fn disable(state: &mut ScreenshotState) {
 /// What `plan` decided to do this tick — passed to `capture_and_process`.
 pub struct CapturePlan {
     anchor: Option<fingerprint::Fingerprint>,
+}
+
+/// Feature flag (API-061) that turns on per-image risk scoring (CORE-004).
+pub const PER_IMAGE_NSFW_FLAG: &str = "per_image_nsfw";
+
+/// How `capture_and_process` scores a screenshot's risk (CORE-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scoring {
+    /// [`RiskClassifier::classify_image`]: one look at the whole frame.
+    WholeFrame,
+    /// [`RiskClassifier::classify_regions`]: each photo-like region on its own.
+    PerImage(Screen),
+}
+
+impl Scoring {
+    /// Per-image scoring when the device's owner has [`PER_IMAGE_NSFW_FLAG`], treating Android
+    /// and iOS screenshots as phone screens. Otherwise whole-frame scoring, including before
+    /// settings are first fetched.
+    pub fn for_device(settings: Option<&DeviceSettings>, platform_name: &str) -> Self {
+        if !settings.is_some_and(|s| s.has_feature_flag(PER_IMAGE_NSFW_FLAG)) {
+            return Self::WholeFrame;
+        }
+        Self::PerImage(match platform_name {
+            "android" | "ios" => Screen::Phone,
+            _ => Screen::Desktop,
+        })
+    }
 }
 
 /// Phase 2a (cheap): decide whether a screenshot is due this tick, applying
@@ -175,6 +203,7 @@ pub fn capture_and_process(
     plan: CapturePlan,
     hooks: &dyn ScreenshotHooks,
     classifier: Option<&RiskClassifier>,
+    scoring: Scoring,
     ocr: Option<&ScreenshotOCR>,
 ) -> CaptureOutcome {
     let screenshot = match hooks.take_screenshot() {
@@ -216,17 +245,28 @@ pub fn capture_and_process(
     // Classify before the (consuming) image pipeline. A `None` classifier (model
     // failed to load) or a classify error fails safe to risk 0 with no raw scores,
     // logged so an always-0 misconfiguration is diagnosable.
-    let scores = classifier.and_then(|c| match c.classify_image(&decoded) {
-        Ok(scores) => Some(scores),
-        Err(err) => {
-            tracing::warn!(error = %err, "classify failed, recording risk 0");
-            None
+    // Per-image scoring also reports its model runs and each image it found (BATCH-003).
+    let scores = classifier.and_then(|c| {
+        let scores = match scoring {
+            Scoring::WholeFrame => c.classify_image(&decoded).map(|s| (s, None)),
+            Scoring::PerImage(screen) => c.classify_regions(&decoded, screen).map(|r| {
+                let images = r.regions.iter().map(|r| r.to_scored_image()).collect();
+                (r.scores, Some((r.model_runs, images)))
+            }),
+        };
+        match scores {
+            Ok(scores) => Some(scores),
+            Err(err) => {
+                tracing::warn!(error = %err, "classify failed, recording risk 0");
+                None
+            }
         }
     });
-    let (risk, skin_detection, nsfw_detection) = match scores {
-        Some(scores) => (scores.risk, Some(scores.skin), scores.nsfw),
-        None => (0.0, None, None),
+    let (risk, skin_detection, nsfw_detection, details) = match scores {
+        Some((scores, details)) => (scores.risk, Some(scores.skin), scores.nsfw, details),
+        None => (0.0, None, None, None),
     };
+    let (model_runs, images) = details.unzip();
 
     let redacted = redact_if_ocr(ocr, &screenshot.bytes, decoded);
     let processed =
@@ -247,6 +287,8 @@ pub fn capture_and_process(
             content_type: processed.content_type,
             skin_detection,
             nsfw_detection,
+            model_runs,
+            images,
         },
         fingerprint: Some(fp),
     }
@@ -388,10 +430,12 @@ mod tests {
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             }],
             hash_base_url: None,
+            feature_flags: Vec::new(),
         });
         upload
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn disabled_never_plans_a_capture() {
         let mut state = ScreenshotState::default();
@@ -402,6 +446,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn enabled_with_no_prior_schedule_captures_immediately() {
         let mut state = ScreenshotState::default();
@@ -414,6 +459,7 @@ mod tests {
         assert!(state.next_screenshot_at_ms.is_some());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn not_due_before_the_drawn_time() {
         let mut state = ScreenshotState::default();
@@ -426,6 +472,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn locked_screen_skips_capture_and_reschedules() {
         let mut state = ScreenshotState::default();
@@ -445,6 +492,7 @@ mod tests {
         )));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn static_frame_is_suppressed_but_capture_failure_is_reported() {
         use crate::testing::fixtures::solid_png_screenshot;
@@ -457,11 +505,13 @@ mod tests {
             },
             &hooks,
             None,
+            Scoring::WholeFrame,
             None,
         );
         assert!(matches!(outcome, CaptureOutcome::StaticFrame));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn changed_frame_uploads() {
         use crate::testing::fixtures::solid_png_screenshot;
@@ -474,19 +524,54 @@ mod tests {
             },
             &hooks,
             None,
+            Scoring::WholeFrame,
             None,
         );
         assert!(matches!(outcome, CaptureOutcome::Uploaded { .. }));
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn capture_failure_reported() {
         let hooks = TestPlatformHooks::new();
         hooks.queue_screenshot(Err(crate::error::CoreError::CommandFailed("boom".into())));
-        let outcome = capture_and_process(CapturePlan { anchor: None }, &hooks, None, None);
+        let outcome = capture_and_process(
+            CapturePlan { anchor: None },
+            &hooks,
+            None,
+            Scoring::WholeFrame,
+            None,
+        );
         assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
     }
 
+    // CORE-004: per-image scoring behind its feature flag.
+    #[test]
+    fn per_image_scoring_needs_its_feature_flag() {
+        let mut upload = authenticated_upload();
+        assert_eq!(Scoring::for_device(None, "linux"), Scoring::WholeFrame);
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "linux"),
+            Scoring::WholeFrame
+        );
+
+        let settings = upload.settings.as_mut().unwrap();
+        settings.feature_flags = vec![PER_IMAGE_NSFW_FLAG.into()];
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "windows"),
+            Scoring::PerImage(Screen::Desktop)
+        );
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "android"),
+            Scoring::PerImage(Screen::Phone)
+        );
+        assert_eq!(
+            Scoring::for_device(upload.settings.as_ref(), "ios"),
+            Scoring::PerImage(Screen::Phone)
+        );
+    }
+
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_bypasses_the_interval_due_gate() {
         let mut state = ScreenshotState::default();
@@ -502,6 +587,7 @@ mod tests {
         );
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_still_respects_locked_or_screensaver() {
         let mut state = ScreenshotState::default();
@@ -512,6 +598,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-021: force_capture_now.
     #[test]
     fn plan_forced_is_a_noop_when_disabled() {
         let state = ScreenshotState::default();
@@ -520,6 +607,7 @@ mod tests {
         assert!(plan.is_none());
     }
 
+    // CORE-003: screenshot scheduling and gates.
     #[test]
     fn draw_next_screenshot_is_deterministic_given_a_fixed_uniform() {
         let rng = TestRandomSource::new();

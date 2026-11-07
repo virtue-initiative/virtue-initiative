@@ -24,16 +24,19 @@ struct VirtueMacApp: App {
                     // Lets the coordinator avoid relaunching itself while
                     // Sparkle is mid-install. See `checkForReplacedBundle`.
                     coordinator.updateController = updateController
-                    openWindow(id: "main")
+                    openWindow(id: MonitoringCoordinator.mainWindowID)
                     NSApp.activate(ignoringOtherApps: true)
                 }
         }
 
-        Window("Virtue", id: "main") {
-            ContentView(coordinator: coordinator)
+        Window("Virtue", id: MonitoringCoordinator.mainWindowID) {
+            ContentView(coordinator: coordinator, updateController: updateController)
                 .tint(VirtueBrand.accent)
                 .preferredColorScheme(.light)
         }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: false))
+        .defaultSize(width: 560, height: 640)
         .windowResizability(.contentMinSize)
     }
 }
@@ -48,14 +51,14 @@ private struct MenuBarMenuContent: View {
 
     var body: some View {
         Button("Open Virtue") {
-            openWindow(id: "main")
+            openWindow(id: MonitoringCoordinator.mainWindowID)
             NSApp.activate(ignoringOtherApps: true)
         }
 
         if !coordinator.loggedIn {
             Divider()
             Button("Log In") {
-                openWindow(id: "main")
+                openWindow(id: MonitoringCoordinator.mainWindowID)
                 NSApp.activate(ignoringOtherApps: true)
             }
         } else {

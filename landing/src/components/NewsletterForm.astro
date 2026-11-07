@@ -1,21 +1,30 @@
 ---
 import { Button, Input } from '@virtueinitiative/shared-web';
+import { API_URL } from '../lib/api-url';
 
-// Posts straight to Buttondown's embed endpoint, so it needs no API key and no account.
-// Buttondown sends its own confirmation email before the address is subscribed, which
-// is what makes this safe to accept from anyone. Accounts opt in from the signup form
-// instead (API-010).
-const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/virtueinitiative';
+// A plain form post to the API (API-058), which redirects back to /newsletter/subscribed or
+// /newsletter/error. The Turnstile widget adds its token as the `cf-turnstile-response` field, and
+// Subscribe stays disabled until it has one, since a post without it only reaches the error page.
+// Accounts opt in from the signup form instead (API-010).
+const TURNSTILE_SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY;
+
+interface Props {
+  centered?: boolean;
+}
+const { centered = false } = Astro.props;
 ---
 
-<section class="newsletter" aria-labelledby="newsletter-heading">
+<section
+  class:list={['newsletter', { 'newsletter-centered': centered }]}
+  aria-labelledby="newsletter-heading"
+>
   <div class="eyebrow">Newsletter</div>
   <h2 id="newsletter-heading">Get project updates</h2>
   <p>
-    We send occasional news about the project, new features, and new articles. You don't need a
+    We send occasional news about the project, new features, and new articles. You do not need a
     Virtue account to subscribe.
   </p>
-  <form class="newsletter-form" action={BUTTONDOWN_EMBED_URL} method="post">
+  <form class="newsletter-form" action={`${API_URL}/newsletter`} method="post">
     <label class="newsletter-label" for="newsletter-email">Email address</label>
     <div class="newsletter-row">
       <Input
@@ -26,12 +35,30 @@ const BUTTONDOWN_EMBED_URL = 'https://buttondown.com/api/emails/embed-subscribe/
         autocomplete="email"
         required
       />
-      <Button type="submit" variant="primary">Subscribe</Button>
+      <Button type="submit" variant="primary" disabled={!!TURNSTILE_SITE_KEY}>Subscribe</Button>
+    </div>
+    <div
+      class="cf-turnstile"
+      data-sitekey={TURNSTILE_SITE_KEY}
+      data-callback="newsletterTurnstileReady"
+      data-expired-callback="newsletterTurnstileExpired"
+      data-error-callback="newsletterTurnstileExpired"
+    >
     </div>
   </form>
   <p class="newsletter-fine-print">
-    We'll email you a link to confirm first. We never share your address. See our <a href="/privacy"
-      >Privacy Policy</a
+    We will email you a link to confirm first. We never share your address. See our <a
+      href="/privacy">Privacy Policy</a
     >.
   </p>
 </section>
+<script is:inline>
+  function setNewsletterSubmitDisabled(disabled) {
+    document.querySelectorAll('.newsletter-form [type="submit"]').forEach((button) => {
+      button.disabled = disabled;
+    });
+  }
+  window.newsletterTurnstileReady = () => setNewsletterSubmitDisabled(false);
+  window.newsletterTurnstileExpired = () => setNewsletterSubmitDisabled(true);
+</script>
+<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>

@@ -132,6 +132,8 @@ struct DeviceSettingsResponse {
     #[serde(default)]
     hash_base_url: Option<String>,
     hash_token: String,
+    #[serde(default)]
+    feature_flags: Vec<String>,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -149,6 +151,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 })
                 .collect(),
             hash_base_url: response.hash_base_url,
+            feature_flags: response.feature_flags,
         }
     }
 }
@@ -589,6 +592,7 @@ struct ApiErrorResponse {
 mod tests {
     use super::*;
 
+    // API-038: the batch upload request body.
     #[test]
     fn multipart_body_has_both_parts_in_order() {
         let body = encode_multipart("BOUND", &[0xde, 0xad], "{\"a\":1}");
@@ -607,6 +611,7 @@ mod tests {
         );
     }
 
+    // API-038: the batch upload request body.
     #[test]
     fn multipart_body_keeps_batch_bytes_verbatim() {
         // The batch is AES-GCM ciphertext: arbitrary bytes, including ones that
@@ -623,6 +628,7 @@ mod tests {
         assert_eq!(&body[header_end..header_end + batch.len()], &batch[..]);
     }
 
+    // API-042: the bug report request body.
     #[test]
     fn bug_report_multipart_omits_log_file_part_when_none() {
         let body = encode_bug_report_multipart("BOUND", "{\"message\":\"hi\"}", None);
@@ -633,6 +639,7 @@ mod tests {
         assert!(text.ends_with("\r\n--BOUND--\r\n"));
     }
 
+    // API-042: the bug report request body.
     #[test]
     fn bug_report_multipart_includes_log_file_part_when_given() {
         let body = encode_bug_report_multipart("BOUND", "{}", Some(b"line one\nline two\n"));
@@ -649,6 +656,7 @@ mod tests {
         );
     }
 
+    // CORE-023, API-042: credentials are redacted from bug report logs.
     #[test]
     fn redact_secrets_scrubs_opaque_session_tokens() {
         let input = "auth failed: token wst_AbCdEf123456ghijklmnop rejected";
@@ -657,6 +665,7 @@ mod tests {
         assert_eq!(redacted, "auth failed: token [redacted] rejected");
     }
 
+    // CORE-023, API-042: credentials are redacted from bug report logs.
     #[test]
     fn redact_secrets_scrubs_jwt_shaped_strings() {
         let input =
@@ -665,18 +674,21 @@ mod tests {
         assert_eq!(redacted, "Authorization: Bearer [redacted]");
     }
 
+    // CORE-023, API-042: credentials are redacted from bug report logs.
     #[test]
     fn redact_secrets_leaves_ordinary_text_untouched() {
         let input = "2026-01-01T00:00:00+0000 host virtue[123]: batch upload ok count=3";
         assert_eq!(redact_secrets(input), input);
     }
 
+    // CORE-023, API-042: credentials are redacted from bug report logs.
     #[test]
     fn redact_secrets_does_not_false_positive_on_short_dotted_text() {
         let input = "build 1.2.3 ok";
         assert_eq!(redact_secrets(input), input);
     }
 
+    // API-038: the batch upload request body.
     #[test]
     fn multipart_boundaries_are_unique_and_well_formed() {
         let a = multipart_boundary();
@@ -690,6 +702,7 @@ mod tests {
         );
     }
 
+    // CORE-026: API error messages.
     #[test]
     fn error_message_from_body_falls_back_on_empty_body() {
         let message = error_message_from_body(StatusCode::from_u16(401).unwrap(), Some(""));
@@ -697,6 +710,7 @@ mod tests {
         assert!(message.contains("401"));
     }
 
+    // CORE-026: API error messages.
     #[test]
     fn error_message_from_body_falls_back_on_missing_body() {
         let message = error_message_from_body(StatusCode::from_u16(500).unwrap(), None);
@@ -704,6 +718,7 @@ mod tests {
         assert!(message.contains("500"));
     }
 
+    // CORE-026: API error messages.
     #[test]
     fn error_message_from_body_includes_reason_phrase_on_fallback() {
         let message = error_message_from_body(StatusCode::from_u16(502).unwrap(), None);
@@ -711,6 +726,7 @@ mod tests {
         assert!(message.contains("Bad Gateway"));
     }
 
+    // CORE-026: API error messages.
     #[test]
     fn error_message_from_body_uses_error_field() {
         let message = error_message_from_body(
@@ -718,5 +734,25 @@ mod tests {
             Some(r#"{"error":"bad email"}"#),
         );
         assert_eq!(message, "bad email");
+    }
+
+    // CORE-005, API-061: feature flags are off until the API sends them.
+    #[test]
+    fn device_settings_feature_flags_default_to_none() {
+        // An API from before feature flags (API-061) omits the field entirely.
+        let without: DeviceSettingsResponse =
+            serde_json::from_str(r#"{"id":"d","name":"n","platform":"linux","hash_token":"t"}"#)
+                .unwrap();
+        let settings = DeviceSettings::from(without);
+        assert!(settings.feature_flags.is_empty());
+        assert!(!settings.has_feature_flag("beta"));
+
+        let with: DeviceSettingsResponse = serde_json::from_str(
+            r#"{"id":"d","name":"n","platform":"linux","hash_token":"t","feature_flags":["beta"]}"#,
+        )
+        .unwrap();
+        let settings = DeviceSettings::from(with);
+        assert!(settings.has_feature_flag("beta"));
+        assert!(!settings.has_feature_flag("other"));
     }
 }

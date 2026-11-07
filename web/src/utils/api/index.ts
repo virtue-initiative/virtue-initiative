@@ -7,8 +7,20 @@ export async function login(email: string, password: string): Promise<APIClient>
   return new APIClient(session);
 }
 
-export async function requestSignup(email: string, to?: string): Promise<void> {
-  await api.signupRequest(email, to);
+export async function requestSignup(
+  email: string,
+  to?: string,
+  turnstileToken?: string,
+): Promise<void> {
+  await api.signupRequest(email, to, turnstileToken);
+}
+
+function detectTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
 }
 
 export async function finishSignup(
@@ -22,6 +34,7 @@ export async function finishSignup(
     name,
     password,
     newsletterOptIn,
+    detectTimezone(),
   );
   return new APIClient(session);
 }
@@ -39,4 +52,4 @@ export {
 export { APIClient } from './client';
 export type { LogQueryResult } from './client';
 export type { User, Device, WatcherPartner, WatchingPartner, LockedPassword } from './api';
-export { api, describeError } from './api';
+export { api, describeError, SERVER_ERROR_MESSAGE } from './api';

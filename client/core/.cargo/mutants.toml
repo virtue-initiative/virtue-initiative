@@ -1,0 +1,16 @@
+# cargo-mutants config for virtue-core. `just mutants-core` runs it from client/ with
+# `--config core/.cargo/mutants.toml` (see TESTING.md, "Property and mutation testing").
+# Only the code where a silent mistake corrupts data or hides tampering is mutated, to
+# keep a run short. Globs are relative to the workspace root (client/).
+examine_globs = [
+    "core/src/crypto.rs",
+    "core/src/module/lifecycle.rs",
+    "core/src/module/upload.rs",
+    "core/src/module/upload/batch.rs",
+]
+
+# The scenario tests need the `testing` feature (client/core/Cargo.toml).
+additional_cargo_test_args = ["--features", "testing"]
+
+# Mutants that loop forever are killed after this many times the unmutated test time.
+timeout_multiplier = 3.0

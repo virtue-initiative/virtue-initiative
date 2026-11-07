@@ -14,7 +14,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
   .slice(0, 3);
 ---
 
-<SiteLayout tagline="Est. 2026">
+<SiteLayout pageTitle="Free Accountability Software" tagline="Est. 2026">
   <div class="home-page">
     <section class="home-hero">
       <div class="home-hero-copy">
@@ -22,7 +22,7 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
         <h1>We want to see a world set free from pornography.</h1>
         <p class="home-hero-lead">
           Virtue is a simple app that shares blurred screenshots of your activity with an
-          accountability partner you trust. It's entirely free to use and end-to-end encrypted.
+          accountability partner you trust. It is entirely free to use and end-to-end encrypted.
         </p>
         <div class="section-actions">
           <Button href={`${APP_URL}/signup`} variant="primary" size="lg">

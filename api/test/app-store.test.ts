@@ -90,7 +90,7 @@ beforeAll(() => {
 
 beforeEach(clearDB);
 
-describe('POST /app-store/notifications', () => {
+describe('POST /app-store/notifications (API-066)', () => {
   it('logs out every device from the download a RESCIND_CONSENT names', async () => {
     const { cookie } = await signupAndGetCookie('teen@example.com');
     const iphone = await createDeviceForUser(

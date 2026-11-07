@@ -4,7 +4,7 @@ import { BASE, clearDB } from './helpers';
 
 beforeEach(clearDB);
 
-describe('API base path routing', () => {
+describe('API base path routing (API-007)', () => {
   it('serves the same health payload with and without the configured base path', async () => {
     const [rootRes, prefixedRes] = await Promise.all([
       SELF.fetch(`${BASE}/`),

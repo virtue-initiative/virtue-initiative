@@ -14,14 +14,13 @@ const EMPTY_ACCESS_KEYS = JSON.stringify({ keys: {} });
 async function insertBatch(userId: string, deviceId: string, createdAt: number) {
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    `INSERT INTO batches (id, user_id, device_id, url, start_time, end_time, end_hash, access_keys, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO batches (id, user_id, device_id, start_time, end_time, end_hash, access_keys, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       uuidToBytes(id),
       uuidToBytes(userId),
       uuidToBytes(deviceId),
-      `batches/${id}.enc`,
       createdAt,
       createdAt,
       `hash-${id}`,
@@ -58,7 +57,7 @@ async function setUserCreatedAt(userId: string, createdAt: number) {
     .run();
 }
 
-describe('computeAnalyticsMetrics', () => {
+describe('computeAnalyticsMetrics (API-051)', () => {
   it('returns zeros on an empty database', async () => {
     const metrics = await computeAnalyticsMetrics(env.DB, Date.now());
 
@@ -166,7 +165,7 @@ describe('computeAnalyticsMetrics', () => {
   });
 });
 
-describe('snapshotAnalytics', () => {
+describe('snapshotAnalytics (API-051)', () => {
   it('stores one row per UTC day and replaces it on rerun', async () => {
     const day = Date.UTC(2026, 8, 18, 3, 0, 0); // 2026-09-18T03:00Z
     const first = await snapshotAnalytics(env, day);
@@ -188,7 +187,7 @@ describe('snapshotAnalytics', () => {
   });
 });
 
-describe('scheduled handler', () => {
+describe('scheduled handler (API-051)', () => {
   async function snapshotCount() {
     const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM analytics_snapshots').first<{
       n: number;

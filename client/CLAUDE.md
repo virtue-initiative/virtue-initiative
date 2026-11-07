@@ -30,7 +30,7 @@ other platform.
 ### Auth / login / logout
 
 - `core/src/module/auth.rs` — `login()`/`logout()`: calls the API, updates
-  `AuthState`/`ScreenshotState`/`UploadState` directly (settings/hash token are
+  `DaemonState` directly (settings/hash token are
   subsequently refreshed opportunistically from every `GET /d/device` and
   `POST /d/batch` response, not a dedicated pre-batch fetch)
 

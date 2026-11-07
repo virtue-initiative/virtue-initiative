@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# The linker for Rust binaries when remote-apple-build.sh cross-compiles for Apple targets on Linux.
+# Linking needs libSystem and the system frameworks, which only the Mac has, so this copies the
+# inputs there, links with its cc, and copies the result back.
+set -euo pipefail
+
+HOST="${VIRTUE_APPLE_LINK_HOST:?}"
+DIR="${VIRTUE_APPLE_LINK_DIR:?}"
+
+files=()
+remote_args=()
+output=""
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" == "-o" ]]; then
+    output="$arg"
+    remote_args+=("$DIR/out/$(basename "$arg")")
+  elif [[ "${arg:0:1}" == "/" && -f "$arg" ]]; then
+    files+=("$arg")
+    remote_args+=("$DIR$arg")
+  else
+    remote_args+=("$arg")
+  fi
+  previous="$arg"
+done
+
+ssh -o BatchMode=yes "$HOST" "mkdir -p $(printf '%q' "$DIR/out")"
+rsync -aR "${files[@]}" "$HOST:$DIR/"
+# -w: rustc's -L paths are Linux ones, which ld warns about. Everything it needs comes by file path.
+# shellcheck disable=SC2029
+ssh -o BatchMode=yes "$HOST" "$(printf '%q ' cc "${remote_args[@]}" -Wl,-w)"
+rsync -a "$HOST:$DIR/out/$(basename "$output")" "$output"

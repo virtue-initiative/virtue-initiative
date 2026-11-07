@@ -10,7 +10,7 @@ import UIKit
 /// age range Apple shares, turn away anyone under the Terms of Use minimum,
 /// and get fresh consent when a significant change ships. Apple stops the app
 /// from launching when a parent withdraws consent, and the API signs out the
-/// device (API-057).
+/// device (API-066).
 ///
 /// The age range is never stored or sent anywhere, since the law only allows
 /// it to be used for this check.

@@ -436,6 +436,7 @@ impl LifecycleHooks for WindowsPlatformHooks {
 }
 
 #[cfg(test)]
+// CLIENT-018: Windows event-log timestamp parsing for the last logout time.
 mod tests {
     use super::parse_eventlog_timecreated_ms;
 

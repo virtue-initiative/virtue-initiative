@@ -4,7 +4,7 @@ import { TEST_WATCHING } from '../mocks/fixtures';
 import { renderWithClient } from '../test-utils';
 import { Sidebar } from './Sidebar';
 
-describe('Sidebar', () => {
+describe('Sidebar (WEB-003)', () => {
   it('renders the primary nav links and user account button', async () => {
     renderWithClient(<Sidebar />);
 

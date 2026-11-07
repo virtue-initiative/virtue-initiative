@@ -5,17 +5,19 @@ sidebar_position: 4
 # Concern scores
 
 Every screenshot in your log feed is automatically scored for concern by an
-on-device classifier. This is not a person's judgment. It's an automated
-estimate meant to help you find the entries most worth a closer look.
+on-device classifier. This is not a person's judgment. It is an automated
+estimate meant to help you find the entries most worth a closer look. A high
+risk alert does not prove guilt. Remember, the goal of the app is not to bring
+shame, but to be an encouragement to live with integrity.
 
 ## Levels
 
 Each score is shown as a percentage alongside one of four levels:
 
-- **Low** — below 40%
-- **Medium** — 40% to 70%
-- **High** — 70% to 90%
-- **Alert** — 90% and above
+- **Low**: 1% to 39%
+- **Medium**: 40% to 69%
+- **High**: 70% to 89%
+- **Alert**: 90% and above
 
 ## Alert-level emails
 

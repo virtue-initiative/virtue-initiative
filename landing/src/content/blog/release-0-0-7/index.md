@@ -9,7 +9,7 @@ This release introduces a new app design and logo, and brings major improvements
 
 ## Styling update
 
-We're redoing our design and logo. We've updated the colors throughout the website and redid the landing page. There's still more work to be done (all the client apps need their colors updated), but we think it looks great so far.
+We are redoing our design and logo. We have updated the colors throughout the website and redid the landing page. There is still more work to be done (all the client apps need their colors updated), but we think it looks great so far.
 
 ![New landing page](./new-style.png)
 

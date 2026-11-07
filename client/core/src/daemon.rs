@@ -16,7 +16,7 @@ use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
 use crate::module::screenshot::{
-    self, CaptureOutcome, ScreenshotState, risk_classifier::RiskClassifier,
+    self, CaptureOutcome, Scoring, ScreenshotState, risk_classifier::RiskClassifier,
 };
 use crate::module::status;
 use crate::module::upload::{self, Upload, UploadState};
@@ -287,16 +287,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         app_transaction_id: Option<&str>,
         now_ms: i64,
     ) -> CoreResult<String> {
-        let DaemonState {
-            auth,
-            screenshot,
-            upload,
-            ..
-        } = state;
         auth::login(
-            auth,
-            screenshot,
-            upload,
+            state,
             &self.api,
             &self.config.device_name,
             &self.config.platform_name,
@@ -309,13 +301,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     fn apply_logout(&self, state: &mut DaemonState) {
-        let DaemonState {
-            auth,
-            screenshot,
-            upload,
-            ..
-        } = state;
-        auth::logout(auth, screenshot, upload, &self.api)
+        auth::logout(state, &self.api)
+    }
+
+    /// A logout nobody asked for: the server rejected the device. Keeps the
+    /// recent errors, which hold the reason (CORE-009).
+    fn apply_rejected_device_logout(&self, state: &mut DaemonState) {
+        let errors = std::mem::take(&mut state.errors);
+        self.apply_logout(state);
+        state.errors = errors;
     }
 
     fn apply_note_user_stop(&self, state: &mut DaemonState, now_ms: i64, source: &str) {
@@ -363,11 +357,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
+        let scoring =
+            Scoring::for_device(state.upload.settings.as_ref(), &self.config.platform_name);
         let captured = plan.map(|plan| {
             screenshot::capture_and_process(
                 plan,
                 &self.platform,
                 self.classifier.as_deref(),
+                scoring,
                 self.ocr.as_deref(),
             )
         });
@@ -454,10 +451,26 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// need this; it exists for platforms like Android where the same
     /// `Daemon` instance's loop can be stopped and resumed without a fresh
     /// `Daemon::new` in between.
+    ///
+    /// Blocks on the loop's reply, so it must only be called while the loop
+    /// is running. A caller that is about to start the loop itself must use
+    /// `queue_note_user_start` instead (CORE-022).
     pub fn note_user_start(&self) {
         if let Err(err) = self.call(|reply| DaemonRequest::NoteUserStart { reply }) {
             log_warning("note_user_start: daemon loop unreachable", Some(&err));
         }
+    }
+
+    /// `note_user_start` without the wait: enqueues the request and returns
+    /// immediately. The loop applies it ahead of anything queued afterward,
+    /// including a `login`, as soon as it next runs. For a caller that is
+    /// about to run `run_forever` itself, where the blocking form would sit
+    /// out its whole timeout waiting on a loop that has not started
+    /// (CORE-022).
+    pub fn queue_note_user_start(&self) {
+        // Nobody waits on this reply; the fire's send just fails quietly.
+        let (reply, _) = mpsc::channel();
+        let _ = self.request_tx.send(DaemonRequest::NoteUserStart { reply });
     }
 
     pub fn queue_upload(&self, upload: Upload) {
@@ -569,7 +582,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .clone();
         let (screen_active, should_logout) = self.run_phases(&mut working, now_ms);
         if should_logout {
-            self.apply_logout(&mut working);
+            self.apply_rejected_device_logout(&mut working);
         }
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
@@ -681,7 +694,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.with_locked_state(|working| {
             let (screen_active, should_logout) = self.run_phases(working, now_ms);
             if should_logout {
-                self.apply_logout(working);
+                self.apply_rejected_device_logout(working);
             }
             working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
             working.last_tick_at_ms = Some(now_ms);
@@ -696,7 +709,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             self.apply_flush_batch_now(working, now_ms);
             let (_, should_logout) = self.run_phases(working, now_ms);
             if should_logout {
-                self.apply_logout(working);
+                self.apply_rejected_device_logout(working);
             }
         });
     }
@@ -877,11 +890,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
+        let scoring =
+            Scoring::for_device(working.upload.settings.as_ref(), &self.config.platform_name);
         let captured = capture_plan.map(|plan| {
             screenshot::capture_and_process(
                 plan,
                 &self.platform,
                 self.classifier.as_deref(),
+                scoring,
                 self.ocr.as_deref(),
             )
         });
@@ -963,10 +979,11 @@ fn record_capture_failure(errors: &mut ErrorState, outcome: Option<&CaptureOutco
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use crate::testing::Scenario;
 
+    // CORE-014: the loop can be started again after a stop.
     /// Android's accessibility service starts and stops this same loop
     /// repeatedly within one process (pause/resume monitoring, logout, the
     /// service reconnecting) — `run_forever` must tolerate being called
@@ -985,6 +1002,57 @@ mod tests {
                 // request/response path production code relies on rather
                 // than racing the thread spawn.
                 std::thread::sleep(Duration::from_millis(20));
+                daemon.request_stop();
+                handle.join().expect("run_forever must not panic");
+            }
+        });
+    }
+
+    /// Android restarts the loop from the thread that is about to run it.
+    /// `note_user_start` blocks on a reply that only the loop can send, so it
+    /// sat out its whole request timeout there and delayed everything queued
+    /// behind it, `login` included (CORE-022). The queued form must return
+    /// immediately with no loop running, the loop must apply it first when it
+    /// does run, and a `login` queued behind it must be served promptly,
+    /// across repeated restarts.
+    #[test]
+    fn queue_note_user_start_does_not_wait_for_a_loop_and_is_applied_first() {
+        let scenario = Scenario::new();
+        let daemon = &scenario.daemon;
+
+        std::thread::scope(|scope| {
+            for round in 0..2 {
+                daemon.test_note_user_stop("test");
+                assert!(
+                    daemon.state_snapshot().lifecycle.monitoring_stopped,
+                    "round {round}: stop must be recorded before the restart"
+                );
+
+                let started = Instant::now();
+                daemon.queue_note_user_start();
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "round {round}: queue_note_user_start must not wait for the loop"
+                );
+                // Still queued, not yet applied: nothing is servicing the channel.
+                assert!(daemon.state_snapshot().lifecycle.monitoring_stopped);
+
+                let handle = scope.spawn(|| daemon.run_forever());
+
+                // The request the platform queues right after starting the
+                // loop. Its result doesn't matter here, only that it isn't
+                // held up waiting out `REQUEST_TIMEOUT`.
+                let started = Instant::now();
+                let _ = daemon.login("user@example.com", "password", None);
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "round {round}: login was delayed by the loop start"
+                );
+                assert!(
+                    !daemon.state_snapshot().lifecycle.monitoring_stopped,
+                    "round {round}: the queued resume must be applied by the loop"
+                );
+
                 daemon.request_stop();
                 handle.join().expect("run_forever must not panic");
             }

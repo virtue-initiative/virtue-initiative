@@ -76,8 +76,8 @@ jobs:
         run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core
         working-directory: client
 
-      - name: Rust scenario tests (core)
-        run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core --features testing --test scenarios
+      - name: Rust scenario tests (core, testing feature)
+        run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core --features testing --tests
         working-directory: client
 
       - name: Build hash server

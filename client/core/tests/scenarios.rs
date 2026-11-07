@@ -13,6 +13,7 @@ use virtue_core::{CoreError, StatusSkipReason, UploadKind};
 
 // ── Basic unauthenticated loop ────────────────────────────────────────────────
 
+// CORE-005, CORE-010: an unauthenticated daemon uploads nothing and reports it.
 #[test]
 fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
     let mut scenario = Scenario::new();
@@ -33,6 +34,7 @@ fn fresh_unauthenticated_service_loops_cleanly_with_no_uploads() {
 
 // ── Screenshots ────────────────────────────────────────────────────────────────
 
+// CORE-003: screenshot cadence.
 #[test]
 fn screenshot_taken_immediately_on_first_loop() {
     let mut scenario = Scenario::authenticated();
@@ -47,6 +49,7 @@ fn screenshot_taken_immediately_on_first_loop() {
     );
 }
 
+// CORE-003: screenshot cadence.
 #[test]
 fn screenshot_not_retaken_before_interval_elapses() {
     let mut scenario = Scenario::authenticated();
@@ -68,6 +71,7 @@ fn screenshot_not_retaken_before_interval_elapses() {
     );
 }
 
+// CORE-003: screenshot cadence.
 #[test]
 fn screenshot_retaken_after_interval() {
     let mut scenario = Scenario::authenticated();
@@ -87,6 +91,7 @@ fn screenshot_retaken_after_interval() {
 
 // ── User-initiated stop (unrelated to the late-wakeup model, preserved) ────────
 
+// CORE-011: note_user_stop sends an immediate alert.
 #[test]
 fn user_stop_emits_high_risk_upload() {
     let mut scenario = Scenario::authenticated();
@@ -98,6 +103,7 @@ fn user_stop_emits_high_risk_upload() {
     );
 }
 
+// CORE-002, CORE-022: the user stop excuse covers the first tick after a real restart.
 #[test]
 fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
     // Regression test: `note_user_stop`'s excuse was previously consumed by
@@ -158,6 +164,7 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
 
 // ── Late-wakeup model (CORE-002) ─────────────────────────────────
 
+// CORE-002: tamper detection.
 #[test]
 fn late_wakeup_over_two_minutes_triggers_alert() {
     let mut scenario = Scenario::authenticated();
@@ -183,6 +190,7 @@ fn late_wakeup_over_two_minutes_triggers_alert() {
     );
 }
 
+// CORE-002: tamper detection.
 #[test]
 fn late_wakeup_near_login_is_excused() {
     let mut scenario = Scenario::authenticated();
@@ -199,6 +207,7 @@ fn late_wakeup_near_login_is_excused() {
     );
 }
 
+// CORE-002: tamper detection.
 #[test]
 fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
     // Mirrors IosPlatformHooks::lifecycle_enabled() -> false.
@@ -217,7 +226,7 @@ fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
     );
 }
 
-// ── Repeated restart detection (CORE-018) ─────────────────────────────────
+// ── Repeated restart detection (CORE-019) ─────────────────────────────────
 
 fn has_repeated_restarts_notify(scenario: &Scenario) -> bool {
     scenario
@@ -240,6 +249,7 @@ fn has_pending_repeated_restarts_event(scenario: &Scenario) -> bool {
         .any(|e| matches!(e.event, UploadKind::RepeatedRestarts { .. }))
 }
 
+// CORE-019: repeated restart detection.
 #[test]
 fn twenty_restarts_within_ten_minutes_triggers_a_repeated_restarts_alert() {
     // Every constructed `Scenario` must be kept alive: `Scenario::Drop`
@@ -271,6 +281,7 @@ fn twenty_restarts_within_ten_minutes_triggers_a_repeated_restarts_alert() {
     assert!(last.state().lifecycle.restart_times.is_empty());
 }
 
+// CORE-019: repeated restart detection.
 #[test]
 fn restarts_spaced_more_than_ten_minutes_apart_never_alert() {
     let mut scenarios = vec![Scenario::authenticated()];
@@ -291,6 +302,7 @@ fn restarts_spaced_more_than_ten_minutes_apart_never_alert() {
 // counts don't accumulate across restarts -- what matters is whether the
 // *specific* restart that crosses the threshold fires its own notify.
 
+// CORE-019: repeated restart detection.
 #[test]
 fn a_second_burst_within_the_cooldown_does_not_alert_twice() {
     let mut scenarios = vec![Scenario::authenticated()];
@@ -329,6 +341,7 @@ fn a_second_burst_within_the_cooldown_does_not_alert_twice() {
     );
 }
 
+// CORE-019: repeated restart detection.
 #[test]
 fn a_burst_after_the_cooldown_expires_alerts_again() {
     let mut scenarios = vec![Scenario::authenticated()];
@@ -372,6 +385,7 @@ fn force_screenshot_due(scenario: &mut Scenario) {
     scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = None);
 }
 
+// CORE-006: capture_failed after repeated capture failures.
 #[test]
 fn four_capture_failures_below_threshold_no_upload() {
     let mut scenario = Scenario::authenticated();
@@ -391,6 +405,7 @@ fn four_capture_failures_below_threshold_no_upload() {
     );
 }
 
+// CORE-006: capture_failed after repeated capture failures.
 #[test]
 fn five_capture_failures_triggers_upload() {
     let mut scenario = Scenario::authenticated();
@@ -412,6 +427,7 @@ fn five_capture_failures_triggers_upload() {
 
 // ── Forced capture ───────────────────────────────────────────────────────────
 
+// CORE-021: force_capture_now.
 #[test]
 fn forced_capture_uploads_immediately_bypassing_interval_and_dedup() {
     let mut scenario = Scenario::authenticated();
@@ -443,6 +459,7 @@ fn forced_capture_uploads_immediately_bypassing_interval_and_dedup() {
     );
 }
 
+// CORE-021, CORE-013: a forced capture flushes its batch.
 #[test]
 fn forced_capture_flushes_the_batch_without_waiting_for_the_interval() {
     let mut scenario = Scenario::authenticated();
@@ -456,6 +473,7 @@ fn forced_capture_flushes_the_batch_without_waiting_for_the_interval() {
     );
 }
 
+// CORE-015, CORE-021: tick_once with a forced capture.
 #[test]
 fn tick_once_forced_captures_and_uploads_without_a_loop_thread() {
     let mut scenario = Scenario::authenticated();
@@ -477,6 +495,7 @@ fn tick_once_forced_captures_and_uploads_without_a_loop_thread() {
 
 // ── Upload: batching ──────────────────────────────────────────────────────────
 
+// CORE-005, CORE-012: a queued event waits for the batch interval.
 #[test]
 fn low_risk_upload_queued_until_batch_interval() {
     let mut scenario = Scenario::authenticated();
@@ -500,6 +519,7 @@ fn low_risk_upload_queued_until_batch_interval() {
     );
 }
 
+// CORE-005: batches wait for the batch interval.
 #[test]
 fn batch_flushed_after_interval() {
     let mut scenario = Scenario::authenticated();
@@ -520,6 +540,7 @@ fn batch_flushed_after_interval() {
     );
 }
 
+// CORE-009: logout discards queued events.
 #[test]
 fn logout_clears_pending_state() {
     let mut scenario = Scenario::authenticated();
@@ -552,6 +573,7 @@ fn logout_clears_pending_state() {
 
 // ── State persistence ─────────────────────────────────────────────────────────
 
+// CORE-016: state survives a restart.
 #[test]
 fn screenshot_state_survives_restart() {
     // Create first service, backdate the schedule so the next screenshot is
@@ -585,6 +607,7 @@ fn screenshot_state_survives_restart() {
 
 // ── Status page data (CORE-010 / CORE-018) ────────────────────────────────────
 
+// CORE-010, CORE-018: status reports capture data.
 #[test]
 fn status_reports_the_account_device_and_last_screenshot_after_a_capture() {
     let mut scenario = Scenario::authenticated();
@@ -606,6 +629,7 @@ fn status_reports_the_account_device_and_last_screenshot_after_a_capture() {
     assert!(!status.api_base_url.is_empty());
 }
 
+// CORE-010, CORE-018: status reports capture data.
 #[test]
 fn status_reports_a_skip_reason_when_the_screen_is_locked() {
     let mut scenario = Scenario::authenticated();
@@ -627,6 +651,7 @@ fn status_reports_a_skip_reason_when_the_screen_is_locked() {
     assert_eq!(scenario.status().last_skip_reason, None);
 }
 
+// CORE-018: recent errors are retained across a restart.
 #[test]
 fn status_reports_recent_upload_errors_and_they_survive_a_restart() {
     let mut scenario = Scenario::authenticated();
@@ -686,6 +711,7 @@ fn scenario_with_batch_waiting_on_interval() -> Scenario {
     scenario
 }
 
+// CORE-020: wakeup scheduling.
 /// Regression test: a batch waiting out its interval used to schedule the
 /// next wakeup for "now", so `run_forever` ran full ticks back-to-back until
 /// the interval elapsed.
@@ -700,6 +726,7 @@ fn batch_waiting_on_its_interval_does_not_schedule_an_immediate_wakeup() {
     );
 }
 
+// CORE-020: wakeup scheduling.
 /// A due batch held by the screen-lock gate can't make progress until the
 /// screen unlocks, which no timer predicts — it must not spin the loop.
 #[test]

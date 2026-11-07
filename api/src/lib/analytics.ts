@@ -8,6 +8,17 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type CountRow = { n: number };
 type PlatformRow = { platform: string; n: number };
+type BatchStatsRow = {
+  total: number;
+  d1: number;
+  d7: number;
+  users_d1: number;
+  users_d7: number;
+  users_d30: number;
+  devices_d1: number;
+  devices_d7: number;
+  devices_d30: number;
+};
 
 function count(result: D1Result<unknown>): number {
   const row = result.results[0] as CountRow | undefined;
@@ -28,18 +39,10 @@ export async function computeAnalyticsMetrics(
     usersNew1d,
     usersNew7d,
     usersNew30d,
-    active1d,
-    active7d,
-    active30d,
-    activeDevices1d,
-    activeDevices7d,
-    activeDevices30d,
     devicesTotal,
     devicesOwners,
     devicesByPlatform,
-    batchesTotal,
-    batches1d,
-    batches7d,
+    batchStats,
     partnersTotal,
     partnersAccepted,
     partnersPending,
@@ -51,32 +54,27 @@ export async function computeAnalyticsMetrics(
     db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at > ?').bind(since1d),
     db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at > ?').bind(since7d),
     db.prepare('SELECT COUNT(*) AS n FROM users WHERE created_at > ?').bind(since30d),
-    db
-      .prepare('SELECT COUNT(DISTINCT user_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since1d),
-    db
-      .prepare('SELECT COUNT(DISTINCT user_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since7d),
-    db
-      .prepare('SELECT COUNT(DISTINCT user_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since30d),
-    db
-      .prepare('SELECT COUNT(DISTINCT device_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since1d),
-    db
-      .prepare('SELECT COUNT(DISTINCT device_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since7d),
-    db
-      .prepare('SELECT COUNT(DISTINCT device_id) AS n FROM batches WHERE created_at > ?')
-      .bind(since30d),
     db.prepare('SELECT COUNT(*) AS n FROM devices WHERE deleted_at IS NULL'),
     db.prepare('SELECT COUNT(DISTINCT owner) AS n FROM devices WHERE deleted_at IS NULL'),
     db.prepare(
       'SELECT platform, COUNT(*) AS n FROM devices WHERE deleted_at IS NULL GROUP BY platform',
     ),
-    db.prepare('SELECT COUNT(*) AS n FROM batches'),
-    db.prepare('SELECT COUNT(*) AS n FROM batches WHERE created_at > ?').bind(since1d),
-    db.prepare('SELECT COUNT(*) AS n FROM batches WHERE created_at > ?').bind(since7d),
+    // Every batch figure in one pass. Batches are only kept for 30 days, so each
+    // of these would read most of the table if it ran as its own query.
+    db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                COUNT(CASE WHEN created_at > ?1 THEN 1 END) AS d1,
+                COUNT(CASE WHEN created_at > ?2 THEN 1 END) AS d7,
+                COUNT(DISTINCT CASE WHEN created_at > ?1 THEN user_id END) AS users_d1,
+                COUNT(DISTINCT CASE WHEN created_at > ?2 THEN user_id END) AS users_d7,
+                COUNT(DISTINCT CASE WHEN created_at > ?3 THEN user_id END) AS users_d30,
+                COUNT(DISTINCT CASE WHEN created_at > ?1 THEN device_id END) AS devices_d1,
+                COUNT(DISTINCT CASE WHEN created_at > ?2 THEN device_id END) AS devices_d7,
+                COUNT(DISTINCT CASE WHEN created_at > ?3 THEN device_id END) AS devices_d30
+         FROM batches`,
+      )
+      .bind(since1d, since7d, since30d),
     db.prepare('SELECT COUNT(*) AS n FROM partners'),
     db.prepare("SELECT COUNT(*) AS n FROM partners WHERE status = 'accepted'"),
     db.prepare("SELECT COUNT(*) AS n FROM partners WHERE status = 'pending'"),
@@ -87,6 +85,7 @@ export async function computeAnalyticsMetrics(
   ]);
 
   const users = count(usersTotal);
+  const batches = batchStats.results[0] as BatchStatsRow;
 
   const byPlatform: Record<string, number> = {};
   for (const row of devicesByPlatform.results as PlatformRow[]) {
@@ -102,14 +101,14 @@ export async function computeAnalyticsMetrics(
       new_30d: count(usersNew30d),
     },
     active_users: {
-      d1: count(active1d),
-      d7: count(active7d),
-      d30: count(active30d),
+      d1: batches.users_d1,
+      d7: batches.users_d7,
+      d30: batches.users_d30,
     },
     active_devices: {
-      d1: count(activeDevices1d),
-      d7: count(activeDevices7d),
-      d30: count(activeDevices30d),
+      d1: batches.devices_d1,
+      d7: batches.devices_d7,
+      d30: batches.devices_d30,
     },
     devices: {
       total: count(devicesTotal),
@@ -117,9 +116,9 @@ export async function computeAnalyticsMetrics(
       by_platform: byPlatform,
     },
     batches: {
-      total: count(batchesTotal),
-      d1: count(batches1d),
-      d7: count(batches7d),
+      total: batches.total,
+      d1: batches.d1,
+      d7: batches.d7,
     },
     partners: {
       total: count(partnersTotal),

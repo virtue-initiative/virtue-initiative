@@ -22,7 +22,7 @@ function bugReportForm(
   return { form };
 }
 
-describe('POST /bug-report', () => {
+describe('POST /bug-report (API-042)', () => {
   it('accepts an anonymous report and emails the fixed support address', async () => {
     const { form } = bugReportForm({
       message: 'The app crashes on launch.',
@@ -155,7 +155,7 @@ describe('POST /bug-report', () => {
     const confirmation = deliveries.find((d) => d.kind === 'bug_report_confirmation');
     expect(confirmation).toBeTruthy();
     expect(confirmation!.recipient_email).toBe('reporter@example.com');
-    expect(confirmation!.subject).toBe('We received your bug report');
+    expect(confirmation!.subject).toBe('We received your issue report');
     expect(confirmation!.text).not.toContain('spam.example');
     expect(confirmation!.html).not.toContain('spam.example');
   });

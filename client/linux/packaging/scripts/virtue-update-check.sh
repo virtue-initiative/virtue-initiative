@@ -21,19 +21,37 @@ fi
 RELEASE_TAG="$(cat "$RELEASE_TAG_FILE")"
 LOCAL_BUILD_LABEL="$(cat "$BUILD_LABEL_FILE")"
 ARCH="$(dpkg --print-architecture)"
+RELEASES_URL="${VIRTUE_RELEASES_URL:-https://api.github.com/repos/$REPO/releases?per_page=30}"
 
-echo "virtue-update-check: checking release tag '$RELEASE_TAG' (local build '$LOCAL_BUILD_LABEL', arch '$ARCH')"
+# The baked-in tag only tells us which channel this build came from. Each
+# version bump publishes to a brand-new tag, so following one fixed tag would
+# strand every install at the version it shipped with. Dev builds track the
+# newest prerelease, stable builds the newest full release.
+case "$RELEASE_TAG" in
+  *-dev) WANT_PRERELEASE=true; CHANNEL=dev ;;
+  *) WANT_PRERELEASE=false; CHANNEL=stable ;;
+esac
 
-RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/tags/$RELEASE_TAG")"
+echo "virtue-update-check: checking $CHANNEL channel (local build '$LOCAL_BUILD_LABEL', arch '$ARCH')"
 
-ASSET_URL="$(printf '%s' "$RELEASE_JSON" | jq -r --arg arch "$ARCH" '
-  .assets[]
-  | select(.name | test("^virtue-linux_.*_" + $arch + "\\.deb$"))
-  | .browser_download_url
-' | head -n1)"
+RELEASES_JSON="$(curl -fsSL "$RELEASES_URL")"
 
-if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-  echo "virtue-update-check: no matching asset found for tag '$RELEASE_TAG'/'$ARCH', nothing to do"
+# Newest release in the channel that already has a .deb for this arch. The
+# release is created by whichever platform job finishes first, so the newest
+# one can briefly have no Linux asset; skip it rather than doing nothing.
+ASSET_URL="$(printf '%s' "$RELEASES_JSON" | jq -r --arg arch "$ARCH" --argjson pre "$WANT_PRERELEASE" '
+  [ .[]
+    | select((.draft | not) and .prerelease == $pre)
+    | . as $release
+    | ($release.assets | map(select(.name | test("^virtue-linux_.*_" + $arch + "\\.deb$"))) | .[0]) as $asset
+    | select($asset != null)
+    | { published_at: $release.published_at, url: $asset.browser_download_url }
+  ]
+  | sort_by(.published_at) | reverse | .[0].url // empty
+')"
+
+if [ -z "$ASSET_URL" ]; then
+  echo "virtue-update-check: no matching $CHANNEL release asset found for '$ARCH', nothing to do"
   exit 0
 fi
 

@@ -5,7 +5,7 @@ function currentSchema(): Map<string, Set<string>> {
   return new Map(CACHE_TABLES.map((t) => [t.name, new Set(t.columns)]));
 }
 
-describe('findSchemaDrift', () => {
+describe('findSchemaDrift (WEB-015)', () => {
   it('reports no drift for a database matching the declaration', () => {
     expect(findSchemaDrift(CACHE_SCHEMA_VERSION, currentSchema())).toBeNull();
   });
@@ -56,7 +56,7 @@ describe('findSchemaDrift', () => {
     expect(findSchemaDrift(CACHE_SCHEMA_VERSION, existing)).toBeNull();
   });
 
-  it('declares a column list matching each table DDL', () => {
+  it('declares a column list matching each table DDL (WEB-015)', () => {
     for (const table of CACHE_TABLES) {
       const body = table.ddl.slice(table.ddl.indexOf('(') + 1, table.ddl.lastIndexOf(')'));
       const declared = body

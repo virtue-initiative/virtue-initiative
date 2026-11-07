@@ -11,6 +11,7 @@ Run `just --list` to see the everyday build/dev/format/test/typecheck commands, 
 - Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
 - Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
+- If you add or change a test or a `SPEC.md`, run `just spec-check` from the repo root. It checks that every test cites an existing spec ID and that no spec section has lost its tests. `just spec-coverage` prints the coverage report. See `TESTING.md`.
 
 ## Repo-wide quick map
 
@@ -132,6 +133,7 @@ cargo fmt --all -- --check
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-linux --all-targets -- -D warnings
 cargo test -p virtue-core
+cargo test -p virtue-core --features testing --tests
 cargo test -p virtue-linux
 ./linux/scripts/build-deb.sh
 ```
@@ -172,7 +174,7 @@ cargo build -p virtue-mac
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-mac --all-targets -- -D warnings
 cargo test -p virtue-core
-cargo test -p virtue-core --features testing --test scenarios
+cargo test -p virtue-core --features testing --tests
 ./mac/scripts/build-dmg.sh
 ```
 
@@ -210,7 +212,7 @@ cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
 cargo test --target x86_64-pc-windows-msvc -p virtue-core
-cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --tests
 cargo test --target x86_64-pc-windows-msvc -p virtue-windows
 ./windows/scripts/build-msix.ps1 -Profile Debug
 ```
@@ -290,9 +292,29 @@ Notes:
 ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
 ```
 
+### Building the macOS and iOS apps from Linux
+
+`client/scripts/remote-apple-build.sh` compiles the Rust on Linux and has a Mac compile the Swift, link and sign over SSH. Use it to test on a device. It's much faster than building Rust on the Mac, and CI still builds what ships.
+
+```bash
+just mac-remote                # Virtue.app, ad-hoc signed, in /Users/Shared/virtue-builds/<worktree>/ on the Mac.
+just ios-remote --run          # Build for the simulator, then install and launch it in the booted one.
+just ios-remote --destination device --profile release
+```
+
+- Apple's SDK isn't licensed for use off Apple hardware, so Linux doesn't have it. `client/scripts/apple-cross/apple-cc` compiles the C dependencies with Linux's `clang` and hand-written declarations in `apple-cross/include/` for the libc functions they call. A new C dependency that calls something else fails at compile time: add its declaration there.
+- The daemon binary links on the Mac, through `apple-cross/apple-link`.
+- Linux needs `clang`, `rsync` and SSH access to the Mac. The Mac needs Xcode. The default host is `virtue-ios@$VD_MAC_HOST`; override it with `--host` or `VIRTUE_APPLE_BUILD_HOST`.
+- If the Mac's simulator runtime doesn't match Xcode's SDK, asset catalogs fail with `No simulator runtime version ... available`. Fix that once per account by pairing them, for example `xcrun simctl runtime match set iphoneos18.5 22G86`.
+- `--prune` deletes the Mac's build dirs for worktrees that no longer exist.
+
+Windows still builds entirely in the VM, through `remote-windows-build.sh`. `tract-linalg` needs Microsoft's `ml64.exe` and `lib.exe` at build time, and once a worktree has built, Rust is only about 15 seconds of a 60-second build, so cross-compiling it wouldn't pay. What keeps it fast is a current base: run `just cow-cache warm-windows` when the VM's first build in a new worktree recompiles most of the crates.
+
+`vd <device> deploy` (see the `test-devices` skill) calls `client/scripts/install-on-test-device.sh` to build the current worktree, install it on a test device and launch it.
+
 ## Deployment workflows
 
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`.
+`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`. Pushes to `staging` also deploy `api-donate` to prod.
 
 If you need to mirror deployment locally:
 
@@ -372,9 +394,11 @@ Gotchas:
   dependencies, which invalidates refs. Take a fresh snapshot if a ref is "not found".
 - `screenshot --filename` must be a path inside the repo. An absolute path elsewhere (such as
   `/tmp`) is silently not written. Save the file inside the repo, then move it.
-- `gh --attach`, which the skill suggests for PR screenshots, needs `gh` 2.99 or later. On older
-  versions, commit the image to the public `virtue-initiative/pr-assets` repo under
-  `pr/<number>/` and link its `raw.githubusercontent.com` URL.
+- `playwright-cli open` blocks `file:` URLs. To screenshot local HTML (such as a rendered email),
+  serve it over http (for example `python3 -m http.server`) and open that.
+- Attach PR screenshots with `gh pr create --attach`, or `gh pr edit --attach` on an existing PR
+  (add `--repo` if running outside the checkout). It needs `gh` 2.99 or later, so upgrade `gh`
+  if it is older. Do not commit screenshots to the repo or push them to a separate branch.
 
 ## Minimum recommended local validation
 

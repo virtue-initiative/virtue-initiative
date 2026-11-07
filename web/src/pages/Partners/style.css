@@ -8,7 +8,7 @@
   margin-bottom: 2.5rem;
 
   & > h2 {
-    margin: 0 0 var(--space-4);
+    margin: 0;
   }
 
   & h2 {
@@ -228,11 +228,25 @@
   width: 100%;
 }
 
-.partner-card-compact {
-  min-height: 0;
-  padding: 0.95rem;
-}
+/* Label/value pairs in two columns, so the card reads as a small table
+   rather than a stack of tiny headings. */
+.partner-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: 0.85rem;
 
-.partner-card-compact .vi-card-actions {
-  margin-top: 0.6rem;
+  & dt {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  & dd {
+    margin: 0;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }

@@ -1,4 +1,5 @@
 import { env, SELF } from 'cloudflare:test';
+import { TEST_TURNSTILE_TOKEN } from './helpers';
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -13,9 +14,9 @@ CREATE TABLE IF NOT EXISTS users (
   settings TEXT NOT NULL DEFAULT '{}',
   pub_key BLOB,
   encrypted_priv_key BLOB,
+  feature_flags TEXT NOT NULL DEFAULT '{}',
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 CREATE TABLE IF NOT EXISTS devices (
   id BLOB PRIMARY KEY,
@@ -32,23 +33,20 @@ CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
 CREATE INDEX IF NOT EXISTS idx_devices_app_transaction_id ON devices(app_transaction_id);
 
 CREATE TABLE IF NOT EXISTS batches (
-  id BLOB PRIMARY KEY,
+  id BLOB NOT NULL,
   user_id BLOB NOT NULL,
   device_id BLOB NOT NULL,
-  url TEXT NOT NULL UNIQUE,
   start_time INTEGER NOT NULL,
   end_time INTEGER NOT NULL,
-  end_hash TEXT NOT NULL,
-  access_keys TEXT NOT NULL,
+  end_hash BLOB NOT NULL,
+  access_keys BLOB NOT NULL,
   version TEXT NOT NULL DEFAULT '',
   high_risk_count INTEGER NOT NULL DEFAULT 0,
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_batches_user_id_created_at ON batches(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_batches_created_at ON batches(created_at);
+  PRIMARY KEY (user_id, created_at, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS partners (
   id BLOB PRIMARY KEY,
@@ -59,6 +57,7 @@ CREATE TABLE IF NOT EXISTS partners (
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  accepted_at INTEGER,
   FOREIGN KEY (watching_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (watcher_user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (invite_token_id) REFERENCES email_tokens(id) ON DELETE SET NULL,
@@ -66,7 +65,6 @@ CREATE TABLE IF NOT EXISTS partners (
 );
 CREATE INDEX IF NOT EXISTS idx_partners_watching_user_id ON partners(watching_user_id);
 CREATE INDEX IF NOT EXISTS idx_partners_watcher_user_id ON partners(watcher_user_id);
-CREATE INDEX IF NOT EXISTS idx_partners_status ON partners(status);
 
 CREATE TABLE IF NOT EXISTS email_bounces (
   id BLOB PRIMARY KEY,
@@ -131,6 +129,14 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
   metrics TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS feature_flags (
+  key TEXT PRIMARY KEY,
+  rollout_percent INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percent BETWEEN 0 AND 100),
+  description TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `;
 
 const statements = schema
@@ -142,6 +148,22 @@ for (const statement of statements) {
   await env.DB.prepare(statement).run();
 }
 
+// Mirrors api-donate/src/schema/migrations/0003_newsletter_signups.sql.
+await env.DONATE_DB.prepare(
+  `CREATE TABLE IF NOT EXISTS newsletter_signups (
+    email TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE DEFAULT (lower(hex(randomblob(16)))),
+    country TEXT,
+    region TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    confirmed_at INTEGER,
+    confirmation_sent_at INTEGER,
+    unsubscribed_at INTEGER
+  )`,
+).run();
+
+const TURNSTILE_SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
 const originalFetch = globalThis.fetch.bind(globalThis);
 
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -150,6 +172,14 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 
   if (url.startsWith('http://localhost/')) {
     return SELF.fetch(input, init);
+  }
+
+  // Accepts only TEST_TURNSTILE_TOKEN, sent with the test secret from vitest.config.ts.
+  if (url === TURNSTILE_SITEVERIFY_URL) {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { secret?: string; response?: string };
+    const success =
+      body.secret === 'test-turnstile-secret' && body.response === TEST_TURNSTILE_TOKEN;
+    return Promise.resolve(Response.json({ success }));
   }
 
   return originalFetch(input, init);

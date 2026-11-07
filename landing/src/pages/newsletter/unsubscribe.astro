@@ -1,0 +1,31 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { API_URL } from '../../lib/api-url';
+
+// Every newsletter's unsubscribe link points here with ?token=. The button posts to
+// POST /newsletter/unsubscribe (API-060), so a mail scanner opening the link changes nothing.
+---
+
+<SiteLayout pageTitle="Unsubscribe">
+  <section class="newsletter-status">
+    <h2>Unsubscribe from the newsletter</h2>
+    <p>
+      You will stop getting Virtue Initiative project updates. Your account, if you have one, is not
+      affected.
+    </p>
+    <form
+      class="newsletter-status-actions"
+      action={`${API_URL}/newsletter/unsubscribe`}
+      method="post"
+    >
+      <input type="hidden" name="token" />
+      <Button type="submit" variant="primary">Unsubscribe</Button>
+    </form>
+  </section>
+</SiteLayout>
+
+<script is:inline>
+  document.querySelector('input[name="token"]').value =
+    new URLSearchParams(location.search).get('token') || '';
+</script>

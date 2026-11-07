@@ -69,3 +69,21 @@ export function checkoutCompletedEvent(
     },
   };
 }
+
+/**
+ * Like `signedWebhook`, but lets a test choose the signing secret and the signature
+ * timestamp (unix seconds) to build signatures that must be rejected.
+ */
+export async function signedWebhookWith(
+  event: Record<string, unknown>,
+  options: { secret?: string; timestamp?: number } = {},
+) {
+  const payload = JSON.stringify(event);
+  const signature = await signingStripe.webhooks.generateTestHeaderStringAsync({
+    payload,
+    secret: options.secret ?? 'whsec_test_secret',
+    timestamp: options.timestamp,
+    cryptoProvider,
+  });
+  return { payload, signature };
+}

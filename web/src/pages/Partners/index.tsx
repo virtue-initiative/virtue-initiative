@@ -26,7 +26,11 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { formatCompactRelativeTimestamp, formatRelativeTimestamp } from '../../utils/time';
+import {
+  formatCompactRelativeTimestamp,
+  formatDate,
+  formatRelativeTimestamp,
+} from '../../utils/time';
 import './style.css';
 
 const MAX_LISTED_DEVICES = 4;
@@ -203,11 +207,13 @@ function bouncedMessage(email: string) {
 function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   function open() {
     setEmail('');
+    setError('');
     dialogRef.current?.showModal();
   }
 
@@ -218,13 +224,14 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   async function handleSubmit(e: Event) {
     e.preventDefault();
     setLoading(true);
+    setError('');
     try {
       const status = await onInvitePartner(email);
       close();
       if (status === 'invite_failed') pushToast(bouncedMessage(email), 'error');
     } catch (err) {
       const message = describeError(err, 'Failed to send invite');
-      if (message) pushToast(message, 'error');
+      if (message) setError(message);
     } finally {
       setLoading(false);
     }
@@ -242,7 +249,7 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
           uploaded <b>after</b> you add them as a partner and they set up their account.
         </p>
         <form onSubmit={handleSubmit}>
-          <Field label="Partner's email">
+          <Field label="Partner's email" error={error}>
             <Input
               type="email"
               value={email}
@@ -281,6 +288,7 @@ function PendingPartnerCard({
 }) {
   const [action, setAction] = useState<'remove' | 'resend' | null>(null);
   const [resendEmail, setResendEmail] = useState(partner.user.email);
+  const [resendError, setResendError] = useState('');
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const resendRef = useRef<HTMLDialogElement>(null);
@@ -291,6 +299,7 @@ function PendingPartnerCard({
 
   function openResend() {
     setResendEmail(partner.user.email);
+    setResendError('');
     resendRef.current?.showModal();
   }
 
@@ -298,6 +307,7 @@ function PendingPartnerCard({
     e.preventDefault();
     if (!onInvitePartner) return;
     setAction('resend');
+    setResendError('');
     try {
       // Resending replaces this invite, so this card goes away with it.
       const status = await onInvitePartner(resendEmail, partner.id);
@@ -305,7 +315,7 @@ function PendingPartnerCard({
       if (status === 'invite_failed') pushToast(bouncedMessage(resendEmail), 'error');
     } catch (err) {
       const message = describeError(err, 'Failed to resend invite');
-      if (message) pushToast(message, 'error');
+      if (message) setResendError(message);
     } finally {
       setAction(null);
     }
@@ -357,7 +367,7 @@ function PendingPartnerCard({
             address and send the invite again.
           </p>
           <form onSubmit={resend}>
-            <Field label="Partner's email">
+            <Field label="Partner's email" error={resendError}>
               <Input
                 type="email"
                 value={resendEmail}
@@ -477,12 +487,34 @@ function PartnerCard({
   }
 
   return (
-    <Card class={isWatching ? undefined : 'partner-card-compact'}>
+    <Card>
       <CardHeader>
         <span class="vi-card__name" title={partnerEmailTooltip}>
           {partnerLabel}
         </span>
+        {!isWatching && (
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
+          </Button>
+        )}
       </CardHeader>
+      {!isWatching && (
+        <dl class="partner-details">
+          <dt>Email</dt>
+          <dd title={partner.user.email}>{partner.user.email}</dd>
+          {partner.accepted_at !== undefined && (
+            <>
+              <dt>Added</dt>
+              <dd>{formatDate(partner.accepted_at)}</dd>
+            </>
+          )}
+        </dl>
+      )}
       {isWatching && (
         <div class="partner-devices">
           <h3 class="eyebrow partner-devices-heading">Devices (last seen)</h3>
@@ -507,21 +539,23 @@ function PartnerCard({
           )}
         </div>
       )}
-      <CardActions>
-        {isWatching && partner.user.id && (
-          <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
-            View logs
+      {isWatching && (
+        <CardActions>
+          {partner.user.id && (
+            <Button variant="ghost" type="button" onClick={() => route(`/logs/${partner.user.id}`)}>
+              View logs
+            </Button>
+          )}
+          <Button
+            variant="danger"
+            type="button"
+            onClick={() => confirmRef.current?.showModal()}
+            disabled={action !== null}
+          >
+            {action === 'remove' ? 'Removing…' : 'Remove'}
           </Button>
-        )}
-        <Button
-          variant="danger"
-          type="button"
-          onClick={() => confirmRef.current?.showModal()}
-          disabled={action !== null}
-        >
-          {action === 'remove' ? 'Removing…' : 'Remove'}
-        </Button>
-      </CardActions>
+        </CardActions>
+      )}
       <Dialog dialogRef={confirmRef}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">

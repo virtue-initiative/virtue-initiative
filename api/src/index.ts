@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
+import { InvalidUuidError } from './lib/db';
 import admin from './routes/admin';
 import appStore from './routes/app-store';
 import auth from './routes/auth';
@@ -9,6 +11,7 @@ import deviceOnly from './routes/device-only';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import lockedPasswords from './routes/locked-password';
+import newsletter from './routes/newsletter';
 import partners from './routes/partners';
 import { snapshotAnalytics } from './lib/analytics';
 import { isApiVersionGone, stripApiVersion } from './lib/api-version';
@@ -26,7 +29,7 @@ import { Env, Variables } from './types/bindings';
 // Must match wrangler.json "triggers.crons". Each tick runs only its own case,
 // so the daily snapshot never displaces hourly work: 00:05 still fires hourly.
 const HOURLY_CRON = '5 * * * *';
-const ANALYTICS_CRON = '20 0 * * *';
+const DAILY_CRON = '20 0 * * *';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>({
   getPath: (request, options) => {
@@ -54,7 +57,7 @@ app.use(
       );
       return allowedOrigins.find((o) => o === origin);
     },
-    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   }),
@@ -74,6 +77,7 @@ app.route('/', bugReport);
 app.route('/', partners);
 app.route('/', emailWebhooks);
 app.route('/', appStore);
+app.route('/', newsletter);
 app.route('/device', devices);
 app.route('/locked-password', lockedPasswords);
 app.route('/data', data);
@@ -81,6 +85,11 @@ app.route('/d', deviceOnly);
 app.route('/admin', admin);
 
 app.get('/r2/*', async (c) => {
+  // API-040: only local dev turns this on.
+  if (c.env.DEV_R2_ROUTE !== 'true') {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
   const key = c.req.path.replace(/^\/r2\//, '');
   const object = await c.env.BUCKET.get(key);
 
@@ -98,6 +107,14 @@ app.get('/r2/*', async (c) => {
 });
 
 app.onError((error, c) => {
+  // API-004: the validator throws this for a body that is not valid JSON.
+  if (error instanceof HTTPException) {
+    return error.res ?? c.json({ error: error.message }, error.status);
+  }
+  // API-004: a path ID that is not a UUID names nothing. Any other bad UUID is a server bug.
+  if (error instanceof InvalidUuidError && Object.values(c.req.param()).includes(error.uuid)) {
+    return c.json({ error: 'Not found' }, 404);
+  }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
 });
@@ -108,13 +125,18 @@ export default {
   fetch: app.fetch,
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     switch (controller.cron) {
-      case ANALYTICS_CRON:
-        // api/SPEC.md API-051: one metrics snapshot per UTC day.
-        ctx.waitUntil(snapshotAnalytics(env, controller.scheduledTime));
+      case DAILY_CRON:
+        // Batch cleanup visits every user, so it runs once a day rather than hourly (see
+        // lib/retention.ts). The snapshot (API-051, one per UTC day) waits for it, so its
+        // batch counts don't depend on how far a concurrent delete has got.
+        ctx.waitUntil(
+          pruneExpiredBatches(env, controller.scheduledTime)
+            .catch((err) => console.error('[cron] batch cleanup failed', err))
+            .then(() => snapshotAnalytics(env, controller.scheduledTime)),
+        );
         break;
       case HOURLY_CRON:
         ctx.waitUntil(runNotificationSchedule(env, controller.scheduledTime));
-        ctx.waitUntil(pruneExpiredBatches(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredEmailTokens(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredUserSessions(env, controller.scheduledTime));
         ctx.waitUntil(pruneExpiredDeviceSessions(env, controller.scheduledTime));

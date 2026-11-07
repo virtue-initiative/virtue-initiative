@@ -12,7 +12,7 @@ beforeEach(clearDB);
 afterEach(() => fetchMock.assertNoPendingInterceptors());
 
 describe('POST /checkout', () => {
-  it('creates a one-time Checkout session and returns its url', async () => {
+  it('creates a one-time Checkout session and returns its url (DONATE-006)', async () => {
     fetchMock
       .get('https://api.stripe.com')
       .intercept({ path: '/v1/checkout/sessions', method: 'POST' })
@@ -31,7 +31,7 @@ describe('POST /checkout', () => {
     expect(await res.json()).toEqual({ url: 'https://checkout.stripe.com/c/pay/cs_test_123' });
   });
 
-  it('sends subscription mode and a monthly recurring price for recurring donations', async () => {
+  it('sends subscription mode and a monthly recurring price for recurring donations (DONATE-008)', async () => {
     let capturedBody = '';
     fetchMock
       .get('https://api.stripe.com')
@@ -55,7 +55,7 @@ describe('POST /checkout', () => {
     expect(decoded).toContain('[unit_amount]=1000');
   });
 
-  it('rejects a non-positive amount without calling Stripe', async () => {
+  it('rejects a non-positive amount without calling Stripe (DONATE-007)', async () => {
     const res = await SELF.fetch(`${BASE}/checkout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

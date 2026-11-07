@@ -119,7 +119,7 @@ export function DonateForm() {
       </Button>
 
       <p class="donate-secure-note">
-        You'll be securely redirected to Stripe to complete your gift.
+        You will be securely redirected to Stripe to complete your gift.
       </p>
 
       {STRIPE_PORTAL_URL && (

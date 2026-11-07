@@ -30,6 +30,7 @@ import {
 import { formatRelativeTimestamp } from '../../utils/time';
 import { csvFilename, downloadCsv, toCsv } from './csv';
 import { Trends } from './Trends';
+import { FeatureFlagsSection } from './FeatureFlags';
 import './style.css';
 
 const HISTORY_DAYS = 90;
@@ -121,6 +122,8 @@ export function Admin() {
           <p class="empty">One point per day appears here once snapshots exist.</p>
         )}
       </section>
+
+      <FeatureFlagsSection />
 
       <QuerySection />
     </div>

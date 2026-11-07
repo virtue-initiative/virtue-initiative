@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use batch::BatchBuilder;
+// The BATCH-008 vector generator builds its batches with the production
+// builder rather than a copy of it.
+#[cfg(feature = "testing")]
+pub use batch::BatchBuilder as BatchBuilderForTests;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::{ApiTransport, UploadedBatchResponse};
@@ -15,6 +19,7 @@ use crate::model::{
     BatchRecipient, BatchUpload, DeviceCredentials, DeviceSettings, LogEntry, NotifyPayload,
     UploadKind,
 };
+use crate::module::lifecycle::risk_percent;
 
 static BATCH_UPLOAD_SUCCESS_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -35,14 +40,18 @@ pub struct Upload {
 
 pub(crate) const POST_LOGIN_PROOF_BATCH_COUNT: u32 = 3;
 const MAX_HASH_RETRIES_PER_LOOP: usize = 8;
-const HASH_TOKEN_MAX_AGE_MS: i64 = 55 * 60 * 1_000;
+// The API mints hash tokens valid for 2 hours (API-002). Refreshing 10 minutes ahead of
+// that leaves an hourly batch upload to renew the token, with no GET /d/device in between.
+const HASH_TOKEN_MAX_AGE_MS: i64 = 110 * 60 * 1_000;
 
 const INITIAL_BACKOFF_MS: i64 = 1_000; // 1s
 const MAX_BACKOFF_MS: i64 = 20 * 60 * 1_000; // cap at 20 minutes
 
-/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`).
-const HIGH_RISK_RATING: f32 = 0.7;
-const MEDIUM_RISK_RATING: f32 = 0.4;
+/// Risk-rating band thresholds mirroring `shared-web/risk.ts` (`getRiskRating`), as whole
+/// percents because the web app rounds the score before choosing a level
+/// (see `lifecycle::risk_percent`).
+const HIGH_RISK_PERCENT: i64 = 70;
+const MEDIUM_RISK_PERCENT: i64 = 40;
 
 /// A hash-uploaded event awaiting batch upload, paired with its risk so the batch
 /// upload can report how many high/medium-risk events it carries.
@@ -55,7 +64,7 @@ pub struct PendingBatchEvent {
     /// can report `event_counts.screenshot` without decoding `encoded`.
     #[serde(default)]
     pub is_screenshot: bool,
-    /// Alert-email metadata, set when the event's risk is >= `EXTRA_HIGH_RISK` at
+    /// Alert-email metadata, set when the event's risk is at the `EXTRA_HIGH_RISK` level (see `is_extra_high_risk`) at
     /// hash time. Rides with this event into the batch it's uploaded in — never
     /// sent standalone.
     #[serde(default)]
@@ -160,29 +169,6 @@ pub struct UploadState {
 }
 
 impl UploadState {
-    pub fn reset_for_login(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.next_hash_seq = 0;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
-    pub fn reset_for_logout(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = 0;
-        self.settings = None;
-        self.device_credentials = None;
-        self.next_hash_seq = 0;
-        self.hash_token_cache = None;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
     pub fn pending_request_count(&self) -> usize {
         self.pending_hash_events.len() + usize::from(!self.pending_batch_events.is_empty())
     }
@@ -195,7 +181,7 @@ pub fn enqueue(state: &mut UploadState, now_ms: i64, risk: f32, kind: UploadKind
         return;
     }
     let is_heartbeat = matches!(kind, UploadKind::Heartbeat);
-    let is_high_risk = risk >= crate::module::lifecycle::EXTRA_HIGH_RISK;
+    let is_high_risk = crate::module::lifecycle::is_extra_high_risk(risk);
     state.pending_hash_events.push(LogEntry {
         ts: now_ms,
         risk: Some(risk),
@@ -344,6 +330,8 @@ pub struct HashRetryOutcome {
     next_hash_seq: u32,
     had_failure: bool,
     refreshed: Option<(String, DeviceSettings)>, // (hash_token, settings) from a GET /d/device refresh
+    /// The hash server answered 401, so the token must be refreshed before the next try.
+    token_rejected: bool,
     permanent_failures: Vec<(LogEntry, CoreError)>,
     /// `(context, message)` pairs for everything that went wrong this pass,
     /// handed to the daemon for the status page's recent-errors ring
@@ -389,6 +377,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     next_hash_seq,
                     had_failure: true,
                     refreshed: None,
+                    token_rejected: false,
                     permanent_failures: Vec::new(),
                     errors: vec![(
                         "settings_refresh".to_string(),
@@ -405,6 +394,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let mut permanent_failures = Vec::new();
     let mut errors: Vec<(String, String)> = Vec::new();
     let mut had_failure = false;
+    let mut token_rejected = false;
     let mut retried = 0usize;
     let mut stop = false;
 
@@ -439,7 +429,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                 next_hash_seq = seq;
                 let is_high_risk = event
                     .risk
-                    .is_some_and(|r| r >= crate::module::lifecycle::EXTRA_HIGH_RISK);
+                    .is_some_and(crate::module::lifecycle::is_extra_high_risk);
                 let notify = is_high_risk.then(|| build_notify_payload(&event));
                 let is_screenshot = matches!(event.event, UploadKind::Screenshot { .. });
                 newly_hashed.push(PendingBatchEvent {
@@ -473,6 +463,23 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                 still_pending.push(event);
                 stop = true;
             }
+            Err(err) if err.is_unauthorized() => {
+                // CORE-005: the token has expired or is otherwise refused. Its age is
+                // judged by the local wall clock, which can be set back and make an
+                // expired token look fresh, so drop it and fetch a new one next pass.
+                had_failure = true;
+                token_rejected = true;
+                log_warning(
+                    "hash server rejected the token, refreshing it before retrying",
+                    Some(&err),
+                );
+                errors.push((
+                    "hash_upload".to_string(),
+                    format!("hash server rejected the token, will refresh: {err}"),
+                ));
+                still_pending.push(event);
+                stop = true;
+            }
             Err(err) => {
                 had_failure = true;
                 log_warning("hash upload failed, will retry", Some(&err));
@@ -493,6 +500,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
         next_hash_seq,
         had_failure,
         refreshed,
+        token_rejected,
         permanent_failures,
         errors,
     }
@@ -523,6 +531,9 @@ pub fn commit_hash_retries(state: &mut UploadState, outcome: HashRetryOutcome, n
     if let Some((hash_token, settings)) = outcome.refreshed {
         state.hash_token_cache = Some((hash_token, now_ms));
         state.settings = Some(settings);
+    }
+    if outcome.token_rejected {
+        state.hash_token_cache = None;
     }
 
     for (_, err) in &outcome.permanent_failures {
@@ -578,10 +589,16 @@ pub fn plan_batch(
     let count = state.pending_batch_events.len();
     let items = state.pending_batch_events.clone();
     let start_time_ms = items.iter().map(|event| event.ts).min()?;
-    let high_risk_count = items.iter().filter(|e| e.risk >= HIGH_RISK_RATING).count() as u32;
+    let high_risk_count = items
+        .iter()
+        .filter(|e| risk_percent(e.risk) >= HIGH_RISK_PERCENT)
+        .count() as u32;
     let medium_risk_count = items
         .iter()
-        .filter(|e| e.risk >= MEDIUM_RISK_RATING && e.risk < HIGH_RISK_RATING)
+        .filter(|e| {
+            let percent = risk_percent(e.risk);
+            (MEDIUM_RISK_PERCENT..HIGH_RISK_PERCENT).contains(&percent)
+        })
         .count() as u32;
     let screenshot_count = items.iter().filter(|e| e.is_screenshot).count() as u32;
     let notifications: Vec<NotifyPayload> = items.iter().filter_map(|e| e.notify.clone()).collect();
@@ -746,6 +763,7 @@ mod tests {
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             }],
             hash_base_url: None,
+            feature_flags: Vec::new(),
         }
     }
 
@@ -761,6 +779,7 @@ mod tests {
         state
     }
 
+    // CORE-005: events are not queued without device credentials.
     #[test]
     fn enqueue_without_credentials_is_a_noop() {
         let mut state = UploadState::default();
@@ -768,6 +787,7 @@ mod tests {
         assert!(state.pending_hash_events.is_empty());
     }
 
+    // CORE-005: a heartbeat forces an upload and bypasses the screen-locked hold.
     #[test]
     fn enqueue_heartbeat_forces_flush_and_bypasses_lock() {
         let mut state = authenticated_state();
@@ -777,6 +797,7 @@ mod tests {
         assert!(state.bypass_lock);
     }
 
+    // CORE-005: a high-risk event forces an upload but not past the screen-locked hold.
     #[test]
     fn enqueue_high_risk_forces_flush_but_not_lock_bypass() {
         let mut state = authenticated_state();
@@ -792,6 +813,7 @@ mod tests {
         assert!(!state.bypass_lock);
     }
 
+    // CORE-005: a hashed event moves on to the batch queue (BATCH-006).
     #[test]
     fn hash_retry_round_trip_moves_event_into_batch_queue() {
         let mut state = authenticated_state();
@@ -809,6 +831,7 @@ mod tests {
         assert_eq!(state.next_hash_seq, 1);
     }
 
+    // CORE-005: no batch is uploaded while the screen is locked.
     #[test]
     fn batch_plan_none_when_lock_gate_blocks_and_not_bypassed() {
         let mut state = authenticated_state();
@@ -822,6 +845,7 @@ mod tests {
         assert!(plan_batch(&state, 1_000, 60_000, false).is_none());
     }
 
+    // CORE-005: an uploaded batch drains the queue.
     #[test]
     fn batch_upload_round_trip_drains_queue_and_advances_state() {
         let mut state = authenticated_state();
@@ -851,6 +875,34 @@ mod tests {
             is_screenshot: false,
             notify: None,
         }
+    }
+
+    /// CORE-005: a token the hash server refuses is dropped, so the next pass
+    /// fetches a new one even though the cached one doesn't look old yet.
+    #[test]
+    fn rejected_hash_token_is_refreshed_before_the_next_try() {
+        let mut state = authenticated_state();
+        state.hash_token_cache = Some(("token".into(), 1_000));
+        enqueue(&mut state, 1_000, 0.0, UploadKind::CaptureFailed);
+        let api = MockApiClient::new();
+        api.program_hash(Err(CoreError::HttpStatus {
+            status: 401,
+            message: "token expired".into(),
+        }));
+
+        let plan = plan_hash_retries(&mut state, 2_000, true).expect("an event to hash");
+        let outcome = execute_hash_retries(plan, &api);
+        commit_hash_retries(&mut state, outcome, 2_000);
+        assert!(api.state().get_device_settings_calls.is_empty());
+        assert!(state.hash_token_cache.is_none());
+        assert_eq!(state.pending_hash_events.len(), 1);
+
+        let plan = plan_hash_retries(&mut state, 3_000, true).expect("the event is still pending");
+        let outcome = execute_hash_retries(plan, &api);
+        commit_hash_retries(&mut state, outcome, 3_000);
+        assert_eq!(api.state().get_device_settings_calls.len(), 1);
+        assert!(state.hash_token_cache.is_some());
+        assert!(state.pending_hash_events.is_empty());
     }
 
     /// CORE-005: hashing stops at the batch cap, so a batch always holds
@@ -986,6 +1038,28 @@ mod tests {
         );
     }
 
+    // CORE-005, API-038: event_counts use the rounded risk percentage.
+    /// The medium/high counts use the rounded percentage, like the web app's
+    /// "N% concern (Level)" label, so a digest never disagrees with the log feed.
+    #[test]
+    fn batch_counts_use_the_rounded_percentage_like_the_web_app() {
+        let mut state = authenticated_state();
+        state.last_batch_at_ms = None;
+        // 39% (low), 40% (medium), 69% (medium), 70% (high), 90% (alert, counted as high).
+        for risk in [0.3949_f32, 0.3951, 0.6949, 0.6951, 0.9] {
+            state.pending_batch_events.push(PendingBatchEvent {
+                risk,
+                ..pending_batch_event()
+            });
+        }
+
+        let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
+        let batch = plan.batch.expect("batch builds");
+        assert_eq!(batch.medium_risk_count, 2);
+        assert_eq!(batch.high_risk_count, 2);
+    }
+
+    // CORE-009: an upload result that arrives after logout is discarded.
     #[test]
     fn commit_ignores_outcome_from_a_stale_session() {
         let mut state = authenticated_state();
@@ -1001,7 +1075,7 @@ mod tests {
         let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
 
         // Logout races the in-flight (unlocked) network call.
-        state.reset_for_logout();
+        state = UploadState::default();
 
         let outcome = execute_batch(plan, &api);
         let should_logout = commit_batch(&mut state, outcome, 1_000);

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** The iOS app's bundle ID. Staging and production builds share it. */
 export const IOS_BUNDLE_ID = 'org.virtueinitiative.virtueios';
 
-/** SHA-256 of Apple Root CA - G3 (API-057). */
+/** SHA-256 of Apple Root CA - G3 (API-066). */
 export const APPLE_ROOT_CA_G3_SHA256 =
   '63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179';
 
@@ -189,7 +189,7 @@ async function sha256Hex(bytes: Uint8Array) {
 }
 
 /**
- * API-057: the decoded payload of an App Store-signed JWS, or null unless its
+ * API-066: the decoded payload of an App Store-signed JWS, or null unless its
  * x5c chain ends at the pinned root and every check passes. `rootSha256`
  * exists so tests can pin their own root; production uses Apple's.
  */

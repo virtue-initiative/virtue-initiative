@@ -23,3 +23,7 @@
   margin: 0;
   color: var(--text-muted);
 }
+
+.email-link-frequency .vi-segmented-control__item {
+  flex: 1;
+}

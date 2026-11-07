@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Report an Issue" form, ported from the Mac/Windows clients' report-issue
+/// "Report an Issue" screen, pushed from the menu. Ported from the Mac/Windows clients' report-issue
 /// dialogs: a message box, an optional contact email (pre-filled when signed
 /// in), and an opt-out "include logs" toggle with the same disclosure text.
 struct ReportBugSheet: View {
@@ -15,64 +15,64 @@ struct ReportBugSheet: View {
     @State private var errorText: String?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextEditor(text: $message)
-                        .frame(height: 120)
-                        .overlay(alignment: .topLeading) {
-                            if message.isEmpty {
-                                Text("Describe the issue")
-                                    .foregroundStyle(VirtueBrand.textMuted)
-                                    .padding(.top, 8)
-                                    .padding(.leading, 5)
-                                    .allowsHitTesting(false)
-                            }
+        Form {
+            Section {
+                TextEditor(text: $message)
+                    .frame(height: 120)
+                    .overlay(alignment: .topLeading) {
+                        if message.isEmpty {
+                            Text("Describe the issue")
+                                .foregroundStyle(VirtueBrand.textMuted)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
                         }
-                } header: {
-                    Text("What happened?")
-                }
-
-                Section {
-                    TextField("Contact email (optional)", text: $contactEmail)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.emailAddress)
-                }
-
-                Section {
-                    Toggle("Include the last two days of diagnostic logs", isOn: $includeLogs)
-                } footer: {
-                    Text(
-                        "Includes timestamps, monitoring status, and error messages. " +
-                        "No screenshots or window titles are included. Known tokens are redacted automatically."
-                    )
-                }
-
-                if let errorText {
-                    Section {
-                        Text(errorText)
-                            .foregroundStyle(Color.red)
                     }
+            } header: {
+                Text("What happened?")
+            }
+
+            Section {
+                TextField("Email", text: $contactEmail)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+            } header: {
+                Text("Contact email (optional)")
+            }
+
+            Section {
+                Toggle("Attach logs from the last two days", isOn: $includeLogs)
+            } footer: {
+                Text(
+                    "Includes timestamps, monitoring status, and error messages. " +
+                    "No screenshots or window titles are included. Known tokens are redacted automatically."
+                )
+            }
+
+            if let errorText {
+                Section {
+                    Text(errorText)
+                        .foregroundStyle(VirtueBrand.bad)
                 }
             }
-            .navigationTitle("Report an Issue")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .disabled(isSending)
+
+            Section {
+                Button(isSending ? "Sending…" : "Send Report") {
+                    send()
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSending ? "Sending…" : "Send") {
-                        send()
-                    }
-                    .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(VirtueBrand.bg)
+        .navigationTitle("Report an Issue")
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(isSending)
         .onAppear {
             if contactEmail.isEmpty {
                 contactEmail = coordinator.accountEmail ?? ""

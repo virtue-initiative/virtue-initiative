@@ -1,18 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { buildGalleryRows } from "./gallery-layout";
-import { FeedLog } from "./shared";
+import { describe, expect, it } from 'vitest';
+import { buildGalleryRows } from './gallery-layout';
+import { FeedLog } from './shared';
 
 function makeItem(overrides: Partial<FeedLog> = {}): FeedLog {
   return {
-    id: "x",
-    device_id: "d",
+    id: 'x',
+    device_id: 'd',
     ts: 0,
-    type: "screenshot",
+    type: 'screenshot',
     data: {},
     created_at: 0,
     risk: undefined,
-    batch_status: "unknown",
-    source: "batch",
+    batch_status: 'unknown',
+    source: 'batch',
     ...overrides,
   } as FeedLog;
 }
@@ -38,18 +38,16 @@ const OPTS = {
   maxLastRowScale: 1.0,
 };
 
-describe("buildGalleryRows", () => {
-  it("returns [] for empty items", () => {
+describe('buildGalleryRows (WEB-042)', () => {
+  it('returns [] for empty items', () => {
     expect(buildGalleryRows([], OPTS)).toEqual([]);
   });
 
-  it("returns [] when containerWidth is 0", () => {
-    expect(
-      buildGalleryRows(make169(5), { ...OPTS, containerWidth: 0 }),
-    ).toEqual([]);
+  it('returns [] when containerWidth is 0', () => {
+    expect(buildGalleryRows(make169(5), { ...OPTS, containerWidth: 0 })).toEqual([]);
   });
 
-  it("all 16:9 items — widths sum to containerWidth (non-last rows)", () => {
+  it('all 16:9 items — widths sum to containerWidth (non-last rows)', () => {
     const items = make169(10);
     const rows = buildGalleryRows(items, OPTS);
     expect(rows.length).toBeGreaterThan(0);
@@ -60,7 +58,7 @@ describe("buildGalleryRows", () => {
     }
   });
 
-  it("portrait items — more items per row than landscape", () => {
+  it('portrait items — more items per row than landscape', () => {
     const landscape = buildGalleryRows(make169(20), OPTS);
     const portrait = buildGalleryRows(makePortrait(20), OPTS);
     const avgLandscape = landscape[0]?.count ?? 0;
@@ -68,30 +66,27 @@ describe("buildGalleryRows", () => {
     expect(avgPortrait).toBeGreaterThan(avgLandscape);
   });
 
-  it("mixed portrait + landscape — no width exceeds containerWidth", () => {
+  it('mixed portrait + landscape — no width exceeds containerWidth', () => {
     const items = [
       ...makePortrait(3).map((it, i) => ({ ...it, id: `p${i}` })),
       ...make169(3).map((it, i) => ({ ...it, id: `l${i}` })),
     ];
     const rows = buildGalleryRows(items, OPTS);
     for (const row of rows) {
-      const total =
-        row.widths.reduce((a, b) => a + b, 0) + OPTS.gap * (row.count - 1);
+      const total = row.widths.reduce((a, b) => a + b, 0) + OPTS.gap * (row.count - 1);
       expect(total).toBeLessThanOrEqual(OPTS.containerWidth + 0.01);
     }
   });
 
-  it("single ultrawide item lands on its own row", () => {
-    const ultrawide = makeItem({ id: "uw", image_w: 10000, image_h: 100 });
+  it('single ultrawide item lands on its own row', () => {
+    const ultrawide = makeItem({ id: 'uw', image_w: 10000, image_h: 100 });
     const rows = buildGalleryRows([ultrawide], OPTS);
     expect(rows).toHaveLength(1);
     expect(rows[0].count).toBe(1);
   });
 
-  it("items missing dimensions use defaultRatio", () => {
-    const noDims = Array.from({ length: 5 }, (_, i) =>
-      makeItem({ id: String(i) }),
-    );
+  it('items missing dimensions use defaultRatio', () => {
+    const noDims = Array.from({ length: 5 }, (_, i) => makeItem({ id: String(i) }));
     const withDims = Array.from({ length: 5 }, (_, i) =>
       makeItem({ id: String(i), image_w: 1920, image_h: 1080 }),
     );
@@ -105,27 +100,25 @@ describe("buildGalleryRows", () => {
     }
   });
 
-  it("last partial row height === targetRowHeight (not stretched)", () => {
+  it('last partial row height === targetRowHeight (not stretched)', () => {
     const items = make169(3); // likely a partial last row
     const rows = buildGalleryRows(items, OPTS);
     const last = rows[rows.length - 1];
     expect(last.height).toBeLessThanOrEqual(OPTS.targetRowHeight + 0.01);
   });
 
-  it("minRowScale enforcement — row does not squash below floor", () => {
+  it('minRowScale enforcement — row does not squash below floor', () => {
     // Many narrow portrait items: adding enough should eventually force a row break
     const narrowItems = Array.from({ length: 30 }, (_, i) =>
       makeItem({ id: String(i), image_w: 100, image_h: 1000 }),
     );
     const rows = buildGalleryRows(narrowItems, OPTS);
     for (const row of rows.slice(0, -1)) {
-      expect(row.height).toBeGreaterThanOrEqual(
-        OPTS.targetRowHeight * OPTS.minRowScale - 0.01,
-      );
+      expect(row.height).toBeGreaterThanOrEqual(OPTS.targetRowHeight * OPTS.minRowScale - 0.01);
     }
   });
 
-  it("startIndex and count are consistent across all rows", () => {
+  it('startIndex and count are consistent across all rows', () => {
     const items = make169(15);
     const rows = buildGalleryRows(items, OPTS);
     let expected = 0;

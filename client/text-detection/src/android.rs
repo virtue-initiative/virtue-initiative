@@ -73,6 +73,7 @@ fn parse_records(output: &str) -> Result<OcrResult, OcrError> {
 }
 
 #[cfg(test)]
+// CLIENT-019: Android OCR records are `text|left|top|right|bottom`, supplied by a registered engine.
 mod tests {
     use super::*;
 

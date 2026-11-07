@@ -1,9 +1,16 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { authenticateWebSession } from '../middleware/auth';
 import { requireAdmin } from '../middleware/admin';
 import { validateZ } from '../middleware/validation';
-import { listAnalyticsSnapshots } from '../lib/db';
+import {
+  deleteFeatureFlag,
+  listAnalyticsSnapshots,
+  setUserFlagOverride,
+  upsertFeatureFlag,
+} from '../lib/db';
 import { snapshotAnalytics } from '../lib/analytics';
+import { clearFeatureFlagCache, listFeatureFlagsWithOverrides } from '../lib/feature-flags';
 import {
   FullScanError,
   InvalidAdminQueryError,
@@ -14,6 +21,9 @@ import {
 import { Env, Variables } from '../types/bindings';
 import {
   adminQuerySchema,
+  featureFlagKeySchema,
+  setFeatureFlagOverrideSchema,
+  upsertFeatureFlagSchema,
   type AnalyticsMetrics,
   type AnalyticsSnapshot,
 } from '../../../shared-web/types';
@@ -85,5 +95,57 @@ admin.post('/query', validateZ('json', adminQuerySchema), async (c) => {
     return c.json({ error: 'Query failed', details: { message } }, 400);
   }
 });
+
+const flagKeyParamSchema = z.object({ key: featureFlagKeySchema });
+
+async function findFeatureFlag(db: D1Database, key: string) {
+  return (await listFeatureFlagsWithOverrides(db)).find((flag) => flag.key === key) ?? null;
+}
+
+// API-062
+admin.get('/flags', async (c) => c.json(await listFeatureFlagsWithOverrides(c.env.DB)));
+
+// API-063
+admin.put(
+  '/flags/:key',
+  validateZ('param', flagKeyParamSchema),
+  validateZ('json', upsertFeatureFlagSchema),
+  async (c) => {
+    const { key } = c.req.valid('param');
+    const { rollout_percent, description } = c.req.valid('json');
+    await upsertFeatureFlag(c.env.DB, { key, rollout_percent, description, now: Date.now() });
+    clearFeatureFlagCache();
+    return c.json(await findFeatureFlag(c.env.DB, key));
+  },
+);
+
+// API-064
+admin.delete('/flags/:key', validateZ('param', flagKeyParamSchema), async (c) => {
+  const { key } = c.req.valid('param');
+  if (!(await deleteFeatureFlag(c.env.DB, key))) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+  clearFeatureFlagCache();
+  return c.body(null, 204);
+});
+
+// API-065
+admin.put(
+  '/flags/:key/users',
+  validateZ('param', flagKeyParamSchema),
+  validateZ('json', setFeatureFlagOverrideSchema),
+  async (c) => {
+    const { key } = c.req.valid('param');
+    const { email, enabled } = c.req.valid('json');
+    if (!(await findFeatureFlag(c.env.DB, key))) {
+      return c.json({ error: 'Flag not found' }, 404);
+    }
+    const updated = await setUserFlagOverride(c.env.DB, email.trim().toLowerCase(), key, enabled);
+    if (!updated) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    return c.json(await findFeatureFlag(c.env.DB, key));
+  },
+);
 
 export default admin;

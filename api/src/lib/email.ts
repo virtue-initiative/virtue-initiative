@@ -25,6 +25,7 @@ export interface MockEmailDelivery {
   status: 'sent' | 'failed' | 'skipped';
   metadata: string;
   attachmentFileNames: string[];
+  configurationSet?: string;
 }
 
 interface SendEmailInput extends EmailContent {
@@ -41,10 +42,14 @@ interface SendEmailInput extends EmailContent {
   allowUnverified?: boolean;
   replyTo?: string;
   attachments?: EmailAttachment[];
+  // SES configuration set to send through instead of the identity's default.
+  configurationSet?: string;
   // Pass this when the caller already looked up the recipient (e.g. a fan-out
   // over rows from a single batch query) to avoid a redundant per-call
   // findUserByEmail lookup here.
   recipientEmailVerified?: number;
+  // Likewise for the recipient's latest permanent bounce, or null for none.
+  recipientPermanentBounce?: { id: string } | null;
 }
 
 let sesClient: SESv2Client | null = null;
@@ -57,6 +62,8 @@ export interface SendEmailResult {
   id: string;
   // Set when the email was not sent because the recipient has a permanent bounce.
   bounce_id?: string;
+  // Set when the email was not sent, with the reason.
+  skipped?: 'bounced' | 'unverified';
 }
 
 function withDisplayName(fromEmail: string) {
@@ -81,7 +88,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   const id = uuidv4();
 
   // API-056: never send to an address with a permanent bounce.
-  const bounce = await findPermanentEmailBounce(input.db, input.recipient);
+  const bounce =
+    input.recipientPermanentBounce !== undefined
+      ? input.recipientPermanentBounce
+      : await findPermanentEmailBounce(input.db, input.recipient);
   if (bounce) {
     if (input.email_token_id) {
       await setEmailTokenBounce(input.db, {
@@ -94,7 +104,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `bounced-${id}`, bounce_id: bounce.id };
+    return { id: `bounced-${id}`, bounce_id: bounce.id, skipped: 'bounced' };
   }
 
   const recipientEmailVerified =
@@ -112,7 +122,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       recipient: input.recipient,
       subject: input.subject,
     });
-    return { id: `skipped-${id}` };
+    return { id: `skipped-${id}`, skipped: 'unverified' };
   }
 
   const attachmentFileNames = (input.attachments ?? []).map((a) => a.fileName);
@@ -137,6 +147,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
       status: 'sent',
       metadata: JSON.stringify(input.metadata ?? {}),
       attachmentFileNames,
+      configurationSet: input.configurationSet,
     });
     return { id: `mock-${id}` };
   }
@@ -147,6 +158,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
         FromEmailAddress: withDisplayName(input.env.AWS_SES_FROM_EMAIL),
         Destination: { ToAddresses: [input.recipient] },
         ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
+        ConfigurationSetName: input.configurationSet,
         EmailTags: input.email_token_id
           ? [{ Name: EMAIL_TOKEN_TAG, Value: input.email_token_id }]
           : undefined,

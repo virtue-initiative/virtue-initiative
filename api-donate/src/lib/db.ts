@@ -80,3 +80,40 @@ export async function markStripeEventProcessed(
 
   return (result.meta.changes ?? 0) > 0;
 }
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string | null;
+  targetCents: number;
+  raisedCents: number;
+}
+
+/**
+ * List active fundraising goals.
+ *
+ * `raised_cents` is maintained by hand in the `goals` table; it is not derived
+ * from the donations table.
+ */
+export async function getActiveGoals(db: D1Database): Promise<Goal[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, title, description, target_cents, raised_cents
+       FROM goals WHERE active = 1 ORDER BY sort_order, created_at`,
+    )
+    .all<{
+      id: string;
+      title: string;
+      description: string | null;
+      target_cents: number;
+      raised_cents: number;
+    }>();
+
+  return results.map((row) => ({
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    targetCents: row.target_cents,
+    raisedCents: row.raised_cents,
+  }));
+}

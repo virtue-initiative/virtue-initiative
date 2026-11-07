@@ -34,6 +34,9 @@ import type {
   AdminQueryPayload,
   AdminQueryResult,
   AdminQueryScanDetails,
+  FeatureFlag,
+  UpsertFeatureFlagPayload,
+  SetFeatureFlagOverridePayload,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -68,11 +71,16 @@ export type {
   AdminQueryPayload,
   AdminQueryResult,
   AdminQueryScanDetails,
+  FeatureFlag,
+  UpsertFeatureFlagPayload,
+  SetFeatureFlagOverridePayload,
 };
 
 const BASE =
   ((import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8787') + `/${CURRENT_API_VERSION}`;
 const NETWORK_ERROR_MESSAGE = "Error: Couldn't connect to the network. Try reloading.";
+export const SERVER_ERROR_MESSAGE =
+  'Something went wrong, please try again. If this continues, contact help@virtueinitiative.org.';
 const NETWORK_TOAST_THROTTLE_MS = 3_000;
 let lastNetworkToastAt = 0;
 
@@ -185,6 +193,10 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     } else if (message === 'Not found') {
       message = 'Requested resource was not found.';
     }
+    // WEB-071
+    if (res.status >= 500) {
+      message = SERVER_ERROR_MESSAGE;
+    }
 
     throw Object.assign(new Error(message), {
       status: res.status,
@@ -214,12 +226,13 @@ export const api = {
       body: JSON.stringify({ email, password_auth, ...(timezone ? { timezone } : {}) }),
     }),
 
-  signupRequest: (email: string, to?: string) =>
+  signupRequest: (email: string, to?: string, turnstileToken?: string) =>
     req<void>('/signup-request', {
       method: 'POST',
       body: JSON.stringify({
         email,
         ...(to ? { to } : {}),
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
       }),
     }),
 
@@ -283,7 +296,7 @@ export const api = {
       encrypted_priv_key?: string;
     },
   ) =>
-    req<{ ok: boolean }>('/password-reset/finalize', {
+    req<void>('/password-reset/finalize', {
       method: 'POST',
       body: JSON.stringify({ token, ...payload }),
     }),
@@ -361,6 +374,24 @@ export const api = {
 
   runAdminQuery: (payload: AdminQueryPayload) =>
     req<AdminQueryResult>('/admin/query', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // api/SPEC.md API-062 to API-065.
+  getAdminFlags: () => req<FeatureFlag[]>('/admin/flags'),
+
+  putAdminFlag: (key: string, payload: UpsertFeatureFlagPayload) =>
+    req<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteAdminFlag: (key: string) =>
+    req<void>(`/admin/flags/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+
+  setAdminFlagOverride: (key: string, payload: SetFeatureFlagOverridePayload) =>
+    req<FeatureFlag>(`/admin/flags/${encodeURIComponent(key)}/users`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

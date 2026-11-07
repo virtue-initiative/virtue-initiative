@@ -33,6 +33,8 @@ export const userSchema = z.object({
   name: z.string().optional(),
   pub_key: z.string().optional(),
   encrypted_priv_key: z.string().optional(),
+  // Keys of the flags enabled for this user (API-061). A key not listed is off.
+  feature_flags: z.array(z.string()),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -41,7 +43,6 @@ export const deviceSchema = z.object({
   owner: z.string(),
   name: z.string(),
   platform: z.string(),
-  last_upload_at: z.number().nullable(),
   last_hash_at: z.number().nullable(),
   pending_count: z.number(),
   status: z.enum(['online', 'offline', 'logged_out']),
@@ -50,6 +51,9 @@ export type Device = z.infer<typeof deviceSchema>;
 
 export const batchSchema = z.object({
   id: z.string(),
+  // The batch's owner. Optional until every deployed API sends it; the web cache falls back
+  // to looking the owner up through the batch's device.
+  user_id: z.string().optional(),
   device_id: z.string(),
   start_time: z.number(),
   end_time: z.number(),
@@ -84,6 +88,7 @@ export const partnerInfoSchema = z.object({
   // 'invite_failed' is a pending invite whose email bounced (api/SPEC.md API-056).
   status: z.enum(['pending', 'accepted', 'invite_failed']),
   created_at: z.number().optional(),
+  accepted_at: z.number().optional(),
 });
 export type PartnerInfo = z.infer<typeof partnerInfoSchema>;
 
@@ -130,6 +135,7 @@ export type SignupValidation = z.infer<typeof signupValidationSchema>;
 export const signupRequestSchema = z.object({
   email: z.email(),
   to: z.string().optional(),
+  turnstile_token: z.string().optional(),
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 
@@ -141,6 +147,7 @@ export const signupSchema = z.object({
   encrypted_priv_key: z.base64(),
   name: z.string().min(1).optional(),
   newsletter_opt_in: z.boolean().optional(),
+  timezone: z.string().optional(),
 });
 export type SignupPayload = z.infer<typeof signupSchema>;
 
@@ -175,6 +182,19 @@ export const passwordResetSchema = z.object({
 });
 export type PasswordResetPayload = z.infer<typeof passwordResetSchema>;
 
+// Whether `timezone` is an IANA time zone name this runtime knows, which is
+// what the digest schedule needs to work out a user's 06:00 (api/SPEC.md
+// API-010, API-016, API-020).
+export function isValidTimezone(timezone: string | undefined): timezone is string {
+  if (!timezone) return false;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const updateUserSchema = z
   .object({
     email: z.email().optional(),
@@ -182,7 +202,10 @@ export const updateUserSchema = z
     settings: z
       .object({
         email_frequency: emailFrequencySchema.optional(),
-        timezone: z.string().optional(),
+        timezone: z
+          .string()
+          .refine(isValidTimezone, { message: 'Not a valid time zone' })
+          .optional(),
       })
       .optional(),
   })
@@ -360,3 +383,29 @@ export const adminQueryScanDetailsSchema = z.object({
   plan: z.array(z.string()),
 });
 export type AdminQueryScanDetails = z.infer<typeof adminQueryScanDetailsSchema>;
+
+// ── Feature flags (api/SPEC.md API-061) ──────────────────────────────────────
+
+export const featureFlagKeySchema = z.string().regex(/^[a-z0-9_]{1,64}$/);
+
+export const featureFlagSchema = z.object({
+  key: z.string(),
+  rollout_percent: z.number(),
+  description: z.string().nullable(),
+  overrides: z.array(z.object({ user_id: z.string(), email: z.string(), enabled: z.boolean() })),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type FeatureFlag = z.infer<typeof featureFlagSchema>;
+
+export const upsertFeatureFlagSchema = z.object({
+  rollout_percent: z.number().int().min(0).max(100),
+  description: z.string().max(500).nullable().optional(),
+});
+export type UpsertFeatureFlagPayload = z.infer<typeof upsertFeatureFlagSchema>;
+
+export const setFeatureFlagOverrideSchema = z.object({
+  email: z.string().min(1),
+  enabled: z.boolean().nullable(),
+});
+export type SetFeatureFlagOverridePayload = z.infer<typeof setFeatureFlagOverrideSchema>;

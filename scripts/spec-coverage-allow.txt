@@ -1,0 +1,66 @@
+# Spec sections that have no test yet. One per line: `ID  reason`.
+#
+# This is a ratchet. `bun scripts/spec-check.ts` fails if an uncovered section is
+# missing from this list, and also if a listed section is now cited by a test,
+# so the list can only shrink. Delete the line when you add the test.
+# `bun scripts/spec-check.ts --write-allowlist` adds new uncovered sections
+# with the reason `todo`. Use a real reason where there is nothing to test,
+# e.g. `overview, nothing to test`.
+
+# web/SPEC.md
+WEB-001     overview, covered through the sections it introduces
+WEB-011     heading only, covered through its subsections
+WEB-022     heading only, covered through its subsections
+WEB-028     todo
+WEB-065     heading only, covered through its subsections
+
+# hash-server/SPEC.md
+HASH-001    overview, covered through the sections it introduces
+HASH-005    heading only, covered through its subsections
+HASH-010    heading only, covered through its subsections
+HASH-011    overview, covered through the sections it introduces
+HASH-012    implementation detail, covered through the HTTP behavior sections
+HASH-013    implementation detail, covered through the HTTP behavior sections
+HASH-015    heading only, covered through its subsections
+HASH-016    performance target, needs a benchmark rather than a test
+HASH-017    deployment and operations, not testable in CI
+HASH-018    heading only, covered through its subsections
+HASH-019    deployment and operations, not testable in CI
+HASH-020    deployment and operations, not testable in CI
+HASH-021    deployment and operations, not testable in CI
+
+# client/SPEC.md
+CLIENT-001  overview, covered through the sections it introduces
+CLIENT-003  todo: needs an OS-level or platform UI test harness
+CLIENT-006  todo
+CLIENT-009  todo: needs an OS-level or platform UI test harness
+CLIENT-010  todo: needs an OS-level or platform UI test harness
+CLIENT-013  todo
+CLIENT-014  todo: needs an OS-level or platform UI test harness
+CLIENT-022  todo: needs an OS-level or platform UI test harness
+CLIENT-023  todo: needs an OS-level or platform UI test harness
+CLIENT-024  todo: needs an OS-level or platform UI test harness
+CLIENT-026  todo: needs an OS-level or platform UI test harness
+CLIENT-030  todo: needs an OS-level or platform UI test harness
+CLIENT-032  todo: needs an OS-level or platform UI test harness
+
+# batch-format/SPEC.md
+BATCH-001   overview, covered through the sections it introduces
+BATCH-007   todo
+
+# api/SPEC.md
+API-001     overview, covered through the sections it introduces
+API-008     heading only, covered through its subsections
+API-022     heading only, covered through its subsections
+API-028     heading only, covered through its subsections
+API-032     heading only, covered through its subsections
+API-039     heading only, covered through its subsections
+
+# api-donate/SPEC.md
+DONATE-001  overview, covered through the sections it introduces
+DONATE-002  environment configuration, not testable in CI
+DONATE-017  storage layout, covered through DONATE-014 and DONATE-015
+DONATE-018  table owned by the main API, tested under API-058 to API-060
+
+# client/core/SPEC.md
+CORE-001    overview, covered through the sections it introduces

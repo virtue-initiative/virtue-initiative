@@ -25,6 +25,7 @@ export const emailKinds = [
   'password_changed',
   'partner_invite',
   'partner_accepted',
+  'partner_removed',
   'device_deleted',
   'device_logout',
   'tamper_alert',
@@ -35,6 +36,7 @@ export const emailKinds = [
   'email_in_use_notice',
   'bug_report',
   'bug_report_confirmation',
+  'newsletter_confirmation',
 ] as const;
 
 export type EmailKind = (typeof emailKinds)[number];

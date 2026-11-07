@@ -7,3 +7,9 @@ node_modules
 /.dev.vars
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+
+# Mutation testing output (just mutants-*, see TESTING.md)
+mutants.out/
+mutants.out.old/
+/web/reports/
+/web/.stryker-tmp/

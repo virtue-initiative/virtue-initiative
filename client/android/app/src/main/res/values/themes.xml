@@ -21,12 +21,26 @@
         <item name="colorOnSurfaceVariant">@color/ink_3</item>
         <item name="colorOutline">@color/border</item>
 
+        <!-- Menus and dialogs use the paper surface, not Material's lavender tint -->
+        <item name="colorSurfaceContainer">@color/surface</item>
+        <item name="colorSurfaceContainerHigh">@color/surface</item>
+        <item name="colorSurfaceContainerHighest">@color/bg_subtle</item>
+        <item name="colorSurfaceContainerLow">@color/surface</item>
+
         <!-- Status bar matches page background -->
         <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
 
         <!-- Flat 4dp corners on buttons to match card style -->
         <item name="materialButtonStyle">@style/Widget.App.Button</item>
         <item name="materialButtonOutlinedStyle">@style/Widget.App.Button.OutlinedButton</item>
+    </style>
+
+    <!-- Dark icons on the paper-colored app bar, including the overflow icon. -->
+    <style name="ThemeOverlay.App.Toolbar" parent="">
+        <item name="colorControlNormal">@color/ink</item>
+        <item name="android:textColorPrimary">@color/ink</item>
     </style>
 
     <style name="ShapeAppearance.App.SmallCorner" parent="">

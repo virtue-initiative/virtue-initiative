@@ -86,12 +86,14 @@ can't silently overwrite a developer's local install with whatever's on GitHub R
 the CI job that actually publishes a release build to `main`/`staging` sets the env var, so only
 an officially-distributed `.deb` ships with auto-update turned on by default.
 
-The script polls the GitHub Releases API for the release tag baked into the package at build
-time (`/usr/lib/virtue/release-tag` — `<VERSION>` on the `main`-branch/stable channel,
-`<VERSION>-dev` on every other branch/dev channel, matching whichever channel this exact build
-was produced from; see `client/scripts/version.sh`). If the release's current `.deb` asset for
-this architecture has a different embedded build label than the locally installed one
-(`/usr/lib/virtue/build-label`), it downloads and `dpkg -i`s it, falling back to
+The script lists recent GitHub Releases and follows the channel of the build that is installed.
+The channel comes from the release tag baked into the package at build time
+(`/usr/lib/virtue/release-tag`: `<VERSION>` on the `main`-branch/stable channel, `<VERSION>-dev` on
+every other branch/dev channel; see `client/scripts/version.sh`). A `-dev` tag follows the newest
+prerelease and any other tag follows the newest full release, so an install keeps updating across
+version bumps, which publish to a new tag. Releases without a `.deb` for this architecture yet are
+skipped. If the chosen release's `.deb` has a different embedded build label than the locally
+installed one (`/usr/lib/virtue/build-label`), it downloads and `dpkg -i`s it, falling back to
 `apt-get install -f -y` on a dependency failure. Installing the new `.deb` re-runs `postinst`,
 which restarts `virtue.service` for every logged-in user — the same upgrade path as a manual
 `dpkg -i`. A `flock` on `/run/lock/virtue-update.lock` prevents overlapping runs; a failed run

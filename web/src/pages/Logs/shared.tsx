@@ -29,11 +29,89 @@ export { toUint8Array, getLogImage };
 
 function getLogMetadata(log: DataLog) {
   return Object.entries(log.data)
-    .filter(([key]) => key !== 'image')
-    .map(
-      ([key, value]) =>
-        [key, typeof value === 'string' ? value : JSON.stringify(value)] as [string, string],
-    );
+    .filter(([key]) => key !== 'image' && key !== 'images')
+    .map(([key, value]) => [key, formatMetaValue(value)] as [string, string]);
+}
+
+function formatMetaValue(value: unknown) {
+  if (typeof value === 'string') return value;
+  // Scores arrive as 32-bit floats, so 0.9 would otherwise read 0.8999999761581543.
+  if (typeof value === 'number') return String(Number(value.toFixed(3)));
+  return JSON.stringify(value);
+}
+
+/** One image that per-image scoring found on a screenshot (batch-format/SPEC.md BATCH-003). */
+type ScoredImage = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  skin: number;
+  gray?: boolean;
+  nsfw?: number;
+  mirrored?: number;
+  score?: number;
+};
+
+/** The screenshot's per-image scoring details, or null when it was scored as a whole, as
+ * every screenshot from a client without per-image scoring is. */
+function getScoredImages(log: DataLog): ScoredImage[] | null {
+  if (!Array.isArray(log.data.images)) return null;
+  return log.data.images.filter(
+    (image): image is ScoredImage => typeof image === 'object' && image !== null,
+  );
+}
+
+function formatScore(value: unknown) {
+  return typeof value === 'number' ? value.toFixed(2) : '–';
+}
+
+function ScoredImages({ images }: { images: ScoredImage[] }) {
+  const checked = images.filter((image) => typeof image.nsfw === 'number').length;
+  return (
+    <section class="logs-images">
+      <h3 class="logs-images-title">Images</h3>
+      <p class="logs-images-summary">
+        {images.length === 0
+          ? 'No images were found on the screen.'
+          : `${images.length} found on the screen, ${checked} checked by the model.`}
+      </p>
+      {images.length > 0 && (
+        <div class="logs-images-scroll">
+          <table class="logs-images-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Size</th>
+                <th>Position</th>
+                <th>Skin</th>
+                <th>Model</th>
+                <th>Mirrored</th>
+                <th>Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {images.map((image, i) => (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td>
+                    {image.width}×{image.height}
+                  </td>
+                  <td>
+                    {image.x}, {image.y}
+                  </td>
+                  <td>{image.gray ? 'Gray' : formatScore(image.skin)}</td>
+                  <td>{typeof image.nsfw === 'number' ? formatScore(image.nsfw) : 'Skipped'}</td>
+                  <td>{formatScore(image.mirrored)}</td>
+                  <td>{formatScore(image.score)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 }
 
 type LogCaseKey =
@@ -373,6 +451,7 @@ export function LogDetailDialog({
   /** Object URL currently held by `imgSrc`, revoked only once it's replaced. */
   const imgUrlRef = useRef<string | null>(null);
   const metadata = getLogMetadata(item);
+  const scoredImages = getScoredImages(item);
   const riskLabel = describeRiskLevel(item.risk) ?? 'Concern unavailable';
   const riskBadge =
     getRiskLevel(item.risk) === 'alert' ? (
@@ -560,6 +639,7 @@ export function LogDetailDialog({
             </>
           ))}
         </dl>
+        {scoredImages && <ScoredImages images={scoredImages} />}
       </Dialog>
     </Dialog>
   );

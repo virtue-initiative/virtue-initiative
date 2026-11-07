@@ -1,10 +1,11 @@
 ---
 import { DonateForm } from '../components/DonateForm';
+import { DonationGoals } from '../components/DonationGoals';
 import SiteLayout from '../layouts/SiteLayout.astro';
 ---
 
 <SiteLayout
-  pageTitle="Donate"
+  pageTitle="Donate to Keep Virtue Free"
   tagline="Support free accountability tools for everyone"
   description="Donate to The Virtue Initiative to keep Virtue free for everyone. Your gift funds development and hosting."
 >
@@ -27,6 +28,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         Please note: donations are not currently tax deductible, as we are still working toward
         501(c)(3) status.
       </p>
+      <DonationGoals client:load />
     </div>
 
     <div class="donate-card">

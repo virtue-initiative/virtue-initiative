@@ -112,9 +112,6 @@ struct SafariSetupState: Equatable {
         return true
     }
     var reportedOff: Bool { reportedOffAt != nil && !extensionTurnedOn }
-    /// Falls back to "a page was captured" when Safari can't report the
-    /// All Websites setting directly.
-    var allWebsitesAllowed: Bool { allSitesGranted ?? (lastFrameAt != nil) }
     var hasCaptured: Bool { lastFrameAt != nil }
 }
 
@@ -143,21 +140,12 @@ enum ExtensionCheck: Equatable {
 enum MonitoringState: Equatable {
     case signedOut
     case paused
-    /// Signed in, but the extension has never captured a page.
+    /// Signed in, but the extension is not known to be on.
     case needsSetup
-    /// Worked before, but Safari now reports a missing permission.
+    /// Safari reports that All Websites or Private Browsing is not allowed.
+    /// This can happen before anything has ever been captured.
     case needsPermission
     case active
-
-    var summary: String {
-        switch self {
-        case .signedOut: return "signed out"
-        case .paused: return "paused"
-        case .needsSetup: return "setup not finished"
-        case .needsPermission: return "needs Safari permission"
-        case .active: return "active"
-        }
-    }
 }
 
 final class MonitoringCoordinator: ObservableObject {
@@ -165,7 +153,11 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var password: String = ""
     @Published var deviceName: String = ""
 
+    /// The latest progress or failure message, shown under Advanced in
+    /// Status Details.
     @Published private(set) var statusMessage: String = "Not initialized"
+    /// A failed Pause or Resume, shown on Home until the next attempt.
+    @Published private(set) var actionError: String?
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var isSigningOut: Bool = false
     @Published private(set) var loginError: String? = nil
@@ -179,8 +171,6 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var pendingRequestCount: Int = 0
     @Published private(set) var currentApiBaseUrl: String = VirtueShared.defaultBaseApiUrl
     @Published private(set) var lastCoreLoop: String = "<none>"
-    @Published private(set) var lastCoreScreenshot: String = "<none>"
-    @Published private(set) var lastCoreBatch: String = "<none>"
     @Published private(set) var lastCoreScreenshotAttempt: String = "<none>"
     /// The full shared status payload (CORE-010) the Status Details sheet
     /// renders; the scalars above stay for the main screen's own bindings.
@@ -191,6 +181,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var safariLastHeartbeat: String = "<none>"
     @Published private(set) var safariLastFrame: String = "<none>"
     @Published private(set) var safariLastPage: String = "<none>"
+    @Published private(set) var safariLastPageHost: String?
     @Published private(set) var safariLastError: String = "<none>"
     @Published private(set) var safariDaemonStatus: String = "Not started yet"
     /// True while a "Capture Next Safari Page" request waits for the extension.
@@ -246,10 +237,12 @@ final class MonitoringCoordinator: ObservableObject {
     func login() {
         guard !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             statusMessage = "Email is required"
+            loginError = "Email is required"
             return
         }
         guard !password.isEmpty else {
             statusMessage = "Password is required"
+            loginError = "Password is required"
             return
         }
 
@@ -299,7 +292,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     /// The App Store download this install came from, registered with the
-    /// device so a parent withdrawing consent signs it out (API-057). Sent for
+    /// device so a parent withdrawing consent signs it out (API-066). Sent for
     /// every account, so it says nothing about the person's age.
     private static func appTransactionID() async -> String? {
         guard let result = try? await AppTransaction.shared,
@@ -332,6 +325,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func toggleMonitoring() {
+        guard !isSigningOut else { return }
+        actionError = nil
         let nextValue = !monitoringEnabled
         guard !nextValue else {
             Task { @MainActor in
@@ -340,6 +335,7 @@ final class MonitoringCoordinator: ObservableObject {
                 }.value
                 if let error {
                     statusMessage = "Resume request failed: \(error)"
+                    actionError = "Could not resume monitoring. \(error)"
                     refreshCoreStatus()
                     refreshSafariStatus()
                     return
@@ -358,6 +354,7 @@ final class MonitoringCoordinator: ObservableObject {
             }.value
             if let error {
                 statusMessage = "Pause request failed: \(error)"
+                actionError = "Could not pause monitoring. \(error)"
                 refreshCoreStatus()
                 refreshSafariStatus()
                 return
@@ -482,6 +479,8 @@ final class MonitoringCoordinator: ObservableObject {
         }
 
         monitoringEnabled = readMonitoringEnabledPreference(defaults: defaults)
+        safariLastPageHost = defaults.string(forKey: VirtueShared.safariLastURLKey)
+            .flatMap { URL(string: $0.trimmingCharacters(in: .whitespacesAndNewlines))?.host }
         forceCaptureRequested = defaults.object(forKey: VirtueShared.safariForceCaptureRequestedAtKey) != nil
         safariSetup = SafariSetupState(
             lastMessageAt: timestamp(forKey: VirtueShared.safariLastMessageAtKey, defaults: defaults)
@@ -502,6 +501,7 @@ final class MonitoringCoordinator: ObservableObject {
             safariLastHeartbeat = "<none>"
             safariLastFrame = "<none>"
             safariLastPage = "<none>"
+            safariLastPageHost = nil
             safariLastError = "<none>"
             safariDaemonStatus = "Paused"
             return
@@ -577,9 +577,7 @@ final class MonitoringCoordinator: ObservableObject {
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
         lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
-        lastCoreScreenshot = formatMillisTimestamp(serviceStatus?.lastScreenshotAtMs)
         lastCoreScreenshotAttempt = formatMillisTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
-        lastCoreBatch = formatMillisTimestamp(serviceStatus?.lastBatchAtMs)
         coreStatus = serviceStatus
         if let apiBaseUrl = serviceStatus?.apiBaseUrl, !apiBaseUrl.isEmpty {
             currentApiBaseUrl = apiBaseUrl
@@ -599,7 +597,7 @@ final class MonitoringCoordinator: ObservableObject {
             monitoringState = .signedOut
         } else if !monitoringEnabled {
             monitoringState = .paused
-        } else if !setup.extensionTurnedOn || !setup.hasCaptured {
+        } else if !setup.extensionTurnedOn {
             monitoringState = .needsSetup
         } else if setup.allSitesGranted == false || setup.privateAllowed == false {
             monitoringState = .needsPermission

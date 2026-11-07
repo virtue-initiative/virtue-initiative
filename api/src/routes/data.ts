@@ -8,19 +8,21 @@ import {
   listOwnedPartners,
   listVisibleOwnerIds,
 } from '../lib/db';
+import { wrappedKeyForUser } from '../lib/access-keys';
+import { batchObject } from '../lib/batch-url';
+import { encodeHex } from '../lib/encoding';
+import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser, serializeWatchers, serializeWatching } from '../lib/serializers';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
 
 const data = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-function getEncryptedKeyForUser(rawAccessKeys: string, userId: string) {
-  try {
-    const accessKeys = JSON.parse(rawAccessKeys) as Record<string, string>;
-    return accessKeys[userId] ?? null;
-  } catch {
-    return null;
-  }
+// batches.end_hash is a 32-byte BLOB, which D1 hands back as an ArrayBuffer or a
+// plain array of byte values.
+function endHashHex(stored: unknown): string {
+  if (typeof stored === 'string') return stored;
+  return encodeHex(stored instanceof ArrayBuffer ? stored : Uint8Array.from(stored as number[]));
 }
 
 const listDataSchema = z.object({
@@ -42,30 +44,34 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const batches = await listBatches(c.env.DB, ownerIds, { since });
+  const [batches, featureFlags] = await Promise.all([
+    listBatches(c.env.DB, ownerIds, { since }),
+    enabledFeatureFlags(c.env.DB, user.id, user.feature_flags),
+  ]);
 
   return c.json({
     batches: batches
       .map((batch) => {
-        const encryptedKey = getEncryptedKeyForUser(batch.access_keys, userId);
+        const encryptedKey = wrappedKeyForUser(batch.access_keys, userId, batch.id);
         if (!encryptedKey) {
           return null;
         }
 
         return {
+          user_id: batch.user_id,
           device_id: batch.device_id,
           id: batch.id,
           start_time: batch.start_time,
           end_time: batch.end_time,
-          end_hash: batch.end_hash,
+          end_hash: endHashHex(batch.end_hash),
           version: batch.version,
-          url: batch.url,
+          url: batchObject(c.env, batch).url,
           encrypted_key: encryptedKey,
           created_at: batch.created_at,
         };
       })
       .filter((item) => item !== null),
-    user: serializeUser(user),
+    user: serializeUser(user, featureFlags),
     watching: serializeWatching(incoming),
     watchers: serializeWatchers(owned),
   });

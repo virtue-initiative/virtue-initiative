@@ -13,7 +13,7 @@ async function postWebhook(payload: string, signature: string) {
 }
 
 describe('POST /webhook', () => {
-  it('rejects a request with a bad signature', async () => {
+  it('rejects a request with a bad signature (DONATE-012)', async () => {
     const res = await postWebhook(JSON.stringify({ id: 'evt_x' }), 't=1,v1=deadbeef');
     expect(res.status).toBe(400);
 
@@ -23,7 +23,7 @@ describe('POST /webhook', () => {
     expect(count).toBe(0);
   });
 
-  it('records a donation from checkout.session.completed', async () => {
+  it('records a donation from checkout.session.completed (DONATE-014)', async () => {
     const { payload, signature } = await signedWebhook(checkoutCompletedEvent());
 
     const res = await postWebhook(payload, signature);
@@ -43,7 +43,7 @@ describe('POST /webhook', () => {
     });
   });
 
-  it('is idempotent when the same event is delivered twice', async () => {
+  it('is idempotent when the same event is delivered twice (DONATE-013)', async () => {
     const event = checkoutCompletedEvent();
     const { payload, signature } = await signedWebhook(event);
 
@@ -59,7 +59,7 @@ describe('POST /webhook', () => {
     expect(count).toBe(1);
   });
 
-  it('marks donations cancelled on customer.subscription.deleted', async () => {
+  it('marks donations cancelled on customer.subscription.deleted (DONATE-015)', async () => {
     const created = checkoutCompletedEvent({
       mode: 'subscription',
       subscription: 'sub_test_1',

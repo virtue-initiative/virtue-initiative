@@ -1,8 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fetchMock, SELF } from 'cloudflare:test';
+import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
   authHeaders,
   BASE,
+  batchMetadataForm,
   clearDB,
   createDeviceForUser,
   listEmailDeliveries,
@@ -20,7 +21,7 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Main device routes', () => {
-  it('lists devices owned by the authenticated user', async () => {
+  it('lists devices owned by the authenticated user (API-029)', async () => {
     const { cookie } = await signupAndGetCookie('alice@example.com');
     await createDeviceForUser('alice@example.com', 'password123', 'Work Laptop', 'linux');
 
@@ -34,7 +35,7 @@ describe('Main device routes', () => {
     expect(body[0]).toMatchObject({ name: 'Work Laptop', platform: 'linux' });
   });
 
-  it("reports last_hash_at as milliseconds, converted from the hash server's unix-second last_received", async () => {
+  it("reports last_hash_at as milliseconds, converted from the hash server's unix-second last_received (API-029)", async () => {
     const { cookie } = await signupAndGetCookie('carol@example.com');
     const device = await createDeviceForUser(
       'carol@example.com',
@@ -54,7 +55,37 @@ describe('Main device routes', () => {
     expect(found?.last_hash_at).toBe(1_700_000_000_000);
   });
 
-  it('updates an owned device', async () => {
+  it('derives status from last_hash_at, not from batches (API-029)', async () => {
+    const { cookie } = await signupAndGetCookie('dave@example.com');
+    const recent = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
+    const stale = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
+    const silent = await createDeviceForUser('dave@example.com', 'password123', 'Tablet', 'ios');
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    seedHashState(recent.id, { hash: '0a'.repeat(32), seq: 1, last_received: nowSeconds - 600 });
+    seedHashState(stale.id, {
+      hash: '0b'.repeat(32),
+      seq: 1,
+      last_received: nowSeconds - 3 * 60 * 60,
+    });
+
+    const res = await SELF.fetch(`${BASE}/device`, {
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{
+      id: string;
+      status: string;
+      last_hash_at: number | null;
+    }>;
+    const byId = new Map(body.map((item) => [item.id, item]));
+    expect(byId.get(recent.id)?.status).toBe('online');
+    expect(byId.get(stale.id)?.status).toBe('offline');
+    expect(byId.get(silent.id)).toMatchObject({ status: 'offline', last_hash_at: null });
+    expect(body[0]).not.toHaveProperty('last_upload_at');
+  });
+
+  it('updates an owned device (API-030)', async () => {
     const { cookie } = await signupAndGetCookie('bob@example.com');
     const device = await createDeviceForUser('bob@example.com', 'password123', 'Old Name', 'macos');
 
@@ -75,7 +106,7 @@ describe('Main device routes', () => {
     });
   });
 
-  it('forbids patching a device owned by another user', async () => {
+  it('forbids patching a device owned by another user (API-030)', async () => {
     await signupAndGetCookie('owner@example.com');
     const { cookie: attackerCookie } = await signupAndGetCookie('attacker@example.com');
     const device = await createDeviceForUser('owner@example.com');
@@ -89,7 +120,7 @@ describe('Main device routes', () => {
     expect(res.status).toBe(404);
   });
 
-  it('lists owner devices to an accepted partner', async () => {
+  it('lists owner devices to an accepted partner (API-029)', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('owner2@example.com');
     const { cookie: partnerCookie, userId: partnerUserId } =
       await signupAndGetCookie('partner2@example.com');
@@ -129,7 +160,34 @@ describe('Main device routes', () => {
     expect(beforeConfirm.find((item) => item.id === device.id)).toBeTruthy();
   });
 
-  it('deletes an owned device and sends a notification email', async () => {
+  it("deletes a device's batch objects from R2 along with the device (API-031)", async () => {
+    const { cookie, userId } = await signupAndGetCookie('wipe@example.com');
+    const device = await createDeviceForUser('wipe@example.com', 'password123', 'Wipe Me', 'linux');
+
+    const batchRes = await SELF.fetch(`${BASE}/d/batch`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${device.refresh_token}` },
+      body: batchMetadataForm({
+        start_time: 1_000,
+        end_time: 2_000,
+        access_keys: { [userId]: Buffer.from('envelope').toString('base64') },
+      }),
+    });
+    expect(batchRes.status).toBe(200);
+    const batch = (await batchRes.json()) as { id: string };
+    const key = `user/${userId}/batches/${batch.id}.enc`;
+    expect(await env.BUCKET.head(key)).not.toBeNull();
+
+    const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(cookie),
+    });
+
+    expect(res.status).toBe(204);
+    expect(await env.BUCKET.head(key)).toBeNull();
+  });
+
+  it('deletes an owned device and sends a notification email (API-031)', async () => {
     const { cookie, userId } = await signupAndGetCookie('delete-device@example.com');
     await markUserEmailVerified(userId);
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
@@ -198,7 +256,7 @@ describe('Main device routes', () => {
     ).toBe(true);
   });
 
-  it('sends deletion notifications to accepted partners even if emails are unverified', async () => {
+  it('sends deletion notifications to accepted partners even if emails are unverified (API-031)', async () => {
     const { cookie } = await signupAndGetCookie('delete-device-unverified@example.com');
     const { cookie: partnerCookie } = await signupAndGetCookie(
       'delete-device-unverified-partner@example.com',

@@ -13,7 +13,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 - `Base64`: base64-encoded binary
 - `SHA256`: lowercase hex-encoded SHA-256 digest
 - `RefreshToken`: opaque web-session string, prefixed by purpose (e.g. `wst_...`). Set as the HTTPOnly `refresh_token` cookie by `POST /login`, `POST /signup`, and `POST /email-verification/validate`.
-- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`
+- `HashServerToken`: EdDSA JWT (`Ed25519`) with `type: "device"` and `sub = device id`; minted by `POST /d/device`, `GET /d/device`, and `POST /d/batch`. It MUST be valid for 2 hours, so that a device uploading a batch every hour does not need `GET /d/device` in between
 - `DeviceRefreshToken`: opaque string returned by `POST /d/device`
 - `ServerToken`: EdDSA JWT (`Ed25519`) with `type: "server"` and `sub = device id`
 
@@ -45,9 +45,12 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   },
   "name": "Name" | undefined,
   "pub_key": Base64 | undefined,
-  "encrypted_priv_key": Base64 | undefined
+  "encrypted_priv_key": Base64 | undefined,
+  "feature_flags": ["flag_key", ...]
 }
 ```
+
+`feature_flags` lists the keys of the flags enabled for this user (see API-061).
 
 **Device**
 
@@ -57,7 +60,6 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "owner": UUID,
   "name": "My Laptop",
   "platform": "linux",
-  "last_upload_at": DateTime | null,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
   "status": "online" | "offline" | "logged_out"
@@ -69,6 +71,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```js
 {
   "id": UUID,
+  "user_id": UUID, // the owner of the device
   "device_id": UUID,
   "start_time": DateTime,
   "end_time": DateTime,
@@ -91,9 +94,12 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     "name": "Partner Name" | undefined
   },
   "status": "pending" | "accepted" | "invite_failed",
-  "created_at": DateTime
+  "created_at": DateTime,
+  "accepted_at": DateTime | undefined
 }
 ```
+
+`created_at` is when the invite was sent. `accepted_at` MUST be set when the invite is accepted (API-025) and MUST be omitted for a partnership that has not been accepted.
 
 `invite_failed` MUST only be reported in `watchers`, for a pending partnership whose invite token has a bounce (see API-056).
 
@@ -111,7 +117,25 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
     }
   ],
   "hash_base_url": "https://..." | null,
-  "hash_token": HashServerToken
+  "hash_token": HashServerToken,
+  "feature_flags": ["flag_key", ...]
+}
+```
+
+`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+
+**FeatureFlag**
+
+```js
+{
+  "key": "new_report_tab",
+  "rollout_percent": 25,         // integer, 0 to 100
+  "description": "..." | null,
+  "overrides": [
+    { "user_id": UUID, "email": "user@example.com", "enabled": true | false }
+  ],
+  "created_at": DateTime,
+  "updated_at": DateTime
 }
 ```
 
@@ -181,7 +205,9 @@ There are **TWO** types of tokens:
 
 ### API-004 Validation
 
-The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure.
+The server SHOULD validate every request shape against a schema and return **HTTP 400** on failure. A body that is not valid JSON, on a route that takes JSON, MUST get **HTTP 400** with an `error` message.
+
+A path ID that is not a UUID names nothing, so the server MUST answer it as it answers an unknown ID, and MUST NOT answer **HTTP 500**. Authentication still comes first.
 
 ### API-005 Backwards compat
 
@@ -218,6 +244,8 @@ MUST NOT require authentication. MUST return this shape:
 
 The version SHOULD match the version of the codebase.
 
+The same payload MUST also be served at `/api`.
+
 ## API-008 Users and authentication
 
 ### API-009 `POST /signup-request`
@@ -227,8 +255,15 @@ The client MUST provide this shape.
 ```js
 {
   "email": "user@example.com",
-  "partner_invite_token": "opaque-string" | undefined
+  "partner_invite_token": "opaque-string" | undefined,
+  "turnstile_token": "opaque-string"
 }
+```
+
+The server MUST verify `turnstile_token` with Cloudflare Turnstile before anything else. If it is missing or does not verify, or the server has no Turnstile secret configured, the server MUST NOT send any email and MUST respond **HTTP 403** with this shape.
+
+```js
+{ "error": "...", "code": "turnstile_failed" }
 ```
 
 If a user at that email does not exist, the server MUST send a signup link to that email.
@@ -256,19 +291,22 @@ The client MUST provide this request shape.
   "encrypted_priv_key": Base64,
   "name": "Name" | undefined,
   "email_digest_minutes_utc": Number | undefined,
-  "newsletter_opt_in": Boolean | undefined
+  "newsletter_opt_in": Boolean | undefined,
+  "timezone": "America/New_York" | undefined
 }
 ```
 
 The server SHOULD verify that `password_auth`, `password_salt` and `pub_key` are all valid.
 
-If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter mailing list after creating the account. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
+If `newsletter_opt_in` is `true`, the server SHOULD add the account's email to the newsletter list (see API-058) after creating the account, already confirmed, because the signup verified the address. An existing unconfirmed row for the email SHOULD become confirmed. The server MUST NOT add the email when `newsletter_opt_in` is absent or `false`, and MUST NOT resubscribe an address that has previously unsubscribed. A failure to add the email MUST NOT fail the signup.
 
-The server SHOULD reject an invalid `verification_token` with **HTTP 401**. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
+The server SHOULD reject an invalid `verification_token` with **HTTP 400**. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session. Note: A `verification_token` becomes invalid as soon as any account with that email is created.
 
 The server MUST return a `refresh_token` cookie containing the refresh token.
 
-The server MUST create an account for the user and return **HTTP 200** with this shape.
+If `timezone` is absent or is not a valid IANA time zone name, the server MUST use `UTC` instead and MUST NOT reject the signup.
+
+The server MUST create an account for the user, with `settings.email_frequency` set to `weekly` and `settings.timezone` set to the provided `timezone`, and return **HTTP 200** with this shape.
 
 ```js
 {
@@ -311,9 +349,11 @@ The client MUST send the email to request a password reset:
 }
 ```
 
-If the account exists, the server SHOULD send a password reset email, otherwise it SHOULD send an account does not exist email.
+If the account exists, the server SHOULD send a password reset email. It MUST NOT send any email to an address with no account, because this endpoint has no Turnstile check and could otherwise be used to send mail to anyone.
 
-The server SHOULD always respond with **HTTP 204**.
+The server SHOULD always respond with **HTTP 204**. It MUST look up the account and send the email only after responding, so that neither the response nor its timing reveals whether the account exists, and a failure to send MUST NOT change the response.
+
+The server SHOULD rate limit this endpoint by client IP before looking up the account, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded.
 
 ### API-013 `POST /password-reset/validate`
 
@@ -325,12 +365,13 @@ The client MUST send a password-reset token.
 }
 ```
 
-The server MUST respond **HTTP 401** if the token is invalid or not found.
+The server MUST respond **HTTP 400** if the token is invalid or not found. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST respond **HTTP 200** with the account email.
 
 ```js
 {
+  "ok": true,
   "email": "user@example.com"
 }
 ```
@@ -351,7 +392,7 @@ The client MUST send the follow request data.
 
 The server SHOULD validate the `password_auth`, `password_salt` and `pub_key` in the same way as `/signup`
 
-The server MUST respond **HTTP 401** if the token is invalid or not found.
+The server MUST respond **HTTP 400** if the token is invalid or not found. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST update the user with the new information and return **HTTP 204**.
 
@@ -363,6 +404,8 @@ The client MAY send an email as a query param `?email=[email]`.
 
 The server MUST return an indistinguishable response for existing and non-existing emails.
 
+The server MUST NOT apply the shared per-IP rate limit to this endpoint, because every login calls it first and people sharing an IP would be locked out.
+
 If the client did not provide an email, the server MUST respond (**HTTP 200**) with the current argon2 hashing parameters:
 
 ```js
@@ -371,7 +414,7 @@ If the client did not provide an email, the server MUST respond (**HTTP 200**) w
 }
 ```
 
-If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist.
+If the client did provide an email, the server MUST additionally respond with the salt for that user. It MUST provide a made up salt if the user does not exist. The made up salt MUST be an HMAC-SHA256 of the normalized email (trimmed and lowercased), keyed with the `LOGIN_SALT_SECRET` secret and truncated to `salt_length` bytes, so that repeating the request gives the same salt, as it does for a real account. The server MUST compute it for every email, before looking up the account. If the secret is not configured, the server MUST log an error and use a random salt rather than fail the request.
 
 ```js
 {
@@ -408,6 +451,10 @@ If that verification email was not sent because the email has a permanent bounce
 
 If it matches, the server MUST send **HTTP 204** and set the `refresh_token` cookie.
 
+If `timezone` is a valid IANA time zone name, the server SHOULD save it as the user's `settings.timezone`. Otherwise the server MUST ignore it and MUST NOT reject the login.
+
+On a successful login, if the user's email is on the newsletter list (see API-058) without a location, the server SHOULD fill in the location of this request. A failure to do so MUST NOT fail the login.
+
 ### API-017 `POST /email-verification/validate`
 
 The client MUST provide a email token in the body.
@@ -418,7 +465,7 @@ The client MUST provide a email token in the body.
 }
 ```
 
-The server MUST return **HTTP 401** on an unknown or expired token.
+The server MUST return **HTTP 400** on an unknown or expired token. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 The server MUST mark the email as verified and, if it is a email change request, change the email.
 
@@ -433,15 +480,15 @@ The server MUST respond with **HTTP 200**:
 
 ### API-018 `POST /logout`
 
-The client MUST authenticate with a **Web Token**.
+The client SHOULD authenticate with a **Web Token**, in the `refresh_token` cookie or the Authorization header (see API-003).
 
-The server MUST invalidate the session and clear the refresh_token.
+The server MUST invalidate every session the request names this way and clear the refresh_token. It MUST NOT invalidate a device session.
 
-The server MUST respond with **HTTP 204**.
+The server MUST respond with **HTTP 204**, including when the request carries no valid Web Token, so that a client can always finish logging out. If it cannot invalidate a session the request names, it MUST still clear the refresh_token and MUST respond **HTTP 500**, because that session is still valid.
 
 ### API-019 `GET /user`
 
-The client MUST authenticate with either token.
+The client MUST authenticate with a **Web Token**.
 
 The server MUST return the currently authenticated user.
 
@@ -459,9 +506,14 @@ The client MUST provide a request in this shape.
 {
   "email": "new@example.com" | undefined,
   "name": "New Name" | undefined,
-  "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined
+  "settings": {
+    "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
+    "timezone": "America/New_York" | undefined
+  } | undefined
 }
 ```
+
+If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
 The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
 
@@ -559,7 +611,7 @@ To get the information about an invite (often before signing up), the client MUS
 }
 ```
 
-The server MUST return **HTTP 401** for an invalid or unknown token.
+The server MUST return **HTTP 400** for an invalid or unknown token, including the token of an invite that was withdrawn. It MUST NOT use **HTTP 401** for this, since clients treat a 401 as an expired session.
 
 For a correct token, server MUST return **HTTP 200**.
 
@@ -584,6 +636,8 @@ The client MUST be authenticated with a **Web Token** and send
   "token": "opaque-string"
 }
 ```
+
+The server MUST respond **HTTP 409** if the caller is the one who sent the invite.
 
 The server MUST finalize the partnership and return **HTTP 200**:
 
@@ -611,6 +665,8 @@ The server MUST collect the lists of partners for the user and return **HTTP 200
 The client MUST be authenticated with a **Web Token**.
 
 The id MUST be a valid partnership ID.
+
+The server MUST respond **HTTP 404** if the partnership does not exist or the caller is not a party to it.
 
 The server MUST delete the partnership and notify the other user.
 
@@ -703,6 +759,8 @@ The client MUST be authenticated with a **Web Token**.
 
 The server SHOULD fetch the count from the hash server and the last updated from the hash server.
 
+The server MUST report `status` as `logged_out` for a logged-out device, `online` when `last_hash_at` is within the last 2 hours, and `offline` otherwise, including when the hash server cannot be reached. The server SHOULD NOT read batches to build this response. A client that needs a device's last upload SHOULD derive it from the batches returned by `GET /data` (API-033).
+
 The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
 
 ```js
@@ -718,6 +776,8 @@ The client MUST be authenticated with a **Web Token** and send
   "name": "New Device Name"
 }
 ```
+
+The server MUST respond **HTTP 404** if the device does not exist or is not owned by the user.
 
 On success, the server MUST respond with **HTTP 204**.
 
@@ -750,11 +810,13 @@ The server MUST collect the user, partners, and batches and return them in this 
 }
 ```
 
-The server SHOULD filter the batches to only include batches the user can decrypt.
+The server SHOULD filter the batches to only include batches the user can decrypt. A batch whose stored `access_keys` cannot be decoded MUST be left out of the response and logged. `access_keys` stored by an earlier version as JSON MUST still be served.
 
 The server MUST only return batches where `created_at > since`.
 
 ## API-034 Device Only
+
+The server MUST rate limit `GET /d/device` and `POST /d/batch` per authenticated device, and MUST respond **HTTP 429** with `{ "error": "Too many requests" }` once the limit is exceeded. The limit is 60 requests per 60 seconds, and one device's requests MUST NOT count against another's.
 
 ### API-035 `POST /d/device`
 
@@ -770,9 +832,9 @@ The client MUST send
 }
 ```
 
-`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-057).
+`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-066).
 
-The server MUST validate the login (see `POST /login`) and create a long lived refresh token.
+The server MUST validate the login (see `POST /login`) and create a long lived refresh token. For an unverified account it MUST behave as `POST /login` does, including the verification email and the `email_bounced` response, and MUST NOT register a device. Like `POST /login`, it SHOULD fill in a missing newsletter location.
 
 It should also return the device settings (see `GET /d/device`)
 
@@ -838,7 +900,17 @@ The client MUST send a multipart form request:
 
 The server MUST upload the file to object storage and store the metadata in the database.
 
+The server MUST take `end_hash` from the hash server's current hash for the device (see `hash-server/SPEC.md`). If that is not 64 hexadecimal characters, the server MUST respond **HTTP 502** and MUST NOT store the batch. After storing the batch the server MUST reset the device's hash state. If the device no longer exists when the batch is stored, the server MUST NOT keep the batch or its object, and MUST respond **HTTP 404**.
+
+For each entry in `notifications`, the server MUST immediately email a tamper alert to every accepted watcher of the device's owner, whatever the entry's `risk`. The alert names the device and uses the entry's `title` and `details`; `title` defaults to `Device reported <type>.` with underscores in the type replaced by spaces. The server MUST NOT send the alert to a watcher whose `email_frequency` is `none` or whose email is unverified. `risk` is required on every entry. A failure to send an alert MUST NOT fail the upload.
+
+The server MUST clamp an `end_time` later than the time it received the batch to that time, and a `start_time` later than the resulting `end_time` to it, and SHOULD log a warning when it does. Both come from the device clock, and a batch is uploaded after the period it covers.
+
 The server SHOULD store the current major version in the database alongside the encrypted batch (for versioning the encrypted batch).
+
+The server SHOULD NOT store a batch's `url`. It MUST derive the `url` from the batch's stored version, its owner and its `id`, so that a later change to the object storage layout leaves batches uploaded under an earlier version resolving to where they were stored.
+
+The server MUST delete a batch's database row once its `created_at` is more than 30 days old, on the daily scheduled job, so a row can outlive 30 days by up to a day. A batch created exactly 30 days ago MUST be kept. The batch's object in object storage expires on its own after 30 days.
 
 The server MUST return **HTTP 200** with the device's refreshed settings alongside the created batch:
 
@@ -857,7 +929,7 @@ The server MUST return **HTTP 200** with the device's refreshed settings alongsi
 
 ### API-040 `GET /r2/*`
 
-This forwards to R2. Only used in dev. It SHOULD be disabled in production.
+This forwards to R2. Only used in dev. The server MUST serve it only when the `DEV_R2_ROUTE` variable is `true`, which only a local dev environment sets. Otherwise it MUST respond **HTTP 404**.
 
 ### API-041 `POST /email/sns`
 
@@ -869,13 +941,15 @@ The server MUST reject a request with **HTTP 400** if the body is not an SNS mes
 - `SigningCertURL` is not an HTTPS URL on an `sns.<region>.amazonaws.com` host
 - the SNS message signature (`SignatureVersion` `1` or `2`) does not verify against that certificate
 
-The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
+The server SHOULD fetch each `SigningCertURL` only once and reuse the certificate. The server MUST check `TopicArn` and the `SigningCertURL` host before fetching the certificate, and MUST NOT fetch `SubscribeURL` or act on the message until the signature has verified.
 
 The server MUST confirm the subscription (`SubscriptionConfirmation`) by fetching `SubscribeURL`, and MUST reject the request with **HTTP 403** if that is not an HTTPS URL on an `sns.<region>.amazonaws.com` host.
 
 The server MUST record every recipient of a `Bounce` notification as an email bounce (see API-056). It SHOULD mark users at a permanently bounced email as bounced and unverified. A temporary bounce MUST NOT mark a user unverified.
 
-The server SHOULD process `Complaint` notifications by marking the users' emails as unverified.
+The server SHOULD process `Complaint` notifications by marking the users' emails as unverified, except for a complaint about a newsletter (mail sent through the `newsletter` SES configuration set).
+
+The server MUST mark every permanently bounced and every complaining address as unsubscribed on the newsletter list (see API-060). A failure to do so MUST NOT fail the request.
 
 For an accepted message the server MUST respond **HTTP 200** with this shape.
 
@@ -908,7 +982,7 @@ The server MUST NOT send any email to an address that has a permanent bounce. If
 
 The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
 
-### API-057 `POST /app-store/notifications`
+### API-066 `POST /app-store/notifications`
 
 The server MUST accept App Store Server Notifications V2, which Apple sends as
 
@@ -937,6 +1011,58 @@ For an accepted notification the server MUST respond **HTTP 200** with
 { "ok": true, "devices": Number } // RESCIND_CONSENT, devices logged out
 { "ok": true }                     // ignored notification
 ```
+
+### API-057 Digest emails
+
+The server MUST run a digest job every hour. It MUST send each verified watcher whose `email_frequency` is `daily` or `weekly` one digest email that summarizes every user they watch.
+
+A daily digest covers the 24 hours before 06:00 in the watcher's `timezone`. A weekly digest covers the 7 days before 06:00 on Monday in that timezone. The server MUST send a digest during the hour that starts at the end of the period it covers.
+
+For each user watched, a digest MUST give the number of screenshots and of high risk alerts in the period it covers, name each of that user's devices that has no logs in the period, and link to that user's report for the period. A digest MUST NOT be sent to a watcher whose email is unverified or has a permanent bounce (see API-056).
+
+A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
+
+The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
+
+### API-058 `POST /newsletter`
+
+The newsletter list lives in the donations worker's database (`newsletter_signups`), which this server reaches through its `DONATE_DB` binding. Each row is an email with the country (ISO 3166-1 alpha-2) and region (ISO 3166-2 subdivision code, e.g. a US state) that Cloudflare reports for the request that added it, which MAY be absent. Each row also has a random, unguessable `token` that its confirmation and unsubscribe links carry. Newsletters MUST only be sent to rows that are confirmed and not unsubscribed.
+
+The landing site's newsletter form posts here as `application/x-www-form-urlencoded` or `multipart/form-data`, with no authentication.
+
+```
+email=user@example.com
+cf-turnstile-response=opaque-string
+```
+
+The server SHOULD rate limit this endpoint by client IP. It MUST verify `cf-turnstile-response` with Cloudflare Turnstile, as in API-009.
+
+If `email` is a valid address and the token verifies, the server MUST add the lowercased email to the newsletter list, unconfirmed, with the request's location. It MUST then email the address a confirmation link to `{LANDING_URL}/newsletter/confirm?token={token}`, which leads to API-059. It MUST send that email through the `newsletter` SES configuration set, so a complaint about it is handled as a newsletter complaint (API-041). It MUST NOT send another confirmation email to the same address within an hour, and MUST NOT send one to an address that is confirmed and not unsubscribed, or that has a permanent bounce (see API-056). Before emailing an unsubscribed row, the server MUST give it a new `token`, so links in emails sent before it unsubscribed stop working. It MUST NOT change an existing row's confirmed or unsubscribed state. In every one of these cases the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/check-email`.
+
+Otherwise the server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error` and MUST NOT change the list or send email.
+
+### API-059 `POST /newsletter/confirm`
+
+The landing page at `/newsletter/confirm` posts here as a form with `token=opaque-string`. Confirming takes a `POST` so that a mail scanner fetching the emailed link can't confirm the address.
+
+If `token` matches a row that is not unsubscribed, or one that was sent a confirmation email (API-058) after it unsubscribed, the server MUST mark the row confirmed and not unsubscribed, and MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/subscribed`. Otherwise it MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/error`.
+
+### API-060 `POST /newsletter/unsubscribe?token=[token]`
+
+Every newsletter MUST link to `{LANDING_URL}/newsletter/unsubscribe?token={token}`, a page whose button posts here, and MUST carry the RFC 8058 one-click headers pointing here:
+
+```
+List-Unsubscribe: <{server}/newsletter/unsubscribe?token={token}>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+`token` MAY instead be sent as a form field. The server MUST NOT require authentication or a Turnstile token.
+
+If `token` matches a row, the server MUST mark it unsubscribed as of now, even if it already was, so a confirmation email sent before then (API-059) can no longer resubscribe it. A one-click request (a form body of `List-Unsubscribe=One-Click`) MUST then get **HTTP 200**, and any other request **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribed`. If `token` matches no row, the server MUST respond **HTTP 400** to a one-click request, and **HTTP 303** to `{LANDING_URL}/newsletter/error` otherwise.
+
+A `GET` to this URL, from a mail client that opens the `List-Unsubscribe` link in a browser, MUST NOT unsubscribe. The server MUST respond **HTTP 303** to `{LANDING_URL}/newsletter/unsubscribe?token={token}`.
+
+The server MUST NOT unmark an unsubscribed row except through API-059.
 
 ### API-042 `POST /bug-report`
 
@@ -1047,3 +1173,64 @@ Rows read are billed, so the server SHOULD inspect the plan of raw `sql` (`EXPLA
 Presets are trusted and skip the plan check.
 
 The server MUST respond **HTTP 200** with an `AdminQueryResult`, including `rows_read` as reported by the database so the caller can see what the query cost. A query the database rejects MUST produce **HTTP 400** with `error: "Query failed"` and the database message in `details`.
+
+## API-061 Feature flags
+
+Feature flags turn a feature on for some users before everyone. The server MUST evaluate flags; clients MUST receive only the result, as `feature_flags` on `User` and `DeviceSettings`, and MUST treat a key absent from that list as off.
+
+Each flag has a `key` matching `^[a-z0-9_]{1,64}$` and an integer `rollout_percent` from 0 to 100. At 0 the flag is on only for users with a `true` override; at 100 it is on for everyone without a `false` override.
+
+A user MAY have an override of `true` or `false` per flag key. Overrides MUST be stored on the user's row, MUST NOT be stored in `settings` (which the user can write through API-020), and MUST NOT be settable through any route outside this section. The server MUST ignore an override whose key names no flag.
+
+A flag is enabled for a user as follows:
+
+```
+enabled(flag, user) = override(user, flag.key) ?? bucket(flag.key, user.id) < flag.rollout_percent * 100
+bucket(key, user_id) = uint32_be(sha256(utf8(key + ":" + user_id))[0..4]) % 10000
+```
+
+`user_id` is the lowercase hyphenated UUID string. The bucket MUST depend only on the flag key and the user id, so that a user's result does not change when their email does, and raising `rollout_percent` never turns a flag off for a user who had it. For `DeviceSettings` the user is the device's owner, so that all of a user's devices agree.
+
+Evaluating flags MUST NOT write to the database. The server SHOULD read a user's overrides from the user row it already reads to build the response, and MAY cache the flag table in memory for up to 60 seconds. A change MAY therefore take that long, plus the time until a device next fetches its settings (CORE-005), to reach a client. A server instance that changes a flag SHOULD drop its own cache.
+
+Every route in this section is an admin route: API-051's authentication and **HTTP 403** rules apply. A `:key` that does not match the key format MUST produce **HTTP 400**.
+
+### API-062 `GET /admin/flags`
+
+The server MUST return every flag, ordered by `key`:
+
+```js
+// array of FeatureFlag
+```
+
+### API-063 `PUT /admin/flags/:key`
+
+The client MUST send:
+
+```js
+{
+  "rollout_percent": 25,
+  "description": "..." | null | undefined
+}
+```
+
+The server MUST answer a CORS preflight for this route from the web app's origin with `PUT` allowed.
+
+The server MUST create the flag if it does not exist and otherwise update it, leaving `description` unchanged when it is omitted. It MUST respond **HTTP 400** if `rollout_percent` is not an integer from 0 to 100, and otherwise **HTTP 200** with the resulting `FeatureFlag`.
+
+### API-064 `DELETE /admin/flags/:key`
+
+The server MUST delete the flag and remove its key from every user's overrides, so that a later flag with the same key starts with none. It MUST respond **HTTP 404** for an unknown key and otherwise **HTTP 204**.
+
+### API-065 `PUT /admin/flags/:key/users`
+
+The client MUST send:
+
+```js
+{
+  "email": "user@example.com",
+  "enabled": true | false | null
+}
+```
+
+The server MUST set the override for the user with that email, or remove it when `enabled` is `null`. It MUST respond **HTTP 404** if the flag or the user does not exist, and otherwise **HTTP 200** with the resulting `FeatureFlag`.

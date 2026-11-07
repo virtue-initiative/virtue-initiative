@@ -130,4 +130,4 @@ These tests might not need to be run every time.
 8. Go to login
 9. Click reset password
 10. Enter an email without an account
-11. Ensure it says an "email was sent if an account exists" but doesn't send an email
+11. Ensure it says an "email was sent if an account exists" but does not send an email

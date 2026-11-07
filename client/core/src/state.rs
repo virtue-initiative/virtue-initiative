@@ -170,6 +170,7 @@ mod tests {
         assert_eq!(take_backup_and_cleanup(&path), original_bytes);
     }
 
+    // CORE-016: state round-trips through the state file.
     #[test]
     fn load_state_round_trips_valid_state() {
         let path = temp_path("valid.json");

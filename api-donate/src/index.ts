@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
 import checkout from './routes/checkout';
+import goals from './routes/goals';
 import webhook from './routes/webhook';
 import { Env, Variables } from './types/bindings';
 
@@ -45,9 +47,14 @@ app.get('/', (c) =>
 );
 
 app.route('/', checkout);
+app.route('/', goals);
 app.route('/', webhook);
 
 app.onError((error, c) => {
+  // DONATE-007: the validator throws this for a body that is not valid JSON.
+  if (error instanceof HTTPException) {
+    return error.res ?? c.json({ error: error.message }, error.status);
+  }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
 });

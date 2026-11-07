@@ -29,8 +29,13 @@ TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$RUST_DIR/../.." && pwd)/target}"
 LIB_DEST="$BUILT_PRODUCTS_DIR/$LIB_NAME"
 rm -f "$LIB_DEST"
 
+# scripts/remote-apple-build.sh sets VIRTUE_IOS_RUST_PREBUILT, because it has
+# already cross-compiled the library on Linux into this same TARGET_DIR.
 build_target() {
   target="$1"
+  if [ -n "${VIRTUE_IOS_RUST_PREBUILT:-}" ]; then
+    return 0
+  fi
   rustup target add "$target" >/dev/null 2>&1 || true
   if [ -n "$CARGO_EXTRA" ]; then
     cargo build --manifest-path "$MANIFEST_PATH" --target "$target" $CARGO_EXTRA

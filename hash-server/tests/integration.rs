@@ -95,6 +95,7 @@ fn post_body(unix_time: u32, seq: u32, hash: [u8; 32]) -> Vec<u8> {
     body
 }
 
+// HASH-009: unauthenticated status endpoint.
 #[tokio::test]
 async fn get_root_returns_status_without_auth() {
     let server = spawn_server().await;
@@ -163,6 +164,7 @@ async fn get_root_responds_410_for_a_no_longer_supported_version() {
     }
 }
 
+// HASH-006: POST /hash needs a valid device-typed JWT (HASH-003).
 #[tokio::test]
 async fn post_hash_requires_valid_jwt() {
     let server = spawn_server().await;
@@ -197,6 +199,7 @@ async fn post_hash_requires_valid_jwt() {
     assert_eq!(resp.status(), 401);
 }
 
+// HASH-006: a body that is not 40 bytes is a 400 invalid_body (HASH-002).
 #[tokio::test]
 async fn post_hash_rejects_bad_body_length() {
     let server = spawn_server().await;
@@ -216,6 +219,7 @@ async fn post_hash_rejects_bad_body_length() {
     assert_eq!(body["code"], "invalid_body");
 }
 
+// HASH-006: stored = sha256(stored || hash), and seq must strictly increase.
 #[tokio::test]
 async fn post_hash_chains_and_enforces_strictly_increasing_seq() {
     let server = spawn_server().await;
@@ -281,6 +285,7 @@ async fn post_hash_chains_and_enforces_strictly_increasing_seq() {
     assert_eq!(body[device_id]["last_received"], 1002);
 }
 
+// HASH-007: unknown devices report a zero hash, seq and last_received.
 #[tokio::test]
 async fn get_hash_returns_zero_state_for_unknown_devices() {
     let server = spawn_server().await;
@@ -301,6 +306,7 @@ async fn get_hash_returns_zero_state_for_unknown_devices() {
     assert_eq!(body[unknown]["last_received"], 0);
 }
 
+// HASH-007: malformed device IDs are a 400.
 #[tokio::test]
 async fn get_hash_rejects_malformed_device_ids() {
     let server = spawn_server().await;
@@ -316,6 +322,7 @@ async fn get_hash_rejects_malformed_device_ids() {
     assert_eq!(resp.status(), 400);
 }
 
+// HASH-008: DELETE returns the prior state and resets hash and seq but not last_received.
 #[tokio::test]
 async fn delete_hash_resets_and_returns_prior_state() {
     let server = spawn_server().await;
@@ -378,6 +385,7 @@ async fn delete_hash_resets_and_returns_prior_state() {
     assert_eq!(resp.status(), 201);
 }
 
+// HASH-008: DELETE requires a server-typed JWT.
 #[tokio::test]
 async fn delete_hash_rejects_device_typed_token() {
     let server = spawn_server().await;

@@ -8,12 +8,26 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix  | File                   |
-| ------- | ---------------------- |
-| `API`   | `api/SPEC.md`          |
-| `HASH`  | `hash-server/SPEC.md`  |
-| `CORE`  | `client/core/SPEC.md`  |
-| `BATCH` | `batch-format/SPEC.md` |
+| Prefix   | File                   |
+| -------- | ---------------------- |
+| `API`    | `api/SPEC.md`          |
+| `DONATE` | `api-donate/SPEC.md`   |
+| `WEB`    | `web/SPEC.md`          |
+| `HASH`   | `hash-server/SPEC.md`  |
+| `CORE`   | `client/core/SPEC.md`  |
+| `CLIENT` | `client/SPEC.md`       |
+| `BATCH`  | `batch-format/SPEC.md` |
+
+`web/SPEC.md` and `client/SPEC.md` describe what users see and can do in the web app and the platform client apps. The others describe server, core and wire behavior.
+
+## Tests
+
+Read `TESTING.md` before writing or changing a test. In short:
+
+- Every test MUST cite the spec ID it proves, in its title (TypeScript) or a comment above it (Rust, C#, Kotlin, Swift). `just spec-check` enforces this. A self-test of a test helper cites `NO-SPEC` instead.
+- Test behavior through the component's public interface (HTTP, the `Scenario` DSL, what the user sees), so refactoring internals doesn't break tests.
+- A behavior change updates the spec, then a test citing it, then the code. A bug fix adds a test that fails without the fix.
+- When a test shows the code doesn't meet the spec and the fix is out of scope, mark the test `KNOWN-BUG` as `TESTING.md` describes instead of fixing or weakening it.
 
 ## Repo map
 
@@ -33,7 +47,7 @@ See `AGENTS.md` for how to run checks and tests for each component.
 
 `./scripts/cow-cache.sh` (`just cow-cache <cmd>`) — optional shared Rust build cache. `init` (one-time, sudo) mounts a loop-backed XFS image at `/mnt/virtue-cow`; `warm` builds `client` (including the Android JNI library, if the Android toolchain is installed) and `hash-server` from `origin/staging` there; `setup.sh` then makes each worktree's `client/target` and `hash-server/target` symlinks to instant reflinked copies of that base, so only the workspace's own crates rebuild. If the mount or base build is missing, `setup.sh` skips it and cargo uses plain `target/` dirs. Rerun `warm` after a toolchain upgrade, and `prune` to free the space of deleted worktrees. `warm-windows` and `prune-windows` do the same for the Windows VM, on a Dev Drive inside it (see `client/windows/VM_SETUP.md`, step 8); `remote-windows-build.sh` then gives each worktree its own build root there.
 
-`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then restart `launch.sh` if it's running and use "Clear cache" in the web app. The restart matters because seeded batch URLs use `R2_URL` from `api/.dev.vars`, and `launch.sh` only rewrites stored batch URLs to its current random API port when it starts. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
+`just seed` (`bun scripts/seed/index.ts`) — writes sample accounts, devices, partnerships and a week of encrypted, hash-chain-verified activity straight into local D1 and R2, so the Logs and Report tabs have something to show without a real device. Log in as `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password). Re-run it to move the sample week up to today, then use "Clear cache" in the web app. `--users-only` seeds just the accounts. The scenario lives in `scripts/seed/scenario.ts`; the placeholder screenshots come from `scripts/seed/make-images.ts`.
 
 `./scripts/launch.sh [--donate] [domain]` — starts `api`, `web`, `landing`, and the standalone `hash-server` (see `hash-server/SPEC.md`) together (interleaved colored logs), each on a random free port. The hash server is minted a `JWT_PUBLIC_KEY` read from `api/.dev.vars` so it verifies tokens signed by the local API:
 
@@ -48,6 +62,8 @@ To see a `web/` or `landing/` change in a browser, use `bunx playwright-cli` (th
 ## Cross-component contracts
 
 These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
+
+The shared test vectors in `batch-format/vectors/` (BATCH-008) pin all five. Both sides' tests check them, so drift on either side fails CI.
 
 ### 1. Batch wire format
 
@@ -87,11 +103,11 @@ new_state = sha256(current_state[32] || contentHash[32])
 
 ### 4. Password auth derivation
 
-Login must hash the password the same way on both platforms before sending:
+Login must hash the password the same way on both platforms before sending. The salt and argon2 parameters come from `GET /user/login-material` (API-015):
 
 ```
-argon2id(password, salt=lowercase_email, m=65536, t=3, p=1, len=32)
-then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
+argon2id(password, salt=password_salt, m/t/p=params, len=32)
+then HKDF-SHA256("auth", argon_output) → Base64 string sent as password_auth
 ```
 
 Key files:
@@ -145,3 +161,5 @@ Checklist for user-facing text (website, help docs, app UI copy):
 ## Pull requests
 
 When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
+
+For UI or copy changes, attach screenshots with `gh pr create --attach` (see `AGENTS.md`).

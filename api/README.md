@@ -67,6 +67,10 @@ environments upload at least the private key with `wrangler secret put`. The
 public key can be shared with any other server that needs to verify tokens.
 The worker also exposes the verifier key at `GET /.well-known/jwks.json`.
 
+Upload `LOGIN_SALT_SECRET` to each deployed environment before deploying, using
+a long random value such as `openssl rand -base64 32`. Rotate it only after a
+leak, because rotating it shows anyone who saved salts which ones were real.
+
 Ensure all the environment variables are set correctly (in `wrangler.json` and
 using `wrangler secret put`) and run
 

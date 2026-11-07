@@ -398,6 +398,7 @@ mod tests {
 
     static COUNTER_FOR_STATE_DIR: AtomicU32 = AtomicU32::new(0);
 
+    // CORE-025, CORE-010: status over IPC.
     #[test]
     fn status_round_trips_over_the_socket() {
         let sock = test_sock_path("status");
@@ -411,6 +412,7 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
+    // CORE-025, CORE-021: force_capture_now over IPC.
     #[test]
     fn force_capture_round_trips_over_the_socket() {
         let sock = test_sock_path("force-capture");
@@ -422,6 +424,7 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
+    // CORE-025: cross-process IPC.
     #[test]
     fn a_second_client_is_served_after_the_first_disconnects() {
         let sock = test_sock_path("single-client");
@@ -477,6 +480,7 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
     }
 
+    // CORE-025: cross-process IPC.
     #[test]
     fn empty_login_error_becomes_default_remote_message() {
         let sock = test_sock_path("login-empty-error");
@@ -494,6 +498,7 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
+    // CORE-025: cross-process IPC.
     #[test]
     fn empty_logout_error_becomes_default_remote_message() {
         let sock = test_sock_path("logout-empty-error");

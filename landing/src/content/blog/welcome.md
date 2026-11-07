@@ -1,22 +1,22 @@
 ---
 title: Welcome to the Virtue Initiative blog
-description: A short post on what we'll be sharing here.
+description: A short post on what we will be sharing here.
 pubDate: 2026-05-10
 author: The Virtue Initiative team
 ---
 
-We're starting a blog to share updates on the project, details about how our
+We are starting a blog to share updates on the project, details about how our
 software works and other information on the fight against pornography.
 
 ## What to expect
 
-We'll write about:
+We will write about:
 
 - New platform support and releases
 - How features are built and why we made certain tradeoffs
 - The technical details of our apps
 - Practical advice for doing accountability well
-- Reflections on the mission and the big picture fight against porn
+- Reflections on the mission and the big picture fight against pornography
 
 ## Stay connected
 

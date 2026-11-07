@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-028: the watchdog launches the execution alias when it exists, else the running executable, else nothing.
 public sealed class AppLaunchPathTests
 {
     private const string AliasPath = @"C:\Users\someone\AppData\Local\Microsoft\WindowsApps\virtue-initiative.exe";

@@ -40,7 +40,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       <li>
         <strong>Batch metadata</strong> - unencrypted information sent alongside each encrypted batch
         so the service can index and summarize it without reading it. Your device sends the time range
-        the batch covers and counts of the events and screenshots inside it; we store the device it came
+        the batch covers and counts of the events and screenshots inside it. We store the device it came
         from, the time range, and how many of its events were scored as medium or high concern, along
         with the key material and integrity hash for that batch. We do not store the contents of any event.
       </li>
@@ -49,7 +49,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         stop monitoring, or a device stops reporting), it sends a short unencrypted summary of that event
         alongside the batch - its type, timestamp, concern score, and a brief title and description. We
         use that summary only to compose an alert email to your accountability partners, and we do not
-        store it; the event itself is retained only in encrypted form. If you have no accepted partners,
+        store it. The event itself is retained only in encrypted form. If you have no accepted partners,
         or they have turned alert emails off, no alert is sent.
       </li>
       <li>
@@ -65,36 +65,37 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         tokens, and similar session data needed to keep you signed in and connect devices to your account.
       </li>
       <li>
-        <strong>Bug reports</strong> - if you choose to report a bug, we receive the description you write,
-        an optional contact email address, and the platform, app version, and operating system details
-        of the device you reported from. From a client app you may also choose to attach a recent excerpt
-        of that device's operational log; the app tells you before it does so. These logs describe how
-        the software behaved - they do not contain your screenshots. Bug reports are delivered to us by
-        email and are not linked to your monitoring data.
+        <strong>Issue reports</strong> - if you choose to report an issue, we receive the description
+        you write, an optional contact email address, and the platform, app version, and operating system
+        details of the device you reported from. From a client app you may also choose to attach a recent
+        excerpt of that device's operational log; the app tells you before it does so. These logs describe
+        how the software behaved - they do not contain your screenshots. Issue reports are delivered to
+        us by email and are not linked to your monitoring data.
       </li>
       <li>
-        <strong>Who a bug report identifies</strong> - a report you send while signed in always tells
+        <strong>Who an issue report identifies</strong> - a report you send while signed in always tells
         us which account it came from, and a report sent from a client app signed in to your account always
         identifies that device by name and platform along with the account that owns it. Your account
         email address is included and is used as the address we reply to, whether or not you fill in the
-        contact field. There is no way to send an identified report anonymously; if you do not want a
-        report tied to your account, sign out first, or send it from our public site without signing in,
-        in which case it carries only what you type into it.
+        contact field. There is no way to send an identified report anonymously. If you do not want a
+        report tied to your account, sign out first, or send it from our public site without signing in.
+        In that case it carries only what you type into it.
       </li>
       <li>
         <strong>Donation records</strong> - if you donate, you are redirected to Stripe's own hosted checkout
         page to enter your payment details. Those details go straight to Stripe and are never sent to
-        our servers, so we never see your full card number - Stripe shows us only the card brand, its
-        expiry, and its last four digits. Stripe then reports the completed donation back to us, and we
-        keep that record: your name, email address, phone number, the amount, whether the donation recurs,
-        and Stripe's identifiers for you and for any recurring donation. Stripe may also collect a billing
-        address; we do not store it in our own systems, but like the partial card details it is visible
-        to us in our Stripe account.
+        our servers, so we never see your full card number. Stripe shows us only the card brand, its expiry,
+        and its last four digits. Stripe then reports the completed donation back to us, and we keep that
+        record: your name, email address, phone number, the amount, whether the donation recurs, and Stripe's
+        identifiers for you and for any recurring donation. Stripe may also collect a billing address.
+        We do not store it in our own systems, but like the partial card details it is visible to us in
+        our Stripe account.
       </li>
       <li>
         <strong>Newsletter</strong> - if you subscribe to our newsletter, either from our website or by
-        ticking the box when you create an account, your email address is added to our mailing list at
-        Buttondown. The box is unticked by default, and not subscribing has no effect on your account.
+        ticking the box when you create an account, your email address is added to our mailing list, along
+        with the country and state or region that Cloudflare reports for your connection when you subscribe
+        or next log in. The box is unticked by default, and not subscribing has no effect on your account.
         Each email includes an unsubscribe link. The mailing list is kept separately from your account
         and your monitoring data.
       </li>
@@ -142,16 +143,16 @@ import SiteLayout from '../layouts/SiteLayout.astro';
         available, derived from how long each device was reporting - not from reading your data.
       </li>
       <li>
-        Bug reports are used to diagnose and fix problems, and to reply to you if you gave us a way
-        to reach you.
+        Issue reports are used to diagnose and fix problems, and to reply to you if you gave us a
+        way to reach you.
       </li>
       <li>
         Account, device, partner, and session data is used to authenticate you, operate registered
         clients, and manage sharing permissions.
       </li>
       <li>
-        We do not use your screenshots, events, or bug reports for advertising, profiling, or model
-        training.
+        We do not use your screenshots, events, or issue reports for advertising, profiling, or
+        model training.
       </li>
     </ul>
 
@@ -193,7 +194,7 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       Account, device, and partner records are retained for as long as your account exists. Deleting
       your account removes those records, along with your devices, sessions, and batch metadata,
       immediately; the encrypted batch blobs themselves are removed by the normal 30-day cycle.
-      Donation records are retained as long as we need them for accounting and tax purposes. Bug
+      Donation records are retained as long as we need them for accounting and tax purposes. Issue
       reports live in our support mailbox and are retained as long as they are useful for diagnosis.
     </p>
     <p>
@@ -218,16 +219,16 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       </li>
       <li>
         <strong>Amazon Web Services</strong> - delivers our outgoing email (Simple Email Service) and
-        reports bounces and complaints back to us. Email we send - alerts, digests, invitations, and account
-        mail - passes through AWS, as do bug reports you submit.
+        reports bounces and complaints back to us. Email we send - alerts, digests, invitations, account
+        mail, and newsletters - passes through AWS, as do issue reports you submit.
       </li>
       <li>
         <strong>Stripe</strong> - processes donations. Payment card details go directly to Stripe and
         are never handled by our servers.
       </li>
       <li>
-        <strong>Buttondown</strong> - hosts our newsletter mailing list and sends newsletter emails. It
-        receives only the email addresses of people who subscribe.
+        <strong>Cloudflare Turnstile</strong> - checks that the sign-up and newsletter forms are submitted
+        by a person rather than a bot. It runs in your browser on those forms.
       </li>
       <li>
         <strong>Have I Been Pwned</strong> - when you choose a new password, your browser checks it against
@@ -251,9 +252,9 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       relevant encryption keys. Batch metadata, alert details, account records, partner records, and
       other service metadata are stored server-side unencrypted and are intended to be accessible
       only through authorized account access. Passwords are hashed and are not stored in plaintext.
-      Before a client attaches a log excerpt to a bug report, it scrubs anything that looks like a
-      session token from the text. When you choose a new password, your browser sends the first five
-      characters of a hash of that password to Have I Been Pwned to warn you if it appears in a
+      Before a client attaches a log excerpt to an issue report, it scrubs anything that looks like
+      a session token from the text. When you choose a new password, your browser sends the first
+      five characters of a hash of that password to Have I Been Pwned to warn you if it appears in a
       known breach. Your password itself never leaves your device.
     </p>
 

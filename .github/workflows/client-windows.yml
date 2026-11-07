@@ -68,8 +68,8 @@ jobs:
         run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core
         working-directory: client
 
-      - name: Rust scenario tests (core)
-        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --features testing --test scenarios
+      - name: Rust scenario tests (core, testing feature)
+        run: cargo test --target x86_64-pc-windows-msvc ${{ steps.profile.outputs.cargo_release_flag }} -p virtue-core --features testing --tests
         working-directory: client
 
       - name: Rust tests (Windows client)

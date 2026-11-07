@@ -1,5 +1,8 @@
 export interface Env {
+  // A new secret also goes in scripts/check-deploy-secrets.ts, which checks them before deploys.
   DB: D1Database;
+  // The donations worker's database (api-donate/), which holds the newsletter list.
+  DONATE_DB: D1Database;
   BUCKET: R2Bucket;
   RATE_LIMITER: RateLimit;
   JWT_PRIVATE_KEY: string;
@@ -8,6 +11,8 @@ export interface Env {
   COMMIT_SHA?: string;
   HASH_SERVER_URL: string;
   R2_URL: string;
+  // 'true' serves GET /r2/* (API-040). Only local dev sets it.
+  DEV_R2_ROUTE?: string;
   APP_URL: string;
   LANDING_URL: string;
   APP_NAME: string;
@@ -19,10 +24,14 @@ export interface Env {
   BUG_REPORT_EMAIL: string;
   // Comma-separated SNS topic ARNs accepted by POST /email/sns (API-041). Unset rejects all.
   SNS_TOPIC_ARNS?: string;
-  // Tests only: pins this root for POST /app-store/notifications instead of Apple's (API-057).
+  // Tests only: pins this root for POST /app-store/notifications instead of Apple's (API-066).
   APP_STORE_ROOT_SHA256?: string;
-  // Unset in local dev, which skips newsletter signups (see lib/newsletter.ts).
-  BUTTONDOWN_API_KEY?: string;
+  // Cloudflare Turnstile secret for the signup and newsletter forms. Unset rejects them.
+  TURNSTILE_SECRET_KEY?: string;
+  // HMAC key for the made-up salt of an unknown email (API-015). Unset falls back to a random
+  // salt. Rotating it changes every made-up salt but no real one, which shows anyone who saved
+  // salts which were real, so rotate it only after a leak.
+  LOGIN_SALT_SECRET?: string;
 }
 
 export interface Variables {

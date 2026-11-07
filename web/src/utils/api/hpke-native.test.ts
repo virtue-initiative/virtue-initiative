@@ -16,7 +16,7 @@ async function decryptSampleWith(
   return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ct));
 }
 
-describe('hpke-native unwrap', () => {
+describe('hpke-native unwrap (WEB-027, BATCH-005)', () => {
   it('recovers the same batch key as @hpke for a wrapped key', async (ctx) => {
     if (!(await nativeX25519Supported())) {
       // Environment (e.g. older Node) lacks X25519 in crypto.subtle; nothing to verify here.

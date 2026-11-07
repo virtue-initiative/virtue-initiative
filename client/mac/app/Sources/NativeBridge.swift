@@ -43,8 +43,10 @@ private func virtue_mac_native_request_user_stop(
 @_silgen_name("virtue_mac_native_force_capture")
 private func virtue_mac_native_force_capture() -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_mac_native_has_capture_permission")
-private func virtue_mac_native_has_capture_permission() -> Bool
+@_silgen_name("virtue_mac_native_check_capture_permission_now")
+private func virtue_mac_native_check_capture_permission_now(
+    _ daemonExePath: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
 
 @_silgen_name("virtue_mac_native_request_capture_permission")
 private func virtue_mac_native_request_capture_permission() -> Bool
@@ -97,6 +99,14 @@ private struct ForceCaptureReport: Decodable {
     let outcome: String?
     let message: String?
     let error: String?
+}
+
+/// A Screen Recording check from a new process (CLIENT-025).
+enum ScreenRecordingCheck {
+    case granted
+    case denied
+    /// The check gave no answer (failed to start, timed out); not a denial.
+    case failed(String)
 }
 
 /// What a "Test Screenshot" run ended up doing, ready to show the user.
@@ -186,8 +196,17 @@ enum NativeBridge {
         return .finished(payload.message ?? "Test screenshot finished.")
     }
 
-    static func hasCapturePermission() -> Bool {
-        virtue_mac_native_has_capture_permission()
+    /// Asks a new daemon process, so a change made while the app runs shows
+    /// up. Spawns a process, so call it off the main actor.
+    static func checkCapturePermissionNow(daemonExePath: String) -> ScreenRecordingCheck {
+        let answer = daemonExePath.withCString { pathCString in
+            consumeOptionalString(virtue_mac_native_check_capture_permission_now(pathCString))
+        }
+        switch answer {
+        case "granted": return .granted
+        case "denied": return .denied
+        default: return .failed(answer ?? "no answer")
+        }
     }
 
     static func requestCapturePermission() -> Bool {

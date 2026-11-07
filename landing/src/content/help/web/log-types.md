@@ -6,8 +6,7 @@ sidebar_position: 2
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
 routine activity (screenshots, sign-ins). A few are **alerts** that flag an
-interruption in monitoring and sometimes indicate a follow-up communication to
-your partner may be needed.
+interruption in monitoring. Some of these may call for a follow-up conversation with your partner.
 
 Open any entry to see its details, the device it came from, and a link back to
 this page.
@@ -27,7 +26,7 @@ redundant images.
 
 ## System Login
 
-The user logged into this computer, or the computer started up (on systems
+The user logged in to this computer, or the computer started up (on systems
 without a separate login step).
 
 ## System Logout
@@ -37,7 +36,7 @@ The user logged out of this computer, or the computer was shut down.
 ## Screenshot Missed
 
 A scheduled screenshot was noticeably late, or several recent ones added up to
-a longer-than-expected delay, and it wasn't explained by a nearby sign-in,
+a longer-than-expected delay, and it was not explained by a nearby sign-in,
 sign-out, or the device being asleep. Time spent asleep does not create this
 event. It usually means the monitoring app was not running for a while, for
 example because it was killed or frozen, or the device was too busy to run it
@@ -46,8 +45,8 @@ worth investigating.
 
 ## Monitoring Stopped by User
 
-A user stopped the monitoring process intentionally. This event cannot happen
-without user intervention.
+A user stopped the monitoring process intentionally, generally by choosing to
+stop monitoring in the app.
 
 ## Monitoring Resumed by User
 
@@ -67,8 +66,9 @@ A general alert was raised. Open the entry to read the alert message.
 ## Capture Failed
 
 Screenshot capture failed several times in a row on the device (5 failures
-within 30 minutes). This usually points to a configuration or permissions problem with screen capture — see the
-[installation guide](/download) for your platform.
+within 30 minutes). This usually points to a configuration or permissions
+problem with screen capture. See the [installation guide](/download) for your
+platform.
 
 ## Developer
 
@@ -78,4 +78,4 @@ are not part of normal monitoring.
 ## Daily Check-in
 
 Once a day, your device sends a small update to confirm that monitoring is
-still active, even when there's nothing else to report.
+still active, even when there is nothing else to report.

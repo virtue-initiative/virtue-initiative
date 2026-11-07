@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from 'astro:content';
 import SiteLayout from '../../layouts/SiteLayout.astro';
+import NewsletterForm from '../../components/NewsletterForm.astro';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
@@ -30,6 +31,7 @@ const formattedDate = post.data.pubDate.toLocaleDateString('en-US', {
       <h1>{post.data.title}</h1>
     </header>
     <Content />
+    <NewsletterForm centered />
     <p class="blog-post-back"><a href="/blog">← Back to blog</a></p>
   </article>
 </SiteLayout>
