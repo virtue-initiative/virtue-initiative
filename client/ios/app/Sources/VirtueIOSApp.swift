@@ -1,4 +1,5 @@
 import SwiftUI
+import VirtueKit
 import UIKit
 
 @main
@@ -811,6 +812,9 @@ struct VirtueLogoShape: Shape {
     }
 }
 
+// Deliberately separate from `VirtueKit`'s `VirtueButtonStyle`, which Mac uses.
+// The iOS look (44pt minimum height, 10pt corners, semibold text, 0.4 disabled
+// opacity, `fullWidth`) differs from the shared one, and iOS keeps it.
 struct VirtueButtonStyle: ButtonStyle {
     var prominent: Bool = false
     var fullWidth: Bool = false
@@ -849,56 +853,3 @@ struct VirtueButtonStyle: ButtonStyle {
     }
 }
 
-struct Card<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VirtueBrand.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(VirtueBrand.border, lineWidth: 1)
-        )
-    }
-}
-
-enum VirtueBrand {
-    // Forest green — matches --accent / --forest in shared-web/tokens.css
-    static let accent = Color(
-        red: 30.0 / 255.0,
-        green: 58.0 / 255.0,
-        blue: 46.0 / 255.0
-    )
-    // Link color — matches --link in shared-web/tokens.css
-    static let link = Color(red: 179.0 / 255.0, green: 67.0 / 255.0, blue: 0.0 / 255.0)
-    // Warm ochre — matches --ochre in shared-web/tokens.css
-    static let ochre = Color(
-        red: 166.0 / 255.0,
-        green: 127.0 / 255.0,
-        blue: 61.0 / 255.0
-    )
-    // Page background — matches --bg (#f4efe3) in shared-web/tokens.css
-    static let bg = Color(red: 244.0 / 255.0, green: 239.0 / 255.0, blue: 227.0 / 255.0)
-    // Card surface — matches --surface (#fbf7ea) in shared-web/tokens.css
-    static let surface = Color(red: 251.0 / 255.0, green: 247.0 / 255.0, blue: 234.0 / 255.0)
-    // Subtle background — matches --bg-subtle (#ebe4ce) in shared-web/tokens.css
-    static let bgSubtle = Color(red: 235.0 / 255.0, green: 228.0 / 255.0, blue: 206.0 / 255.0)
-    // Border — matches --border (#d9d1bc) in shared-web/tokens.css
-    static let border = Color(red: 217.0 / 255.0, green: 209.0 / 255.0, blue: 188.0 / 255.0)
-    // Primary text — matches --text (#1b1a16) in shared-web/tokens.css
-    static let text = Color(red: 27.0 / 255.0, green: 26.0 / 255.0, blue: 22.0 / 255.0)
-    // Muted text — matches --text-muted (#6a6655) in shared-web/tokens.css
-    static let textMuted = Color(red: 106.0 / 255.0, green: 102.0 / 255.0, blue: 85.0 / 255.0)
-    // Status colors from the client redesign: working, needs action, and
-    // starting or paused.
-    static let good = Color(red: 47.0 / 255.0, green: 125.0 / 255.0, blue: 79.0 / 255.0)
-    static let bad = Color(red: 192.0 / 255.0, green: 57.0 / 255.0, blue: 43.0 / 255.0)
-    static let warn = ochre
-    // The logo's own dark green, from landing/public/logo.svg.
-    static let logo = Color(red: 22.0 / 255.0, green: 48.0 / 255.0, blue: 38.0 / 255.0)
-}

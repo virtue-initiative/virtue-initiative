@@ -1,5 +1,6 @@
 import SafariServices
 import SwiftUI
+import VirtueKit
 import UIKit
 
 /// The five setup steps. Each turns done from what the Safari extension
@@ -93,7 +94,7 @@ struct SafariSetupGuide: View {
                 .foregroundStyle(VirtueBrand.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-                Card {
+                Card(cornerRadius: 12) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(SetupStep.allCases) { step in
                             stepRow(step)
@@ -213,7 +214,7 @@ struct SetupWizard: View {
             }
             .accessibilityHidden(true)
 
-            Card {
+            Card(cornerRadius: 12) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(step.title)
                         .font(.headline)

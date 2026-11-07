@@ -1,4 +1,5 @@
 import SwiftUI
+import VirtueKit
 
 /// "Report an Issue" screen, pushed from the menu. Ported from the Mac/Windows clients' report-issue
 /// dialogs: a message box, an optional contact email (pre-filled when signed
