@@ -158,12 +158,15 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
 
 pub trait ApiTransport: Send + Sync {
     fn logout(&self, device_refresh_token: &str) -> CoreResult<()>;
+    /// `app_transaction_id` is the App Store app transaction ID, which only
+    /// an App Store client has (API-035).
     fn register_device(
         &self,
         email: &str,
         password: &str,
         name: &str,
         platform: &str,
+        app_transaction_id: Option<&str>,
     ) -> CoreResult<RegisteredDevice>;
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState>;
     fn upload_batch(
@@ -257,6 +260,7 @@ impl ApiTransport for HttpApiClient {
         password: &str,
         name: &str,
         platform: &str,
+        app_transaction_id: Option<&str>,
     ) -> CoreResult<RegisteredDevice> {
         #[derive(Deserialize)]
         struct LoginMaterialResponse {
@@ -270,6 +274,8 @@ impl ApiTransport for HttpApiClient {
             password_auth: String,
             name: &'a str,
             platform: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            app_transaction_id: Option<&'a str>,
         }
 
         #[derive(Deserialize)]
@@ -294,6 +300,7 @@ impl ApiTransport for HttpApiClient {
                     password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
                     name,
                     platform,
+                    app_transaction_id,
                 })?,
         )?;
 

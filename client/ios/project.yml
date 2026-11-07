@@ -25,6 +25,10 @@ targets:
         INFOPLIST_FILE: app/Info.plist
         CODE_SIGN_ENTITLEMENTS: app/VirtueIOS.entitlements
         OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust'
+        # Age assurance (AgeAssurance.swift) needs the iOS 26 SDK, and is compiled out
+        # on older ones. Weak, so iOS 16-25 devices still launch.
+        'OTHER_LDFLAGS[sdk=iphoneos26*]': '$(inherited) -lvirtue_ios_rust -weak_framework DeclaredAgeRange -weak_framework PermissionKit'
+        'OTHER_LDFLAGS[sdk=iphonesimulator26*]': '$(inherited) -lvirtue_ios_rust -weak_framework DeclaredAgeRange -weak_framework PermissionKit'
       configs:
         Release:
           CODE_SIGN_STYLE: Manual
@@ -34,6 +38,7 @@ targets:
       - path: app/Sources
       - path: app/Shared
       - path: app/Assets.xcassets
+      - path: app/PrivacyInfo.xcprivacy
     dependencies:
       - target: VirtueSafariWebExtension
         embed: true

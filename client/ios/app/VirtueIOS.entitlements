@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Age assurance (AgeAssurance.swift). The App Store provisioning profile
+	     must include the Declared Age Range capability, or the Release archive
+	     fails to sign. -->
+	<key>com.apple.developer.declared-age-range</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.org.virtueinitiative.virtueios</string>

@@ -24,6 +24,8 @@ export interface Env {
   BUG_REPORT_EMAIL: string;
   // Comma-separated SNS topic ARNs accepted by POST /email/sns (API-041). Unset rejects all.
   SNS_TOPIC_ARNS?: string;
+  // Tests only: pins this root for POST /app-store/notifications instead of Apple's (API-066).
+  APP_STORE_ROOT_SHA256?: string;
   // Cloudflare Turnstile secret for the signup and newsletter forms. Unset rejects them.
   TURNSTILE_SECRET_KEY?: string;
   // HMAC key for the made-up salt of an unknown email (API-015). Unset falls back to a random

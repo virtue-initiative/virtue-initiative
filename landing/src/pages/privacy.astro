@@ -28,7 +28,14 @@ import SiteLayout from '../layouts/SiteLayout.astro';
       </li>
       <li>
         <strong>Device metadata</strong> - the name, platform, and activity timestamps of each device
-        you register.
+        you register. For an iPhone or iPad, this also includes the App Store's ID for your download of
+        the app. We use it only to sign that device out if a parent or guardian withdraws their consent
+        through the App Store.
+      </li>
+      <li>
+        <strong>Age range</strong> - where the law requires it, the iOS app checks the age range Apple
+        shares for your Apple Account. The check happens on your device. The age range is never sent to
+        us or stored.
       </li>
       <li>
         <strong>Batch metadata</strong> - unencrypted information sent alongside each encrypted batch
