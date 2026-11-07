@@ -28,8 +28,9 @@ const REQUIRED: Record<string, string[]> = {
 };
 
 // In `Env` but never deployed as a secret: the deploy passes COMMIT_SHA with --var, and only
-// local dev sets DEV_R2_ROUTE.
-const NOT_SECRETS = ['COMMIT_SHA', 'DEV_R2_ROUTE'];
+// local dev sets DEV_R2_ROUTE. Only the tests set APP_STORE_ROOT_SHA256 (API-066), to pin a
+// throwaway CA in place of Apple's.
+const NOT_SECRETS = ['COMMIT_SHA', 'DEV_R2_ROUTE', 'APP_STORE_ROOT_SHA256'];
 
 type Target = { project: string; env: string };
 
