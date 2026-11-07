@@ -24,11 +24,11 @@ describe('Sidebar (WEB-003)', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('link', { name: new RegExp(`${TEST_WATCHING.user.name} logs`, 'i') }),
+        screen.getByRole('link', { name: new RegExp(`${TEST_WATCHING.user.name}'s logs`, 'i') }),
       ).toBeInTheDocument();
     });
     expect(
-      screen.getByRole('link', { name: new RegExp(`${TEST_WATCHING.user.name} logs`, 'i') }),
+      screen.getByRole('link', { name: new RegExp(`${TEST_WATCHING.user.name}'s logs`, 'i') }),
     ).toHaveAttribute('href', `/logs/${TEST_WATCHING.user.id}`);
   });
 
@@ -40,7 +40,7 @@ describe('Sidebar (WEB-003)', () => {
     });
     expect(
       await screen.findByRole('link', {
-        name: new RegExp(`${TEST_WATCHING.user.name} report`, 'i'),
+        name: new RegExp(`${TEST_WATCHING.user.name}'s report`, 'i'),
       }),
     ).toHaveAttribute('href', `/report/${TEST_WATCHING.user.id}`);
   });
