@@ -1,4 +1,4 @@
-import { FeedLog } from "./shared";
+import { FeedLog } from './shared';
 
 export interface GalleryRow {
   /** Index of first item in the source array (inclusive). */
@@ -22,8 +22,8 @@ export interface GalleryLayoutOptions {
 
 function ratioOf(item: FeedLog, defaultRatio: number): number {
   if (
-    typeof item.image_w === "number" &&
-    typeof item.image_h === "number" &&
+    typeof item.image_w === 'number' &&
+    typeof item.image_h === 'number' &&
     item.image_w > 0 &&
     item.image_h > 0
   ) {
@@ -32,10 +32,7 @@ function ratioOf(item: FeedLog, defaultRatio: number): number {
   return defaultRatio;
 }
 
-export function buildGalleryRows(
-  items: FeedLog[],
-  options: GalleryLayoutOptions,
-): GalleryRow[] {
+export function buildGalleryRows(items: FeedLog[], options: GalleryLayoutOptions): GalleryRow[] {
   const {
     containerWidth: W,
     targetRowHeight: H,
@@ -76,7 +73,9 @@ export function buildGalleryRows(
     const scaledH = usableW / totalRatio;
 
     const isLast = i >= items.length;
-    const rowH = isLast ? Math.min(scaledH, H * maxLastRowScale) : scaledH;
+    const rowH = isLast
+      ? (averageRowHeight(rows) ?? Math.min(scaledH, H * maxLastRowScale))
+      : scaledH;
 
     const widths = rowItems.map((it) => rowH * ratioOf(it, defaultRatio));
 
@@ -84,4 +83,11 @@ export function buildGalleryRows(
   }
 
   return rows;
+}
+
+/** Mean final height (px) of all rows except the last, or null if there are fewer than two rows. */
+export function averageRowHeight(rows: GalleryRow[]): number | null {
+  if (rows.length < 2) return null;
+  const full = rows.slice(0, -1);
+  return full.reduce((sum, row) => sum + row.height, 0) / full.length;
 }

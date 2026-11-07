@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGalleryRows } from './gallery-layout';
+import { averageRowHeight, buildGalleryRows } from './gallery-layout';
 import { FeedLog } from './shared';
 
 function makeItem(overrides: Partial<FeedLog> = {}): FeedLog {
@@ -100,11 +100,13 @@ describe('buildGalleryRows (WEB-042)', () => {
     }
   });
 
-  it('last partial row height === targetRowHeight (not stretched)', () => {
-    const items = make169(3); // likely a partial last row
+  it('last row height === average of the other rows (WEB-042)', () => {
+    const items = make169(20); // several rows with a partial last row
     const rows = buildGalleryRows(items, OPTS);
-    const last = rows[rows.length - 1];
-    expect(last.height).toBeLessThanOrEqual(OPTS.targetRowHeight + 0.01);
+    expect(rows.length).toBeGreaterThan(2);
+    const others = rows.slice(0, -1);
+    const avg = others.reduce((s, r) => s + r.height, 0) / others.length;
+    expect(rows[rows.length - 1].height).toBeCloseTo(avg, 6);
   });
 
   it('minRowScale enforcement — row does not squash below floor', () => {
@@ -127,5 +129,15 @@ describe('buildGalleryRows (WEB-042)', () => {
       expected += row.count;
     }
     expect(expected).toBe(items.length);
+  });
+
+  it('averageRowHeight excludes the last row and is null for fewer than two rows', () => {
+    const rows = [
+      { startIndex: 0, count: 1, height: 100, widths: [] },
+      { startIndex: 1, count: 1, height: 200, widths: [] },
+      { startIndex: 2, count: 1, height: 9999, widths: [] },
+    ];
+    expect(averageRowHeight(rows)).toBe(150);
+    expect(averageRowHeight(rows.slice(0, 1))).toBeNull();
   });
 });

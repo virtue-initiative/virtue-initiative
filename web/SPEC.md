@@ -310,7 +310,7 @@ Events stored by older clients MUST still be shown: `lifecycle` with `kind` `sys
 
 The gallery is the default view.
 
-- Screenshots MUST be laid out in rows that fill the width, each at its own aspect ratio, read from the image. An image whose size cannot be read MUST be laid out as 16:9. Rows aim for about 140 px high and MUST NOT shrink below 60% of that. A very wide image MUST get a row to itself, and the last row MUST NOT be stretched.
+- Screenshots MUST be laid out in rows that fill the width, each at its own aspect ratio, read from the image. An image whose size cannot be read MUST be laid out as 16:9. Rows aim for about 140 px high and MUST NOT shrink below 60% of that. A very wide image MUST get a row to itself. The last row MUST be as high as the average of the other rows, when there is more than one row.
 - Screenshot tiles with Medium concern or above MUST show the concern badge. Events without a screenshot MUST appear as cards with their icon, category, message and relative time.
 - A tile MUST outline events with High or Alert concern, or from an unverified batch.
 
