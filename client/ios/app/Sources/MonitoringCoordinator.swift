@@ -612,13 +612,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func loadCoreStatus() -> CoreServiceStatus? {
-        guard let json = NativeBridge.getStatusJson(),
-              let data = json.data(using: .utf8),
-              !data.isEmpty
-        else {
-            return nil
-        }
-        return try? JSONDecoder().decode(CoreServiceStatus.self, from: data)
+        NativeBridge.getStatusJson().flatMap(CoreServiceStatus.decode(fromJson:))
     }
 
     private func timestamp(forKey key: String, defaults: UserDefaults) -> TimeInterval? {

@@ -1,6 +1,6 @@
 import SwiftUI
-import VirtueKit
 import UIKit
+import VirtueKit
 
 @main
 struct VirtueIOSApp: App {
@@ -218,7 +218,7 @@ private struct SignInForm: View {
             Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
                 signIn()
             }
-            .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+            .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
             .disabled(coordinator.isSigningIn)
 
             if let error = coordinator.loginError {
@@ -310,14 +310,14 @@ private struct StatusFocus: View {
                         Haptics.tap()
                         coordinator.toggleMonitoring()
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                    .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                 } else {
                     Button(partnersTitle) {
                         openURL(partnersURL)
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                    .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                     Button("Pause Monitoring", action: onPause)
-                        .buttonStyle(VirtueButtonStyle(fullWidth: true))
+                        .buttonStyle(IOSButtonStyle(fullWidth: true))
                     ExtensionCheckButton(coordinator: coordinator, style: .link)
                 }
             }
@@ -814,8 +814,9 @@ struct VirtueLogoShape: Shape {
 
 // Deliberately separate from `VirtueKit`'s `VirtueButtonStyle`, which Mac uses.
 // The iOS look (44pt minimum height, 10pt corners, semibold text, 0.4 disabled
-// opacity, `fullWidth`) differs from the shared one, and iOS keeps it.
-struct VirtueButtonStyle: ButtonStyle {
+// opacity, `fullWidth`) differs from the shared one, and iOS keeps it. It has
+// its own name so it can't be mistaken for, or silently swapped with, the shared one.
+struct IOSButtonStyle: ButtonStyle {
     var prominent: Bool = false
     var fullWidth: Bool = false
 

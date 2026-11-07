@@ -4,7 +4,7 @@ public struct Card<Content: View>: View {
     private let content: Content
     private let cornerRadius: CGFloat
 
-    /// `cornerRadius` defaults to the Mac/shared card radius. iOS passes 12 to keep its own look.
+    /// `cornerRadius` defaults to `VirtueRadius.card`. iOS passes `VirtueRadius.cardLarge`.
     public init(cornerRadius: CGFloat = VirtueRadius.card, @ViewBuilder content: () -> Content) {
         self.cornerRadius = cornerRadius
         self.content = content()

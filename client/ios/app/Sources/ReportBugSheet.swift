@@ -63,7 +63,7 @@ struct ReportBugSheet: View {
                 Button(isSending ? "Sending…" : "Send Report") {
                     send()
                 }
-                .buttonStyle(VirtueButtonStyle(prominent: true, fullWidth: true))
+                .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                 .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())

@@ -47,4 +47,6 @@ public enum VirtueSpacing {
 public enum VirtueRadius {
     public static let button: CGFloat = 6
     public static let card: CGFloat = 8
+    /// The rounder card the iOS app uses, closer to native iOS grouped lists.
+    public static let cardLarge: CGFloat = 12
 }
