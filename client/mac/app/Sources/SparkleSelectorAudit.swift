@@ -25,7 +25,9 @@ enum SparkleSelectorAudit {
         #selector(VirtueUpdateDriver.show(_:reply:)),
         #selector(VirtueUpdateDriver.showUpdateFound(with:state:reply:)),
         #selector(VirtueUpdateDriver.showReady(toInstallAndRelaunch:)),
-        #selector(VirtueUpdateDriver.showInstallingUpdate(withApplicationTerminated:retryTerminatingApplication:)),
+        #selector(
+            VirtueUpdateDriver.showInstallingUpdate(
+                withApplicationTerminated:retryTerminatingApplication:)),
         #selector(VirtueUpdateDriver.dismissUpdateInstallation),
     ]
 }

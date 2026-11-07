@@ -99,7 +99,8 @@ final class MonitoringCoordinator: ObservableObject {
         postRelaunchGraceUntil = Date().addingTimeInterval(Self.postRelaunchGrace)
 
         Task {
-            let error = await Task.detached(priority: .userInitiated) { [daemonExePath] () -> String? in
+            let error = await Task.detached(priority: .userInitiated) {
+                [daemonExePath] () -> String? in
                 NativeBridge.ensureDaemonRunning(daemonExePath: daemonExePath)
             }.value
             // Previously discarded entirely: if `launchctl bootstrap` fails
@@ -141,13 +142,15 @@ final class MonitoringCoordinator: ObservableObject {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let pw = password
         let trimmedDeviceName = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedDeviceName = trimmedDeviceName.isEmpty
+        let resolvedDeviceName =
+            trimmedDeviceName.isEmpty
             ? NativeBridge.defaultDeviceName()
             : trimmedDeviceName
 
         Task {
             let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.login(email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+                NativeBridge.login(
+                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
             }.value
             isSigningIn = false
             if let error {
@@ -181,7 +184,8 @@ final class MonitoringCoordinator: ObservableObject {
     ) {
         Task {
             let error = await Task.detached(priority: .userInitiated) {
-                NativeBridge.reportIssue(message: message, contactEmail: contactEmail, includeLogs: includeLogs)
+                NativeBridge.reportIssue(
+                    message: message, contactEmail: contactEmail, includeLogs: includeLogs)
             }.value
             completion(error)
         }
@@ -253,7 +257,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func openScreenRecordingSettings() {
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
     }
 
@@ -263,7 +268,8 @@ final class MonitoringCoordinator: ObservableObject {
         guard statusTimer == nil else {
             return
         }
-        statusTimer = Timer.scheduledTimer(withTimeInterval: Self.statusPollInterval, repeats: true) { [weak self] _ in
+        statusTimer = Timer.scheduledTimer(withTimeInterval: Self.statusPollInterval, repeats: true)
+        { [weak self] _ in
             Task { @MainActor in
                 self?.pollTick()
             }
@@ -296,14 +302,19 @@ final class MonitoringCoordinator: ObservableObject {
         let windowVisible = NSApp.windows.contains {
             $0.isVisible && $0.identifier?.rawValue.hasPrefix(Self.mainWindowID) == true
         }
-        let checkScreenRecording = windowVisible
-            || lastScreenRecordingCheck.map { Date().timeIntervalSince($0) >= Self.hiddenScreenRecordingCheckInterval } ?? true
+        let checkScreenRecording =
+            windowVisible
+            || lastScreenRecordingCheck.map {
+                Date().timeIntervalSince($0) >= Self.hiddenScreenRecordingCheckInterval
+            } ?? true
         if checkScreenRecording {
             lastScreenRecordingCheck = Date()
         }
         Task {
-            let snapshot = await Task.detached(priority: .utility) { [daemonExePath] () -> PolledSnapshot in
-                let screenRecording = checkScreenRecording
+            let snapshot = await Task.detached(priority: .utility) {
+                [daemonExePath] () -> PolledSnapshot in
+                let screenRecording =
+                    checkScreenRecording
                     ? NativeBridge.checkCapturePermissionNow(daemonExePath: daemonExePath)
                     : nil
                 let status = NativeBridge.pollDaemonStatus()
@@ -343,7 +354,8 @@ final class MonitoringCoordinator: ObservableObject {
         // a genuinely successful `.running` poll, or the UI is stuck showing
         // "Starting…" for the whole grace window even when the daemon came
         // up within a second or two, as it normally does.
-        let inGracePeriod = gracefulShutdown
+        let inGracePeriod =
+            gracefulShutdown
             || (postRelaunchGraceUntil.map { Date() < $0 } ?? false)
 
         switch snapshot.status {
@@ -471,7 +483,8 @@ final class MonitoringCoordinator: ObservableObject {
         let bundleURL = Bundle.main.bundleURL
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, error in
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) {
+            _, error in
             if let error {
                 NSLog("Failed to relaunch after bundle replacement: \(error)")
                 // Let a later poll try again rather than sitting on a stale
@@ -508,7 +521,9 @@ final class MonitoringCoordinator: ObservableObject {
 
     private func loginErrorMessage(_ raw: String) -> String {
         let lower = raw.lowercased()
-        if lower.contains("unauthorized") || lower.contains("bad request") || lower.contains("login failed") {
+        if lower.contains("unauthorized") || lower.contains("bad request")
+            || lower.contains("login failed")
+        {
             return "Login failed. Check your email and password and try again."
         }
         return "Login failed: \(raw)"
@@ -524,7 +539,8 @@ final class MonitoringCoordinator: ObservableObject {
         formatter.timeStyle = .medium
         let relative = RelativeDateTimeFormatter()
         relative.unitsStyle = .short
-        return "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+        return
+            "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
     }
 
     /// Where this app's daemon writes its rolling log files — surfaced on the

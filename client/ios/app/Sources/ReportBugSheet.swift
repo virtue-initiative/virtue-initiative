@@ -47,8 +47,8 @@ struct ReportBugSheet: View {
                 Toggle("Attach logs from the last two days", isOn: $includeLogs)
             } footer: {
                 Text(
-                    "Includes timestamps, monitoring status, and error messages. " +
-                    "No screenshots or window titles are included. Known tokens are redacted automatically."
+                    "Includes timestamps, monitoring status, and error messages. "
+                        + "No screenshots or window titles are included. Known tokens are redacted automatically."
                 )
             }
 
@@ -64,7 +64,9 @@ struct ReportBugSheet: View {
                     send()
                 }
                 .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
-                .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
             }

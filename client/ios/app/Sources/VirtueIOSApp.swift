@@ -36,7 +36,8 @@ struct ContentView: View {
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .menu:
-                        MenuView(coordinator: coordinator, onSignOut: { showLogoutConfirmation = true })
+                        MenuView(
+                            coordinator: coordinator, onSignOut: { showLogoutConfirmation = true })
                     case .setupSteps:
                         SafariSetupGuide(coordinator: coordinator)
                     case .statusDetails:
@@ -75,7 +76,9 @@ struct ContentView: View {
                 coordinator.logout()
             }
         } message: {
-            Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
+            Text(
+                "Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device."
+            )
         }
     }
 }
@@ -207,12 +210,15 @@ private struct SignInForm: View {
                 }
                 .fieldStyle(trailingPadding: 0)
 
-                TextField("Device name (default \"\(UIDevice.current.name)\")", text: $coordinator.deviceName)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .focused($focus, equals: .deviceName)
-                    .onSubmit { signIn() }
-                    .fieldStyle()
+                TextField(
+                    "Device name (default \"\(UIDevice.current.name)\")",
+                    text: $coordinator.deviceName
+                )
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .focused($focus, equals: .deviceName)
+                .onSubmit { signIn() }
+                .fieldStyle()
             }
 
             Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
@@ -244,8 +250,8 @@ private struct SignInForm: View {
     }
 }
 
-private extension View {
-    func fieldStyle(trailingPadding: CGFloat = 14) -> some View {
+extension View {
+    fileprivate func fieldStyle(trailingPadding: CGFloat = 14) -> some View {
         self
             .padding(.leading, 14)
             .padding(.trailing, trailingPadding)
@@ -360,9 +366,12 @@ private struct MenuView: View {
             Section {
                 NavigationLink("Report an Issue", value: Route.reportIssue)
                 if coordinator.loggedIn {
-                    Button(coordinator.isSigningOut ? "Signing Out…" : "Sign Out", role: .destructive, action: onSignOut)
-                        .foregroundStyle(VirtueBrand.bad)
-                        .disabled(coordinator.isSigningOut)
+                    Button(
+                        coordinator.isSigningOut ? "Signing Out…" : "Sign Out", role: .destructive,
+                        action: onSignOut
+                    )
+                    .foregroundStyle(VirtueBrand.bad)
+                    .disabled(coordinator.isSigningOut)
                 }
             }
             .listRowBackground(VirtueBrand.surface)
@@ -389,12 +398,18 @@ private struct WhatVirtueMonitorsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Virtue only captures Safari. It takes a screenshot of the web page you are viewing about every 5 minutes, blurred and with text blacked out.")
-                    .foregroundStyle(VirtueBrand.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!)
-                    .font(.subheadline)
-                    .foregroundStyle(VirtueBrand.link)
+                Text(
+                    "Virtue only captures Safari. It takes a screenshot of the web page you are viewing about every 5 minutes, blurred and with text blacked out."
+                )
+                .foregroundStyle(VirtueBrand.text)
+                .fixedSize(horizontal: false, vertical: true)
+                Link(
+                    "Learn more",
+                    destination: URL(
+                        string: "https://virtueinitiative.org/help/what-virtue-monitors/ios")!
+                )
+                .font(.subheadline)
+                .foregroundStyle(VirtueBrand.link)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
@@ -542,8 +557,11 @@ private struct StatusDetailsView: View {
                 DetailRow(
                     kind: pending == 0 ? .good : .warn,
                     label: "Waiting to upload",
-                    value: pending == 0 ? "None" : "\(pending) screenshot\(pending == 1 ? "" : "s")",
-                    hint: status?.lastBatchAtMs.map { "Last upload: \(coordinator.formatStatusTimestamp($0))" }
+                    value: pending == 0
+                        ? "None" : "\(pending) screenshot\(pending == 1 ? "" : "s")",
+                    hint: status?.lastBatchAtMs.map {
+                        "Last upload: \(coordinator.formatStatusTimestamp($0))"
+                    }
                 )
             }
         }
@@ -573,7 +591,8 @@ private struct StatusDetailsView: View {
         Section {
             DisclosureGroup("Advanced") {
                 DetailRow(label: "Device ID", value: coordinator.deviceId)
-                DetailRow(label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
+                DetailRow(
+                    label: "API URL", value: status?.apiBaseUrl ?? coordinator.currentApiBaseUrl)
                 DetailRow(label: "Hash base URL", value: status?.hashBaseUrl ?? "<default>")
                 DetailRow(
                     label: "Capture interval",
@@ -591,7 +610,8 @@ private struct StatusDetailsView: View {
                 DetailRow(label: "Pending requests", value: "\(coordinator.pendingRequestCount)")
                 DetailRow(label: "Last loop", value: coordinator.lastCoreLoop)
                 DetailRow(label: "Last attempt", value: coordinator.lastCoreScreenshotAttempt)
-                DetailRow(label: "Last skip reason", value: status?.lastSkipReason?.label ?? "<none>")
+                DetailRow(
+                    label: "Last skip reason", value: status?.lastSkipReason?.label ?? "<none>")
                 DetailRow(label: "Capture health", value: coordinator.safariCaptureHealth)
                 DetailRow(label: "Permission state", value: coordinator.safariPermissionSummary)
                 DetailRow(label: "Extension status", value: coordinator.safariDaemonStatus)
@@ -605,7 +625,8 @@ private struct StatusDetailsView: View {
                         DetailRow(
                             label: "Recent error",
                             value: error.message,
-                            hint: "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
+                            hint:
+                                "\(coordinator.formatStatusTimestamp(error.atMs)) · \(error.context)"
                         )
                     }
                 } else {
@@ -621,9 +642,11 @@ private struct StatusDetailsView: View {
                 }
                 .disabled(coordinator.forceCaptureRequested || !coordinator.loggedIn)
 
-                Text("Capture Next Safari Page takes a screenshot the next time you view a page in Safari. It uploads that screenshot right away, along with anything else waiting to upload.")
-                    .font(.footnote)
-                    .foregroundStyle(VirtueBrand.textMuted)
+                Text(
+                    "Capture Next Safari Page takes a screenshot the next time you view a page in Safari. It uploads that screenshot right away, along with anything else waiting to upload."
+                )
+                .font(.footnote)
+                .foregroundStyle(VirtueBrand.textMuted)
             }
             .listRowBackground(VirtueBrand.surface)
         }
@@ -644,7 +667,10 @@ private struct DetailRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 2) { labelView; valueView }
+                VStack(alignment: .leading, spacing: 2) {
+                    labelView
+                    valueView
+                }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     labelView
@@ -734,7 +760,8 @@ extension MonitoringState {
         case .needsSetup:
             return "Virtue is not monitoring yet. Finish the Safari setup steps."
         case .needsPermission:
-            return "The Safari extension is missing a permission. Allow it in Settings so Virtue can see every page."
+            return
+                "The Safari extension is missing a permission. Allow it in Settings so Virtue can see every page."
         case .active:
             return "The Safari extension is on. Virtue takes screenshots as you browse in Safari."
         }
@@ -789,7 +816,10 @@ struct StatusRing: View {
 /// `3 6 54 58` of the 60 unit drawing).
 struct VirtueLogoShape: Shape {
     func path(in rect: CGRect) -> Path {
-        let originX = 21.459, originY = 201.684, width = 54.0, height = 58.0
+        let originX = 21.459
+        let originY = 201.684
+        let width = 54.0
+        let height = 58.0
         func p(_ x: Double, _ y: Double) -> CGPoint {
             CGPoint(
                 x: rect.minX + (x - originX) / width * rect.width,
@@ -805,8 +835,10 @@ struct VirtueLogoShape: Shape {
 
         path.move(to: p(64.839, 203.161))
         path.addLine(to: p(43.551, 252.456))
-        path.addCurve(to: p(55.923, 247.815), control1: p(43.551, 252.456), control2: p(50.473, 261.429))
-        path.addCurve(to: p(74.555, 203.156), control1: p(62.757, 230.379), control2: p(69.101, 220.585))
+        path.addCurve(
+            to: p(55.923, 247.815), control1: p(43.551, 252.456), control2: p(50.473, 261.429))
+        path.addCurve(
+            to: p(74.555, 203.156), control1: p(62.757, 230.379), control2: p(69.101, 220.585))
         path.closeSubpath()
         return path
     }
@@ -839,7 +871,8 @@ struct IOSButtonStyle: ButtonStyle {
                 .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 44)
                 .background(
                     prominent
-                        ? (configuration.isPressed ? VirtueBrand.accent.opacity(0.85) : VirtueBrand.accent)
+                        ? (configuration.isPressed
+                            ? VirtueBrand.accent.opacity(0.85) : VirtueBrand.accent)
                         : (configuration.isPressed ? VirtueBrand.border : VirtueBrand.bgSubtle)
                 )
                 .foregroundStyle(prominent ? Color.white : VirtueBrand.accent)
@@ -853,4 +886,3 @@ struct IOSButtonStyle: ButtonStyle {
         }
     }
 }
-

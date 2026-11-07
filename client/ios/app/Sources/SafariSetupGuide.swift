@@ -54,7 +54,9 @@ struct SetupProgress {
         let done = isDone(step)
         switch (step, done) {
         case (.turnOnExtension, false) where setup.reportedOff:
-            return setup.reportedOffAt.map { "The extension was turned off when Virtue checked \(relativeTime($0))." }
+            return setup.reportedOffAt.map {
+                "The extension was turned off when Virtue checked \(relativeTime($0))."
+            }
         case (.turnOnExtension, true):
             return setup.lastMessageAt.map { "Last heard from Safari \(relativeTime($0))." }
         case (.tryIt, true):
@@ -105,9 +107,12 @@ struct SafariSetupGuide: View {
                     }
                 }
 
-                Link("See these steps on the website", destination: URL(string: "https://virtueinitiative.org/download#ios")!)
-                    .font(.subheadline)
-                    .foregroundStyle(VirtueBrand.link)
+                Link(
+                    "See these steps on the website",
+                    destination: URL(string: "https://virtueinitiative.org/download#ios")!
+                )
+                .font(.subheadline)
+                .foregroundStyle(VirtueBrand.link)
             }
             .padding(20)
         }
@@ -264,7 +269,8 @@ struct SetupStepDetails: View {
         VStack(alignment: .leading, spacing: 10) {
             switch step {
             case .signIn:
-                Instruction("Enter your Virtue email and password on the home screen, then tap Sign In.")
+                Instruction(
+                    "Enter your Virtue email and password on the home screen, then tap Sign In.")
             case .turnOnExtension:
                 Instruction(openSettingsText)
                 openSettingsButton
@@ -290,9 +296,15 @@ struct SetupStepDetails: View {
                 openSettingsButton
                 Instruction("Turn on Allow in Private Browsing.", image: "ios_setup_allow_private")
             case .tryIt:
-                Instruction("Close Safari completely. Swipe up from the bottom of the screen and pause, then swipe Safari up and away.")
-                Instruction("Tap Check Extension. Safari opens a page that shows whether the extension is on.")
-                Instruction("Come back to Virtue. This step turns green once the check page reports that the extension is on.")
+                Instruction(
+                    "Close Safari completely. Swipe up from the bottom of the screen and pause, then swipe Safari up and away."
+                )
+                Instruction(
+                    "Tap Check Extension. Safari opens a page that shows whether the extension is on."
+                )
+                Instruction(
+                    "Come back to Virtue. This step turns green once the check page reports that the extension is on."
+                )
                 ExtensionCheckButton(coordinator: coordinator, style: .prominent)
             }
         }
@@ -308,9 +320,11 @@ struct SetupStepDetails: View {
             return "Tap Open Settings. It opens Safari's settings for the Virtue extension."
         }
         if #available(iOS 18.0, *) {
-            return "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then tap Safari in the list of apps."
+            return
+                "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then tap Safari in the list of apps."
         }
-        return "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then scroll down and tap Safari."
+        return
+            "Tap Open Settings. It opens Virtue's own settings page, so tap the back button at the top left. Then scroll down and tap Safari."
     }
 
     private var reopenText: String {
@@ -324,7 +338,7 @@ struct SetupStepDetails: View {
     /// own Settings page if it throws.
     private var hasDirectExtensionLink: Bool {
         #if compiler(>=6.2.3)
-        if #available(iOS 26.2, *) { return true }
+            if #available(iOS 26.2, *) { return true }
         #endif
         return false
     }
@@ -345,14 +359,16 @@ struct SetupStepDetails: View {
 
     private func openSettings() async {
         #if compiler(>=6.2.3)
-        if #available(iOS 26.2, *), let appID = Bundle.main.bundleIdentifier {
-            do {
-                // The extension's bundle id is the app's plus ".broadcast"
-                // (project.yml).
-                try await SFSafariSettings.openExtensionsSettings(forIdentifiers: ["\(appID).broadcast"])
-                return
-            } catch {}
-        }
+            if #available(iOS 26.2, *), let appID = Bundle.main.bundleIdentifier {
+                do {
+                    // The extension's bundle id is the app's plus ".broadcast"
+                    // (project.yml).
+                    try await SFSafariSettings.openExtensionsSettings(forIdentifiers: [
+                        "\(appID).broadcast"
+                    ])
+                    return
+                } catch {}
+            }
         #endif
         // Before iOS 26.2 there is no public link to Safari's extension
         // settings; this gets the user to the app list that holds Safari.
@@ -413,11 +429,17 @@ struct ExtensionCheckButton: View {
     private var result: (text: String, icon: String, passed: Bool)? {
         switch coordinator.extensionCheck {
         case .waiting(_, true):
-            return ("No answer yet. On the check page, tap Back to Virtue to see the result.", "hourglass", false)
+            return (
+                "No answer yet. On the check page, tap Back to Virtue to see the result.",
+                "hourglass", false
+            )
         case .passed:
             return ("The extension is on.", "checkmark.circle.fill", true)
         case .failed:
-            return ("The extension is turned off. Turn it on with the Turn on the Safari extension step.", "exclamationmark.triangle", false)
+            return (
+                "The extension is turned off. Turn it on with the Turn on the Safari extension step.",
+                "exclamationmark.triangle", false
+            )
         case .waiting(_, false), nil:
             return nil
         }
@@ -438,7 +460,9 @@ private struct StepBadge: View {
             } else {
                 Circle()
                     .stroke(
-                        current ? VirtueBrand.accent : (done == nil ? VirtueBrand.ochre : VirtueBrand.border),
+                        current
+                            ? VirtueBrand.accent
+                            : (done == nil ? VirtueBrand.ochre : VirtueBrand.border),
                         lineWidth: current ? 2 : 1.5
                     )
                     .frame(width: 22, height: 22)
@@ -505,10 +529,12 @@ private struct ScreenTimeNote: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "hourglass")
                 .foregroundStyle(VirtueBrand.ochre)
-            Text("If Allow Extension is grayed out or won't stay on, Screen Time restrictions are blocking it. Whoever knows your Screen Time passcode can open Settings, tap Screen Time, and turn off Content & Privacy Restrictions. Turn on the extension, then turn the restrictions back on.")
-                .font(.footnote)
-                .foregroundStyle(VirtueBrand.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "If Allow Extension is grayed out or won't stay on, Screen Time restrictions are blocking it. Whoever knows your Screen Time passcode can open Settings, tap Screen Time, and turn off Content & Privacy Restrictions. Turn on the extension, then turn the restrictions back on."
+            )
+            .font(.footnote)
+            .foregroundStyle(VirtueBrand.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .background(VirtueBrand.bgSubtle)

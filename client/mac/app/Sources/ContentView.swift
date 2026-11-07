@@ -27,7 +27,10 @@ struct ContentView: View {
 
     var body: some View {
         content
-            .frame(minWidth: 440, idealWidth: 560, maxWidth: .infinity, minHeight: 520, idealHeight: 640, maxHeight: .infinity)
+            .frame(
+                minWidth: 440, idealWidth: 560, maxWidth: .infinity, minHeight: 520,
+                idealHeight: 640, maxHeight: .infinity
+            )
             .background(VirtueBrand.bg)
             .navigationTitle(screen.title)
             .toolbar { toolbar }
@@ -44,7 +47,9 @@ struct ContentView: View {
                     coordinator.stopMonitoringAndQuit()
                 }
             } message: {
-                Text("This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted.")
+                Text(
+                    "This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted."
+                )
             }
             .alert("Sign out?", isPresented: $showLogoutConfirmation) {
                 Button("Cancel", role: .cancel) {}
@@ -53,7 +58,9 @@ struct ContentView: View {
                     screen = .home
                 }
             } message: {
-                Text("Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device.")
+                Text(
+                    "Signing out will deactivate this device and stop monitoring. Anyone monitoring you may be alerted. Logging in again will create a new device."
+                )
             }
     }
 
@@ -155,7 +162,10 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(VirtueBrand.text.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(
+                    VirtueBrand.text.opacity(0.88),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
                 .padding(.horizontal, 24)
                 .padding(.bottom, 20)
                 .transition(.opacity)
@@ -312,7 +322,8 @@ private struct ScreenRecordingSteps: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .stroke(VirtueBrand.border, lineWidth: 1)
                         )
-                        .accessibilityLabel("Privacy & Security settings, Screen Recording, with Virtue turned on")
+                        .accessibilityLabel(
+                            "Privacy & Security settings, Screen Recording, with Virtue turned on")
                     Text("If macOS asks to quit and reopen Virtue, either choice works.")
                         .font(.system(size: 12))
                         .foregroundStyle(VirtueBrand.textMuted)
@@ -401,7 +412,10 @@ private struct SignInForm: View {
 
             // A daemon that failed to start would fail the login too, so say
             // why up front (CLIENT-024).
-            ForEach([coordinator.loginError, coordinator.unexpectedStopMessage].compactMap { $0 }, id: \.self) { message in
+            ForEach(
+                [coordinator.loginError, coordinator.unexpectedStopMessage].compactMap { $0 },
+                id: \.self
+            ) { message in
                 Text(message.replacingOccurrences(of: "\n\n", with: " "))
                     .font(.system(size: 13))
                     .foregroundStyle(VirtueBrand.bad)
@@ -427,10 +441,14 @@ private struct InputStyle: ViewModifier {
             .font(.system(size: 14))
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(VirtueBrand.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background(
+                VirtueBrand.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(isFocused ? VirtueBrand.accent : VirtueBrand.border, lineWidth: isFocused ? 2 : 1)
+                    .stroke(
+                        isFocused ? VirtueBrand.accent : VirtueBrand.border,
+                        lineWidth: isFocused ? 2 : 1)
             )
     }
 }
@@ -501,7 +519,10 @@ private struct StatusFocus: View {
             return (coordinator.unexpectedStopMessage ?? "")
                 .replacingOccurrences(of: "\n\n", with: " ")
         case .active:
-            let last = coordinator.coreStatus?.lastScreenshotAtMs.map { " Last screenshot at \(shortTime($0))." } ?? ""
+            let last =
+                coordinator.coreStatus?.lastScreenshotAtMs.map {
+                    " Last screenshot at \(shortTime($0))."
+                } ?? ""
             return "Virtue is capturing your main display.\(last)"
         default:
             return "Virtue is getting ready. The first screenshot is taken within a few minutes."
@@ -518,14 +539,20 @@ private struct WhatVirtueMonitorsView: View {
         ScrollView {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Virtue takes a screenshot of your main display about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(VirtueBrand.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Link("Learn more", destination: URL(string: "https://virtueinitiative.org/help/what-virtue-monitors/mac")!)
-                        .font(.system(size: 14))
-                        .foregroundStyle(VirtueBrand.link)
-                        .pointingHandCursor()
+                    Text(
+                        "Virtue takes a screenshot of your main display about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners."
+                    )
+                    .font(.system(size: 14))
+                    .foregroundStyle(VirtueBrand.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Link(
+                        "Learn more",
+                        destination: URL(
+                            string: "https://virtueinitiative.org/help/what-virtue-monitors/mac")!
+                    )
+                    .font(.system(size: 14))
+                    .foregroundStyle(VirtueBrand.link)
+                    .pointingHandCursor()
                 }
             }
             .frame(maxWidth: 400)
@@ -602,7 +629,10 @@ private struct StatusRing: View {
 /// `3 6 54 58` of the 60 unit drawing).
 struct VirtueLogoShape: Shape {
     func path(in rect: CGRect) -> Path {
-        let originX = 21.459, originY = 201.684, width = 54.0, height = 58.0
+        let originX = 21.459
+        let originY = 201.684
+        let width = 54.0
+        let height = 58.0
         func p(_ x: Double, _ y: Double) -> CGPoint {
             CGPoint(
                 x: rect.minX + (x - originX) / width * rect.width,
@@ -618,8 +648,10 @@ struct VirtueLogoShape: Shape {
 
         path.move(to: p(64.839, 203.161))
         path.addLine(to: p(43.551, 252.456))
-        path.addCurve(to: p(55.923, 247.815), control1: p(43.551, 252.456), control2: p(50.473, 261.429))
-        path.addCurve(to: p(74.555, 203.156), control1: p(62.757, 230.379), control2: p(69.101, 220.585))
+        path.addCurve(
+            to: p(55.923, 247.815), control1: p(43.551, 252.456), control2: p(50.473, 261.429))
+        path.addCurve(
+            to: p(74.555, 203.156), control1: p(62.757, 230.379), control2: p(69.101, 220.585))
         path.closeSubpath()
         return path
     }

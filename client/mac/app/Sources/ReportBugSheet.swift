@@ -21,7 +21,10 @@ struct ReportIssueView: View {
                     .scrollContentBackground(.hidden)
                     .padding(6)
                     .frame(height: 160)
-                    .background(VirtueBrand.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(
+                        VirtueBrand.surface,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
                     .overlay(alignment: .topLeading) {
                         if message.isEmpty {
                             Text("Describe what happened.")
@@ -43,7 +46,10 @@ struct ReportIssueView: View {
                     .font(.system(size: 14))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
-                    .background(VirtueBrand.surface, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(
+                        VirtueBrand.surface,
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
                     .overlay(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .stroke(VirtueBrand.border)
@@ -53,8 +59,8 @@ struct ReportIssueView: View {
                     Toggle("Attach logs from the last two days", isOn: $includeLogs)
                         .toggleStyle(AccentCheckboxStyle())
                     Text(
-                        "Includes timestamps, monitoring status, and error messages. " +
-                        "No screenshots or window titles are included."
+                        "Includes timestamps, monitoring status, and error messages. "
+                            + "No screenshots or window titles are included."
                     )
                     .font(.system(size: 12))
                     .foregroundStyle(VirtueBrand.textMuted)
@@ -98,7 +104,9 @@ struct ReportIssueView: View {
                         .fill(configuration.isOn ? VirtueBrand.accent : VirtueBrand.surface)
                         .overlay(
                             RoundedRectangle(cornerRadius: 3.5, style: .continuous)
-                                .stroke(configuration.isOn ? Color.clear : VirtueBrand.border, lineWidth: 1)
+                                .stroke(
+                                    configuration.isOn ? Color.clear : VirtueBrand.border,
+                                    lineWidth: 1)
                         )
                         .overlay {
                             if configuration.isOn {

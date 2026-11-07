@@ -32,14 +32,20 @@ public struct VirtueButtonStyle: ButtonStyle {
                 .frame(maxWidth: large ? .infinity : nil)
                 .background(
                     prominent
-                        ? (configuration.isPressed ? VirtueBrand.accent.opacity(0.85) : VirtueBrand.accent)
+                        ? (configuration.isPressed
+                            ? VirtueBrand.accent.opacity(0.85) : VirtueBrand.accent)
                         : (configuration.isPressed ? VirtueBrand.border : VirtueBrand.bgSubtle)
                 )
                 .foregroundStyle(prominent ? Color.white : VirtueBrand.accent)
-                .clipShape(RoundedRectangle(cornerRadius: large ? 8 : VirtueRadius.button, style: .continuous))
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: large ? 8 : VirtueRadius.button, style: .continuous)
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: large ? 8 : VirtueRadius.button, style: .continuous)
-                        .stroke(prominent ? Color.clear : VirtueBrand.border, lineWidth: 1)
+                    RoundedRectangle(
+                        cornerRadius: large ? 8 : VirtueRadius.button, style: .continuous
+                    )
+                    .stroke(prominent ? Color.clear : VirtueBrand.border, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1.0 : 0.45)
