@@ -113,6 +113,10 @@ git show <base-sha>:client/version.properties > "${base_version_file}"
 
 Replace `<base-sha>` with the commit or branch you are targeting, for example `origin/main`.
 
+## TestFlight "What to Test" (`.github/workflows/testflight-notes-check.yml`)
+
+Pull requests into `main` must have a `# What to Test (iOS)` section in the PR body, with plain sentences for TestFlight testers. The check fails without it. The section is read by `client/scripts/extract-testflight-notes.sh`, which prints the text under the heading up to the next heading of the same or higher level. The `client-ios.yml` distribution step on `main` uses that text as the build's "What to Test". Staging builds keep the version label.
+
 ## Rust client workspace
 
 The Rust workspace lives in `client/` and includes:
