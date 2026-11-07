@@ -292,6 +292,24 @@ Notes:
 ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
 ```
 
+### Swift style (`.github/workflows/swift-format.yml`)
+
+Run this when touching any `.swift` file (`client/mac/`, `client/ios/`, `client/shared-swift/`).
+
+From the repo root:
+
+```bash
+./scripts/swift-format.sh --check
+```
+
+Notes:
+
+- Uses Apple's `swift-format` with the repo-root `.swift-format` config (4-space indent, 100 columns). It ships with Xcode 16+ and Swift 6 toolchains, so there's nothing extra to install, on macOS or Linux.
+- `./scripts/swift-format.sh` (`just swift-format`) fixes formatting in place. `--check` (`just swift-format-check`) also fails on lint rules the formatter can't fix.
+- It only looks at tracked files, so build output and checked-out packages are skipped.
+- CI pins `swift:6.1.2`, because `swift-format`'s output can change between releases. If your local version formats differently from CI, CI's version wins.
+- C FFI declarations (`@_silgen_name`/`@_cdecl`) keep their snake_case Rust symbol names, with `// swift-format-ignore: AlwaysUseLowerCamelCase` above each one.
+
 ### Building the macOS and iOS apps from Linux
 
 `client/scripts/remote-apple-build.sh` compiles the Rust on Linux and has a Mac compile the Swift, link and sign over SSH. Use it to test on a device. It's much faster than building Rust on the Mac, and CI still builds what ships.
@@ -414,3 +432,4 @@ If you want a practical rule instead of the full matrix:
 - `client/windows/` changes: run the Windows client CI commands.
 - `client/android/` changes: run the Android debug lint/build command.
 - `client/ios/` changes: run the iOS Rust build plus simulator build.
+- Any `.swift` change: run `./scripts/swift-format.sh --check`.

@@ -281,6 +281,18 @@ android-logs follow="false":
 android-force-idle:
     ./client/android/scripts/force-idle.sh
 
+# --- swift -----------------------------------------------------------------
+
+# Format every tracked Swift file (mac, ios, shared-swift) with swift-format.
+[group('swift')]
+swift-format:
+    ./scripts/swift-format.sh
+
+# Check Swift formatting and lint rules without changing anything (what CI runs).
+[group('swift')]
+swift-format-check:
+    ./scripts/swift-format.sh --check
+
 # --- ios -------------------------------------------------------------------
 
 # Build the iOS app (macOS + Xcode only). Run the script with --help for all options.
