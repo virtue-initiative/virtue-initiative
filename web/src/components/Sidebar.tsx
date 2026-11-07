@@ -318,7 +318,7 @@ export function Sidebar() {
                   active={onReport && activeReportUserId === partner.user.id}
                   onNavigate={closeMobile}
                 >
-                  {(partner.user.name ?? partner.user.email) + ' report'}
+                  {(partner.user.name ?? partner.user.email) + "'s report"}
                 </NavLink>
               ))}
             </div>

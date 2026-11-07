@@ -32,7 +32,7 @@ Every signed-in page MUST show the sidebar. On narrow screens it MUST collapse i
 
 - **Devices**, **Partners** and **Passwords** links MUST show a count when it is above zero: the user's own devices, accepted partners in both directions, and locked passwords that are not deleted.
 - Clicking **Devices** or **Partners** MUST refresh that page's data (WEB-012), even when already on it.
-- **Reports** MUST list "My report" and one "<name> report" per accepted watched person. **Logs** MUST list "My logs" and one "<name>'s logs" per accepted watched person. `<name>` is the person's name, or their email when they have none. The link for the current page MUST be marked active.
+- **Reports** MUST list "My report" and one "<name>'s report" per accepted watched person. **Logs** MUST list "My logs" and one "<name>'s logs" per accepted watched person. `<name>` is the person's name, or their email when they have none. The link for the current page MUST be marked active.
 - The account button MUST show the user's name, else their email, else "Account". It MUST open a menu with **Settings**, **Help** (opens the help site in a new tab), **Report an issue** (WEB-064) and **Log out** (WEB-007).
 - There MUST NOT be a link to Admin (WEB-026).
 
