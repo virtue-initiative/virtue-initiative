@@ -78,8 +78,15 @@ enum Commands {
         #[command(subcommand)]
         command: Option<DaemonCommands>,
     },
-    #[command(about = "Show current auth, capture, and upload status")]
+    #[command(about = "Show whether monitoring is working")]
     Status {
+        /// Also show account, queue, capture and error details.
+        #[arg(long)]
+        full: bool,
+        /// Show everything --full does, plus settings, paths and logs.
+        #[arg(long)]
+        advanced: bool,
+        /// Print every field as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -184,7 +191,20 @@ async fn run() -> Result<()> {
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
+        Commands::Status {
+            full,
+            advanced,
+            json,
+        } => {
+            let detail = if advanced {
+                StatusDetail::Advanced
+            } else if full {
+                StatusDetail::Full
+            } else {
+                StatusDetail::Summary
+            };
+            tokio::task::block_in_place(|| status(paths, detail, json))
+        }
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
         Commands::ForceScreenshot => tokio::task::block_in_place(|| force_screenshot(paths)),
         Commands::ReportIssue {
@@ -516,7 +536,15 @@ fn log_command() -> String {
     format!("journalctl --user -u {} --since -1h", service_name())
 }
 
-fn status(paths: ClientPaths, json: bool) -> Result<()> {
+/// How much `virtue status` prints (CLIENT-020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StatusDetail {
+    Summary,
+    Full,
+    Advanced,
+}
+
+fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
     // Every field below comes from `load_service_status` — the shared
     // `status::build` (CORE-010), which already folds in the compile-time
     // config — so there is nothing for this command to assemble itself.
@@ -563,18 +591,55 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
         Tone::Bad => style::bad(headline.text),
     };
     println!("{}", style::heading(&painted));
-    if let Some(command) = headline.fix_command {
-        println!("Run {} to fix this.", style::link(&format!("`{command}`")));
-    }
+    let print_fix = || {
+        if let Some(command) = headline.fix_command {
+            println!("Run {} to fix this.", style::link(&format!("`{command}`")));
+        }
+    };
 
-    let none = style::dim("<none>");
-    let unknown = style::dim("<unknown>");
     let row = |label: &str, value: &str| {
         println!(
             "  {} {value}",
             style::dim(&format!("{:<21}", format!("{label}:")))
         );
     };
+
+    if detail == StatusDetail::Summary {
+        if let Some(email) = &status.account_email
+            && status.is_authenticated
+        {
+            row("signed in as", email);
+        }
+        row(
+            "last screenshot",
+            &status
+                .last_screenshot_at_ms
+                .map(|ms| format_age(now_ms - ms))
+                .unwrap_or_else(|| "None yet".to_string()),
+        );
+        row(
+            "waiting to upload",
+            &(status.pending_hash_count + status.pending_batch_count).to_string(),
+        );
+        let errors = status.recent_errors.len();
+        row(
+            "recent errors",
+            &if errors == 0 {
+                "None".to_string()
+            } else {
+                style::bad(&errors.to_string())
+            },
+        );
+        println!();
+        print_fix();
+        println!("Run {} for details.", style::link("`virtue status --full`"));
+        return Ok(());
+    }
+
+    print_fix();
+
+    let none = style::dim("<none>");
+    let unknown = style::dim("<unknown>");
     let yes_no = |value: bool| {
         if value {
             style::good("yes")
@@ -649,6 +714,17 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
                 style::bad(&error.message)
             );
         }
+    }
+
+    if detail < StatusDetail::Advanced {
+        println!();
+        println!(
+            "Run {} for settings, paths and logs.",
+            style::link("`virtue status --advanced`")
+        );
+        println!();
+        print_monitoring_summary();
+        return Ok(());
     }
 
     section("Advanced");
@@ -1287,7 +1363,29 @@ mod tests {
     #[test]
     fn cli_accepts_status_command() {
         let cli = Cli::try_parse_from(["virtue", "status"]).expect("status command should parse");
-        assert!(matches!(cli.command, Commands::Status { json: false }));
+        assert!(matches!(
+            cli.command,
+            Commands::Status {
+                full: false,
+                advanced: false,
+                json: false,
+            }
+        ));
+    }
+
+    // CLIENT-020: `virtue status --full --advanced` parses.
+    #[test]
+    fn cli_accepts_status_detail_flags() {
+        let cli = Cli::try_parse_from(["virtue", "status", "--full", "--advanced"])
+            .expect("status --full --advanced should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::Status {
+                full: true,
+                advanced: true,
+                json: false,
+            }
+        ));
     }
 
     // CLIENT-020: `virtue status --json` parses.
@@ -1295,7 +1393,7 @@ mod tests {
     fn cli_accepts_status_json_flag() {
         let cli = Cli::try_parse_from(["virtue", "status", "--json"])
             .expect("status --json should parse");
-        assert!(matches!(cli.command, Commands::Status { json: true }));
+        assert!(matches!(cli.command, Commands::Status { json: true, .. }));
     }
 
     // CLIENT-020: bare `virtue daemon` parses as the daemon run.

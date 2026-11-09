@@ -69,7 +69,7 @@ Every app MUST show whether the user is signed in and a one-line monitoring stat
 - Windows: see CLIENT-027.
 - Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
 - iOS headline: "Signed out"; "Monitoring paused"; "Setup not finished"; "Safari permission needed"; "Monitoring active" (CLIENT-032).
-- Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status`.
+- Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status --full`.
 
 ## CLIENT-007 Status Details
 
@@ -84,7 +84,7 @@ Status Details MUST render the CORE-010 fields, grouped as:
 Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
 
 - macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot.
-- Linux `virtue status` MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.
+- Linux Status Details is `virtue status --full`, which MUST leave out the Advanced group; `virtue status --advanced` MUST show every group. It MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.
 
 ## CLIENT-008 Test Screenshot
 
@@ -233,7 +233,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `virtue login [--email E] [--device-name N]`                                 | CLIENT-004                                                                                           |
 | `virtue logout [--yes]`                                                      | CLIENT-005; prints "Logged out. Monitoring is disabled on this device until you run `virtue login`." |
-| `virtue status [--json]`                                                     | CLIENT-007                                                                                           |
+| `virtue status [--full] [--advanced] [--json]`                               | CLIENT-006, CLIENT-007                                                                               |
 | `virtue daemon`                                                              | runs the daemon and tray (used by systemd)                                                           |
 | `virtue daemon start`                                                        | `systemctl --user start` the service                                                                 |
 | `virtue daemon stop [--yes]`                                                 | CLIENT-011                                                                                           |
@@ -245,7 +245,8 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Output SHOULD use color and bold headings when written to a terminal. It MUST NOT contain color codes when the stream is not a terminal, `NO_COLOR` is set to a non-empty value, or `TERM` is `dumb`.
 - `--risk` MUST be a number from 0 to 1 and defaults to 0.5. `virtue --version` MUST print the build label.
 - The login capture probe MUST report one of: Wayland capture working; Wayland capture failing, with advice to use X11 or a compositor that allows `grim`; X11 working; X11 failing, with advice to install ImageMagick or `maim`; or no graphical session, with advice to run `virtue login` inside the desktop session.
-- `status --json` MUST output the CORE-010 fields plus `backend`, `service_name`, `service_active`, `state_dir`, `log_command`, and the older keys `logged_in`, `running` and `base_api_url`.
+- `virtue status` with no flags MUST show only the headline (CLIENT-006), the signed-in email, the age of the last screenshot ("None yet" when there is none), how many events are waiting to upload, how many recent errors there are, and a pointer to `--full`.
+- `status --json` MUST output every field whatever the other flags, namely the CORE-010 fields plus `backend`, `service_name`, `service_active`, `state_dir`, `log_command`, and the older keys `logged_in`, `running` and `base_api_url`.
 
 > OPEN: `virtue dev upload-log` always sends risk 1.0 but prints the `--risk` value it was given — should it honor `--risk` or stop accepting it?
 
