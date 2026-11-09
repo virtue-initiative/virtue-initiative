@@ -13,8 +13,8 @@ import { d1, fail, parseEnv, sqlString } from './d1';
 const USAGE = `Usage:
   bun run newsletter send <file.md> --env staging|prod|local [--country US] [--region CA]
       Writes .newsletter/<name>.html as a preview and prints how many subscribers match. Nothing
-      is sent. A blog post (landing/src/content/blog) uses its title as the subject, and its
-      relative links and images point at the published post. Any other file needs a first
+      is sent. A blog post (landing/src/content/blog) uses its frontmatter subject, or else its
+      title, as the subject, and its relative links and images point at the published post. Any other file needs a first
       "# Heading", which is the subject.
     --to you@example.com   Send only to this address (it need not be a subscriber).
     --send                 Send to every confirmed, subscribed match, after a prompt. Addresses
@@ -89,7 +89,7 @@ const TAG_STYLES: Record<string, string> = {
 
 interface Issue {
   subject: string;
-  /** The body, starting with the subject as a "# Heading". */
+  /** The body, starting with the title as a "# Heading". */
   markdown: string;
   /** Relative links and images resolve against this. */
   baseUrl: string;
@@ -122,7 +122,7 @@ function readIssue(path: string): Issue {
     const slug = inFolder ? basename(dirname(fromBlog)) : basename(fromBlog).replace(/\.mdx?$/, '');
     const postUrl = `${urls.landing}/blog/${slug}`;
     return {
-      subject: meta.title,
+      subject: meta.subject || meta.title,
       markdown: `# ${meta.title}\n\n${body}`,
       baseUrl: inFolder ? `${postUrl}/` : `${urls.landing}/blog/`,
       postUrl,

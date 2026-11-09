@@ -142,7 +142,8 @@ bun run newsletter send $POST --env prod --send
 bun run newsletter unsubscribe reader@example.com --env prod
 ```
 
-For a blog post, the frontmatter `title` is the subject, and the email links to the post. Relative
+For a blog post, the frontmatter `subject` is the email's subject, or the `title` if it has none.
+The `title` is still the email's heading, and the email links to the post. Relative
 links and images point at the published post, so deploy the landing site before sending, and keep
 the post's images in its folder beside `index.md`. The landing build publishes them unchanged at
 `/blog/<folder>/<file>` (`landing/blog-assets.mjs`), because the blog page's own copies are re-encoded
