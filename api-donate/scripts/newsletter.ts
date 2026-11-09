@@ -2,7 +2,8 @@
  * Newsletter CLI. Reads and writes the `newsletter_signups` table in this worker's D1 with
  * wrangler, and sends email through SES. Run from api-donate/ (see README.md, "Newsletter").
  */
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
@@ -11,11 +12,13 @@ import { d1, fail, parseEnv, sqlString } from './d1';
 
 const USAGE = `Usage:
   bun run newsletter send <file.md> --env staging|prod|local [--country US] [--region CA]
-      Writes <file>.html as a preview and prints how many subscribers match. Nothing is sent.
-      The file's first "# Heading" is the subject.
+      Writes .newsletter/<name>.html as a preview and prints how many subscribers match. Nothing
+      is sent. A blog post (landing/src/content/blog) uses its title as the subject, and its
+      relative links and images point at the published post. Any other file needs a first
+      "# Heading", which is the subject.
     --to you@example.com   Send only to this address (it need not be a subscriber).
     --send                 Send to every confirmed, subscribed match, after a prompt. Addresses
-                           are logged to <file>.sent.txt and skipped on a rerun.
+                           are logged to .newsletter/<name>.sent.txt and skipped on a rerun.
   bun run newsletter unsubscribe <email> --env staging|prod|local
       For someone who asks by email instead of using the link.
 
@@ -32,6 +35,9 @@ const SES_REGION = 'us-east-1';
 const SES_CONFIG_SET = 'newsletter';
 const POSTAL_ADDRESS = '75 Knapp Rd, Mechanicville, NY 12118';
 const SENDS_PER_SECOND = 10;
+const BLOG_DIR = resolve(import.meta.dir, '../../landing/src/content/blog');
+// Previews and sent logs, kept out of the blog folder and out of git (they list subscribers).
+const OUT_DIR = resolve(import.meta.dir, '../.newsletter');
 const URLS = {
   prod: { landing: 'https://virtueinitiative.org', api: 'https://app.virtueinitiative.org/api' },
   staging: {
@@ -81,14 +87,81 @@ const TAG_STYLES: Record<string, string> = {
   li: 'margin:0 0 8px;',
 };
 
-function renderBodyHtml(markdown: string): string {
-  return (marked.parse(markdown, { async: false }) as string).replace(
-    /<(a|img|h1|h2|h3|blockquote|hr|li)(?=[\s>/])/g,
-    (_, tag: string) => `<${tag} style="${TAG_STYLES[tag]}"`,
-  );
+interface Issue {
+  subject: string;
+  /** The body, starting with the subject as a "# Heading". */
+  markdown: string;
+  /** Relative links and images resolve against this. */
+  baseUrl: string;
+  /** The published blog post, when the issue is one. */
+  postUrl?: string;
+  /** Names the preview and sent log in OUT_DIR. */
+  name: string;
 }
 
-function renderHtml(body: string, unsubscribeUrl: string): string {
+/**
+ * Reads an issue. A blog post's frontmatter gives the subject, and its folder's images are
+ * published beside the post at /blog/<slug>/<file> (landing/blog-assets.mjs), so `./image.png`
+ * resolves there.
+ */
+function readIssue(path: string): Issue {
+  const text = readFileSync(path, 'utf8').trim();
+  const frontmatter = text.match(/^---\n([\s\S]*?)\n---\n?/);
+  const meta: Record<string, string> = {};
+  for (const line of frontmatter?.[1].split('\n') ?? []) {
+    const field = line.match(/^(\w+):\s*(.*)$/);
+    if (field) meta[field[1]] = field[2].replace(/^(['"])(.*)\1$/, '$2').trim();
+  }
+  const body = text.slice(frontmatter?.[0].length ?? 0).trim();
+
+  const fromBlog = relative(BLOG_DIR, resolve(path));
+  if (!fromBlog.startsWith('..') && /\.mdx?$/.test(fromBlog)) {
+    if (meta.draft === 'true') fail('This post is a draft, so it is not on the website yet.');
+    if (!meta.title) fail('The post needs a title.');
+    const inFolder = /^index\.mdx?$/.test(basename(fromBlog));
+    const slug = inFolder ? basename(dirname(fromBlog)) : basename(fromBlog).replace(/\.mdx?$/, '');
+    const postUrl = `${urls.landing}/blog/${slug}`;
+    return {
+      subject: meta.title,
+      markdown: `# ${meta.title}\n\n${body}`,
+      baseUrl: inFolder ? `${postUrl}/` : `${urls.landing}/blog/`,
+      postUrl,
+      name: slug,
+    };
+  }
+
+  const subject = body.match(/^#\s+(.+)$/m)?.[1]?.trim();
+  if (!subject) fail('The file needs a "# Heading" line to use as the subject.');
+  return {
+    subject,
+    markdown: body,
+    baseUrl: `${urls.landing}/`,
+    name: basename(path).replace(/\.mdx?$/, ''),
+  };
+}
+
+/** Makes a link absolute, since an email has no page for a relative one to be relative to. */
+function absoluteUrl(url: string, baseUrl: string): string {
+  try {
+    return new URL(url, baseUrl).href;
+  } catch {
+    return url;
+  }
+}
+
+function renderBodyHtml(markdown: string, baseUrl: string): string {
+  return (marked.parse(markdown, { async: false }) as string)
+    .replace(
+      /<(a|img|h1|h2|h3|blockquote|hr|li)(?=[\s>/])/g,
+      (_, tag: string) => `<${tag} style="${TAG_STYLES[tag]}"`,
+    )
+    .replace(
+      /\b(href|src)="([^"]*)"/g,
+      (_, attr: string, url: string) => `${attr}="${absoluteUrl(url, baseUrl)}"`,
+    );
+}
+
+function renderHtml(body: string, unsubscribeUrl: string, postUrl?: string): string {
   return `<!doctype html>
 <html lang="en">
 <body style="margin:0;padding:24px 12px;background:#f4f4f1;">
@@ -96,7 +169,7 @@ function renderHtml(body: string, unsubscribeUrl: string): string {
 ${body}
 <hr style="border:none;border-top:1px solid #e3e3df;margin:28px 0 16px;">
 <div style="font-size:13px;color:#6b6b66;">
-<p style="margin:0 0 8px;">You got this email because you subscribed to Virtue Initiative project updates.</p>
+${postUrl ? `<p style="margin:0 0 8px;">You can also <a href="${postUrl}" style="color:#6b6b66;">read this on our blog</a>.</p>\n` : ''}<p style="margin:0 0 8px;">You got this email because you subscribed to Virtue Initiative project updates.</p>
 <p style="margin:0 0 8px;">${POSTAL_ADDRESS}</p>
 <p style="margin:0;"><a href="${unsubscribeUrl}" style="color:#6b6b66;">Unsubscribe</a></p>
 </div>
@@ -107,29 +180,30 @@ ${body}
 }
 
 /** The text/plain part: links become `text (url)`, and heading and emphasis markers are dropped. */
-function renderTextBody(markdown: string): string {
+function renderTextBody(markdown: string, baseUrl: string): string {
   return markdown
-    .replace(/!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, text: string, url: string) =>
-      text && text !== url ? `${text} (${url})` : url,
-    )
+    .replace(/!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, text: string, path: string) => {
+      const url = absoluteUrl(path, baseUrl);
+      return text && text !== path ? `${text} (${url})` : url;
+    })
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/(\*\*|__)(.+?)\1/g, '$2');
 }
 
-function renderText(body: string, unsubscribeUrl: string): string {
-  return `${body}\n\n--\nYou got this email because you subscribed to Virtue Initiative project updates.\n${POSTAL_ADDRESS}\nUnsubscribe: ${unsubscribeUrl}\n`;
+function renderText(body: string, unsubscribeUrl: string, postUrl?: string): string {
+  const post = postUrl ? `You can also read this on our blog: ${postUrl}\n` : '';
+  return `${body}\n\n--\n${post}You got this email because you subscribed to Virtue Initiative project updates.\n${POSTAL_ADDRESS}\nUnsubscribe: ${unsubscribeUrl}\n`;
 }
 
 async function send() {
   if (!arg || !existsSync(arg)) fail(USAGE);
-  const markdown = readFileSync(arg, 'utf8').trim();
-  const subject = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim();
-  if (!subject) fail('The file needs a "# Heading" line to use as the subject.');
-  const bodyHtml = renderBodyHtml(markdown);
-  const bodyText = renderTextBody(markdown);
+  const { subject, markdown, baseUrl, postUrl, name } = readIssue(arg);
+  const bodyHtml = renderBodyHtml(markdown, baseUrl);
+  const bodyText = renderTextBody(markdown, baseUrl);
 
-  const htmlPath = arg.replace(/\.md$/, '') + '.html';
-  writeFileSync(htmlPath, renderHtml(bodyHtml, unsubscribeUrls('preview').page));
+  mkdirSync(OUT_DIR, { recursive: true });
+  const htmlPath = resolve(OUT_DIR, `${name}.html`);
+  writeFileSync(htmlPath, renderHtml(bodyHtml, unsubscribeUrls('preview').page, postUrl));
   console.log(`Subject: ${subject}\nPreview: ${htmlPath}`);
 
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
@@ -150,8 +224,8 @@ async function send() {
           Simple: {
             Subject: { Data: subject },
             Body: {
-              Html: { Data: renderHtml(bodyHtml, unsubscribe.page) },
-              Text: { Data: renderText(bodyText, unsubscribe.page) },
+              Html: { Data: renderHtml(bodyHtml, unsubscribe.page, postUrl) },
+              Text: { Data: renderText(bodyText, unsubscribe.page, postUrl) },
             },
             // RFC 8058 one-click unsubscribe (API-060).
             Headers: [
@@ -188,7 +262,7 @@ async function send() {
     `SELECT email, token FROM newsletter_signups WHERE ${where.join(' AND ')} ORDER BY email;`,
   );
 
-  const sentLog = arg.replace(/\.md$/, '') + '.sent.txt';
+  const sentLog = resolve(OUT_DIR, `${name}.sent.txt`);
   const alreadySent = new Set(
     existsSync(sentLog) ? readFileSync(sentLog, 'utf8').split('\n').filter(Boolean) : [],
   );

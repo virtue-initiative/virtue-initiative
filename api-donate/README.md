@@ -126,22 +126,33 @@ this worker serves it. The main `api/` worker manages it through its `DONATE_DB`
 Only rows that are confirmed and not unsubscribed get newsletters. Each row's random `token` is what
 its confirm and unsubscribe links carry.
 
-`scripts/newsletter.ts` sends issues. Run it from `api-donate/`:
+`scripts/newsletter.ts` sends issues. An issue is usually a blog post, so it goes out by email and
+on the blog. Run it from `api-donate/`:
 
 ```bash
-# Write a preview (issue.html) and count the audience. Sends nothing.
-bun run newsletter send issue.md --env prod --country US --region CA
+POST=../landing/src/content/blog/release-0-1-9/index.md
+# Write a preview (.newsletter/release-0-1-9.html) and count the audience. Sends nothing.
+bun run newsletter send $POST --env prod --country US --region CA
 # Send a test to one address.
-bun run newsletter send issue.md --env prod --to you@example.com
-# Send to everyone who matches, after a prompt. Reruns skip addresses in issue.sent.txt.
-bun run newsletter send issue.md --env prod --send
+bun run newsletter send $POST --env prod --to you@example.com
+# Send to everyone who matches, after a prompt. Reruns skip addresses in
+# .newsletter/release-0-1-9.sent.txt.
+bun run newsletter send $POST --env prod --send
 # Unsubscribe someone who asked by email instead of using the link.
 bun run newsletter unsubscribe reader@example.com --env prod
 ```
 
-The issue's first `# Heading` is the subject. `--env local` reads the local API's D1 (under
-`api/.wrangler`), which is what the dev API writes to. Set `NEWSLETTER_LANDING_URL` and
-`NEWSLETTER_API_URL` to the ports `launch.sh` printed so the unsubscribe links point at them.
+For a blog post, the frontmatter `title` is the subject, and the email links to the post. Relative
+links and images point at the published post, so deploy the landing site before sending, and keep
+the post's images in its folder beside `index.md`. The landing build publishes them unchanged at
+`/blog/<folder>/<file>` (`landing/blog-assets.mjs`), because the blog page's own copies are re-encoded
+WebP, which Outlook can't show. A post marked `draft: true` can't be sent. Any other Markdown file
+works too, with its first `# Heading` as the subject. Previews and sent logs go in `.newsletter/`,
+which is gitignored because the logs list subscribers.
+
+`--env local` reads the local API's D1 (under `api/.wrangler`), which is what the dev API writes to.
+Set `NEWSLETTER_LANDING_URL` and `NEWSLETTER_API_URL` to the ports `launch.sh` printed so the
+unsubscribe links, and a blog post's images, point at them.
 
 Sending needs `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the `virtue-newsletter` IAM user,
 which can only send from `news.virtueinitiative.org` through the `newsletter` SES configuration set.

@@ -8,6 +8,8 @@ import sitemap from '@astrojs/sitemap';
 
 import mermaid from 'astro-mermaid';
 
+import blogAssets from './blog-assets.mjs';
+
 // Pages that exist but shouldn't be offered to search engines: the 404 page
 // and the post-checkout thank-you page.
 const EXCLUDED_FROM_SITEMAP = new Set([
@@ -62,6 +64,7 @@ export default defineConfig({
       },
     }),
     mdx(),
+    blogAssets(),
     preact({ compat: true }),
     // Writes sitemap-index.xml + sitemap-0.xml against `site`, which
     // src/pages/robots.txt.ts advertises to crawlers.
