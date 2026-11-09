@@ -34,7 +34,7 @@ We've simplified the emails to focus on the important information.
 
 ## Behind the scenes
 
-We also spent a lot of time on things you won't see. We fixed a few privacy
+We also spent some time on things behind the scenes. We fixed a few privacy
 issues in how login and password reset work, and added a large set of automated
 tests so we can make changes without breaking things. We are also testing a new
 way of checking screenshots that looks at each image on the screen separately.
