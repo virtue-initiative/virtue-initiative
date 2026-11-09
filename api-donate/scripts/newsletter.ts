@@ -89,7 +89,7 @@ const TAG_STYLES: Record<string, string> = {
 
 interface Issue {
   subject: string;
-  /** The body, starting with the title as a "# Heading". */
+  /** The body, starting with the title as a "# Heading" and ending with the author, if any. */
   markdown: string;
   /** Relative links and images resolve against this. */
   baseUrl: string;
@@ -123,7 +123,8 @@ function readIssue(path: string): Issue {
     const postUrl = `${urls.landing}/blog/${slug}`;
     return {
       subject: meta.subject || meta.title,
-      markdown: `# ${meta.title}\n\n${body}`,
+      // The author signs off the email, as the byline does on the blog.
+      markdown: `# ${meta.title}\n\n${body}${meta.author ? `\n\n${meta.author}` : ''}`,
       baseUrl: inFolder ? `${postUrl}/` : `${urls.landing}/blog/`,
       postUrl,
       name: slug,
