@@ -1,8 +1,9 @@
 ---
-title: A cleaner look for the Virtue apps
+title: Release 0.1.9 — A new look for the Virtue apps
+subject: The Virtue Initiative — A new look for the Virtue apps
 description: Version 0.1.9 redesigns the Virtue apps on every platform and makes the partner email reports easier to read.
 pubDate: 2026-11-08
-author: The Virtue Initiative team
+author: Andrew Baumes, President
 ---
 
 Virtue 0.1.9 is released! We cleaned up the interface for all our apps.
