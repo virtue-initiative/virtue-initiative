@@ -64,6 +64,107 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       </ol>
     </section>
 
+    <section class="home-section" id="partner-view">
+      <div class="eyebrow">Your partner's view</div>
+      <div class="home-section-heading">
+        <h2>What your partner sees</h2>
+      </div>
+      <p class="home-section-lead">
+        Your partner signs in to Virtue on the web. Screenshots from each of your devices show up in
+        one place, and anything the app flags as concerning is marked.
+      </p>
+      <figure class="home-shot home-shot-wide">
+        <img
+          src="/images/home/web-logs.webp"
+          width="1280"
+          height="800"
+          alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
+          loading="lazy"
+        />
+        <figcaption>The Logs page, with sample activity.</figcaption>
+      </figure>
+      <div class="home-shot-pair">
+        <figure class="home-shot">
+          <img
+            src="/images/home/web-report.webp"
+            width="760"
+            height="800"
+            alt="A daily activity report listing a missed screenshot alert and one high risk screenshot."
+            loading="lazy"
+          />
+          <figcaption>
+            A daily report sums up alerts and flagged screenshots. Partners can also get it by
+            email.
+          </figcaption>
+        </figure>
+        <figure class="home-shot">
+          <img
+            src="/images/home/app-windows.webp"
+            width="766"
+            height="653"
+            alt="The Virtue app on Windows, showing a check mark and the words Monitoring active."
+            loading="lazy"
+          />
+          <figcaption>The app on your device shows when monitoring is active.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="home-section" id="redaction">
+      <div class="eyebrow">Privacy</div>
+      <div class="home-section-heading">
+        <h2>Text is removed before anything is shared</h2>
+      </div>
+      <p class="home-section-lead">
+        Before a screenshot leaves your device, the app finds the text on screen and blacks it out.
+        It then shrinks and blurs the image. Your partner can tell what kind of thing was on your
+        screen, but cannot read your messages, emails or passwords.
+      </p>
+      <ol class="home-redaction-steps">
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-screen.webp"
+              width="1440"
+              height="900"
+              alt="A web page with a heading, a paragraph and a picture of the Virtue app."
+              loading="lazy"
+            />
+            <figcaption>1. What is on your screen.</figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-redacted.webp"
+              width="1440"
+              height="900"
+              alt="The same page with each word covered by a black box. The picture is left as it was."
+              loading="lazy"
+            />
+            <figcaption>2. The text is blacked out.</figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-shared.webp"
+              width="180"
+              height="113"
+              alt="The redacted page, shrunk and blurred so that only rough shapes remain."
+              loading="lazy"
+            />
+            <figcaption>3. What your partner sees.</figcaption>
+          </figure>
+        </li>
+      </ol>
+      <p class="home-shot-note">
+        These images came from the app's real redaction step. Text detection is not perfect, so a
+        few words, like button labels, can slip through. The blur still makes them very hard to
+        read.
+      </p>
+    </section>
+
     <section class="home-section home-section-split">
       <div class="home-section-body">
         <div class="partner-copy">
