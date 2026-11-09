@@ -3,3 +3,5 @@ dist
 .wrangler
 .dev.vars
 worker-configuration.d.ts
+# Newsletter previews and sent logs (scripts/newsletter.ts)
+.newsletter
