@@ -150,6 +150,9 @@ struct ContentView: View {
         }
         Divider()
         Text("Build \(coordinator.buildLabel)")
+        if let updateStatus = updateController.statusMessage {
+            Text(updateStatus)
+        }
     }
 
     /// Test Screenshot results (CLIENT-008), shown over whichever screen is open.
