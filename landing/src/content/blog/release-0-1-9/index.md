@@ -23,15 +23,13 @@ taken.
 Everything else (status details, what Virtue monitors, reporting an issue,
 checking for updates and signing out) is in a menu in the top corner.
 
-TODO: Mac screenshot. Save it in this folder as success-page-mac.png and replace this line with
-`![The Mac app showing "Monitoring active"](./success-page-mac.png)`.
+![The Mac app showing "Monitoring active"](./success-page-mac.png)
 
 The phone apps got the same treatment. Here are Android and iPhone:
 
 ![The Android app showing "Monitoring active"](./success-page-android.png)
 
-TODO: iPhone screenshot. Save it in this folder as success-page-ios.png and replace this line with
-`![The iPhone app showing "Monitoring active"](./success-page-ios.png)`.
+![The iPhone app showing "Monitoring active"](./success-page-ios.png)
 
 On Android, the setup guide now fits on one page. The app also no longer asks
 for notification and battery permissions as soon as you open it. Instead, the
