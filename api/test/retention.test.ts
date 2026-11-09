@@ -56,7 +56,7 @@ async function batchCount() {
   return result?.count ?? 0;
 }
 
-describe('pruneExpiredBatches', () => {
+describe('pruneExpiredBatches (API-038)', () => {
   it('deletes batches older than 30 days and keeps recent ones', async () => {
     const now = Date.UTC(2026, 0, 6, 0, 0, 0);
     const { userId } = await signupAndGetCookie('retention-owner@example.com', 'pw');

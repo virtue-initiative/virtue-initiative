@@ -12,7 +12,7 @@ import { Passwords } from './index';
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 const textEncoder = new TextEncoder();
 
-describe('Passwords — list', () => {
+describe('Passwords — list (WEB-054)', () => {
   it('shows "Passwords" page heading', async () => {
     renderWithClient(<Passwords />);
     await waitFor(() => {
@@ -37,7 +37,7 @@ describe('Passwords — list', () => {
     });
   });
 
-  it('shows a Recently deleted section only when a deleted entry exists', async () => {
+  it('shows a Recently deleted section only when a deleted entry exists (WEB-057)', async () => {
     server.use(
       http.get(`${BASE}/locked-password`, () =>
         HttpResponse.json([{ ...TEST_LOCKED_PASSWORD, deleted_at: Date.now() }]),
@@ -52,7 +52,7 @@ describe('Passwords — list', () => {
   });
 });
 
-describe('Passwords — create', () => {
+describe('Passwords — create (WEB-055)', () => {
   it('opens the Add password dialog', async () => {
     const user = userEvent.setup();
     renderWithClient(<Passwords />);
@@ -94,7 +94,7 @@ describe('Passwords — create', () => {
   });
 });
 
-describe('Passwords — reveal', () => {
+describe('Passwords — reveal (WEB-056)', () => {
   it('warns before the first reveal, then decrypts and displays the value', async () => {
     const { publicKey, privateKeyHandle } = await generateUserKeyPair();
     const wrapped = await encryptForPublicKey(publicKey, textEncoder.encode('hunter2'));
@@ -165,7 +165,7 @@ describe('Passwords — reveal', () => {
   });
 });
 
-describe('Passwords — delete, restore, permanent delete', () => {
+describe('Passwords — delete, restore, permanent delete (WEB-057, WEB-020)', () => {
   it('soft-deletes after confirmation', async () => {
     let deletedId: string | undefined;
     server.use(

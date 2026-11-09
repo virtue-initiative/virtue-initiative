@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# The C compiler for `cc`-crate dependencies (ring, libwebp) when remote-apple-build.sh cross-compiles
+# Rust for Apple targets on Linux. Linux's clang emits Mach-O fine. It only lacks a libc to include,
+# and Apple's SDK isn't licensed for use off Apple hardware, so include/ declares by hand the few libc
+# functions those crates call. They resolve against libSystem when the Mac links the app. A new C
+# dependency that calls something else fails here at compile time: add its declaration to include/.
+#
+# cc-rs passes Apple flags meant for Apple's clang. APPLE_CC_TARGET already says the same thing.
+set -euo pipefail
+
+INCLUDE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/include" && pwd)"
+
+args=()
+skip=0
+for arg in "$@"; do
+  if [[ $skip -eq 1 ]]; then
+    skip=0
+    continue
+  fi
+  case "$arg" in
+    -isysroot | -arch)
+      skip=1
+      continue
+      ;;
+    -isysroot* | --target=* | -mmacosx-version-min=* | -miphoneos-version-min=* | -mios-version-min=* | -mios-simulator-version-min=* | -mtargetos=*)
+      continue
+      ;;
+  esac
+  args+=("$arg")
+done
+
+exec clang --target="${APPLE_CC_TARGET:?}" -nostdlibinc -isystem "$INCLUDE_DIR" -w "${args[@]}"

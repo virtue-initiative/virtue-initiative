@@ -40,7 +40,22 @@ final class UpdateController: NSObject, ObservableObject {
     private let driver = VirtueUpdateDriver()
 
     @Published private(set) var isEnabled: Bool = false
+    /// The update check line (CLIENT-026): the latest check's state, for
+    /// scheduled checks too. Nil until a check has run, and in a build
+    /// without auto-update.
     @Published private(set) var statusMessage: String?
+    /// Mirrors `SPUUpdater.canCheckForUpdates`, which is false while a check
+    /// or install is running. Published so the buttons re-enable on their own.
+    @Published private(set) var canCheckForUpdates: Bool = false
+
+    /// Set by Check for Updates, so only a check the user asked for ends in
+    /// an alert. Scheduled checks stay silent.
+    private var userInitiatedCheck = false
+
+    /// Written when Check for Updates finds an update, just before Sparkle
+    /// quits to install it, so the relaunched app can say it was updated.
+    /// Holds the update's `versionString` and `displayVersionString`.
+    private static let pendingNoticeKey = "VirtuePendingUpdateNotice"
 
     /// Empty in a build without auto-update wired in.
     static var feedURL: String {
@@ -56,10 +71,9 @@ final class UpdateController: NSObject, ObservableObject {
     override init() {
         super.init()
 
-        guard !Self.feedURL.isEmpty else {
-            statusMessage = "Automatic updates are not enabled for this build."
-            return
-        }
+        guard !Self.feedURL.isEmpty else { return }
+
+        Self.showPendingUpdateNotice()
 
         let updater = SPUUpdater(
             hostBundle: Bundle.main,
@@ -78,16 +92,15 @@ final class UpdateController: NSObject, ObservableObject {
             try updater.start()
             self.updater = updater
             isEnabled = true
+            updater.publisher(for: \.canCheckForUpdates)
+                .receive(on: DispatchQueue.main)
+                .assign(to: &$canCheckForUpdates)
         } catch {
             // A failed updater must never take the app down with it —
-            // monitoring matters more than updating.
-            statusMessage = "Automatic updates unavailable: \(error.localizedDescription)"
+            // monitoring matters more than updating. `isEnabled` stays false,
+            // so Check for Updates is hidden.
             NSLog("Sparkle failed to start: \(error)")
         }
-    }
-
-    var canCheckForUpdates: Bool {
-        updater?.canCheckForUpdates ?? false
     }
 
     /// True while Sparkle is mid-check/download/install. `MonitoringCoordinator`
@@ -98,11 +111,58 @@ final class UpdateController: NSObject, ObservableObject {
 
     /// Menu-driven "Check for Updates". Runs the same silent path a scheduled
     /// check does — if an update is found it installs and relaunches without
-    /// asking.
+    /// asking. Otherwise the result shows in an alert (CLIENT-026).
     func checkForUpdates() {
-        guard let updater else { return }
+        guard let updater, updater.canCheckForUpdates else { return }
         statusMessage = "Checking for updates…"
+        userInitiatedCheck = true
         updater.checkForUpdates()
+    }
+
+    /// Sets the check line and, when the user asked for this check, shows
+    /// the result in an alert.
+    private func finishCheck(status: String, alertTitle: String, alertText: String) {
+        statusMessage = status
+        guard userInitiatedCheck else { return }
+        userInitiatedCheck = false
+        // Let Sparkle finish ending its cycle before the alert's modal loop.
+        DispatchQueue.main.async {
+            Self.showAlert(title: alertTitle, text: alertText)
+        }
+    }
+
+    /// After a relaunch that Check for Updates started, says whether the
+    /// update installed, then forgets it so it shows once (CLIENT-026).
+    private static func showPendingUpdateNotice() {
+        let defaults = UserDefaults.standard
+        guard let notice = defaults.dictionary(forKey: pendingNoticeKey) as? [String: String]
+        else { return }
+        defaults.removeObject(forKey: pendingNoticeKey)
+
+        let display = notice["display"] ?? ""
+        let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let (title, text) =
+            current == notice["version"]
+            ? ("Virtue updated", "Virtue is now on the latest version, \(display).")
+            : (
+                "Update didn't install",
+                "Virtue couldn't install version \(display). It will try again at the next update check."
+            )
+        // Give the window a moment to open first, so the alert lands on top.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            showAlert(title: title, text: text)
+        }
+    }
+
+    /// A native alert, like the menu bar's Stop Monitoring confirmation: the
+    /// menu bar's dropdown closes at once and leaves no view to show it in.
+    private static func showAlert(title: String, text: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 }
 
@@ -118,6 +178,17 @@ extension UpdateController: SPUUpdaterDelegate {
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSLog("Sparkle found update \(item.displayVersionString) (\(item.versionString))")
+        MainActor.assumeIsolated {
+            statusMessage = "Update found; installing…"
+            // No alert now, since one would hold up the quit Sparkle needs to
+            // install. The relaunched app shows it instead.
+            if userInitiatedCheck {
+                UserDefaults.standard.set(
+                    ["version": item.versionString, "display": item.displayVersionString],
+                    forKey: Self.pendingNoticeKey
+                )
+            }
+        }
     }
 
     nonisolated func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
@@ -132,11 +203,28 @@ extension UpdateController: SPUUpdaterDelegate {
     ) {
         MainActor.assumeIsolated {
             if let error = error as NSError?,
-               error.code != Int(SUError.noUpdateError.rawValue) {
-                statusMessage = "Update check failed: \(error.localizedDescription)"
+                !(error.domain == SUSparkleErrorDomain
+                    && error.code == Int(SUError.noUpdateError.rawValue))
+            {
                 NSLog("Sparkle update cycle failed: \(error)")
+                // A failed download or install never relaunches, so its
+                // notice must not wait for the next launch.
+                UserDefaults.standard.removeObject(forKey: Self.pendingNoticeKey)
+                finishCheck(
+                    status: "Update check failed: \(error.localizedDescription)",
+                    alertTitle: "Update check failed",
+                    alertText: error.localizedDescription
+                )
+            } else if statusMessage == "Update found; installing…" {
+                // The update is installing, and the relaunch reports it.
+                userInitiatedCheck = false
             } else {
-                statusMessage = "Up to date."
+                // Sparkle reports "no update" as noUpdateError.
+                finishCheck(
+                    status: "No updates found.",
+                    alertTitle: "No updates found",
+                    alertText: "This is the latest version of Virtue."
+                )
             }
         }
     }

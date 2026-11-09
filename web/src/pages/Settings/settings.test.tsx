@@ -29,21 +29,21 @@ vi.mock('../../utils/cache/client', () => ({
 }));
 
 describe('Settings — page renders', () => {
-  it('shows the user display name', async () => {
+  it('shows the user display name (WEB-059)', async () => {
     renderWithClient(<Settings />);
     await waitFor(() => {
       expect(screen.getByDisplayValue(TEST_USER.name!)).toBeInTheDocument();
     });
   });
 
-  it('shows the user email', async () => {
+  it('shows the user email (WEB-060)', async () => {
     renderWithClient(<Settings />);
     await waitFor(() => {
       expect(screen.getByDisplayValue(TEST_USER.email)).toBeInTheDocument();
     });
   });
 
-  it('renders "Delete account" button', async () => {
+  it('renders "Delete account" button (WEB-063)', async () => {
     renderWithClient(<Settings />);
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /delete account/i })).toBeInTheDocument();
@@ -51,7 +51,7 @@ describe('Settings — page renders', () => {
   });
 });
 
-describe('Settings — save name', () => {
+describe('Settings — save name (WEB-059)', () => {
   it('sends PATCH /user with updated name', async () => {
     let patchBody: unknown;
     server.use(
@@ -78,7 +78,7 @@ describe('Settings — save name', () => {
   });
 });
 
-describe('Settings — email frequency', () => {
+describe('Settings — email frequency (WEB-059)', () => {
   it('sends PATCH /user with updated email frequency', async () => {
     let patchBody: unknown;
     server.use(
@@ -108,7 +108,7 @@ describe('Settings — email frequency', () => {
   });
 });
 
-describe('Settings — delete account', () => {
+describe('Settings — delete account (WEB-063)', () => {
   it('opens delete dialog when "Delete account" is clicked', async () => {
     const user = userEvent.setup();
     renderWithClient(<Settings />);
@@ -163,7 +163,7 @@ describe('Settings — delete account', () => {
   });
 });
 
-describe('Settings — clear cache', () => {
+describe('Settings — clear cache (WEB-062)', () => {
   it('clears the cache and reloads the page', async () => {
     const reload = vi.fn();
     const originalReload = window.location.reload;
@@ -189,7 +189,7 @@ describe('Settings — clear cache', () => {
   });
 });
 
-describe('Settings — change password', () => {
+describe('Settings — change password (WEB-061)', () => {
   async function fillPasswordForm(current: string, next: string, confirm: string) {
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText('Current password'), current);

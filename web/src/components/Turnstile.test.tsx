@@ -6,7 +6,7 @@ afterEach(() => {
   document.head.querySelectorAll('script[src*="turnstile"]').forEach((s) => s.remove());
 });
 
-describe('Turnstile', () => {
+describe('Turnstile (WEB-030)', () => {
   it('says so when the Turnstile script cannot load', async () => {
     // The site key is read when the module loads, and tests leave it unset.
     vi.stubEnv('VITE_TURNSTILE_SITE_KEY', 'test-site-key');

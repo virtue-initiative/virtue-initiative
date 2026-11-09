@@ -54,6 +54,16 @@ export const JORDAN: SeedUser = {
 
 export const USERS = [DEV, SAM, JORDAN];
 
+// The feature flag for per-image NSFW scoring (API-061, CORE-004), with a per-user override
+// for each user below. The number is how many days ago it was turned on: their screenshots
+// from that day carry per-image details (BATCH-003), while older ones, and everyone else's,
+// carry only the whole-frame skin and NSFW scores. Sam's devices therefore show both kinds.
+export const PER_IMAGE_FLAG = 'per_image_nsfw';
+export const PER_IMAGE_SINCE = new Map<SeedUser, number>([
+  [DEV, DAYS],
+  [SAM, 2],
+]);
+
 // Each watcher can decrypt the watched user's batches (access_keys) and sees
 // them in the Logs and Report tabs.
 export const PARTNERSHIPS: { idHex: string; watching: SeedUser; watcher: SeedUser }[] = [
@@ -162,7 +172,15 @@ export interface SeedBatch {
 const MINUTE = 60_000;
 const SCREENSHOT_INTERVAL = 4 * MINUTE;
 
-function screenshot(ts: number, name: string, risk: number, r: Rng): SeedEvent {
+function screenshot(
+  ts: number,
+  name: string,
+  risk: number,
+  r: Rng,
+  form: FormFactor,
+  perImage: boolean,
+): SeedEvent {
+  const skin = risk > 0.3 ? Math.min(1, risk + r.range(0, 0.1)) : r.range(0, 0.2);
   return {
     ts,
     risk,
@@ -170,9 +188,60 @@ function screenshot(ts: number, name: string, risk: number, r: Rng): SeedEvent {
     data: {
       image: image(name),
       content_type: 'image/webp',
-      skin_detection: risk > 0.3 ? Math.min(1, risk + r.range(0, 0.1)) : r.range(0, 0.2),
-      nsfw_detection: risk,
+      ...(perImage ? perImageData(risk, skin, form) : wholeFrameData(risk, skin)),
     },
+  };
+}
+
+// Whole-frame scoring, as clients without the flag send it: the frame's skin score, and the
+// model's score unless the skin gate skipped the model (CORE-004).
+function wholeFrameData(risk: number, skin: number) {
+  const gated = risk === 0 && skin * 0.3 <= 0.05;
+  return gated ? { skin_detection: skin } : { skin_detection: skin, nsfw_detection: risk };
+}
+
+// Per-image scoring (BATCH-003), as clients with the flag send it: the frame's skin score, the
+// best image's score as nsfw_detection, and every image found. Worked out from the risk alone,
+// so it doesn't shift the random sequence.
+function perImageData(risk: number, skin: number, form: FormFactor) {
+  const phone = form === 'phone';
+  if (risk < 0.4) {
+    const images: Record<string, unknown>[] = [
+      phone
+        ? { x: 0, y: 360, width: 1080, height: 608, skin: 0.05 }
+        : { x: 200, y: 300, width: 640, height: 360, skin: 0.05 },
+    ];
+    if (risk === 0) return { skin_detection: skin, model_runs: 0, images };
+    images.push({
+      ...(phone
+        ? { x: 40, y: 1100, width: 480, height: 360 }
+        : { x: 900, y: 300, width: 320, height: 240 }),
+      skin: 0.4,
+      nsfw: risk,
+      score: 0,
+    });
+    return { skin_detection: skin, nsfw_detection: 0, model_runs: 1, images };
+  }
+  // The flagged image: a first pass, a mirrored pass, and a score rescaled above the 0.7 floor.
+  const raw = 0.7 + 0.3 * risk;
+  const flagged = { skin: 0.7, nsfw: Math.min(1, raw + 0.02), mirrored: raw, score: risk };
+  const others = [{ skin: 0.08 }, { skin: 0.4, nsfw: 0.22, score: 0 }];
+  const bounds = phone
+    ? [
+        { x: 0, y: 300, width: 1080, height: 1350 },
+        { x: 40, y: 1720, width: 480, height: 480 },
+        { x: 560, y: 1720, width: 480, height: 480 },
+      ]
+    : [
+        { x: 320, y: 160, width: 960, height: 540 },
+        { x: 1320, y: 160, width: 400, height: 300 },
+        { x: 1320, y: 500, width: 400, height: 300 },
+      ];
+  return {
+    skin_detection: skin,
+    nsfw_detection: risk,
+    model_runs: 3,
+    images: [flagged, ...others].map((scores, i) => ({ ...bounds[i], ...scores })),
   };
 }
 
@@ -210,6 +279,7 @@ export function generateBatches(now: number): SeedBatch[] {
       if (device.quietDays.includes(daysAgo)) continue;
       const r = rng(dateSeed * 31 + parseInt(device.idHex.slice(-4), 16));
       const sessions = sessionsFor(device, dayStart.getTime(), now, r);
+      const perImage = daysAgo <= (PER_IMAGE_SINCE.get(device.owner) ?? -1);
 
       for (const [index, session] of sessions.entries()) {
         const events: SeedEvent[] = [];
@@ -228,20 +298,17 @@ export function generateBatches(now: number): SeedBatch[] {
         ) {
           const roll = r.next();
           const risky = device.riskiness;
+          const shot = (name: string, risk: number) =>
+            screenshot(ts, name, risk, r, device.form, perImage);
           if (roll < 0.035 * risky) {
-            events.push(screenshot(ts, HIGH_IMAGE[device.form], r.range(0.72, 0.97), r));
+            events.push(shot(HIGH_IMAGE[device.form], r.range(0.72, 0.97)));
           } else if (roll < 0.14 * risky) {
-            events.push(screenshot(ts, MEDIUM_IMAGE[device.form], r.range(0.41, 0.68), r));
+            events.push(shot(MEDIUM_IMAGE[device.form], r.range(0.41, 0.68)));
           } else if (roll < 0.2) {
             events.push({ ts, type: 'screenshot_skipped', data: { reason: 'static_screen' } });
           } else {
             events.push(
-              screenshot(
-                ts,
-                r.pick(SAFE_IMAGES[device.form]),
-                r.chance(0.6) ? 0 : r.range(0.01, 0.3),
-                r,
-              ),
+              shot(r.pick(SAFE_IMAGES[device.form]), r.chance(0.6) ? 0 : r.range(0.01, 0.3)),
             );
           }
         }

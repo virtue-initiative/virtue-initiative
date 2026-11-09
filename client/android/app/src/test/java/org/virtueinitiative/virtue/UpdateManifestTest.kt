@@ -6,6 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+// CLIENT-031: the Android update feed is accepted only when well formed, and offered only when numerically newer.
 class UpdateManifestTest {
     private val sha = "c890dc1f4c68567b2ccf7b0d16def763c4990d7d833fc75261a097005b92cc84"
 

@@ -2,8 +2,11 @@ import SwiftUI
 
 public struct Card<Content: View>: View {
     private let content: Content
+    private let cornerRadius: CGFloat
 
-    public init(@ViewBuilder content: () -> Content) {
+    /// `cornerRadius` defaults to `VirtueRadius.card`. iOS passes `VirtueRadius.cardLarge`.
+    public init(cornerRadius: CGFloat = VirtueRadius.card, @ViewBuilder content: () -> Content) {
+        self.cornerRadius = cornerRadius
         self.content = content()
     }
 
@@ -14,9 +17,9 @@ public struct Card<Content: View>: View {
         .padding(VirtueSpacing.s5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(VirtueBrand.surface)
-        .clipShape(RoundedRectangle(cornerRadius: VirtueRadius.card, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: VirtueRadius.card, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(VirtueBrand.border, lineWidth: 1)
         )
     }

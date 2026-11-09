@@ -21,7 +21,7 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Main device routes', () => {
-  it('lists devices owned by the authenticated user', async () => {
+  it('lists devices owned by the authenticated user (API-029)', async () => {
     const { cookie } = await signupAndGetCookie('alice@example.com');
     await createDeviceForUser('alice@example.com', 'password123', 'Work Laptop', 'linux');
 
@@ -35,7 +35,7 @@ describe('Main device routes', () => {
     expect(body[0]).toMatchObject({ name: 'Work Laptop', platform: 'linux' });
   });
 
-  it("reports last_hash_at as milliseconds, converted from the hash server's unix-second last_received", async () => {
+  it("reports last_hash_at as milliseconds, converted from the hash server's unix-second last_received (API-029)", async () => {
     const { cookie } = await signupAndGetCookie('carol@example.com');
     const device = await createDeviceForUser(
       'carol@example.com',
@@ -55,7 +55,7 @@ describe('Main device routes', () => {
     expect(found?.last_hash_at).toBe(1_700_000_000_000);
   });
 
-  it('derives status from last_hash_at, not from batches', async () => {
+  it('derives status from last_hash_at, not from batches (API-029)', async () => {
     const { cookie } = await signupAndGetCookie('dave@example.com');
     const recent = await createDeviceForUser('dave@example.com', 'password123', 'Laptop', 'linux');
     const stale = await createDeviceForUser('dave@example.com', 'password123', 'Phone', 'android');
@@ -85,7 +85,7 @@ describe('Main device routes', () => {
     expect(body[0]).not.toHaveProperty('last_upload_at');
   });
 
-  it('updates an owned device', async () => {
+  it('updates an owned device (API-030)', async () => {
     const { cookie } = await signupAndGetCookie('bob@example.com');
     const device = await createDeviceForUser('bob@example.com', 'password123', 'Old Name', 'macos');
 
@@ -106,7 +106,7 @@ describe('Main device routes', () => {
     });
   });
 
-  it('forbids patching a device owned by another user', async () => {
+  it('forbids patching a device owned by another user (API-030)', async () => {
     await signupAndGetCookie('owner@example.com');
     const { cookie: attackerCookie } = await signupAndGetCookie('attacker@example.com');
     const device = await createDeviceForUser('owner@example.com');
@@ -120,7 +120,7 @@ describe('Main device routes', () => {
     expect(res.status).toBe(404);
   });
 
-  it('lists owner devices to an accepted partner', async () => {
+  it('lists owner devices to an accepted partner (API-029)', async () => {
     const { cookie: ownerCookie } = await signupAndGetCookie('owner2@example.com');
     const { cookie: partnerCookie, userId: partnerUserId } =
       await signupAndGetCookie('partner2@example.com');
@@ -160,7 +160,7 @@ describe('Main device routes', () => {
     expect(beforeConfirm.find((item) => item.id === device.id)).toBeTruthy();
   });
 
-  it("deletes a device's batch objects from R2 along with the device", async () => {
+  it("deletes a device's batch objects from R2 along with the device (API-031)", async () => {
     const { cookie, userId } = await signupAndGetCookie('wipe@example.com');
     const device = await createDeviceForUser('wipe@example.com', 'password123', 'Wipe Me', 'linux');
 
@@ -187,7 +187,7 @@ describe('Main device routes', () => {
     expect(await env.BUCKET.head(key)).toBeNull();
   });
 
-  it('deletes an owned device and sends a notification email', async () => {
+  it('deletes an owned device and sends a notification email (API-031)', async () => {
     const { cookie, userId } = await signupAndGetCookie('delete-device@example.com');
     await markUserEmailVerified(userId);
     const { cookie: partnerCookie, userId: partnerUserId } = await signupAndGetCookie(
@@ -256,7 +256,7 @@ describe('Main device routes', () => {
     ).toBe(true);
   });
 
-  it('sends deletion notifications to accepted partners even if emails are unverified', async () => {
+  it('sends deletion notifications to accepted partners even if emails are unverified (API-031)', async () => {
     const { cookie } = await signupAndGetCookie('delete-device-unverified@example.com');
     const { cookie: partnerCookie } = await signupAndGetCookie(
       'delete-device-unverified-partner@example.com',

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use axum::Json;
+use axum::extract::rejection::{BytesRejection, QueryRejection};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -36,9 +37,10 @@ impl From<DeviceState> for DeviceInfo {
 pub async fn ingest(
     State(app): State<AppState>,
     headers: HeaderMap,
-    body: axum::body::Bytes,
+    body: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<StatusCode, ApiError> {
-    let claims = app.jwt.require(&headers, "device")?;
+    let device_id = app.jwt.require(&headers, "device")?.device_id()?;
+    let body = body?;
 
     if body.len() != 40 {
         return Err(ApiError::InvalidBody(Some(format!(
@@ -52,7 +54,7 @@ pub async fn ingest(
     let mut hash = [0u8; 32];
     hash.copy_from_slice(&body[8..40]);
 
-    app.writer.ingest(claims.sub, unix_time, seq, hash).await?;
+    app.writer.ingest(device_id, unix_time, seq, hash).await?;
 
     Ok(StatusCode::CREATED)
 }
@@ -66,9 +68,10 @@ pub struct DevicesQuery {
 pub async fn get_many(
     State(app): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<DevicesQuery>,
+    query: Result<Query<DevicesQuery>, QueryRejection>,
 ) -> Result<Json<HashMap<String, DeviceInfo>>, ApiError> {
     app.jwt.require(&headers, "server")?;
+    let Query(query) = query?;
 
     let raw = query.devices.filter(|s| !s.is_empty()).ok_or_else(|| {
         ApiError::InvalidQuery(Some("'devices' query parameter is required".into()))
@@ -96,9 +99,10 @@ pub struct DeviceQuery {
 pub async fn reset(
     State(app): State<AppState>,
     headers: HeaderMap,
-    Query(query): Query<DeviceQuery>,
+    query: Result<Query<DeviceQuery>, QueryRejection>,
 ) -> Result<Json<DeviceInfo>, ApiError> {
     app.jwt.require(&headers, "server")?;
+    let Query(query) = query?;
 
     let device_id = query.device.filter(|s| !s.is_empty()).ok_or_else(|| {
         ApiError::InvalidQuery(Some("'device' query parameter is required".into()))

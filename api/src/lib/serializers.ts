@@ -5,7 +5,9 @@ type UserRow = NonNullable<Awaited<ReturnType<typeof findUserById>>>;
 type IncomingPartnerRow = Awaited<ReturnType<typeof listIncomingPartners>>[number];
 type OwnedPartnerRow = Awaited<ReturnType<typeof listOwnedPartners>>[number];
 
-export function serializeUser(user: UserRow) {
+// `featureFlags` comes from enabledFeatureFlags (API-061), which needs the
+// flag table and so can't run here.
+export function serializeUser(user: UserRow, featureFlags: string[]) {
   return {
     id: user.id,
     email: user.email,
@@ -17,6 +19,7 @@ export function serializeUser(user: UserRow) {
     ...(user.encrypted_priv_key
       ? { encrypted_priv_key: encodeBase64(user.encrypted_priv_key) }
       : {}),
+    feature_flags: featureFlags,
   };
 }
 

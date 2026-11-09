@@ -11,6 +11,7 @@ Run `just --list` to see the everyday build/dev/format/test/typecheck commands, 
 - Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
 - Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
+- If you add or change a test or a `SPEC.md`, run `just spec-check` from the repo root. It checks that every test cites an existing spec ID and that no spec section has lost its tests. `just spec-coverage` prints the coverage report. See `TESTING.md`.
 
 ## Repo-wide quick map
 
@@ -112,6 +113,10 @@ git show <base-sha>:client/version.properties > "${base_version_file}"
 
 Replace `<base-sha>` with the commit or branch you are targeting, for example `origin/main`.
 
+## TestFlight "What to Test" (`.github/workflows/testflight-notes-check.yml`)
+
+Pull requests into `main` must have a `# What to Test (iOS)` section in the PR body, with plain sentences for TestFlight testers. The check fails without it. The section is read by `client/scripts/extract-testflight-notes.sh`, which prints the text under the heading up to the next heading of the same or higher level. The `client-ios.yml` distribution step on `main` uses that text as the build's "What to Test". Staging builds keep the version label.
+
 ## Rust client workspace
 
 The Rust workspace lives in `client/` and includes:
@@ -132,6 +137,7 @@ cargo fmt --all -- --check
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-linux --all-targets -- -D warnings
 cargo test -p virtue-core
+cargo test -p virtue-core --features testing --tests
 cargo test -p virtue-linux
 ./linux/scripts/build-deb.sh
 ```
@@ -172,7 +178,7 @@ cargo build -p virtue-mac
 cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-mac --all-targets -- -D warnings
 cargo test -p virtue-core
-cargo test -p virtue-core --features testing --test scenarios
+cargo test -p virtue-core --features testing --tests
 ./mac/scripts/build-dmg.sh
 ```
 
@@ -210,7 +216,7 @@ cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
 cargo test --target x86_64-pc-windows-msvc -p virtue-core
-cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --test scenarios
+cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --tests
 cargo test --target x86_64-pc-windows-msvc -p virtue-windows
 ./windows/scripts/build-msix.ps1 -Profile Debug
 ```
@@ -289,6 +295,44 @@ Notes:
 ```bash
 ./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
 ```
+
+### Swift style (`.github/workflows/swift-format.yml`)
+
+Run this when touching any `.swift` file (`client/mac/`, `client/ios/`, `client/shared-swift/`).
+
+From the repo root:
+
+```bash
+./scripts/swift-format.sh --check
+```
+
+Notes:
+
+- Uses Apple's `swift-format` with the repo-root `.swift-format` config (4-space indent, 100 columns). It ships with Xcode 16+ and Swift 6 toolchains, so there's nothing extra to install, on macOS or Linux.
+- `./scripts/swift-format.sh` (`just swift-format`) fixes formatting in place. `--check` (`just swift-format-check`) also fails on lint rules the formatter can't fix.
+- It only looks at tracked files, so build output and checked-out packages are skipped.
+- CI pins `swift:6.1.2`, because `swift-format`'s output can change between releases. If your local version formats differently from CI, CI's version wins.
+- C FFI declarations (`@_silgen_name`/`@_cdecl`) keep their snake_case Rust symbol names, with `// swift-format-ignore: AlwaysUseLowerCamelCase` above each one.
+
+### Building the macOS and iOS apps from Linux
+
+`client/scripts/remote-apple-build.sh` compiles the Rust on Linux and has a Mac compile the Swift, link and sign over SSH. Use it to test on a device. It's much faster than building Rust on the Mac, and CI still builds what ships.
+
+```bash
+just mac-remote                # Virtue.app, ad-hoc signed, in /Users/Shared/virtue-builds/<worktree>/ on the Mac.
+just ios-remote --run          # Build for the simulator, then install and launch it in the booted one.
+just ios-remote --destination device --profile release
+```
+
+- Apple's SDK isn't licensed for use off Apple hardware, so Linux doesn't have it. `client/scripts/apple-cross/apple-cc` compiles the C dependencies with Linux's `clang` and hand-written declarations in `apple-cross/include/` for the libc functions they call. A new C dependency that calls something else fails at compile time: add its declaration there.
+- The daemon binary links on the Mac, through `apple-cross/apple-link`.
+- Linux needs `clang`, `rsync` and SSH access to the Mac. The Mac needs Xcode. The default host is `virtue-ios@$VD_MAC_HOST`; override it with `--host` or `VIRTUE_APPLE_BUILD_HOST`.
+- If the Mac's simulator runtime doesn't match Xcode's SDK, asset catalogs fail with `No simulator runtime version ... available`. Fix that once per account by pairing them, for example `xcrun simctl runtime match set iphoneos18.5 22G86`.
+- `--prune` deletes the Mac's build dirs for worktrees that no longer exist.
+
+Windows still builds entirely in the VM, through `remote-windows-build.sh`. `tract-linalg` needs Microsoft's `ml64.exe` and `lib.exe` at build time, and once a worktree has built, Rust is only about 15 seconds of a 60-second build, so cross-compiling it wouldn't pay. What keeps it fast is a current base: run `just cow-cache warm-windows` when the VM's first build in a new worktree recompiles most of the crates.
+
+`vd <device> deploy` (see the `test-devices` skill) calls `client/scripts/install-on-test-device.sh` to build the current worktree, install it on a test device and launch it.
 
 ## Deployment workflows
 
@@ -392,3 +436,4 @@ If you want a practical rule instead of the full matrix:
 - `client/windows/` changes: run the Windows client CI commands.
 - `client/android/` changes: run the Android debug lint/build command.
 - `client/ios/` changes: run the iOS Rust build plus simulator build.
+- Any `.swift` change: run `./scripts/swift-format.sh --check`.

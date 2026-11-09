@@ -95,7 +95,7 @@ async function listDailyDigests() {
   return (await listEmailDeliveries()).filter((delivery) => delivery.kind === 'daily_digest');
 }
 
-describe('Notification scheduler', () => {
+describe('Notification scheduler (API-057)', () => {
   it('sends a daily digest at the configured local hour using the prior 24 hours', async () => {
     const now = Date.UTC(2026, 0, 6, 11, 5, 0);
     const previousWindowStart = Date.UTC(2026, 0, 5, 11, 0, 0);
@@ -321,7 +321,7 @@ describe('Notification scheduler', () => {
     const digestDeliveries = deliveries.filter((delivery) => delivery.kind === 'daily_digest');
     expect(digestDeliveries).toHaveLength(1);
     expect(digestDeliveries[0]?.recipient_email).toBe('multi-partner@example.com');
-    expect(digestDeliveries[0]?.text).toContain('Monitored accounts: 2');
+    expect(digestDeliveries[0]?.text).toContain('summary for 2 monitored accounts');
     expect(digestDeliveries[0]?.text).toContain('Owner One');
     expect(digestDeliveries[0]?.text).toContain('Owner Two');
     for (const id of [ownerOneId, ownerTwoId]) {
@@ -492,7 +492,7 @@ describe('Notification scheduler', () => {
     expect(await listDailyDigests()).toEqual([]);
   });
 
-  it('counts a digest to a permanently bounced address as skipped, not sent', async () => {
+  it('counts a digest to a permanently bounced address as skipped, not sent (API-056)', async () => {
     const now = Date.UTC(2026, 0, 6, 6, 5, 0);
     const { cookie: ownerCookie } = await signupAndGetCookie('bounce-owner@example.com', 'pw');
     await addVerifiedWatcher(ownerCookie, 'bounce-watcher@example.com');
@@ -629,7 +629,7 @@ describe('Notification scheduler', () => {
   });
 });
 
-describe('Notification scheduler D1 use', () => {
+describe('Notification scheduler D1 use (API-057)', () => {
   // Counts the statements a run prepares.
   function countingEnv() {
     const counts = { statements: 0 };
@@ -664,7 +664,7 @@ describe('Notification scheduler D1 use', () => {
     const digests = await listDailyDigests();
     expect(digests.map((digest) => digest.recipient_email).sort()).toEqual(watcherEmails);
     for (const digest of digests) {
-      expect(digest.text).toContain('Monitored accounts: 2');
+      expect(digest.text).toContain('summary for 2 monitored accounts');
     }
     // The partnerships (with each recipient's bounce), and the watched users'
     // activity. Per digest, this was 3 statements before.
@@ -714,7 +714,7 @@ describe('Notification scheduler D1 use', () => {
   });
 });
 
-describe('createSendPacer', () => {
+describe('createSendPacer (API-057)', () => {
   it('spaces sends at least the interval apart', async () => {
     vi.useFakeTimers();
     const pace = createSendPacer(100);

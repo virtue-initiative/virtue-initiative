@@ -7,6 +7,7 @@ namespace Virtue.WindowsApp.Tests;
 
 public sealed class SessionViewModelTests
 {
+    // CLIENT-027: before the first status load the app shows Loading... and the loading state.
     [Fact]
     public void BeforeAnyRefresh_ReportsLoadingState()
     {
@@ -20,6 +21,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Virtue: loading status", viewModel.TrayTooltip);
     }
 
+    // CLIENT-027: the tray tooltip gains " (update ready)" while an update is staged.
     [Fact]
     public void NotifyUpdateStaged_AppendsUpdateReadySuffixToTrayTooltip()
     {
@@ -32,6 +34,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Virtue: loading status (update ready)", viewModel.TrayTooltip);
     }
 
+    // CLIENT-029: the restart countdown text is exposed to the window (design test).
     [Fact]
     public void SetUpdateCountdownText_UpdatesProperty()
     {
@@ -45,6 +48,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("42m", viewModel.UpdateCountdownText);
     }
 
+    // CLIENT-029: leaving the staged state clears the notice, countdown and tooltip suffix.
     [Fact]
     public void NotifyUpdateUnstaged_ClearsTheNoticeCountdownAndTooltipSuffix()
     {
@@ -66,8 +70,9 @@ public sealed class SessionViewModelTests
         Assert.Contains(nameof(SessionViewModel.TrayTooltip), changed);
     }
 
+    // CLIENT-029: the update check line is exposed to the window (design test).
     [Fact]
-    public void UpdateCheckStatusText_RaisesPropertyChanged()
+    public void ReportUpdateCheck_SetsTheLineAndRaisesPropertyChanged()
     {
         var fakeClient = new FakeRustInteropClient();
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
@@ -76,12 +81,31 @@ public sealed class SessionViewModelTests
 
         var changed = new List<string?>();
         viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
-        viewModel.UpdateCheckStatusText = "No updates found.";
+        viewModel.ReportUpdateCheck("No updates found.", checking: false);
 
         Assert.Equal("No updates found.", viewModel.UpdateCheckStatusText);
         Assert.Contains(nameof(SessionViewModel.UpdateCheckStatusText), changed);
     }
 
+    // CLIENT-027: the window toasts each result of a check it started, even one that repeats the last line.
+    [Fact]
+    public void ReportUpdateCheck_ReportsEveryResultAndWhetherItIsStillChecking()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
+        var reports = 0;
+        viewModel.UpdateCheckReported += (_, _) => reports++;
+
+        viewModel.ReportUpdateCheck("Checking for updates...", checking: true);
+        Assert.True(viewModel.IsCheckingForUpdates);
+
+        viewModel.ReportUpdateCheck("Update already downloaded.", checking: false);
+        viewModel.ReportUpdateCheck("Update already downloaded.", checking: false);
+
+        Assert.False(viewModel.IsCheckingForUpdates);
+        Assert.Equal(3, reports);
+    }
+
+    // CLIENT-004: sign-in uses the machine name as the default device name, clears the password and refreshes status.
     [Fact]
     public async Task LoginAsync_RefreshesStatusAfterSuccess()
     {
@@ -100,10 +124,11 @@ public sealed class SessionViewModelTests
 
         Assert.Equal(("user@example.com", "secret", Environment.MachineName), fakeClient.LastLogin);
         Assert.True(viewModel.LoggedIn);
-        Assert.Equal("Monitoring is active on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring active", viewModel.Headline);
         Assert.Equal(string.Empty, viewModel.PasswordInput);
     }
 
+    // CLIENT-007: Status Details receives every CORE-010 field.
     [Fact]
     public async Task RefreshAsync_ExposesTheFullStatusPagePayload()
     {
@@ -151,6 +176,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(123, viewModel.LastScreenshotAtMs);
     }
 
+    // CLIENT-027: the device id and email fall back to the daemon's values.
     [Fact]
     public async Task RefreshAsync_FallsBackToTheDaemonsDeviceIdWhenTheSessionHasNone()
     {
@@ -174,6 +200,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("user@example.com", viewModel.AccountEmail);
     }
 
+    // CLIENT-011: tray Exit stops monitoring through its own tagged call.
     [Fact]
     public async Task StopMonitoringFromTrayExitAsync_UsesExplicitTrayExitInterop()
     {
@@ -187,9 +214,10 @@ public sealed class SessionViewModelTests
         await viewModel.StopMonitoringFromTrayExitAsync();
 
         Assert.True(fakeClient.StopMonitoringFromTrayExitCalled);
-        Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
     }
 
+    // CLIENT-027: signed out clears the device id, error, queue count and last screenshot but keeps the typed email.
     [Fact]
     public async Task RefreshAsync_ClearsStaleMonitorDetailsWhenSignedOut()
     {
@@ -212,9 +240,10 @@ public sealed class SessionViewModelTests
         Assert.Equal(0, viewModel.PendingRequestCount);
         Assert.Null(viewModel.LastScreenshotAtMs);
         Assert.Equal("stale@example.com", viewModel.EmailInput);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+        Assert.Equal("Signed out", viewModel.Headline);
     }
 
+    // CLIENT-027: a signed-in session whose monitor reports signed out shows starting.
     [Fact]
     public async Task RefreshAsync_TreatsSignedOutMonitorStateAsStartingWhenSessionIsSignedIn()
     {
@@ -229,9 +258,10 @@ public sealed class SessionViewModelTests
 
         Assert.True(viewModel.LoggedIn);
         Assert.Equal("starting", viewModel.MonitorState);
-        Assert.Equal("Monitoring is starting for this device.", viewModel.StatusText);
+        Assert.Equal("Starting...", viewModel.Headline);
     }
 
+    // CLIENT-027: the tray menu offers Open and Exit (design test).
     [Fact]
     public void TrayMenuController_RoutesOpenAndExitEvents()
     {
@@ -250,6 +280,7 @@ public sealed class SessionViewModelTests
         Assert.True(exitRaised);
     }
 
+    // CLIENT-015: a status payload that is not JSON surfaces as an error.
     [Fact]
     public void RustInteropJson_ThrowsForNonJsonPayload()
     {
@@ -257,6 +288,7 @@ public sealed class SessionViewModelTests
         Assert.Contains("non-JSON payload", ex.Message);
     }
 
+    // CLIENT-015: session status JSON carries loggedIn, deviceId, email and buildLabel.
     [Fact]
     public void RustInteropJson_DeserializesValidPayload()
     {
@@ -270,6 +302,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("build-42", result.BuildLabel);
     }
 
+    // CLIENT-004: sign-in without an email is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
     {
@@ -286,6 +319,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Email is required.", viewModel.ErrorText);
     }
 
+    // CLIENT-004: sign-in without a password is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingPassword()
     {
@@ -302,8 +336,9 @@ public sealed class SessionViewModelTests
         Assert.Equal("Password is required.", viewModel.ErrorText);
     }
 
+    // CLIENT-005: signing out reads as signed out.
     [Fact]
-    public async Task LogoutAsync_SignsOutAndUpdatesStatusText()
+    public async Task LogoutAsync_SignsOutAndUpdatesHeadline()
     {
         var fakeClient = new FakeRustInteropClient
         {
@@ -315,11 +350,78 @@ public sealed class SessionViewModelTests
         await viewModel.LogoutAsync();
 
         Assert.False(viewModel.LoggedIn);
-        Assert.Equal("Sign in to start monitoring.", viewModel.StatusText);
+        Assert.Equal("Signed out", viewModel.Headline);
     }
 
+    // CLIENT-027: Exit during a running action waits for it, then still records the user stop.
     [Fact]
-    public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesStatusText()
+    public async Task StopMonitoringFromTrayExitAsync_WaitsForARunningAction()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
+            ForceScreenshotAndUploadGate = new ManualResetEventSlim(false),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        var capture = viewModel.ForceCaptureAsync();
+        Assert.True(viewModel.IsBusy);
+        var exit = viewModel.StopMonitoringFromTrayExitAsync();
+        Assert.False(exit.IsCompleted);
+        Assert.False(fakeClient.StopMonitoringFromTrayExitCalled);
+
+        fakeClient.ForceScreenshotAndUploadGate.Set();
+        await capture;
+        await exit;
+
+        Assert.True(fakeClient.StopMonitoringFromTrayExitCalled);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
+    }
+
+    // CLIENT-027: the headline, tray and phase agree for a state the window does not list.
+    [Theory]
+    [InlineData(null, MonitorPhase.Starting, "Starting...", "Virtue: starting monitoring")]
+    [InlineData(123L, MonitorPhase.Active, "Monitoring active", "Virtue: monitoring active")]
+    public async Task RefreshAsync_UnlistedStateFollowsTheHeadlineEverywhere(
+        long? lastScreenshotAtMs, MonitorPhase expectedPhase, string expectedHeadline, string expectedTooltip)
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("paused", true, 0, lastScreenshotAtMs, null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(expectedPhase, viewModel.Phase);
+        Assert.Equal(expectedHeadline, viewModel.Headline);
+        Assert.Equal(expectedTooltip, viewModel.TrayTooltip);
+    }
+
+    // CLIENT-027: a screenshot from another day shows its date in the culture's own month-day order.
+    [Fact]
+    public void FormatShortTime_UsesTheCulturesMonthDayOrder()
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+            var lastWeek = DateTimeOffset.Now.AddDays(-7);
+            var text = SessionViewModel.FormatShortTime(lastWeek.ToUnixTimeMilliseconds());
+
+            Assert.StartsWith($"{lastWeek.ToLocalTime().Day} ", text);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    // CLIENT-011: Stop Monitoring stops monitoring and the status reads stopped.
+    [Fact]
+    public async Task StopMonitoringAsync_CallsStopMonitoringAndUpdatesHeadline()
     {
         var fakeClient = new FakeRustInteropClient
         {
@@ -331,22 +433,80 @@ public sealed class SessionViewModelTests
         await viewModel.StopMonitoringAsync();
 
         Assert.True(fakeClient.StopMonitoringCalled);
-        Assert.Equal("Monitoring is stopped on this device.", viewModel.StatusText);
+        Assert.Equal("Monitoring stopped", viewModel.Headline);
     }
 
+    // CLIENT-027: the headline and its sentence for each state, first match wins.
     [Theory]
-    [InlineData("running", true, null, "Virtue: monitoring active")]
-    [InlineData("stopped", true, null, "Virtue: monitoring stopped")]
-    [InlineData("error", true, "upload failed", "Virtue: upload failed")]
-    [InlineData("error", true, null, "Virtue: monitoring error")]
-    [InlineData("signed_out", false, null, "Virtue: sign in required")]
-    public async Task RefreshAsync_TrayTooltipReflectsMonitorState(
-        string monitorState, bool loggedIn, string? lastError, string expectedTooltip)
+    [InlineData(false, "signed_out", null, null, "Signed out", "Sign in to start monitoring on this device.")]
+    [InlineData(true, "error", 123L, "upload failed", "Monitoring needs attention", "upload failed.")]
+    [InlineData(true, "error", null, null, "Monitoring needs attention", "Virtue could not start monitoring.")]
+    [InlineData(true, "stopped", 123L, null, "Monitoring stopped", "Monitoring is stopped on this device.")]
+    [InlineData(true, "running", null, null, "Starting...", "Virtue is getting ready. The first screenshot is taken within a few minutes.")]
+    [InlineData(true, "starting", null, null, "Starting...", "Virtue is getting ready. The first screenshot is taken within a few minutes.")]
+    public async Task RefreshAsync_HeadlineAndSentenceFollowTheState(
+        bool loggedIn, string monitorState, long? lastScreenshotAtMs, string? lastError, string expectedHeadline, string expectedSentence)
     {
         var fakeClient = new FakeRustInteropClient
         {
             SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
-            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, null, lastError),
+            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, lastScreenshotAtMs, lastError),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal(expectedHeadline, viewModel.Headline);
+        Assert.Equal(expectedSentence, viewModel.StatusSentence);
+    }
+
+    // CLIENT-027: once a screenshot has been taken the headline is active and the sentence gives its time.
+    [Fact]
+    public async Task RefreshAsync_ActiveSentenceGivesTheLastScreenshotTime()
+    {
+        const long lastScreenshotAtMs = 1_761_900_000_000;
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, lastScreenshotAtMs, null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.RefreshAsync();
+
+        Assert.Equal("Monitoring active", viewModel.Headline);
+        Assert.Equal(
+            $"Virtue is capturing every screen. Last screenshot at {SessionViewModel.FormatShortTime(lastScreenshotAtMs)}.",
+            viewModel.StatusSentence);
+    }
+
+    // CLIENT-027: before the first status load the headline reads Loading, with its sentence.
+    [Fact]
+    public void BeforeAnyRefresh_HeadlineReadsLoading()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234");
+
+        Assert.Equal("Loading...", viewModel.Headline);
+        Assert.Equal("Checking your sign-in status...", viewModel.StatusSentence);
+    }
+
+    // CLIENT-027: the tray tooltip text for each monitor state; running and starting follow the headline.
+    [Theory]
+    [InlineData("running", true, 123L, null, "Virtue: monitoring active")]
+    [InlineData("starting", true, 123L, null, "Virtue: monitoring active")]
+    [InlineData("running", true, null, null, "Virtue: starting monitoring")]
+    [InlineData("starting", true, null, null, "Virtue: starting monitoring")]
+    [InlineData("stopped", true, null, null, "Virtue: monitoring stopped")]
+    [InlineData("error", true, null, "upload failed", "Virtue: upload failed")]
+    [InlineData("error", true, null, null, "Virtue: monitoring error")]
+    [InlineData("signed_out", false, null, null, "Virtue: sign in required")]
+    public async Task RefreshAsync_TrayTooltipReflectsMonitorState(
+        string monitorState, bool loggedIn, long? lastScreenshotAtMs, string? lastError, string expectedTooltip)
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(loggedIn, loggedIn ? "device-1" : null, loggedIn ? "user@example.com" : null, "build-123"),
+            MonitorStatus = new MonitorStatusPayload(monitorState, loggedIn, 0, lastScreenshotAtMs, lastError),
         };
         var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
 
@@ -355,6 +515,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(expectedTooltip, viewModel.TrayTooltip);
     }
 
+    // CLIENT-027: displayed states show underscores as spaces.
     [Fact]
     public async Task RefreshAsync_MonitorStateDisplayReplacesUnderscoresWithSpaces()
     {
@@ -370,6 +531,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("signed out", viewModel.MonitorStateDisplay);
     }
 
+    // CLIENT-027: once loaded, signed in reads "Yes" and the account is the email.
     [Fact]
     public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedIn()
     {
@@ -386,6 +548,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("user@example.com", viewModel.AccountSummary);
     }
 
+    // CLIENT-027: once loaded, signed out reads "No" and "Not signed in".
     [Fact]
     public async Task RefreshAsync_AccountSummaryAndLoggedInTextWhenSignedOut()
     {
@@ -402,6 +565,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Not signed in", viewModel.AccountSummary);
     }
 
+    // CLIENT-027: the build line without a package version reads "Build unknown" before load.
     [Fact]
     public void BuildLabelText_WithNoWindowsPackageVersion()
     {
@@ -411,6 +575,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Build unknown", viewModel.BuildLabelText);
     }
 
+    // CLIENT-027: the email field keeps what the user typed while signed out.
     [Fact]
     public async Task RefreshAsync_PreservesUserEditedEmailWhenSignedOut()
     {
@@ -427,6 +592,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("typed@example.com", viewModel.EmailInput);
     }
 
+    // CLIENT-027: the email field follows the account while signed in.
     [Fact]
     public async Task RefreshAsync_OverwritesEmailInputWhenSignedIn()
     {
@@ -443,6 +609,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("server@example.com", viewModel.EmailInput);
     }
 
+    // CLIENT-016: a report is sent with its message, contact email and log choice.
     [Fact]
     public async Task SubmitBugReportAsync_ReturnsTrueAndForwardsFieldsOnSuccess()
     {
@@ -456,6 +623,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-016: a failed report shows the error.
     [Fact]
     public async Task SubmitBugReportAsync_ReturnsFalseAndSetsErrorTextOnFailure()
     {
@@ -471,6 +639,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Too many requests", viewModel.ErrorText);
     }
 
+    // CLIENT-008: Test Screenshot requests a capture and reports the uploaded outcome.
     [Fact]
     public async Task ForceCaptureAsync_ReturnsTheOutcomeAndInvokesInteropOnSuccess()
     {
@@ -485,6 +654,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-008: a not-captured outcome and its message are passed through.
     [Fact]
     public async Task ForceCaptureAsync_PassesThroughAnOutcomeThatIsNotAnUpload()
     {
@@ -502,6 +672,7 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
+    // CLIENT-008: a failed Test Screenshot request shows "Test screenshot failed: <error>".
     [Fact]
     public async Task ForceCaptureAsync_ReturnsNullAndSetsErrorTextOnFailure()
     {
@@ -514,9 +685,10 @@ public sealed class SessionViewModelTests
         var result = await viewModel.ForceCaptureAsync();
 
         Assert.Null(result);
-        Assert.Equal("monitoring is not running", viewModel.ErrorText);
+        Assert.Equal("Test screenshot failed: monitoring is not running", viewModel.ErrorText);
     }
 
+    // CLIENT-027: the tray menu offers Report an Issue (design test).
     [Fact]
     public void TrayMenuController_RoutesReportBugEvent()
     {
@@ -531,12 +703,14 @@ public sealed class SessionViewModelTests
         Assert.True(reportBugRaised);
     }
 
+    // CLIENT-027: where no tray icon can be hosted, the tray has no window handle.
     [Fact]
     public void NullTrayIconHost_HasNoWindowHandle()
     {
         Assert.Equal(IntPtr.Zero, new NullTrayIconHost().WindowHandle);
     }
 
+    // CLIENT-027: the tray exposes its host's window handle (design test).
     [Fact]
     public void TrayMenuController_ForwardsWindowHandleFromHost()
     {
@@ -546,6 +720,7 @@ public sealed class SessionViewModelTests
         Assert.Equal(new IntPtr(0x1234), controller.WindowHandle);
     }
 
+    // CLIENT-008: the tray menu offers Test Screenshot (design test).
     [Fact]
     public void TrayMenuController_RoutesForceCaptureEvent()
     {
@@ -560,6 +735,7 @@ public sealed class SessionViewModelTests
         Assert.True(forceCaptureRaised);
     }
 
+    // CLIENT-008: Test Screenshot calls the native capture (design test, exercises only the test fake).
     [Fact]
     public void ForceScreenshotAndUpload_InvokesInterop()
     {
@@ -570,6 +746,7 @@ public sealed class SessionViewModelTests
         Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
     }
 
+    // CLIENT-027: the tray reports session logoff and system shutdown (CLIENT-012).
     [Fact]
     public void TrayMenuController_RoutesAllSystemEvents()
     {
@@ -588,6 +765,7 @@ public sealed class SessionViewModelTests
         Assert.True(shutdownRaised);
     }
 
+    // CLIENT-027: the periodic refresh does not change the signed-in state.
     [Fact]
     public async Task BackgroundRefreshAsync_DoesNotClearLoggedInState()
     {
@@ -650,6 +828,7 @@ public sealed class SessionViewModelTests
         }
     }
 
+    // CLIENT-029: the installing state is shown for the staged update and cleared when it is unstaged.
     [Fact]
     public void NotifyUpdateInstalling_FlagsTheNoticeAndIsClearedByUnstaging()
     {
@@ -742,8 +921,12 @@ public sealed class SessionViewModelTests
         public ForceCapturePayload ForceScreenshotAndUploadResult { get; set; } =
             new("uploaded", "Screenshot uploaded. Check the web logs page to view it.");
 
+        /// <summary>When set, the call blocks until the test sets it.</summary>
+        public ManualResetEventSlim? ForceScreenshotAndUploadGate { get; set; }
+
         public ForceCapturePayload ForceScreenshotAndUpload()
         {
+            ForceScreenshotAndUploadGate?.Wait(TimeSpan.FromSeconds(10));
             if (ForceScreenshotAndUploadError is not null)
             {
                 throw ForceScreenshotAndUploadError;

@@ -11,7 +11,7 @@ import { Partners } from './index';
 
 const BASE = `http://localhost:8787/${CURRENT_API_VERSION}`;
 
-describe('Partners — sections', () => {
+describe('Partners — sections (WEB-049)', () => {
   it('shows "You monitor" section heading', async () => {
     renderWithClient(<Partners />);
     await waitFor(() => {
@@ -26,21 +26,21 @@ describe('Partners — sections', () => {
     });
   });
 
-  it('renders accepted watcher name', async () => {
+  it('renders accepted watcher name (WEB-051)', async () => {
     renderWithClient(<Partners />);
     await waitFor(() => {
       expect(screen.getByText(TEST_WATCHER.user.name!)).toBeInTheDocument();
     });
   });
 
-  it('renders accepted watching partner name', async () => {
+  it('renders accepted watching partner name (WEB-050)', async () => {
     renderWithClient(<Partners />);
     await waitFor(() => {
       expect(screen.getByText(TEST_WATCHING.user.name!)).toBeInTheDocument();
     });
   });
 
-  it('shows empty messages when there are no partners', async () => {
+  it('shows empty messages when there are no partners (WEB-050, WEB-051)', async () => {
     server.use(
       http.get(`${BASE}/partner`, () => HttpResponse.json({ watchers: [], watching: [] })),
     );
@@ -52,7 +52,7 @@ describe('Partners — sections', () => {
   });
 });
 
-describe('Partners — refresh on open', () => {
+describe('Partners — refresh on open (WEB-049, WEB-012)', () => {
   it('shows the cached partners on reopen and then refetches partners and devices', async () => {
     const user = userEvent.setup();
     function Harness() {
@@ -105,7 +105,7 @@ describe('Partners — refresh on open', () => {
   });
 });
 
-describe('Partners — monitored device list', () => {
+describe('Partners — monitored device list (WEB-050)', () => {
   it("lists a watched account's devices with their status", async () => {
     server.use(
       http.get(`${BASE}/device`, () =>
@@ -140,7 +140,7 @@ describe('Partners — monitored device list', () => {
   });
 });
 
-describe('Partners — monitored account with no devices', () => {
+describe('Partners — monitored account with no devices (WEB-050)', () => {
   it('says "No devices" under the heading', async () => {
     server.use(http.get(`${BASE}/device`, () => HttpResponse.json([])));
     renderWithClient(<Partners />);
@@ -149,7 +149,7 @@ describe('Partners — monitored account with no devices', () => {
   });
 });
 
-describe('Partners — more devices dialog', () => {
+describe('Partners — more devices dialog (WEB-050)', () => {
   it('opens a dialog listing every device when "+N more" is clicked', async () => {
     const user = userEvent.setup();
     const many = Array.from({ length: 6 }, (_, i) => ({
@@ -174,7 +174,7 @@ describe('Partners — more devices dialog', () => {
   });
 });
 
-describe('Partners — Invite partner dialog', () => {
+describe('Partners — Invite partner dialog (WEB-051)', () => {
   it('opens the invite dialog with an email input', async () => {
     const user = userEvent.setup();
     renderWithClient(<Partners />);
@@ -230,7 +230,7 @@ describe('Partners — Invite partner dialog', () => {
   });
 });
 
-describe('Partners — failed invites', () => {
+describe('Partners — failed invites (WEB-052)', () => {
   const failedInvite = {
     id: 'watcher-failed',
     user: { email: 'typo@example.com' },

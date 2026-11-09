@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Virtue.WindowsApp.Tests;
 
+// CLIENT-027: the window opens at 760x640 scaled by DPI, clamped to 90% of the work area and centered.
 public sealed class InitialWindowBoundsTests
 {
     [Fact]

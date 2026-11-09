@@ -40,6 +40,7 @@ pub fn build(state: &DaemonState, config: &Config, is_running: bool) -> ServiceS
     }
 }
 
+// CORE-010: the status fields.
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -73,6 +74,7 @@ mod tests {
                 })
                 .collect(),
             hash_base_url: Some("https://hash.example.org".into()),
+            feature_flags: Vec::new(),
         }
     }
 

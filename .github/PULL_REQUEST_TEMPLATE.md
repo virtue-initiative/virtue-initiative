@@ -10,3 +10,7 @@
 ## Testing
 
 <!-- How did you verify this works? -->
+
+# What to Test (iOS)
+
+<!-- Only required for PRs into main. Plain sentences telling TestFlight testers what to try. This text is shown to testers as-is. -->

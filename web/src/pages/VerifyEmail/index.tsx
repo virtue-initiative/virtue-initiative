@@ -33,7 +33,12 @@ export function VerifyEmail() {
             </Button>
           </>
         )}
-        {state === 'error' && <p>This verification link is invalid or has expired.</p>}
+        {state === 'error' && (
+          <>
+            <h2>Verification failed</h2>
+            <p>This verification link is invalid or has expired.</p>
+          </>
+        )}
       </Card>
     </div>
   );

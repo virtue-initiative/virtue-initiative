@@ -63,9 +63,11 @@ where
 
         if segment != CURRENT_API_VERSION {
             return Box::pin(async move {
+                let message = "This API version is no longer supported";
                 Ok((
                     StatusCode::GONE,
-                    Json(json!({ "error": "This API version is no longer supported" })),
+                    // HASH-004: old clients show `error`, so it stays beside the HASH-002 shape.
+                    Json(json!({ "code": "gone", "message": message, "error": message })),
                 )
                     .into_response())
             });
@@ -109,6 +111,7 @@ fn is_version_segment(segment: &str) -> bool {
     }
 }
 
+// HASH-004: version-prefix routing and 410 for unsupported versions.
 #[cfg(test)]
 mod tests {
     use super::*;

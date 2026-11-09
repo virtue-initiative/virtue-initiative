@@ -1,5 +1,6 @@
 import { env, SELF } from 'cloudflare:test';
 import { clearMockEmailDeliveries, listMockEmailDeliveries } from '../src/lib/email';
+import { clearFeatureFlagCache } from '../src/lib/feature-flags';
 import { resetHashServerMock } from './hash-server-mock';
 
 export const BASE = 'http://localhost';
@@ -268,6 +269,8 @@ export function extractTokenFromDelivery(
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   resetHashServerMock();
+  clearFeatureFlagCache();
+  await env.DB.prepare('DELETE FROM feature_flags').run();
   await env.DB.prepare('DELETE FROM analytics_snapshots').run();
   await env.DB.prepare('DELETE FROM admins').run();
   await env.DB.prepare('DELETE FROM email_tokens').run();
@@ -280,4 +283,44 @@ export async function clearDB(): Promise<void> {
   await env.DB.prepare('DELETE FROM devices').run();
   await env.DB.prepare('DELETE FROM users').run();
   await env.DONATE_DB.prepare('DELETE FROM newsletter_signups').run();
+}
+
+/** Sends a partner invite and returns the partnership id and the invite token from the logged email. */
+export async function invitePartner(ownerCookie: string, email: string) {
+  const res = await SELF.fetch(`${BASE}/partner`, {
+    method: 'POST',
+    headers: authHeaders(ownerCookie),
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    throw new Error(`partner invite failed: ${res.status} ${await res.text()}`);
+  }
+  const { id } = (await res.json()) as { id: string };
+
+  const delivery = [...listMockEmailDeliveries()]
+    .reverse()
+    .find((item) => item.kind === 'partner_invite' && item.recipient_email === email);
+  if (!delivery) {
+    throw new Error(`partner invite delivery not found for ${email}`);
+  }
+  const { inviteToken } = JSON.parse(delivery.metadata) as { inviteToken: string };
+  return { id, token: inviteToken };
+}
+
+/** Accepts a partner invite as the user with `cookie` and returns the raw response. */
+export function acceptPartnerInvite(cookie: string, token: string) {
+  return SELF.fetch(`${BASE}/partner/accept`, {
+    method: 'POST',
+    headers: authHeaders(cookie),
+    body: JSON.stringify({ token }),
+  });
+}
+
+/** Uploads a batch as a device and returns the raw response. */
+export function uploadBatch(deviceRefreshToken: string, form: FormData) {
+  return SELF.fetch(`${BASE}/d/batch`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${deviceRefreshToken}` },
+    body: form,
+  });
 }

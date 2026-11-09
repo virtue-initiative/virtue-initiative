@@ -1,11 +1,13 @@
 import Foundation
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
     _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_login")
 private func virtue_ios_native_login(
     _ email: UnsafePointer<CChar>?,
@@ -13,18 +15,23 @@ private func virtue_ios_native_login(
     _ deviceName: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_logout")
 private func virtue_ios_native_logout() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_is_logged_in")
 private func virtue_ios_native_is_logged_in() -> Bool
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_get_device_id")
 private func virtue_ios_native_get_device_id() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_get_status_json")
 private func virtue_ios_native_get_status_json() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_report_issue")
 private func virtue_ios_native_report_issue(
     _ message: UnsafePointer<CChar>?,
@@ -33,20 +40,25 @@ private func virtue_ios_native_report_issue(
     _ platformDetails: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_run_daemon_loop")
 private func virtue_ios_native_run_daemon_loop() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_stop_daemon")
 private func virtue_ios_native_stop_daemon() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_request_pause_monitoring")
 private func virtue_ios_native_request_pause_monitoring(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_request_resume_monitoring")
 private func virtue_ios_native_request_resume_monitoring() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
@@ -142,7 +154,8 @@ enum NativeBridge {
                 email.withCString { emailCString in
                     password.withCString { passwordCString in
                         deviceName.withCString { deviceNameCString in
-                            virtue_ios_native_login(emailCString, passwordCString, deviceNameCString)
+                            virtue_ios_native_login(
+                                emailCString, passwordCString, deviceNameCString)
                         }
                     }
                 }

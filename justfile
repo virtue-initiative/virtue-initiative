@@ -32,6 +32,18 @@ dev domain="":
 dev-donate domain="":
     ./scripts/launch.sh --donate {{domain}}
 
+# --- specs ---------------------------------------------------------------
+
+# Check every test cites a SPEC.md section ID and uncovered sections match the allow-list.
+[group('specs')]
+spec-check:
+    bun scripts/spec-check.ts
+
+# Print a markdown report of spec section test coverage and untagged tests.
+[group('specs')]
+spec-coverage:
+    bun scripts/spec-check.ts --report
+
 # --- api -----------------------------------------------------------------
 
 # Run the API worker locally (wrangler dev).
@@ -158,6 +170,30 @@ shared-web-format:
 core-test:
     cargo test -p virtue-core
 
+# --- mutation testing ----------------------------------------------------
+# Occasional runs (not per PR) that look for code the tests do not really check.
+# See "Property and mutation testing" in TESTING.md. Reports: mutants.out/ (Rust),
+# web/reports/mutation/ (web). All three edit source files in place (and restore them), because
+# the tests read batch-format/vectors/ outside the crate. Pass extra flags, e.g. `-j 2`.
+
+# Mutate the riskiest client/core files (client/core/.cargo/mutants.toml; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'client']
+mutants-core *args:
+    cargo mutants -p virtue-core --config core/.cargo/mutants.toml --timeout 300 --in-place {{args}}
+
+# Mutate the hash server (hash-server/.cargo/mutants.toml; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'hash-server']
+mutants-hash *args:
+    cargo mutants --timeout 120 --in-place {{args}}
+
+# Mutate the web crypto, batch materializer and cache sync (web/stryker.config.json; edits in place, start clean).
+[group('mutants')]
+[working-directory: 'web']
+mutants-web *args:
+    bunx stryker run {{args}}
+
 # --- linux ---------------------------------------------------------------
 
 # Build the Linux .deb package.
@@ -183,6 +219,11 @@ linux-test:
 [group('mac')]
 mac-build *args:
     ./client/mac/scripts/build-app.sh {{args}}
+
+# Build the macOS app from Linux: Rust here, Swift on the Mac. Run the script with --help for all options.
+[group('mac')]
+mac-remote *args:
+    ./client/scripts/remote-apple-build.sh --platform mac {{args}}
 
 # --- windows -------------------------------------------------------------
 
@@ -240,9 +281,26 @@ android-logs follow="false":
 android-force-idle:
     ./client/android/scripts/force-idle.sh
 
+# --- swift -----------------------------------------------------------------
+
+# Format every tracked Swift file (mac, ios, shared-swift) with swift-format.
+[group('swift')]
+swift-format:
+    ./scripts/swift-format.sh
+
+# Check Swift formatting and lint rules without changing anything (what CI runs).
+[group('swift')]
+swift-format-check:
+    ./scripts/swift-format.sh --check
+
 # --- ios -------------------------------------------------------------------
 
 # Build the iOS app (macOS + Xcode only). Run the script with --help for all options.
 [group('ios')]
 ios-build *args:
     ./client/ios/scripts/build-ios.sh {{args}}
+
+# Build the iOS app from Linux: Rust here, Swift on the Mac. Run the script with --help for all options.
+[group('ios')]
+ios-remote *args:
+    ./client/scripts/remote-apple-build.sh --platform ios {{args}}

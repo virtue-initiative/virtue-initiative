@@ -110,6 +110,7 @@ mod tests {
 
     use super::{ClientPaths, load_service_status};
 
+    // CLIENT-002: the state directory is `virtue` under the state root.
     #[test]
     fn state_dir_is_under_state_root() {
         let paths =
@@ -118,6 +119,7 @@ mod tests {
         assert_eq!(paths.data_dir, PathBuf::from("/tmp/state/virtue"));
     }
 
+    // CLIENT-002: the config directory is `virtue` under the config root.
     #[test]
     fn config_dir_is_under_config_root() {
         let paths = ClientPaths::from_roots(
@@ -128,6 +130,7 @@ mod tests {
         assert_eq!(paths.config_dir, PathBuf::from("/home/user/.config/virtue"));
     }
 
+    // CLIENT-002: default paths are ~/.local/state/virtue and ~/.config/virtue.
     #[test]
     fn fallback_paths_follow_xdg_spec_conventions() {
         let home = PathBuf::from("/home/testuser");
@@ -142,6 +145,7 @@ mod tests {
         );
     }
 
+    // CLIENT-002: an instance build uses `virtue-<name>` for both directories.
     #[test]
     fn instance_name_is_appended_to_dir_name() {
         let paths = ClientPaths::from_roots(
@@ -159,6 +163,7 @@ mod tests {
         );
     }
 
+    // CLIENT-002: an empty instance name behaves as no instance.
     #[test]
     fn empty_instance_falls_back_to_default_dir_name() {
         let paths = ClientPaths::from_roots(
@@ -186,6 +191,7 @@ mod tests {
         }
     }
 
+    // CLIENT-015: with no daemon socket and no state file, status reads signed out and not running.
     #[test]
     fn status_defaults_to_logged_out_when_daemon_is_unreachable_and_never_ran() {
         let paths = scratch_paths("missing-file");
@@ -194,6 +200,7 @@ mod tests {
         assert!(!status.is_running);
     }
 
+    // CLIENT-015: with the daemon stopped, status is computed from event_state.json and still reads signed in.
     #[test]
     fn status_reflects_credentials_persisted_by_the_daemon_even_when_it_is_stopped() {
         let paths = scratch_paths("with-credentials");

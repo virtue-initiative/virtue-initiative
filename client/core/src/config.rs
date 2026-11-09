@@ -53,6 +53,7 @@ fn normalize_base_url(value: String) -> String {
 mod tests {
     use super::*;
 
+    // CORE-024: the API base URL is normalized.
     #[test]
     fn normalize_base_url_trims_whitespace_and_trailing_slash() {
         assert_eq!(

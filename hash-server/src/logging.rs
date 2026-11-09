@@ -18,6 +18,7 @@ mod tests {
     use tower::ServiceExt;
     use tracing_test::traced_test;
 
+    // HASH-014: requests are logged at debug level, never with their body.
     #[traced_test]
     #[tokio::test]
     async fn logs_every_request_at_debug_level_without_the_body() {

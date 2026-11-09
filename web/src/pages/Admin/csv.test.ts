@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { csvFilename, toCsv } from './csv';
 
-describe('toCsv', () => {
+describe('toCsv (WEB-068)', () => {
   it('writes a header row and escapes per RFC 4180', () => {
     const csv = toCsv({
       columns: ['email', 'name', 'n', 'blob'],
@@ -59,7 +59,7 @@ describe('toCsv', () => {
   });
 });
 
-describe('csvFilename', () => {
+describe('csvFilename (WEB-068)', () => {
   it('slugifies the title and appends the date', () => {
     const now = new Date('2026-09-18T15:00:00Z');
     expect(csvFilename('Signups by day', now)).toBe('signups-by-day-2026-09-18.csv');

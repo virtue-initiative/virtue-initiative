@@ -32,6 +32,37 @@ export function generatePasswordSalt() {
   return crypto.getRandomValues(new Uint8Array(CURRENT_HASH_PARAMS.salt_length));
 }
 
+let cachedSaltKey: { secret: string; key: Promise<CryptoKey> } | undefined;
+
+/** Imports the HMAC key once per isolate, and again if the secret changes. */
+function saltKeyFor(secret: string) {
+  if (cachedSaltKey?.secret !== secret) {
+    const key = crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    cachedSaltKey = { secret, key };
+    key.catch(() => {
+      if (cachedSaltKey?.key === key) cachedSaltKey = undefined;
+    });
+  }
+  return cachedSaltKey.key;
+}
+
+/** API-015: the salt shown for an email with no account, stable as a real account's salt is. */
+export async function madeUpPasswordSalt(secret: string | undefined, normalizedEmail: string) {
+  if (!secret) {
+    console.error('[login-material] LOGIN_SALT_SECRET is not set; using a random made-up salt');
+    return generatePasswordSalt();
+  }
+  const key = await saltKeyFor(secret);
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(normalizedEmail));
+  return new Uint8Array(mac).slice(0, CURRENT_HASH_PARAMS.salt_length);
+}
+
 export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', toBytes(passwordAuth));
   return bytesToHex(new Uint8Array(hashBuffer));

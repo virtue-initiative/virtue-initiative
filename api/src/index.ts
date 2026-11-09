@@ -1,10 +1,13 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
+import { InvalidUuidError } from './lib/db';
 import admin from './routes/admin';
 import auth from './routes/auth';
 import bugReport from './routes/bug-report';
 import data from './routes/data';
 import deviceOnly from './routes/device-only';
+import devEmails from './routes/dev-emails';
 import devices from './routes/devices';
 import emailWebhooks from './routes/email-webhooks';
 import lockedPasswords from './routes/locked-password';
@@ -54,7 +57,7 @@ app.use(
       );
       return allowedOrigins.find((o) => o === origin);
     },
-    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   }),
@@ -79,8 +82,14 @@ app.route('/locked-password', lockedPasswords);
 app.route('/data', data);
 app.route('/d', deviceOnly);
 app.route('/admin', admin);
+app.route('/dev', devEmails);
 
 app.get('/r2/*', async (c) => {
+  // API-040: only local dev turns this on.
+  if (c.env.DEV_R2_ROUTE !== 'true') {
+    return c.json({ error: 'Not found' }, 404);
+  }
+
   const key = c.req.path.replace(/^\/r2\//, '');
   const object = await c.env.BUCKET.get(key);
 
@@ -98,6 +107,14 @@ app.get('/r2/*', async (c) => {
 });
 
 app.onError((error, c) => {
+  // API-004: the validator throws this for a body that is not valid JSON.
+  if (error instanceof HTTPException) {
+    return error.res ?? c.json({ error: error.message }, error.status);
+  }
+  // API-004: a path ID that is not a UUID names nothing. Any other bad UUID is a server bug.
+  if (error instanceof InvalidUuidError && Object.values(c.req.param()).includes(error.uuid)) {
+    return c.json({ error: 'Not found' }, 404);
+  }
   console.error(error);
   return c.json({ error: 'Internal server error', details: { message: error.message } }, 500);
 });

@@ -765,6 +765,7 @@ where
 mod tests {
     use super::*;
 
+    // CLIENT-017: setting up logging twice in one process does not fail or panic.
     #[test]
     fn init_logging_is_idempotent_across_repeated_calls() {
         // `nativeInit` can legitimately be called more than once per process

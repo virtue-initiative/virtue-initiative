@@ -12,6 +12,7 @@ import {
   signupAndGetCookie,
   uuidToBytes,
 } from './helpers';
+import { postPasswordReset } from './auth-helpers';
 import { TEST_OTHER_SNS_PRIVATE_KEY, TEST_SNS_CERT, TEST_SNS_PRIVATE_KEY } from './sns-test-keys';
 
 const SNS_ORIGIN = 'https://sns.us-east-1.amazonaws.com';
@@ -167,7 +168,7 @@ async function listWatchers(cookie: string) {
 }
 
 describe('Email webhooks', () => {
-  it('marks users unverified on SNS bounce notifications', async () => {
+  it('marks users unverified on SNS bounce notifications (API-041)', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();
     serveCert(certPath);
@@ -184,7 +185,7 @@ describe('Email webhooks', () => {
     expect(typeof user?.email_bounced_at).toBe('number');
   });
 
-  it('marks users unverified on SNS complaint notifications', async () => {
+  it('marks users unverified on SNS complaint notifications (API-041)', async () => {
     const userId = await verifiedUser('complaint@example.com');
     const certPath = nextCertPath();
     serveCert(certPath);
@@ -209,7 +210,7 @@ describe('Email webhooks', () => {
     expect(user?.email_bounced_at).toBeNull();
   });
 
-  it('unsubscribes newsletter rows on a permanent bounce but not a transient one', async () => {
+  it('unsubscribes newsletter rows on a permanent bounce but not a transient one (API-041)', async () => {
     await env.DONATE_DB.prepare(
       "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('gone@example.com', 1), ('soft@example.com', 1)",
     ).run();
@@ -224,7 +225,7 @@ describe('Email webhooks', () => {
     expect(results[1]?.unsubscribed_at).toBeNull();
   });
 
-  it('unsubscribes on a newsletter complaint without unverifying the account', async () => {
+  it('unsubscribes on a newsletter complaint without unverifying the account (API-041)', async () => {
     const userId = await verifiedUser('reader@example.com');
     await env.DONATE_DB.prepare(
       "INSERT INTO newsletter_signups (email, confirmed_at) VALUES ('reader@example.com', 1)",
@@ -253,7 +254,7 @@ describe('Email webhooks', () => {
     expect(typeof row?.unsubscribed_at).toBe('number');
   });
 
-  it('cancels a pending resubscribe on a complaint', async () => {
+  it('cancels a pending resubscribe on a complaint (API-041, API-059)', async () => {
     // Unsubscribed long ago, then asked again through the landing form, so the token is live.
     await env.DONATE_DB.prepare(
       "INSERT INTO newsletter_signups (email, token, confirmed_at, unsubscribed_at, confirmation_sent_at) VALUES ('reader@example.com', 'pending', 1, 1, unixepoch() - 10)",
@@ -281,7 +282,7 @@ describe('Email webhooks', () => {
     expect(res.headers.get('Location')).toBe(`${env.LANDING_URL}/newsletter/error`);
   });
 
-  it('still answers 200 when the newsletter list cannot be updated', async () => {
+  it('still answers 200 when the newsletter list cannot be updated (API-041)', async () => {
     // A 500 would make SNS redeliver, recording the bounce again each time.
     await env.DONATE_DB.exec('ALTER TABLE newsletter_signups RENAME TO newsletter_signups_away');
     try {
@@ -296,7 +297,7 @@ describe('Email webhooks', () => {
     expect(results).toHaveLength(1);
   });
 
-  it('accepts SignatureVersion 2, a Subject, and every allowlisted topic', async () => {
+  it('accepts SignatureVersion 2, a Subject, and every allowlisted topic (API-041)', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();
     serveCert(certPath);
@@ -317,7 +318,7 @@ describe('Email webhooks', () => {
     expect((await userEmailState(userId))?.email_verified).toBe(0);
   });
 
-  it('fetches the signing cert once per URL', async () => {
+  it('fetches the signing cert once per URL (API-041)', async () => {
     const certPath = nextCertPath();
     serveCert(certPath);
 
@@ -326,7 +327,7 @@ describe('Email webhooks', () => {
     expect((await postSns(await snsMessage({}, { certPath }))).status).toBe(200);
   });
 
-  it('rejects a body that is not an SNS message', async () => {
+  it('rejects a body that is not an SNS message (API-041)', async () => {
     const unsigned = {
       Type: 'Notification',
       Message: bounceMessage('bounce@example.com'),
@@ -336,7 +337,7 @@ describe('Email webhooks', () => {
     expect((await postSns('not json')).status).toBe(400);
   });
 
-  it('rejects a topic that is not allowlisted without fetching its cert', async () => {
+  it('rejects a topic that is not allowlisted without fetching its cert (API-041)', async () => {
     const userId = await verifiedUser('bounce@example.com');
 
     const res = await postSns(
@@ -350,7 +351,7 @@ describe('Email webhooks', () => {
     expect((await userEmailState(userId))?.email_verified).toBe(1);
   });
 
-  it('rejects a signature from another key', async () => {
+  it('rejects a signature from another key (API-041)', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();
     serveCert(certPath);
@@ -366,7 +367,7 @@ describe('Email webhooks', () => {
     expect((await userEmailState(userId))?.email_verified).toBe(1);
   });
 
-  it('rejects a message altered after signing', async () => {
+  it('rejects a message altered after signing (API-041)', async () => {
     const userId = await verifiedUser('bounce@example.com');
     const certPath = nextCertPath();
     serveCert(certPath);
@@ -384,7 +385,7 @@ describe('Email webhooks', () => {
     'https://sns.us-east-1.amazonaws.com.evil.example.com/cert.pem',
     'https://evil.example.com/sns.us-east-1.amazonaws.com/cert.pem',
     'https://sns.us-east-1.amazonaws.com@evil.example.com/cert.pem',
-  ])('rejects a signing cert at %s without fetching it', async (SigningCertURL) => {
+  ])('rejects a signing cert at %s without fetching it (API-041)', async (SigningCertURL) => {
     const userId = await verifiedUser('bounce@example.com');
 
     const res = await postSns(
@@ -395,7 +396,7 @@ describe('Email webhooks', () => {
     expect((await userEmailState(userId))?.email_verified).toBe(1);
   });
 
-  it('confirms a subscription on an SNS host', async () => {
+  it('confirms a subscription on an SNS host (API-041)', async () => {
     const certPath = nextCertPath();
     serveCert(certPath);
     fetchMock
@@ -419,7 +420,7 @@ describe('Email webhooks', () => {
     expect(await res.json()).toEqual({ ok: true, subscribed: true });
   });
 
-  it('does not follow a SubscribeURL off SNS, even when correctly signed', async () => {
+  it('does not follow a SubscribeURL off SNS, even when correctly signed (API-041)', async () => {
     const certPath = nextCertPath();
     serveCert(certPath);
 
@@ -438,7 +439,7 @@ describe('Email webhooks', () => {
     expect(res.status).toBe(403);
   });
 
-  it('does not follow a SubscribeURL from an unsigned confirmation', async () => {
+  it('does not follow a SubscribeURL from an unsigned confirmation (API-041)', async () => {
     const certPath = nextCertPath();
     serveCert(certPath);
 
@@ -457,7 +458,7 @@ describe('Email webhooks', () => {
     expect(res.status).toBe(403);
   });
 
-  it('ignores other signed message types', async () => {
+  it('ignores other signed message types (API-041)', async () => {
     const certPath = nextCertPath();
     serveCert(certPath);
 
@@ -477,7 +478,7 @@ describe('Email webhooks', () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it('records a temporary bounce without unverifying the user or blocking the address', async () => {
+  it('records a temporary bounce without unverifying the user or blocking the address (API-041, API-056)', async () => {
     const { userId } = await signupAndGetCookie('soft@example.com', 'pw');
     await markUserEmailVerified(userId);
 
@@ -490,16 +491,12 @@ describe('Email webhooks', () => {
     expect(user?.email_verified).toBe(1);
 
     const before = (await listEmailDeliveries()).length;
-    const resetRes = await SELF.fetch(`${BASE}/password-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: 'soft@example.com' }),
-    });
+    const resetRes = await postPasswordReset('soft@example.com');
     expect(resetRes.status).toBe(204);
     expect((await listEmailDeliveries()).length).toBe(before + 1);
   });
 
-  it('marks only the tagged token on a temporary bounce', async () => {
+  it('marks only the tagged token on a temporary bounce (API-056)', async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     const { cookie: otherCookie, userId: otherId } = await signupAndGetCookie(
@@ -518,7 +515,7 @@ describe('Email webhooks', () => {
     expect((await listWatchers(otherCookie))[0].status).toBe('pending');
   });
 
-  it('fails every outstanding invite to a permanently bounced address', async () => {
+  it('fails every outstanding invite to a permanently bounced address (API-056)', async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     const { cookie: otherCookie, userId: otherId } = await signupAndGetCookie(
@@ -536,7 +533,7 @@ describe('Email webhooks', () => {
     expect((await listWatchers(otherCookie))[0].status).toBe('invite_failed');
   });
 
-  it('does not send to a permanently bounced address and fails the new invite immediately', async () => {
+  it('does not send to a permanently bounced address and fails the new invite immediately (API-056, API-023)', async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     await postBounce('gone@example.com', 'Permanent');
@@ -552,7 +549,7 @@ describe('Email webhooks', () => {
     expect((await listWatchers(cookie))[0].status).toBe('invite_failed');
   });
 
-  it('resends a failed invite to a new email by replacing the old one', async () => {
+  it('resends a failed invite to a new email by replacing the old one (API-023)', async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     const created = (await (await invitePartner(cookie, 'typo@example.com')).json()) as {
@@ -569,7 +566,7 @@ describe('Email webhooks', () => {
     expect(watchers[0]).toMatchObject({ status: 'pending', user: { email: 'right@example.com' } });
   });
 
-  it('resends to the same email after a temporary bounce', async () => {
+  it('resends to the same email after a temporary bounce (API-023)', async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     const created = (await (await invitePartner(cookie, 'full@example.com')).json()) as {
@@ -586,7 +583,7 @@ describe('Email webhooks', () => {
     expect(watchers[0].status).toBe('pending');
   });
 
-  it("rejects replace_id for someone else's or an accepted partnership", async () => {
+  it("rejects replace_id for someone else's or an accepted partnership (API-023)", async () => {
     const { cookie, userId } = await signupAndGetCookie('owner@example.com', 'pw');
     await markUserEmailVerified(userId);
     const { cookie: otherCookie } = await signupAndGetCookie('other@example.com', 'pw');
@@ -599,7 +596,7 @@ describe('Email webhooks', () => {
     expect(await listWatchers(cookie)).toHaveLength(1);
   });
 
-  it('tells signup-request that the address bounced instead of sending', async () => {
+  it('tells signup-request that the address bounced instead of sending (API-009)', async () => {
     await postBounce('gone@example.com', 'Permanent');
 
     const res = await SELF.fetch(`${BASE}/signup-request`, {
@@ -612,7 +609,7 @@ describe('Email webhooks', () => {
     expect(await listEmailDeliveries()).toHaveLength(0);
   });
 
-  it('reports the bounce instead of resending verification at login', async () => {
+  it('reports the bounce instead of resending verification at login (API-016)', async () => {
     const { userId } = await signupAndGetCookie('gone@example.com', 'pw');
     await markUserEmailVerified(userId);
     await postBounce('gone@example.com', 'Permanent');
@@ -633,7 +630,7 @@ describe('Email webhooks', () => {
     expect(await tokenHasBounce(token!.id)).toBe(true);
   });
 
-  it('reports the bounce when changing email to a permanently bounced address', async () => {
+  it('reports the bounce when changing email to a permanently bounced address (API-020)', async () => {
     const { cookie, userId } = await signupAndGetCookie('user@example.com', 'pw');
     await markUserEmailVerified(userId);
     await postBounce('gone@example.com', 'Permanent');
@@ -652,7 +649,7 @@ describe('Email webhooks', () => {
     expect((await listEmailDeliveries()).length).toBe(before);
   });
 
-  it('clears bounces for an address once a verification link sent to it is used', async () => {
+  it('clears bounces for an address once a verification link sent to it is used (API-056)', async () => {
     const { userId } = await signupAndGetCookie('back@example.com', 'pw');
     await env.DB.prepare('UPDATE users SET email_verified = 0 WHERE id = ?')
       .bind(uuidToBytes(userId))

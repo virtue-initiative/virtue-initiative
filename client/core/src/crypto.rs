@@ -82,6 +82,11 @@ pub fn derive_password_auth(
     password_salt: &[u8],
     params: &HashParams,
 ) -> CoreResult<[u8; 32]> {
+    // BATCH-008: the web app's argon2id can't derive this, so no account can have it.
+    if password.is_empty() {
+        return Err(CoreError::InvalidState("password must not be empty"));
+    }
+
     let argon_params = Params::new(
         params.memory_cost_kib,
         params.time_cost,
@@ -136,6 +141,7 @@ mod tests {
         }
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn generate_batch_key_produces_32_distinct_bytes() {
         let engine = CryptoEngine;
@@ -145,6 +151,7 @@ mod tests {
         assert_ne!(key1, key2, "two keys must differ");
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn encrypt_batch_blob_nonce_is_first_12_bytes() {
         let engine = CryptoEngine;
@@ -154,6 +161,7 @@ mod tests {
         assert_eq!(blob.len(), 12 + plaintext.len() + 16);
     }
 
+    // BATCH-002: the batch blob.
     #[test]
     fn encrypt_batch_blob_round_trips() {
         let engine = CryptoEngine;
@@ -166,6 +174,7 @@ mod tests {
         assert_eq!(decrypted.as_slice(), plaintext);
     }
 
+    // API-016: password_auth derivation.
     #[test]
     fn derive_password_auth_is_deterministic() {
         let params = low_cost_params();
@@ -177,6 +186,13 @@ mod tests {
         assert_ne!(out1, [0_u8; 32]);
     }
 
+    // BATCH-008: the derivation is not defined for an empty password.
+    #[test]
+    fn derive_password_auth_rejects_an_empty_password() {
+        assert!(derive_password_auth("", b"user@example.com", &low_cost_params()).is_err());
+    }
+
+    // API-016: password_auth derivation.
     #[test]
     fn derive_password_auth_changes_with_different_inputs() {
         let params = low_cost_params();
@@ -185,6 +201,7 @@ mod tests {
         assert_ne!(out1, out2);
     }
 
+    // BATCH-006: the content hash.
     #[test]
     fn compute_event_hash_is_deterministic() {
         let h1 = compute_event_hash(b"hello");
@@ -194,6 +211,7 @@ mod tests {
         assert_ne!(h1, h3);
     }
 
+    // BATCH-005: wrapping the batch key for a recipient.
     #[test]
     fn wrap_and_unwrap_batch_key_round_trips() {
         let mut csprng = HpkeOsRng.unwrap_err();

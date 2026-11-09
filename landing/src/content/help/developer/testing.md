@@ -60,14 +60,15 @@ Install the `.dmg`, drag to Applications, and launch.
 Install the MSIX and launch from Start.
 
 1. Confirm the tray icon appears and no window opens automatically.
-2. Log in from the settings window and confirm screenshots appear in the web app within ~10 minutes.
+2. Sign in from the window and confirm screenshots appear in the web app within ~10 minutes.
 3. Sleep and wake the machine; confirm zero-risk suspend and wake logs and that capture resumes automatically.
 4. Reboot the machine; confirm zero-risk shutdown and startup logs and that monitoring restarts via the startup task without re-login.
 5. Sign out of the Windows user session; confirm a zero-risk session-logout log.
 6. Use tray → Exit; confirm the confirmation prompt and a high-risk user-stop log with a marker so the next start is zero-risk.
-7. Log out from the settings window; confirm a high-risk logout log.
-8. Force-kill `Virtue.WindowsApp.exe` from Task Manager (End Task); confirm a 0.5-risk stop log if cleanup runs, or a high-risk log on next start determined by ping timestamps.
-9. Disable the `VirtueTrayStartup` task and reboot; confirm a high-risk log on the next time the app runs.
+7. Select **Stop Monitoring** in the window; confirm the same prompt and log as tray → Exit.
+8. Open the window menu (**☰**) and choose **Sign Out**; confirm the confirmation prompt and a high-risk logout log.
+9. Force-kill `Virtue.WindowsApp.exe` from Task Manager (End Task); confirm a 0.5-risk stop log if cleanup runs, or a high-risk log on next start determined by ping timestamps.
+10. Disable the `VirtueTrayStartup` task and reboot; confirm a high-risk log on the next time the app runs.
 
 ## Linux
 

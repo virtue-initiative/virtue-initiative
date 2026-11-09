@@ -53,13 +53,13 @@ function summarizeUserActivity(rows: DigestActivityRow[]): UserActivity {
   return activity;
 }
 
-function collectMissingLogPeriods(
+function collectMissingLogs(
   cadence: DigestFrequency,
   devices: UserActivity['devices'],
   windowStart: number,
   windowEnd: number,
 ) {
-  const missing: string[] = [];
+  const missing: Array<{ deviceName: string; days: string[] }> = [];
   for (const device of devices) {
     // Day 0 starts here, as in listDigestActivity.
     const firstRelevantTime = Math.max(windowStart, device.created_at);
@@ -70,19 +70,23 @@ function collectMissingLogPeriods(
 
     if (cadence === 'daily') {
       if (device.days.size === 0) {
-        missing.push(`${device.name}: no logs in the last 24 hours`);
+        missing.push({ deviceName: device.name, days: [] });
       }
       continue;
     }
 
+    const days: string[] = [];
     for (
       let day = 0, bucketStart = firstRelevantTime;
       bucketStart < windowEnd;
       day++, bucketStart += DAY_MS
     ) {
       if (!device.days.has(day)) {
-        missing.push(`${device.name}: no logs on ${formatUtcDate(bucketStart)}`);
+        days.push(formatUtcDate(bucketStart));
       }
+    }
+    if (days.length > 0) {
+      missing.push({ deviceName: device.name, days });
     }
   }
 
@@ -196,7 +200,7 @@ async function sendDigest(env: Env, digest: DueDigest, activity: Map<string, Use
         reportUrl: `${env.APP_URL}/report/${partnership.watching_user_id}?${reportQuery}`,
         approxScreenshotCount: user?.screenshots ?? 0,
         tamperCounts,
-        missingLogDays: collectMissingLogPeriods(
+        missingLogs: collectMissingLogs(
           emailFrequency,
           user?.devices ?? [],
           window.start,

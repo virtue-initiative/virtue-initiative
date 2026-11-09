@@ -40,7 +40,7 @@ From WSL:
 
 ```bash
 cd /home/jeff/code/virtue-initiative/client/windows
-./scripts/build-msix.sh -Version 0.1.8-dev -Profile Debug
+./scripts/build-msix.sh -Version 0.1.9-dev -Profile Debug
 ```
 
 Expected output:
@@ -182,7 +182,7 @@ Build the Windows MSIX package from Linux:
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode msix \
-  --version 0.1.8-dev \
+  --version 0.1.9-dev \
   --profile Debug
 ```
 
@@ -260,9 +260,9 @@ check, but a failed one retries after 5 minutes and doubles up to an hour, so a 
 newly-introduced) failure no longer costs a full 4-hour cycle. The loop itself wakes on a 5-second
 slice and tracks its own next-check time, rather than sleeping one long delay, so the debug
 sentinel below and the manual re-check are picked up promptly and all staging stays on one
-thread. The status card's **Check for updates** button calls `RequestCheckNow()`, which releases
+thread. The window menu's **Check for Updates** item calls `RequestCheckNow()`, which releases
 a semaphore that slice waits on — short-circuiting the cadence is its _only_ effect. Feedback
-appears next to it via `SessionViewModel.UpdateCheckStatusText` ("Checking for updates..." →
+appears at the bottom of the menu via `SessionViewModel.UpdateCheckStatusText` ("Checking for updates..." →
 "No updates found." / "Update found; downloading..." / "Update check failed."); see the status-line
 rules below.
 
@@ -341,9 +341,9 @@ also by `ClearStagedUpdateAfterFailedInstall()` (where the process survived, so 
 coming), so a stale flag can't pop a window at some unrelated later launch. An automatic
 window-closed update sets no flag and stays quiet.
 
-The status line beside "Check for updates" reports every terminal outcome — "No updates found.",
+The status line at the bottom of the window menu reports every terminal outcome — "No updates found.",
 "Update found; downloading...", "Update downloaded.", "Update check failed.", "Update install did
-not complete; it will be retried." — and the button short-circuits to "Update already downloaded."
+not complete; it will be retried." — and the menu item short-circuits to "Update already downloaded."
 when one is staged, since the check loop skips checks entirely in that state and the line would
 otherwise sit on "Checking for updates..." forever. Nothing sets it back to empty: a blank line
 after a click is indistinguishable from a hang.

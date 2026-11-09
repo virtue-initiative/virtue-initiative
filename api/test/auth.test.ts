@@ -8,7 +8,7 @@ import {
   TEST_OTHER_JWT_PUBLIC_KEY,
 } from './jwt-test-keys';
 
-describe('Password auth hashing', () => {
+describe('Password auth hashing (API-016)', () => {
   it('hashes and verifies correct password auth material', async () => {
     const passwordAuth = new TextEncoder().encode('hunter2-auth');
     const hash = await hashPasswordAuth(passwordAuth);
@@ -30,7 +30,7 @@ describe('Password auth hashing', () => {
   });
 });
 
-describe('JWT tokens', () => {
+describe('JWT tokens (API-002)', () => {
   it('generates and verifies a server token', async () => {
     const token = await generateToken('server', 'device-123', TEST_JWT_PRIVATE_KEY, 60);
     const payload = await verifyJWT(token, TEST_JWT_PUBLIC_KEY);
@@ -51,7 +51,7 @@ describe('JWT tokens', () => {
   });
 });
 
-describe('Opaque token purpose prefixes', () => {
+describe('Opaque token purpose prefixes (API-002)', () => {
   it('prefixes generated tokens by purpose', () => {
     expect(generateOpaqueToken('web_session')).toMatch(/^wst_/);
     expect(generateOpaqueToken('device_session')).toMatch(/^dst_/);

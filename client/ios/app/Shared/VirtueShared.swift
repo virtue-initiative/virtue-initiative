@@ -1,18 +1,22 @@
 import Foundation
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_default_api_base_url")
 private func virtue_ios_default_api_base_url() -> UnsafePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_default_capture_interval_seconds")
 private func virtue_ios_default_capture_interval_seconds() -> UInt64
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_default_batch_window_seconds")
 private func virtue_ios_default_batch_window_seconds() -> UInt64
 
 enum VirtueShared {
     static let appGroupID = "group.org.virtueinitiative.virtueios"
     static let buildLabel: String = {
-        if let buildLabel = Bundle.main.object(forInfoDictionaryKey: "VirtueBuildLabel") as? String {
+        if let buildLabel = Bundle.main.object(forInfoDictionaryKey: "VirtueBuildLabel") as? String
+        {
             return buildLabel
         }
         if let marketingVersion =

@@ -24,7 +24,7 @@ beforeAll(() => {
 beforeEach(clearDB);
 
 describe('Data and device API routes', () => {
-  it('refuses a batch when the hash server returns a malformed hash', async () => {
+  it('refuses a batch when the hash server returns a malformed hash (API-038)', async () => {
     await signupAndGetCookie('badhash@example.com');
     const device = await createDeviceForUser('badhash@example.com', 'password123', 'PC', 'linux');
     seedHashState(device.id, { hash: 'abc', seq: 1, last_received: 1000 });
@@ -42,7 +42,7 @@ describe('Data and device API routes', () => {
     error.mockRestore();
   });
 
-  it('does not store a batch for a device that no longer exists', async () => {
+  it('does not store a batch for a device that no longer exists (API-038)', async () => {
     const { userId } = await signupAndGetCookie('gone@example.com');
     const result = await createBatch(env.DB, {
       id: '00000000-0000-4000-8000-0000000000aa',
@@ -59,7 +59,7 @@ describe('Data and device API routes', () => {
     expect(result.meta.changes).toBe(0);
   });
 
-  it('leaves out and logs a batch whose access keys cannot be decoded', async () => {
+  it('leaves out and logs a batch whose access keys cannot be decoded (API-033)', async () => {
     const { cookie, userId } = await signupAndGetCookie('corrupt@example.com');
     const device = await createDeviceForUser('corrupt@example.com', 'password123', 'PC', 'linux');
     await env.DB.prepare(
@@ -88,7 +88,7 @@ describe('Data and device API routes', () => {
     warn.mockRestore();
   });
 
-  it('clamps batch times from a device clock running ahead, and logs a warning', async () => {
+  it('clamps batch times from a device clock running ahead, and logs a warning (API-038)', async () => {
     await signupAndGetCookie('skew@example.com');
     const device = await createDeviceForUser('skew@example.com', 'password123', 'Laptop', 'linux');
     seedHashState(device.id, { hash: '07'.repeat(32), seq: 1, last_received: 1000 });
@@ -120,7 +120,7 @@ describe('Data and device API routes', () => {
     warn.mockRestore();
   });
 
-  it('handles device registration, settings, batch upload, and data listing', async () => {
+  it('handles device registration, settings, batch upload, and data listing (API-036, API-038, API-033)', async () => {
     const { cookie: userCookie, userId } = await signupAndGetCookie('alice@example.com');
     const device = await createDeviceForUser('alice@example.com', 'password123', 'Phone', 'ios');
 
@@ -212,7 +212,7 @@ describe('Data and device API routes', () => {
     expect(data.watchers).toEqual([]);
   });
 
-  it("bundles an accepted partner's batches into the watcher's own GET /data response", async () => {
+  it("bundles an accepted partner's batches into the watcher's own GET /data response (API-033)", async () => {
     const { cookie: ownerCookie, userId: ownerUserId } =
       await signupAndGetCookie('owner@example.com');
     const { cookie: partnerCookie, userId: partnerUserId } =
@@ -278,7 +278,7 @@ describe('Data and device API routes', () => {
     expect(partnerData.watching[0]?.user.email).toBe('owner@example.com');
   });
 
-  it('still serves a batch whose access keys were stored as JSON before they became msgpack', async () => {
+  it('still serves a batch whose access keys were stored as JSON before they became msgpack (API-033)', async () => {
     const { cookie, userId } = await signupAndGetCookie('legacy@example.com');
     const device = await createDeviceForUser('legacy@example.com', 'password123', 'Old', 'linux');
     const batchId = '00000000-0000-4000-8000-0000000000aa';
@@ -313,7 +313,7 @@ describe('Data and device API routes', () => {
     ]);
   });
 
-  it('rejects a batch upload whose metadata is missing the required event_counts object', async () => {
+  it('rejects a batch upload whose metadata is missing the required event_counts object (API-038)', async () => {
     const { userId } = await signupAndGetCookie('bad-metadata@example.com');
     const device = await createDeviceForUser('bad-metadata@example.com', 'password123');
 
@@ -336,7 +336,7 @@ describe('Data and device API routes', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects a batch upload whose metadata field is not valid JSON', async () => {
+  it('rejects a batch upload whose metadata field is not valid JSON (API-038)', async () => {
     await signupAndGetCookie('bad-json@example.com');
     const device = await createDeviceForUser('bad-json@example.com', 'password123');
 

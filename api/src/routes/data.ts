@@ -11,6 +11,7 @@ import {
 import { wrappedKeyForUser } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
 import { encodeHex } from '../lib/encoding';
+import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser, serializeWatchers, serializeWatching } from '../lib/serializers';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
@@ -43,7 +44,10 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const batches = await listBatches(c.env.DB, ownerIds, { since });
+  const [batches, featureFlags] = await Promise.all([
+    listBatches(c.env.DB, ownerIds, { since }),
+    enabledFeatureFlags(c.env.DB, user.id, user.feature_flags),
+  ]);
 
   return c.json({
     batches: batches
@@ -67,7 +71,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
         };
       })
       .filter((item) => item !== null),
-    user: serializeUser(user),
+    user: serializeUser(user, featureFlags),
     watching: serializeWatching(incoming),
     watchers: serializeWatchers(owned),
   });

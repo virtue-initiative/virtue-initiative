@@ -1,8 +1,10 @@
 import Foundation
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_init")
 private func virtue_mac_native_init() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_login")
 private func virtue_mac_native_login(
     _ email: UnsafePointer<CChar>?,
@@ -10,9 +12,11 @@ private func virtue_mac_native_login(
     _ deviceName: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_logout")
 private func virtue_mac_native_logout() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_report_issue")
 private func virtue_mac_native_report_issue(
     _ message: UnsafePointer<CChar>?,
@@ -20,63 +24,83 @@ private func virtue_mac_native_report_issue(
     _ includeLogs: Bool
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_is_logged_in")
 private func virtue_mac_native_is_logged_in() -> Bool
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_device_id")
 private func virtue_mac_native_get_device_id() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_account_email")
 private func virtue_mac_native_get_account_email() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_status_json")
 private func virtue_mac_native_get_status_json() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_poll_daemon_status")
 private func virtue_mac_native_poll_daemon_status() -> Int32
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_request_user_stop")
 private func virtue_mac_native_request_user_stop(
     _ source: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_force_capture")
 private func virtue_mac_native_force_capture() -> UnsafeMutablePointer<CChar>?
 
-@_silgen_name("virtue_mac_native_has_capture_permission")
-private func virtue_mac_native_has_capture_permission() -> Bool
+// swift-format-ignore: AlwaysUseLowerCamelCase
+@_silgen_name("virtue_mac_native_check_capture_permission_now")
+private func virtue_mac_native_check_capture_permission_now(
+    _ daemonExePath: UnsafePointer<CChar>?
+) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_request_capture_permission")
 private func virtue_mac_native_request_capture_permission() -> Bool
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_ensure_daemon_running")
 private func virtue_mac_native_ensure_daemon_running(
     _ daemonExePath: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_stop_daemon")
 private func virtue_mac_native_stop_daemon(_ userInitiated: Bool) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_agent_is_registered")
 private func virtue_mac_native_agent_is_registered() -> Bool
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_build_label")
 private func virtue_mac_native_get_build_label() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_default_device_name")
 private func virtue_mac_native_default_device_name() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_default_capture_interval_seconds")
 private func virtue_mac_native_default_capture_interval_seconds() -> UInt64
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_default_batch_window_seconds")
 private func virtue_mac_native_default_batch_window_seconds() -> UInt64
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_daemon_exe_path")
 private func virtue_mac_native_daemon_exe_path(
     _ appBundlePath: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_free_string")
 private func virtue_mac_native_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
@@ -97,6 +121,14 @@ private struct ForceCaptureReport: Decodable {
     let outcome: String?
     let message: String?
     let error: String?
+}
+
+/// A Screen Recording check from a new process (CLIENT-025).
+enum ScreenRecordingCheck {
+    case granted
+    case denied
+    /// The check gave no answer (failed to start, timed out); not a denial.
+    case failed(String)
 }
 
 /// What a "Test Screenshot" run ended up doing, ready to show the user.
@@ -175,8 +207,8 @@ enum NativeBridge {
     /// from `virtue_core::force_capture`, or an error.
     static func forceCapture() -> ForceCaptureResult {
         guard let json = consumeOptionalString(virtue_mac_native_force_capture()),
-              let data = json.data(using: .utf8),
-              let payload = try? JSONDecoder().decode(ForceCaptureReport.self, from: data)
+            let data = json.data(using: .utf8),
+            let payload = try? JSONDecoder().decode(ForceCaptureReport.self, from: data)
         else {
             return .failed("the native layer returned no result")
         }
@@ -186,8 +218,17 @@ enum NativeBridge {
         return .finished(payload.message ?? "Test screenshot finished.")
     }
 
-    static func hasCapturePermission() -> Bool {
-        virtue_mac_native_has_capture_permission()
+    /// Asks a new daemon process, so a change made while the app runs shows
+    /// up. Spawns a process, so call it off the main actor.
+    static func checkCapturePermissionNow(daemonExePath: String) -> ScreenRecordingCheck {
+        let answer = daemonExePath.withCString { pathCString in
+            consumeOptionalString(virtue_mac_native_check_capture_permission_now(pathCString))
+        }
+        switch answer {
+        case "granted": return .granted
+        case "denied": return .denied
+        default: return .failed(answer ?? "no answer")
+        }
     }
 
     static func requestCapturePermission() -> Bool {

@@ -8,12 +8,26 @@ SPEC.md is the source of truth and MUST be updated before the code is updated. T
 
 Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
 
-| Prefix  | File                   |
-| ------- | ---------------------- |
-| `API`   | `api/SPEC.md`          |
-| `HASH`  | `hash-server/SPEC.md`  |
-| `CORE`  | `client/core/SPEC.md`  |
-| `BATCH` | `batch-format/SPEC.md` |
+| Prefix   | File                   |
+| -------- | ---------------------- |
+| `API`    | `api/SPEC.md`          |
+| `DONATE` | `api-donate/SPEC.md`   |
+| `WEB`    | `web/SPEC.md`          |
+| `HASH`   | `hash-server/SPEC.md`  |
+| `CORE`   | `client/core/SPEC.md`  |
+| `CLIENT` | `client/SPEC.md`       |
+| `BATCH`  | `batch-format/SPEC.md` |
+
+`web/SPEC.md` and `client/SPEC.md` describe what users see and can do in the web app and the platform client apps. The others describe server, core and wire behavior.
+
+## Tests
+
+Read `TESTING.md` before writing or changing a test. In short:
+
+- Every test MUST cite the spec ID it proves, in its title (TypeScript) or a comment above it (Rust, C#, Kotlin, Swift). `just spec-check` enforces this. A self-test of a test helper cites `NO-SPEC` instead.
+- Test behavior through the component's public interface (HTTP, the `Scenario` DSL, what the user sees), so refactoring internals doesn't break tests.
+- A behavior change updates the spec, then a test citing it, then the code. A bug fix adds a test that fails without the fix.
+- When a test shows the code doesn't meet the spec and the fix is out of scope, mark the test `KNOWN-BUG` as `TESTING.md` describes instead of fixing or weakening it.
 
 ## Repo map
 
@@ -48,6 +62,8 @@ To see a `web/` or `landing/` change in a browser, use `bunx playwright-cli` (th
 ## Cross-component contracts
 
 These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
+
+The shared test vectors in `batch-format/vectors/` (BATCH-008) pin all five. Both sides' tests check them, so drift on either side fails CI.
 
 ### 1. Batch wire format
 
@@ -87,11 +103,11 @@ new_state = sha256(current_state[32] || contentHash[32])
 
 ### 4. Password auth derivation
 
-Login must hash the password the same way on both platforms before sending:
+Login must hash the password the same way on both platforms before sending. The salt and argon2 parameters come from `GET /user/login-material` (API-015):
 
 ```
-argon2id(password, salt=lowercase_email, m=65536, t=3, p=1, len=32)
-then HKDF-SHA256("auth", argon_output) → hex string sent as password_auth
+argon2id(password, salt=password_salt, m/t/p=params, len=32)
+then HKDF-SHA256("auth", argon_output) → Base64 string sent as password_auth
 ```
 
 Key files:

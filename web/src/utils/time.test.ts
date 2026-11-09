@@ -10,7 +10,7 @@ import {
 
 const FIXED_TS = new Date('2024-03-15T14:30:45.000Z').getTime();
 
-describe('formatRelativeTimestamp', () => {
+describe('formatRelativeTimestamp (WEB-023)', () => {
   it('returns Never for null', () => {
     expect(formatRelativeTimestamp(null)).toBe('Never');
   });
@@ -26,7 +26,7 @@ describe('formatRelativeTimestamp', () => {
   });
 });
 
-describe('formatCompactRelativeTimestamp', () => {
+describe('formatCompactRelativeTimestamp (WEB-023)', () => {
   const ago = (ms: number) => Date.now() - ms;
 
   it('returns Never for null and 0', () => {
@@ -48,7 +48,7 @@ describe('formatCompactRelativeTimestamp', () => {
   });
 });
 
-describe('formatDate', () => {
+describe('formatDate (WEB-023)', () => {
   it('returns a non-empty string', () => {
     const result = formatDate(FIXED_TS);
     expect(typeof result).toBe('string');
@@ -62,7 +62,7 @@ describe('formatDate', () => {
   });
 });
 
-describe('formatTime', () => {
+describe('formatTime (WEB-023)', () => {
   it('returns a non-empty string', () => {
     const result = formatTime(FIXED_TS);
     expect(typeof result).toBe('string');
@@ -70,7 +70,7 @@ describe('formatTime', () => {
   });
 });
 
-describe('localDateKey', () => {
+describe('localDateKey (WEB-023)', () => {
   it('formats as YYYY-MM-DD in local time', () => {
     // Use a UTC midnight to get a predictable local date key on any TZ
     const ts = new Date('2024-06-01T00:00:00').getTime();
@@ -86,7 +86,7 @@ describe('localDateKey', () => {
   });
 });
 
-describe('formatDayHeading', () => {
+describe('formatDayHeading (WEB-023)', () => {
   it('returns "Today" for a timestamp from today', () => {
     const startOfToday = new Date();
     startOfToday.setHours(12, 0, 0, 0);

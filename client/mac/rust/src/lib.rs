@@ -8,7 +8,9 @@ use once_cell::sync::OnceCell;
 use virtue_core::AuthState;
 use virtue_core::force_capture;
 use virtue_core::ipc::ClientController;
-use virtue_mac_platform::capture::{has_screen_capture_access, request_screen_capture_access};
+use virtue_mac_platform::capture::{
+    AccessCheck, CHECK_ACCESS_TIMEOUT, check_access_in_new_process, request_screen_capture_access,
+};
 use virtue_mac_platform::config::{
     ClientPaths, ClientState, build_core_config, read_auth_state, save_state,
 };
@@ -300,9 +302,20 @@ pub extern "C" fn virtue_mac_native_force_capture() -> *mut c_char {
     }
 }
 
+/// Fresh answer from a new `virtue-daemon` process, since macOS answers each
+/// process only once (CLIENT-025): "granted", "denied", or "failed: <cause>"
+/// when the check gave no answer.
 #[unsafe(no_mangle)]
-pub extern "C" fn virtue_mac_native_has_capture_permission() -> bool {
-    has_screen_capture_access()
+pub extern "C" fn virtue_mac_native_check_capture_permission_now(
+    daemon_exe_path: *const c_char,
+) -> *mut c_char {
+    let exe = c_string_or_empty(daemon_exe_path);
+    let answer = match check_access_in_new_process(Path::new(&exe), CHECK_ACCESS_TIMEOUT) {
+        AccessCheck::Granted => "granted".to_string(),
+        AccessCheck::Denied => "denied".to_string(),
+        AccessCheck::Failed(cause) => format!("failed: {cause}"),
+    };
+    string_to_c(answer)
 }
 
 #[unsafe(no_mangle)]

@@ -345,6 +345,7 @@ mod tests {
     use crate::module::upload::UploadState;
     use crate::testing::TestPlatformHooks;
 
+    // CORE-005: the forced-upload risk threshold uses the rounded percentage.
     #[test]
     fn extra_high_risk_uses_the_rounded_percentage_like_the_web_app() {
         // 0.8951 shows as "90% concern (Alert)" on the website.
@@ -406,6 +407,7 @@ mod tests {
             .any(|e| matches!(e.event, UploadKind::UserStart))
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn first_tick_with_no_scheduled_wakeup_is_a_noop() {
         let mut state = LifecycleState::default();
@@ -416,6 +418,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn small_lateness_is_tracked_but_does_not_alert() {
         let mut state = LifecycleState::default();
@@ -427,6 +430,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn single_wakeup_over_two_minutes_late_alerts() {
         let mut state = LifecycleState::default();
@@ -436,6 +440,7 @@ mod tests {
         assert!(has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn accumulated_lateness_over_five_minutes_alerts() {
         let mut state = LifecycleState::default();
@@ -455,6 +460,7 @@ mod tests {
         assert!(has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn negative_diffs_do_not_count_toward_the_sum_budget() {
         let mut state = LifecycleState::default();
@@ -471,6 +477,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn wakeup_near_login_is_excused() {
         let mut state = LifecycleState::default();
@@ -484,6 +491,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn wakeup_near_logout_is_excused() {
         let mut state = LifecycleState::default();
@@ -499,6 +507,7 @@ mod tests {
 
     // ── Suspend evidence (CORE-002) ───────────────────────────────────────
 
+    // CORE-002: tamper detection.
     #[test]
     fn suspend_that_explains_the_whole_gap_is_excused() {
         let mut state = LifecycleState::default();
@@ -517,6 +526,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn suspend_is_excused_even_with_a_stale_unrelated_login_and_logout_on_record() {
         // Regression test: on a real desktop, `get_last_login_utc_ms`/
@@ -540,6 +550,7 @@ mod tests {
         assert!(!has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn brief_suspend_coincident_with_a_long_kill_does_not_excuse() {
         // A daemon killed for ~2.7 hours, during which the machine also
@@ -564,6 +575,7 @@ mod tests {
         assert!(has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn kill_then_reboot_still_alerts_despite_a_nearby_login() {
         // The daemon was killed well before the machine was actually
@@ -584,6 +596,7 @@ mod tests {
         assert!(has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn never_restarted_after_reboot_still_alerts_despite_a_nearby_logout() {
         // Autostart is disabled: the machine rebooted (a real logout/login
@@ -603,6 +616,7 @@ mod tests {
         assert!(has_late_wakeup_alert(&upload));
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn late_wakeups_array_is_cleared_after_an_alert_is_sent() {
         // CORE-002: "The late wakeups array MUST be cleared after an alert
@@ -625,6 +639,7 @@ mod tests {
         );
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn accumulated_alert_does_not_duplicate_on_the_next_tick() {
         let mut state = LifecycleState::default();
@@ -652,6 +667,7 @@ mod tests {
         );
     }
 
+    // CORE-002: tamper detection.
     #[test]
     fn late_wakeups_array_evicts_beyond_ten_entries() {
         let mut state = LifecycleState::default();
@@ -666,6 +682,7 @@ mod tests {
         assert_eq!(state.late_wakeups.len(), MAX_TRACKED_WAKEUPS);
     }
 
+    // CORE-011: note_user_stop sends an immediate user_stop alert.
     #[test]
     fn user_stop_emits_immediate_extra_high_risk_alert() {
         let mut state = LifecycleState::default();
@@ -683,6 +700,7 @@ mod tests {
         );
     }
 
+    // CORE-011, CORE-002: a user stop excuses the gap until monitoring resumes.
     #[test]
     fn user_stop_suspends_lateness_checking_until_user_start() {
         // A kill-signal-triggered clean exit (SIGTERM etc.) must NOT excuse
@@ -709,6 +727,7 @@ mod tests {
             })
     }
 
+    // CORE-006: system login and logout events.
     #[test]
     fn first_observation_only_seeds_the_baseline_and_is_not_reported() {
         // CORE-006: "The first System Login/Logout time observed [...]
@@ -727,6 +746,7 @@ mod tests {
         assert_eq!(state.last_seen_logout_ms, Some(2_000));
     }
 
+    // CORE-006: system login and logout events.
     #[test]
     fn system_login_at_event_sent_when_login_time_changes_after_a_baseline_is_established() {
         // CORE-006: "When the daemon detects that the System Login time
@@ -744,6 +764,7 @@ mod tests {
         assert_eq!(state.last_seen_login_ms, Some(9_000));
     }
 
+    // CORE-006: system login and logout events.
     #[test]
     fn system_logout_at_event_sent_when_logout_time_changes_after_a_baseline_is_established() {
         // CORE-006: "When the daemon detects tha[t] th[e] System Logout
@@ -761,6 +782,7 @@ mod tests {
         assert_eq!(state.last_seen_logout_ms, Some(20_000));
     }
 
+    // CORE-006: system login and logout events.
     #[test]
     fn no_system_event_sent_when_login_and_logout_time_are_unchanged() {
         let mut state = LifecycleState::default();
@@ -780,6 +802,7 @@ mod tests {
         );
     }
 
+    // CORE-006: system login and logout events.
     #[test]
     fn system_event_sent_again_when_login_time_changes_a_second_time() {
         let mut state = LifecycleState::default();
@@ -802,6 +825,7 @@ mod tests {
 
     // ── Intentional-stop excuse (CORE-002) ────────────────────────────────
 
+    // CORE-002, CORE-022: the stop excuse survives ticks before the daemon actually stops.
     #[test]
     fn ticks_before_the_daemon_actually_stops_do_not_consume_the_excuse() {
         // Regression test: `note_user_stop` and the eventual process exit
@@ -846,6 +870,7 @@ mod tests {
         assert_eq!(state.late_wakeups.len(), 1);
     }
 
+    // CORE-022: note_user_start does nothing when no stop is active.
     #[test]
     fn note_user_start_is_a_no_op_when_not_stopped() {
         // A plain kill (no `note_user_stop`) must not be excused — asserted
@@ -870,6 +895,7 @@ mod tests {
             .count()
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn fewer_than_threshold_restarts_does_not_alert() {
         let mut state = LifecycleState::default();
@@ -881,6 +907,7 @@ mod tests {
         assert_eq!(state.restart_times.len(), RESTART_ALERT_THRESHOLD - 1);
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn threshold_restarts_within_window_alerts_once_and_clears() {
         let mut state = LifecycleState::default();
@@ -899,6 +926,7 @@ mod tests {
         assert!(entry.risk.unwrap() >= EXTRA_HIGH_RISK);
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn restarts_older_than_the_window_are_pruned_and_do_not_count() {
         let mut state = LifecycleState::default();
@@ -914,6 +942,7 @@ mod tests {
         assert_eq!(state.restart_times.len(), 1);
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn restarts_spread_past_the_window_never_accumulate_to_threshold() {
         let mut state = LifecycleState::default();
@@ -927,6 +956,7 @@ mod tests {
         assert_eq!(state.restart_times.len(), 1);
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn second_threshold_crossing_within_cooldown_is_suppressed() {
         let mut state = LifecycleState::default();
@@ -953,6 +983,7 @@ mod tests {
         );
     }
 
+    // CORE-019: repeated restart detection.
     #[test]
     fn alert_after_cooldown_expires_fires_again() {
         let mut state = LifecycleState::default();

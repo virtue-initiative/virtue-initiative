@@ -13,17 +13,26 @@ public enum VirtueBrand {
     /// Card surface — matches --surface (#fbf7ea).
     public static let surface = Color(red: 251.0 / 255.0, green: 247.0 / 255.0, blue: 234.0 / 255.0)
     /// Subtle background — matches --bg-subtle (#ebe4ce).
-    public static let bgSubtle = Color(red: 235.0 / 255.0, green: 228.0 / 255.0, blue: 206.0 / 255.0)
+    public static let bgSubtle = Color(
+        red: 235.0 / 255.0, green: 228.0 / 255.0, blue: 206.0 / 255.0)
     /// Border — matches --border (#d9d1bc).
     public static let border = Color(red: 217.0 / 255.0, green: 209.0 / 255.0, blue: 188.0 / 255.0)
     /// Primary text — matches --text (#1b1a16).
     public static let text = Color(red: 27.0 / 255.0, green: 26.0 / 255.0, blue: 22.0 / 255.0)
     /// Muted text — matches --text-muted (#6a6655).
-    public static let textMuted = Color(red: 106.0 / 255.0, green: 102.0 / 255.0, blue: 85.0 / 255.0)
+    public static let textMuted = Color(
+        red: 106.0 / 255.0, green: 102.0 / 255.0, blue: 85.0 / 255.0)
     /// Success — matches --success (#4f7a5a).
     public static let success = Color(red: 79.0 / 255.0, green: 122.0 / 255.0, blue: 90.0 / 255.0)
     /// Danger — matches --danger (#ef4444).
     public static let danger = Color(red: 239.0 / 255.0, green: 68.0 / 255.0, blue: 68.0 / 255.0)
+    /// The V in `landing/public/logo.svg` (#163026).
+    public static let logo = Color(red: 22.0 / 255.0, green: 48.0 / 255.0, blue: 38.0 / 255.0)
+    /// Status colors from the client redesign: working, needs action, and
+    /// starting or not yet (ochre).
+    public static let good = Color(red: 47.0 / 255.0, green: 125.0 / 255.0, blue: 79.0 / 255.0)
+    public static let bad = Color(red: 192.0 / 255.0, green: 57.0 / 255.0, blue: 43.0 / 255.0)
+    public static let warn = ochre
 }
 
 /// Spacing scale matching `shared-web/tokens.css` (`--space-1` … `--space-6`).
@@ -40,4 +49,6 @@ public enum VirtueSpacing {
 public enum VirtueRadius {
     public static let button: CGFloat = 6
     public static let card: CGFloat = 8
+    /// The rounder card the iOS app uses, closer to native iOS grouped lists.
+    public static let cardLarge: CGFloat = 12
 }

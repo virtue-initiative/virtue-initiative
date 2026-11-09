@@ -152,14 +152,15 @@ The mac client stores shared core state under:
 
 The app requests Screen Recording at every launch where it is missing, before sign-in, so the
 first screenshot after sign-in never fails for lack of it (issue #632). macOS shows its prompt only
-once per app, ever, so after that the window's "Action Needed" card sends the user to
+once per app, ever, so after that the window's "Allow Screen Recording" steps send the user to
 `System Settings -> Privacy & Security -> Screen & System Audio Recording` (`Screen Recording`
 before macOS 15) with a deep link.
 
-macOS caches the permission answer for the life of a process, so a running app can't see a grant.
-The user picks up the grant with macOS's own "Quit & Reopen" prompt, or with the card's
-`Restart Virtue` button if they chose "Later". Either way the relaunched app kickstarts the daemon,
-which then starts with the permission. `Test Screenshot` stays disabled until then.
+macOS caches the permission answer for the life of a process, so a running process can't see the
+permission change. The app and the daemon both ask a new `virtue-daemon check-screen-capture`
+process instead: the app at every status poll while its window is open, and the daemon before each
+capture. The window leaves "Allow Screen Recording" within a few seconds of the user turning Virtue
+on, with no restart, whether they click "Quit & Reopen" or "Later" (CLIENT-025).
 
 The user-facing walkthrough, with screenshots, is `landing/src/content/download-instructions/mac.md`.
 

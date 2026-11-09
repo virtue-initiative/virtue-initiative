@@ -68,24 +68,30 @@ private enum ProcessDiagnostics {
     }
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_init")
 private func virtue_ios_native_init(
     _ configDir: UnsafePointer<CChar>?,
     _ dataDir: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_tick_once")
 private func virtue_ios_native_tick_once() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_force_tick_once")
 private func virtue_ios_native_force_tick_once() -> UnsafeMutablePointer<CChar>?
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_nsfw_run_count")
 private func virtue_ios_native_nsfw_run_count() -> UInt64
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_native_batch_upload_count")
 private func virtue_ios_native_batch_upload_count() -> UInt64
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_ios_free_string")
 private func virtue_ios_free_string(_ value: UnsafeMutablePointer<CChar>?)
 
@@ -108,7 +114,8 @@ private final class SafariFrameStore {
             forSecurityApplicationGroupIdentifier: VirtueShared.appGroupID
         ) {
             let frameDir = root.appendingPathComponent("virtue/safari", isDirectory: true)
-            try? FileManager.default.createDirectory(at: frameDir, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(
+                at: frameDir, withIntermediateDirectories: true)
             frameFileURL = frameDir.appendingPathComponent("latest-frame.png", isDirectory: false)
         } else {
             frameFileURL = nil
@@ -140,7 +147,8 @@ private final class SafariFrameStore {
 
     func statusCode() -> Int32 {
         lock.lock()
-        let hasFreshMemoryFrame = latestFrame != nil
+        let hasFreshMemoryFrame =
+            latestFrame != nil
             && max(0, Date().timeIntervalSince1970 - lastFrameAt)
                 <= VirtueShared.safariFrameFreshnessThresholdSeconds
         let lastStateCode = lastStateCode
@@ -214,7 +222,8 @@ private final class SafariSharedStateStore {
     func markMessage() {
         lock.lock()
         if defaults?.object(forKey: VirtueShared.monitoringEnabledKey) == nil {
-            defaults?.set(VirtueShared.defaultMonitoringEnabled, forKey: VirtueShared.monitoringEnabledKey)
+            defaults?.set(
+                VirtueShared.defaultMonitoringEnabled, forKey: VirtueShared.monitoringEnabledKey)
         }
         defaults?.set(Date().timeIntervalSince1970, forKey: VirtueShared.safariLastMessageAtKey)
         lock.unlock()
@@ -231,7 +240,8 @@ private final class SafariSharedStateStore {
         if let title, !title.isEmpty {
             defaults?.set(title, forKey: VirtueShared.safariLastTitleKey)
         }
-        defaults?.set(VirtueShared.captureStateReady, forKey: VirtueShared.safariCaptureStateCodeKey)
+        defaults?.set(
+            VirtueShared.captureStateReady, forKey: VirtueShared.safariCaptureStateCodeKey)
         defaults?.removeObject(forKey: VirtueShared.safariLastErrorKey)
         lock.unlock()
     }
@@ -297,7 +307,8 @@ private final class SafariSharedStateStore {
         lock.lock()
         defer { lock.unlock() }
         if defaults?.object(forKey: VirtueShared.monitoringEnabledKey) == nil {
-            defaults?.set(VirtueShared.defaultMonitoringEnabled, forKey: VirtueShared.monitoringEnabledKey)
+            defaults?.set(
+                VirtueShared.defaultMonitoringEnabled, forKey: VirtueShared.monitoringEnabledKey)
         }
         return defaults?.bool(forKey: VirtueShared.monitoringEnabledKey)
             ?? VirtueShared.defaultMonitoringEnabled
@@ -374,7 +385,8 @@ private final class SafariNativeRuntime {
             // `tickInFlight` out from under a call that's still in progress.
             guard !expired else { return }
 
-            let tickError = forceCapture
+            let tickError =
+                forceCapture
                 ? virtue_ios_native_force_tick_once()
                 : virtue_ios_native_tick_once()
             var tickMessage: String?
@@ -399,9 +411,11 @@ private final class SafariNativeRuntime {
         }
         lock.unlock()
 
-        guard let root = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: VirtueShared.appGroupID
-        ) else {
+        guard
+            let root = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: VirtueShared.appGroupID
+            )
+        else {
             return "missing app group container"
         }
 
@@ -409,7 +423,8 @@ private final class SafariNativeRuntime {
         let dataDir = root.appendingPathComponent("virtue/data", isDirectory: true)
 
         do {
-            try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: configDir, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
         } catch {
             return "failed to prepare runtime storage: \(error.localizedDescription)"
@@ -434,11 +449,13 @@ private final class SafariNativeRuntime {
     }
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_status")
 public func virtue_ios_capture_status() -> Int32 {
     SafariFrameStore.shared.statusCode()
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_png_write")
 public func virtue_ios_capture_png_write(
     _ outBuffer: UnsafeMutablePointer<UnsafePointer<UInt8>?>?,
@@ -462,6 +479,7 @@ public func virtue_ios_capture_png_write(
     return 0
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
 @_cdecl("virtue_ios_capture_png_release")
 public func virtue_ios_capture_png_release(_ buffer: UnsafePointer<UInt8>?, _ length: Int) {
     _ = length
@@ -481,7 +499,8 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     private func handleRequest(_ context: NSExtensionContext) -> [String: Any] {
         SafariSharedStateStore.shared.markMessage()
 
-        let payload = (context.inputItems.first as? NSExtensionItem)?
+        let payload =
+            (context.inputItems.first as? NSExtensionItem)?
             .userInfo?[extensionMessageKey] as? [String: Any]
         SafariSharedStateStore.shared.markPermissions(
             allSites: payload?["all_sites"] as? Bool,
@@ -512,8 +531,10 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             )
             return ["ok": true]
         case "ping":
-            SafariFrameStore.shared.updateState(code: captureStateSessionUnavailable, clearFrame: false)
-            SafariSharedStateStore.shared.markCaptureState(VirtueShared.captureStateSessionUnavailable)
+            SafariFrameStore.shared.updateState(
+                code: captureStateSessionUnavailable, clearFrame: false)
+            SafariSharedStateStore.shared.markCaptureState(
+                VirtueShared.captureStateSessionUnavailable)
             SafariNativeRuntime.shared.ensureInitializedAndTick()
             return ["ok": true]
         default:
@@ -523,7 +544,8 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
     private func handleCaptureFrame(_ payload: [String: Any]) -> [String: Any] {
         guard let png = decodePNG(payload) else {
-            SafariFrameStore.shared.updateState(code: captureStateSessionUnavailable, clearFrame: true)
+            SafariFrameStore.shared.updateState(
+                code: captureStateSessionUnavailable, clearFrame: true)
             SafariSharedStateStore.shared.markCaptureError(
                 "invalid_frame_payload",
                 stateCode: VirtueShared.captureStateSessionUnavailable
@@ -539,7 +561,9 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         // Only a message carrying a fresh frame can satisfy a force request.
         // It stays set until a tick is actually scheduled with it.
         let forceCapture = SafariSharedStateStore.shared.isForceCaptureRequested()
-        if SafariNativeRuntime.shared.ensureInitializedAndTick(forceCapture: forceCapture), forceCapture {
+        if SafariNativeRuntime.shared.ensureInitializedAndTick(forceCapture: forceCapture),
+            forceCapture
+        {
             SafariSharedStateStore.shared.clearForceCaptureRequest()
         }
 
@@ -552,7 +576,8 @@ final class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         }
 
         if let dataURL = payload["png_data_url"] as? String {
-            let parts = dataURL.split(separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
+            let parts = dataURL.split(
+                separator: ",", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2 else {
                 return nil
             }

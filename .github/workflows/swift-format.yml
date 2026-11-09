@@ -1,0 +1,35 @@
+name: Swift Format
+
+# Every tracked Swift file matches swift-format and the repo-root .swift-format
+# config. Runs on Linux, since checking style needs no Apple SDK.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift-format:
+    name: Swift format
+    runs-on: ubuntu-latest
+    # Pinned because swift-format's output can change between releases. Keep
+    # it on the Swift version Xcode ships, so local and CI results agree.
+    container: swift:6.1.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The container runs as root over a checkout owned by the runner user,
+      # which git refuses to read without this.
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Check Swift style
+        run: ./scripts/swift-format.sh --check

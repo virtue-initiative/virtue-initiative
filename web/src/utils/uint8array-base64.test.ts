@@ -4,7 +4,7 @@ import './uint8array-base64';
 // Node does not implement these natively, so in this suite they are the polyfill.
 const BYTES = new Uint8Array([0x00, 0x01, 0x7f, 0x80, 0xff, 0xfe]);
 
-describe('toBase64', () => {
+describe('toBase64 (WEB-027)', () => {
   it('round-trips through fromBase64', () => {
     expect(Uint8Array.fromBase64(BYTES.toBase64())).toEqual(BYTES);
   });
@@ -33,7 +33,7 @@ describe('toBase64', () => {
   });
 });
 
-describe('fromBase64', () => {
+describe('fromBase64 (WEB-027)', () => {
   it('accepts unpadded input', () => {
     expect(Uint8Array.fromBase64('AQIDBA')).toEqual(new Uint8Array([1, 2, 3, 4]));
   });
@@ -47,7 +47,7 @@ describe('fromBase64', () => {
   });
 });
 
-describe('setFromBase64', () => {
+describe('setFromBase64 (WEB-027)', () => {
   it('fills the target and reports what it read', () => {
     const target = new Uint8Array(4);
     expect(target.setFromBase64('AQIDBA==')).toEqual({ read: 6, written: 4 });
@@ -61,7 +61,7 @@ describe('setFromBase64', () => {
   });
 });
 
-describe('toHex and fromHex', () => {
+describe('toHex and fromHex (WEB-027)', () => {
   it('round-trips', () => {
     expect(BYTES.toHex()).toBe('00017f80fffe');
     expect(Uint8Array.fromHex('00017f80fffe')).toEqual(BYTES);
@@ -77,7 +77,7 @@ describe('toHex and fromHex', () => {
   });
 });
 
-describe('setFromHex', () => {
+describe('setFromHex (WEB-027)', () => {
   it('fills the target and reports what it read', () => {
     const target = new Uint8Array(2);
     expect(target.setFromHex('0102')).toEqual({ read: 4, written: 2 });

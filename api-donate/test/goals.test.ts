@@ -6,7 +6,7 @@ beforeEach(async () => {
   await env.DB.prepare('UPDATE goals SET raised_cents = 0, active = 1').run();
 });
 
-describe('GET /goals', () => {
+describe('GET /goals (DONATE-010)', () => {
   it('returns the seeded goal with zero raised', async () => {
     const res = await SELF.fetch(`${BASE}/goals`);
     expect(res.status).toBe(200);

@@ -33,6 +33,8 @@ export const userSchema = z.object({
   name: z.string().optional(),
   pub_key: z.string().optional(),
   encrypted_priv_key: z.string().optional(),
+  // Keys of the flags enabled for this user (API-061). A key not listed is off.
+  feature_flags: z.array(z.string()),
 });
 export type User = z.infer<typeof userSchema>;
 
@@ -381,3 +383,29 @@ export const adminQueryScanDetailsSchema = z.object({
   plan: z.array(z.string()),
 });
 export type AdminQueryScanDetails = z.infer<typeof adminQueryScanDetailsSchema>;
+
+// ── Feature flags (api/SPEC.md API-061) ──────────────────────────────────────
+
+export const featureFlagKeySchema = z.string().regex(/^[a-z0-9_]{1,64}$/);
+
+export const featureFlagSchema = z.object({
+  key: z.string(),
+  rollout_percent: z.number(),
+  description: z.string().nullable(),
+  overrides: z.array(z.object({ user_id: z.string(), email: z.string(), enabled: z.boolean() })),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type FeatureFlag = z.infer<typeof featureFlagSchema>;
+
+export const upsertFeatureFlagSchema = z.object({
+  rollout_percent: z.number().int().min(0).max(100),
+  description: z.string().max(500).nullable().optional(),
+});
+export type UpsertFeatureFlagPayload = z.infer<typeof upsertFeatureFlagSchema>;
+
+export const setFeatureFlagOverrideSchema = z.object({
+  email: z.string().min(1),
+  enabled: z.boolean().nullable(),
+});
+export type SetFeatureFlagOverridePayload = z.infer<typeof setFeatureFlagOverrideSchema>;

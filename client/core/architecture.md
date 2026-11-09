@@ -151,16 +151,16 @@ thread) can drive the daemon synchronously.
 
 ### The 7 modules
 
-| Module                 | Owns                                                                        | Notable functions                                                                                                                      |
-| ---------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth`                 | nothing (writes into `AuthState`/`ScreenshotState`/`UploadState` passed in) | `login()`, `logout()`                                                                                                                  |
-| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)                            | `tick()`, `note_user_stop()`                                                                                                           |
-| `screenshot`           | `ScreenshotState`                                                           | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
-| `upload`               | `UploadState`                                                               | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
-| `capture_availability` | `CaptureAvailabilityState`                                                  | `note_failure()`, `tick()`                                                                                                             |
-| `heartbeat`            | `HeartbeatState`                                                            | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                               |
-| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20)                | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                   |
-| `status`               | nothing                                                                     | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                   |
+| Module                 | Owns                                                         | Notable functions                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                  |
+| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                           |
+| `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
+| `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
+| `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                             |
+| `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                               |
+| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                   |
+| `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                   |
 
 ### Screenshot dedup (two gates) + random cadence
 

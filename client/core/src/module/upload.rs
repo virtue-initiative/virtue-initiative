@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use batch::BatchBuilder;
+// The BATCH-008 vector generator builds its batches with the production
+// builder rather than a copy of it.
+#[cfg(feature = "testing")]
+pub use batch::BatchBuilder as BatchBuilderForTests;
 pub(crate) use batch::MAX_BATCH_ITEMS_PER_UPLOAD;
 
 use crate::api::{ApiTransport, UploadedBatchResponse};
@@ -165,29 +169,6 @@ pub struct UploadState {
 }
 
 impl UploadState {
-    pub fn reset_for_login(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = POST_LOGIN_PROOF_BATCH_COUNT;
-        self.next_hash_seq = 0;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
-    pub fn reset_for_logout(&mut self) {
-        self.pending_batch_events.clear();
-        self.pending_hash_events.clear();
-        self.last_batch_at_ms = None;
-        self.post_login_proof_batches_remaining = 0;
-        self.settings = None;
-        self.device_credentials = None;
-        self.next_hash_seq = 0;
-        self.hash_token_cache = None;
-        self.force_flush = false;
-        self.bypass_lock = false;
-    }
-
     pub fn pending_request_count(&self) -> usize {
         self.pending_hash_events.len() + usize::from(!self.pending_batch_events.is_empty())
     }
@@ -782,6 +763,7 @@ mod tests {
                 pub_key_base64: "CQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
             }],
             hash_base_url: None,
+            feature_flags: Vec::new(),
         }
     }
 
@@ -797,6 +779,7 @@ mod tests {
         state
     }
 
+    // CORE-005: events are not queued without device credentials.
     #[test]
     fn enqueue_without_credentials_is_a_noop() {
         let mut state = UploadState::default();
@@ -804,6 +787,7 @@ mod tests {
         assert!(state.pending_hash_events.is_empty());
     }
 
+    // CORE-005: a heartbeat forces an upload and bypasses the screen-locked hold.
     #[test]
     fn enqueue_heartbeat_forces_flush_and_bypasses_lock() {
         let mut state = authenticated_state();
@@ -813,6 +797,7 @@ mod tests {
         assert!(state.bypass_lock);
     }
 
+    // CORE-005: a high-risk event forces an upload but not past the screen-locked hold.
     #[test]
     fn enqueue_high_risk_forces_flush_but_not_lock_bypass() {
         let mut state = authenticated_state();
@@ -828,6 +813,7 @@ mod tests {
         assert!(!state.bypass_lock);
     }
 
+    // CORE-005: a hashed event moves on to the batch queue (BATCH-006).
     #[test]
     fn hash_retry_round_trip_moves_event_into_batch_queue() {
         let mut state = authenticated_state();
@@ -845,6 +831,7 @@ mod tests {
         assert_eq!(state.next_hash_seq, 1);
     }
 
+    // CORE-005: no batch is uploaded while the screen is locked.
     #[test]
     fn batch_plan_none_when_lock_gate_blocks_and_not_bypassed() {
         let mut state = authenticated_state();
@@ -858,6 +845,7 @@ mod tests {
         assert!(plan_batch(&state, 1_000, 60_000, false).is_none());
     }
 
+    // CORE-005: an uploaded batch drains the queue.
     #[test]
     fn batch_upload_round_trip_drains_queue_and_advances_state() {
         let mut state = authenticated_state();
@@ -1050,6 +1038,7 @@ mod tests {
         );
     }
 
+    // CORE-005, API-038: event_counts use the rounded risk percentage.
     /// The medium/high counts use the rounded percentage, like the web app's
     /// "N% concern (Level)" label, so a digest never disagrees with the log feed.
     #[test]
@@ -1070,6 +1059,7 @@ mod tests {
         assert_eq!(batch.high_risk_count, 2);
     }
 
+    // CORE-009: an upload result that arrives after logout is discarded.
     #[test]
     fn commit_ignores_outcome_from_a_stale_session() {
         let mut state = authenticated_state();
@@ -1085,7 +1075,7 @@ mod tests {
         let plan = plan_batch(&state, 1_000, 60_000, true).expect("expected a batch plan");
 
         // Logout races the in-flight (unlocked) network call.
-        state.reset_for_logout();
+        state = UploadState::default();
 
         let outcome = execute_batch(plan, &api);
         let should_logout = commit_batch(&mut state, outcome, 1_000);
