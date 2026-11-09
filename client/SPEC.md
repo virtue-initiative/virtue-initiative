@@ -28,7 +28,7 @@ The API URL, capture interval and batch window are fixed at build time on every 
 
 ## CLIENT-003 Installing and first run
 
-- Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. Before `virtue login`, the daemon runs with capture disabled.
+- Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. It MUST run each user's commands without a login shell, so a broken `~/.profile` or other login script cannot fail the install, and a failure for one user MUST NOT fail the install. It SHOULD end by telling the user to run `virtue login`. Before `virtue login`, the daemon runs with capture disabled.
 - macOS: the first launch MUST open the main window, request Screen Recording (CLIENT-025), register the app as a login item, and install and start the daemon LaunchAgent (CLIENT-024).
 - Windows: the app is installed from the Microsoft Store as an MSIX. Launching it MUST start monitoring in-process, create the tray icon, register the watchdog (CLIENT-028) and show the main window.
 - Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). The app MUST NOT ask for the notification permission (Android 13+) or for exemption from battery optimization when it opens; the setup guide's first step MUST explain why both are wanted and offer a "Request Permissions" button that asks for them (CLIENT-030).
@@ -64,7 +64,7 @@ While signed out, no screenshots are taken (CORE-009):
 
 Every app MUST show whether the user is signed in and a one-line monitoring state, and MUST give access to Status Details (CLIENT-007).
 
-- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021).
+- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021). `virtue status` MUST open with a headline, first match wins: "Signed out"; "Monitoring stopped" (daemon not running); "Monitoring active" (a screenshot has been taken); otherwise "Waiting for the first screenshot". The first two MUST be followed by the command that fixes them (`virtue login`, `virtue daemon start`).
 - macOS window headline, first match wins: "Screen Recording off"; "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Monitoring active" (daemon running and a screenshot has been taken); otherwise "Starting…".
 - Windows: see CLIENT-027.
 - Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
@@ -162,7 +162,7 @@ Shared rules for every platform that updates itself:
 
 ## CLIENT-014 Uninstalling
 
-- Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user. Upgrades run the same stop, then CLIENT-003's start.
+- Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user, running each user's commands as CLIENT-003 does. Upgrades run the same stop, then CLIENT-003's start.
 - macOS, Windows, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
@@ -242,6 +242,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 | `virtue dev upload-log` / `dev add-log [--risk R] [--title T] [--details D]` | queue a Developer log, sent now or with the next batch                                               |
 | `virtue dev send --type T` (debug builds)                                    | queue any log type, or `all`                                                                         |
 
+- Output SHOULD use color and bold headings when written to a terminal. It MUST NOT contain color codes when the stream is not a terminal, `NO_COLOR` is set to a non-empty value, or `TERM` is `dumb`.
 - `--risk` MUST be a number from 0 to 1 and defaults to 0.5. `virtue --version` MUST print the build label.
 - The login capture probe MUST report one of: Wayland capture working; Wayland capture failing, with advice to use X11 or a compositor that allows `grim`; X11 working; X11 failing, with advice to install ImageMagick or `maim`; or no graphical session, with advice to run `virtue login` inside the desktop session.
 - `status --json` MUST output the CORE-010 fields plus `backend`, `service_name`, `service_active`, `state_dir`, `log_command`, and the older keys `logged_in`, `running` and `base_api_url`.

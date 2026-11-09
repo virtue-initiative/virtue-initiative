@@ -3,17 +3,38 @@ set -e
 
 ACTION="${1:-}"
 
+# Runs a shell command as a user without starting a login shell. `su -` would
+# source the user's ~/.profile, so one broken line there failed the whole
+# install (CLIENT-003). Errors are ignored: setting up one user's service must
+# not abort the package install. VIRTUE_RUN_USER_DIR exists for tests only.
+run_as_user() {
+  run_user="$1"
+  run_uid="$2"
+  run_cmd="$3"
+  run_runtime="${VIRTUE_RUN_USER_DIR:-/run/user}/$run_uid"
+  run_home=$(getent passwd "$run_user" 2>/dev/null | cut -d: -f6)
+  (
+    cd / &&
+      runuser -u "$run_user" -- env -i \
+        PATH="$PATH" \
+        HOME="${run_home:-/}" \
+        USER="$run_user" \
+        LOGNAME="$run_user" \
+        XDG_RUNTIME_DIR="$run_runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$run_runtime/bus" \
+        sh -c "$run_cmd"
+  ) >/dev/null 2>&1 || true
+}
+
 stop_for_user() {
   user="$1"
   uid="$2"
-  runtime="/run/user/$uid"
 
-  if [ ! -d "$runtime" ]; then
+  if [ ! -d "${VIRTUE_RUN_USER_DIR:-/run/user}/$uid" ]; then
     return 0
   fi
 
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now virtue.service >/dev/null 2>&1 || true"
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now virtue.service >/dev/null 2>&1 || true"
+  run_as_user "$user" "$uid" "systemctl --user disable --now virtue.service"
 }
 
 # Keep global enable on upgrades; remove it on remove/deconfigure.
