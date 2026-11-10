@@ -45,9 +45,9 @@ fn print_monitoring_summary() {
     println!("  Learn more: {}", style::link(MONITORING_HELP_URL));
 }
 
-/// Prints a yellow "Warning:" line.
+/// Prints a yellow "warning:" line, matching the `error:` prefix.
 fn print_warning(message: &str) {
-    println!("{} {message}", style::warn("Warning:"));
+    println!("{} {message}", style::warn("warning:"));
 }
 
 #[derive(Debug, Parser)]
