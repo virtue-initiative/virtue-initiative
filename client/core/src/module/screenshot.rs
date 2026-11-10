@@ -341,7 +341,7 @@ pub fn commit(
 /// Detects and blacks out on-screen text, operating on the already-decoded frame (`img`) so
 /// this doesn't need its own PNG decode — `engine.detect` still needs the original encoded
 /// `bytes` since Vision/Tesseract/etc. decode the frame themselves internally.
-pub fn redact_if_ocr(
+fn redact_if_ocr(
     ocr: Option<&ScreenshotOCR>,
     bytes: &[u8],
     img: image::DynamicImage,
@@ -359,7 +359,9 @@ pub fn redact_if_ocr(
     }
 }
 
-fn redact_text_regions(
+/// Blacks out each detected text region. Public so `examples/redaction_demo.rs` can run the
+/// same step without `redact_if_ocr`'s fall back to the unredacted frame.
+pub fn redact_text_regions(
     img: image::DynamicImage,
     regions: &[virtue_text_detection::TextRegion],
 ) -> image::DynamicImage {

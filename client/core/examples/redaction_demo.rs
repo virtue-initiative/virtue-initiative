@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use virtue_core::module::screenshot::image_pipeline::ImagePipeline;
-use virtue_core::module::screenshot::{load_ocr, redact_if_ocr};
+use virtue_core::module::screenshot::{load_ocr, redact_text_regions};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -26,7 +26,15 @@ fn main() {
     let decoded = image::load_from_memory(&bytes).expect("decode screenshot");
     let ocr = load_ocr().expect("OCR engine unavailable on this platform");
 
-    let redacted = redact_if_ocr(Some(&ocr), &bytes, decoded);
+    // Calls `detect` directly rather than `redact_if_ocr`, which would quietly hand back the
+    // unredacted frame if OCR failed.
+    let detected = ocr.detect(&bytes).expect("OCR failed");
+    if detected.regions.is_empty() {
+        eprintln!("OCR found no text, so redacted.png will match the input");
+    } else {
+        eprintln!("blacked out {} text regions", detected.regions.len());
+    }
+    let redacted = redact_text_regions(decoded, &detected.regions);
     redacted
         .save(out.join("redacted.png"))
         .expect("write redacted.png");

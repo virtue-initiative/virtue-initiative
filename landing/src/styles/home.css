@@ -258,8 +258,7 @@
   line-height: 1.8;
 }
 
-.home-section-lead,
-.home-shot-note {
+.home-section-lead {
   max-width: 42rem;
   font-size: var(--text-base);
   line-height: 1.8;
@@ -278,7 +277,6 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  cursor: zoom-in;
 }
 
 .home-shot figcaption,
@@ -309,6 +307,7 @@
 }
 
 .home-shot-note {
+  max-width: 42rem;
   margin-top: var(--space-2);
 }
 
