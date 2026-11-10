@@ -16,8 +16,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: macOS changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      # The device -> api/hash-server integration test also needs api, hash-server
+      # and the seed script.
+      paths: |
+        client/mac/*
+        client/shared-swift/*
+        api/*
+        shared-web/*
+        hash-server/*
+        scripts/seed/*
+        package.json
+        bun.lock
+        .github/workflows/client-macos.yml
+
   client-macos:
     name: Client macOS
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: macos-latest
     steps:
       - name: Checkout

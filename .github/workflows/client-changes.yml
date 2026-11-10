@@ -1,0 +1,90 @@
+name: Client Changes
+
+# Reusable check, called by each client-*.yml workflow, that decides whether the
+# client build is needed. A PR into staging runs it only if it touches files that
+# client build depends on; everything else (PRs into main, pushes,
+# workflow_dispatch) always runs it, so main and the release builds still get
+# every check. Fails open: if the PR's file list can't be read, the build runs.
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: >-
+          Newline-separated globs for this platform, on top of the shared ones
+          below. `*` also matches `/`, so `client/linux/*` covers the whole tree.
+        required: true
+        type: string
+    outputs:
+      run:
+        description: "'true' if the client build should run."
+        value: ${{ jobs.detect.outputs.run }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  detect:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.match.outputs.run }}
+    steps:
+      - name: Match changed files
+        id: match
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          PLATFORM_PATHS: ${{ inputs.paths }}
+          # Shared by every client build: the Rust core and workspace, client
+          # scripts (version.sh and friends), the batch format vectors the core
+          # tests check, the LFS-tracked models, and the CI plumbing itself.
+          SHARED_PATHS: |
+            client/core/*
+            client/text-detection/*
+            client/Cargo.toml
+            client/Cargo.lock
+            client/.cargo/*
+            client/.env
+            client/version.properties
+            client/scripts/*
+            batch-format/*
+            .gitattributes
+            .github/actions/*
+            .github/workflows/client-changes.yml
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" != "pull_request" || "$BASE_REF" != "staging" ]]; then
+            echo "Not a PR into staging; running the build."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # filename plus previous_filename, so a rename out of a watched path counts.
+          if ! files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+              -q '.[] | .filename, (.previous_filename // empty)'); then
+            echo "Couldn't list the PR's files; running the build."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t patterns < <(printf '%s\n%s\n' "$SHARED_PATHS" "$PLATFORM_PATHS" | sed '/^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//')
+          while IFS= read -r file; do
+            for pattern in "${patterns[@]}"; do
+              # Unquoted on purpose: the pattern is a glob.
+              # shellcheck disable=SC2053
+              if [[ "$file" == $pattern ]]; then
+                echo "$file matches $pattern; running the build."
+                echo "run=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+          done <<< "$files"
+
+          echo "No changed file affects this client; skipping the build."
+          echo "run=false" >> "$GITHUB_OUTPUT"

@@ -16,8 +16,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Windows changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      # The device -> api/hash-server integration test also needs api, hash-server
+      # and the seed script.
+      paths: |
+        client/windows/*
+        api/*
+        shared-web/*
+        hash-server/*
+        scripts/seed/*
+        package.json
+        bun.lock
+        .github/workflows/client-windows.yml
+
   client-windows:
     name: Client Windows
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout

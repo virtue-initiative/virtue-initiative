@@ -16,8 +16,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Linux changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      # The device -> api/hash-server integration test also needs api, hash-server
+      # and the seed script.
+      paths: |
+        client/linux/*
+        api/*
+        shared-web/*
+        hash-server/*
+        scripts/seed/*
+        package.json
+        bun.lock
+        .github/workflows/client-linux.yml
+
   client-linux:
     name: Client Linux
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Pinned: ubuntu-latest moved to 26.04 (clang 21, newer leptonica), where the
     # leptonica-sys 0.4.9 bindgen step fails with "unknown type name 'atomic_int'".
     runs-on: ubuntu-24.04
