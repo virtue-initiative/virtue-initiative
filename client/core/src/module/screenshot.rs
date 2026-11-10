@@ -359,7 +359,9 @@ fn redact_if_ocr(
     }
 }
 
-fn redact_text_regions(
+/// Blacks out each detected text region. Public so `examples/redaction_demo.rs` can run the
+/// same step without `redact_if_ocr`'s fall back to the unredacted frame.
+pub fn redact_text_regions(
     img: image::DynamicImage,
     regions: &[virtue_text_detection::TextRegion],
 ) -> image::DynamicImage {
