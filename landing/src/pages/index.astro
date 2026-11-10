@@ -44,37 +44,39 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       <div class="home-section-heading">
         <h2>How it works</h2>
       </div>
-      <ol class="steps-grid">
-        <li class="step-card">
-          <span class="step-number">1.</span>
-          <a href={`${APP_URL}/signup`}>Create an account</a>
-        </li>
-        <li class="step-card">
-          <span class="step-number">2.</span>
-          <a href="/download">Install the app on your devices</a>
-        </li>
-        <li class="step-card">
-          <span class="step-number">3.</span>
-          <span>It captures blurred screenshots of your activity</span>
-        </li>
-        <li class="step-card">
-          <span class="step-number">4.</span>
-          <span>Your accountability partner can review them</span>
-        </li>
-      </ol>
-      <figure class="home-shot home-shot-feature">
-        <img
-          src="/images/home/web-logs.webp"
-          width="1280"
-          height="800"
-          alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
-          loading="lazy"
-        />
-        <figcaption>
-          Your partner reviews screenshots from all of your devices on the web. Anything the app
-          flags as concerning is marked.
-        </figcaption>
-      </figure>
+      <div class="home-how">
+        <ol class="steps-grid">
+          <li class="step-card">
+            <span class="step-number">1.</span>
+            <a href={`${APP_URL}/signup`}>Create an account</a>
+          </li>
+          <li class="step-card">
+            <span class="step-number">2.</span>
+            <a href="/download">Install the app on your devices</a>
+          </li>
+          <li class="step-card">
+            <span class="step-number">3.</span>
+            <span>It captures blurred screenshots of your activity</span>
+          </li>
+          <li class="step-card">
+            <span class="step-number">4.</span>
+            <span>Your accountability partner can review them</span>
+          </li>
+        </ol>
+        <figure class="home-shot">
+          <img
+            src="/images/home/web-logs.webp"
+            width="1280"
+            height="800"
+            alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
+            loading="lazy"
+          />
+          <figcaption>
+            Your partner reviews screenshots from all of your devices on the web. Anything the app
+            flags as concerning is marked.
+          </figcaption>
+        </figure>
+      </div>
     </section>
 
     <section class="home-section home-section-split">
@@ -104,6 +106,16 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
           </p>
         </div>
       </div>
+      <figure class="home-shot">
+        <img
+          src="/images/home/email-report.webp"
+          width="640"
+          height="480"
+          alt="A daily summary email for Sam Rivera, showing 412 screenshots, 1 high risk and 2 medium risk, with a button to read the report."
+          loading="lazy"
+        />
+        <figcaption>Your partner can also get a daily or weekly summary by email.</figcaption>
+      </figure>
     </section>
 
     <section class="home-section" id="privacy">
