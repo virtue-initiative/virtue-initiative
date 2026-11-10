@@ -17,8 +17,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: iOS changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      paths: |
+        client/ios/**
+        client/shared-swift/**
+        .github/workflows/client-ios.yml
+
   client-ios:
     name: Client iOS
+    needs: changes
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: macos-latest
     steps:
       - name: Checkout

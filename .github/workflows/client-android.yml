@@ -16,8 +16,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Android changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      paths: |
+        client/android/**
+        .github/workflows/client-android.yml
+
   client-android:
     name: Client Android
+    needs: changes
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
