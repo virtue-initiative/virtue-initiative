@@ -27,14 +27,15 @@ jobs:
     uses: ./.github/workflows/client-changes.yml
     with:
       paths: |
-        client/ios/*
-        client/shared-swift/*
+        client/ios/**
+        client/shared-swift/**
         .github/workflows/client-ios.yml
 
   client-ios:
     name: Client iOS
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: macos-latest
     steps:
       - name: Checkout

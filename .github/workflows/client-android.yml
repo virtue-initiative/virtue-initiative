@@ -26,13 +26,14 @@ jobs:
     uses: ./.github/workflows/client-changes.yml
     with:
       paths: |
-        client/android/*
+        client/android/**
         .github/workflows/client-android.yml
 
   client-android:
     name: Client Android
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     env:
       ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk

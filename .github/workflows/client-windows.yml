@@ -25,22 +25,16 @@ jobs:
       pull-requests: read
     uses: ./.github/workflows/client-changes.yml
     with:
-      # The device -> api/hash-server integration test also needs api, hash-server
-      # and the seed script.
+      integration: true
       paths: |
-        client/windows/*
-        api/*
-        shared-web/*
-        hash-server/*
-        scripts/seed/*
-        package.json
-        bun.lock
+        client/windows/**
         .github/workflows/client-windows.yml
 
   client-windows:
     name: Client Windows
     needs: changes
-    if: needs.changes.outputs.run == 'true'
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
     runs-on: windows-latest
     steps:
       - name: Checkout
