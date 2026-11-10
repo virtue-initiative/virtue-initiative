@@ -1,4 +1,5 @@
 import type { FeedLog } from '../../pages/Logs/types';
+import { reportUnauthorized } from '../api/api';
 
 export type CacheQuery = {
   userId?: string;
@@ -500,8 +501,11 @@ export function createCacheClient(): CacheClient {
     }
 
     leaderWorker.onmessage = (e: MessageEvent) => {
-      const data = e.data as CacheResponse | CacheChunk | CacheProgress;
-      if ('type' in data && data.type === 'queryChunk') {
+      const data = e.data as CacheResponse | CacheChunk | CacheProgress | { type: 'unauthorized' };
+      if ('type' in data && data.type === 'unauthorized') {
+        reportUnauthorized();
+        channel.postMessage(data);
+      } else if ('type' in data && data.type === 'queryChunk') {
         handleChunk(data as CacheChunk);
         channel.postMessage(data);
       } else if ('type' in data && data.type === 'queryProgress') {
@@ -605,6 +609,11 @@ export function createCacheClient(): CacheClient {
       for (const msg of queued) {
         channel.postMessage(msg);
       }
+      return;
+    }
+    if (data?.type === 'unauthorized') {
+      lastLeaderSeen = Date.now();
+      reportUnauthorized();
       return;
     }
     if (data?.type === 'queryChunk') {

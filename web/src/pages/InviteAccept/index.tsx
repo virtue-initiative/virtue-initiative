@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { api as rawApi, PartnerInviteValidation } from '../../utils/api/api';
 import { describeError, useAPIContext } from '../../utils/api';
 import { Alert, Button, Card, SegmentedControl } from '@virtueinitiative/shared-web';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import '../../styles/email-link.css';
 
 function navigate(path: string) {
@@ -21,6 +22,7 @@ type InviteState =
   | { status: 'error'; message: string | null };
 
 export function InviteAccept() {
+  useDocumentTitle('Accept invite');
   const apiClient = useAPIContext();
   const [state, setState] = useState<InviteState>({ status: 'loading' });
   const [frequency, setFrequency] = useState<'daily' | 'weekly'>('weekly');

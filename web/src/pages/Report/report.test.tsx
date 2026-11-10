@@ -149,4 +149,17 @@ describe('Report', () => {
       expect(queries[queries.length - 1].startTime).toBe(new Date(2026, 2, 14).getTime());
     });
   });
+
+  it.each(['2026-02-30', '2026-13-01', '2026-00-10', '2026-02-29'])(
+    'treats the nonexistent date %s as today (WEB-046)',
+    async (bad) => {
+      window.history.replaceState({}, '', `/report?date=${bad}`);
+      renderWithClient(<Report />);
+      await screen.findByRole('heading', { name: /^my report$/i, level: 1 });
+      await waitFor(() => expect(queries.length).toBeGreaterThan(0));
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      expect(queries[queries.length - 1].startTime).toBe(startOfToday.getTime());
+    },
+  );
 });

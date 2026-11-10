@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'preact/hooks';
+import { useSingleFlight } from '../../hooks/usePromise';
 import {
   LockedPassword,
   describeError,
@@ -80,6 +81,7 @@ function AddPasswordButton() {
   const [label, setLabel] = useState('');
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -100,20 +102,23 @@ function AddPasswordButton() {
       return;
     }
 
-    setSaving(true);
-    try {
-      const wrapped = await encryptForPublicKey(
-        Uint8Array.fromBase64(user.pub_key),
-        textEncoder.encode(value),
-      );
-      await api.createPassword(label, wrapped.toBase64());
-      close();
-    } catch (err) {
-      const message = describeError(err, 'Failed to create locked password');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setSaving(false);
-    }
+    const pubKey = user.pub_key;
+    await once(async () => {
+      setSaving(true);
+      try {
+        const wrapped = await encryptForPublicKey(
+          Uint8Array.fromBase64(pubKey),
+          textEncoder.encode(value),
+        );
+        await api.createPassword(label, wrapped.toBase64());
+        close();
+      } catch (err) {
+        const message = describeError(err, 'Failed to create locked password');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   return (
@@ -121,7 +126,7 @@ function AddPasswordButton() {
       <Button variant="primary" type="button" onClick={open}>
         Add password
       </Button>
-      <Dialog dialogRef={dialogRef}>
+      <Dialog dialogRef={dialogRef} busy={saving}>
         <DialogHeader>Add a locked password</DialogHeader>
         <p class="invite-desc">
           Store a secret you don't want easy access to, like a Screen Time passcode. Reading it back
@@ -167,6 +172,7 @@ function PasswordCard({ password }: { password: LockedPassword }) {
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const confirmRevealRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
@@ -177,20 +183,20 @@ function PasswordCard({ password }: { password: LockedPassword }) {
       return;
     }
 
-    setRevealing(true);
-    try {
-      const { wrapped_value } = await api.revealPassword(password.id);
-      const plainBytes = await decryptForOwnKey(
-        api.session.privateKey,
-        Uint8Array.fromBase64(wrapped_value),
-      );
-      setRevealedValue(textDecoder.decode(plainBytes));
-    } catch (err) {
-      const message = describeError(err, 'Failed to reveal password');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setRevealing(false);
-    }
+    const privateKey = api.session.privateKey;
+    await once(async () => {
+      setRevealing(true);
+      try {
+        const { wrapped_value } = await api.revealPassword(password.id);
+        const plainBytes = await decryptForOwnKey(privateKey, Uint8Array.fromBase64(wrapped_value));
+        setRevealedValue(textDecoder.decode(plainBytes));
+      } catch (err) {
+        const message = describeError(err, 'Failed to reveal password');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setRevealing(false);
+      }
+    });
   }
 
   function handleRevealClick() {
@@ -213,16 +219,18 @@ function PasswordCard({ password }: { password: LockedPassword }) {
   }
 
   async function handleDeleteConfirmed() {
-    setDeleting(true);
-    try {
-      await api?.removePassword(password.id);
-      deleteDialogRef.current?.close();
-    } catch (err) {
-      const message = describeError(err, 'Failed to delete password');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setDeleting(false);
-    }
+    await once(async () => {
+      setDeleting(true);
+      try {
+        await api?.removePassword(password.id);
+        deleteDialogRef.current?.close();
+      } catch (err) {
+        const message = describeError(err, 'Failed to delete password');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setDeleting(false);
+      }
+    });
   }
 
   return (
@@ -269,7 +277,7 @@ function PasswordCard({ password }: { password: LockedPassword }) {
         </Button>
       </CardActions>
 
-      <Dialog dialogRef={confirmRevealRef}>
+      <Dialog dialogRef={confirmRevealRef} busy={revealing}>
         <DialogHeader>Reveal "{password.label}"?</DialogHeader>
         <p class="invite-desc">
           This permanently flags this password as accessed and immediately emails every partner
@@ -298,7 +306,7 @@ function PasswordCard({ password }: { password: LockedPassword }) {
         </DialogActions>
       </Dialog>
 
-      <Dialog dialogRef={deleteDialogRef}>
+      <Dialog dialogRef={deleteDialogRef} busy={deleting}>
         <DialogHeader>Delete "{password.label}"?</DialogHeader>
         <p class="invite-desc">
           It moves to Recently deleted for 7 days, where you can restore it or delete it
@@ -331,32 +339,37 @@ function DeletedPasswordCard({ password }: { password: LockedPassword }) {
   const api = useAPIContext();
   const [restoring, setRestoring] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
   async function handleRestore() {
-    setRestoring(true);
-    try {
-      await api?.restorePassword(password.id);
-    } catch (err) {
-      const message = describeError(err, 'Failed to restore password');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setRestoring(false);
-    }
+    await once(async () => {
+      setRestoring(true);
+      try {
+        await api?.restorePassword(password.id);
+      } catch (err) {
+        const message = describeError(err, 'Failed to restore password');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setRestoring(false);
+      }
+    });
   }
 
   async function handlePermanentDeleteConfirmed() {
-    setDeleting(true);
-    try {
-      await api?.permanentlyDeletePassword(password.id);
-      deleteDialogRef.current?.close();
-    } catch (err) {
-      const message = describeError(err, 'Failed to delete password');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setDeleting(false);
-    }
+    await once(async () => {
+      setDeleting(true);
+      try {
+        await api?.permanentlyDeletePassword(password.id);
+        deleteDialogRef.current?.close();
+      } catch (err) {
+        const message = describeError(err, 'Failed to delete password');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setDeleting(false);
+      }
+    });
   }
 
   return (
@@ -387,7 +400,7 @@ function DeletedPasswordCard({ password }: { password: LockedPassword }) {
         </Button>
       </CardActions>
 
-      <Dialog dialogRef={deleteDialogRef}>
+      <Dialog dialogRef={deleteDialogRef} busy={deleting}>
         <DialogHeader>Delete "{password.label}" permanently?</DialogHeader>
         <p class="invite-desc">This can't be undone.</p>
         <DialogActions>

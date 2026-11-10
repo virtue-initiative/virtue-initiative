@@ -74,7 +74,7 @@ export function Settings() {
     const patch: Parameters<typeof api.updateSettings>[0] = {};
     if (hasNameChange) patch.name = trimmedName;
     if (hasEmailFrequencyChanges) patch.settings = { email_frequency: emailFrequency };
-    setSettingsSave(
+    setSettingsSave(() =>
       api
         .updateSettings(patch)
         .then(() => setSettingsShowSaved(true))
@@ -88,7 +88,7 @@ export function Settings() {
     e.preventDefault();
     if (!api || !hasEmailChanged) return;
     setEmailStatus(null);
-    setEmailSave(
+    setEmailSave(() =>
       api
         .updateSettings({ email: normalizedEmail })
         .then((result) => {
@@ -132,7 +132,7 @@ export function Settings() {
       setPasswordStatus(problem);
       return;
     }
-    setPasswordSave(
+    setPasswordSave(() =>
       api
         .changePassword(currentPassword, newPassword)
         .then(() => {
@@ -163,7 +163,7 @@ export function Settings() {
   function deleteAccountConfirmed() {
     if (!api || !deleteConfirmationMatches) return;
     setDeleteAccountStatus(null);
-    setDeleteAccountSave(
+    setDeleteAccountSave(() =>
       api
         .deleteUser(user.email)
         .then(async () => {
@@ -359,7 +359,7 @@ export function Settings() {
         </Button>
       </Card>
 
-      <Dialog dialogRef={deleteDialogRef} class="settings-dialog">
+      <Dialog dialogRef={deleteDialogRef} class="settings-dialog" busy={deleteAccountPending}>
         <DialogHeader>Delete account</DialogHeader>
         <p class="invite-desc">
           This permanently removes your account and all associated data. Type{' '}

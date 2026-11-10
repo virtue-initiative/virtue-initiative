@@ -426,6 +426,48 @@ describe('POST /partner (API-023)', () => {
     expect((await listPartners(owner.cookie)).watchers).toEqual([]);
   });
 
+  it.each([
+    ['uppercase', 'OWN@Partners.test'],
+    ['surrounded by spaces', '  own@partners.test '],
+  ])(
+    'answers 400 for the caller own email written %s, and creates no invite (API-023)',
+    async (_name, email) => {
+      const { owner } = await ownerAndPartner();
+
+      const res = await SELF.fetch(`${BASE}/partner`, {
+        method: 'POST',
+        headers: authHeaders(owner.cookie),
+        body: JSON.stringify({ email }),
+      });
+
+      expect(res.status).toBe(400);
+      expect((await listPartners(owner.cookie)).watchers).toEqual([]);
+    },
+  );
+
+  it('stores and emails the invited address trimmed and lowercased, and treats a differently-cased repeat as the same invite (API-023)', async () => {
+    const { owner } = await ownerAndPartner();
+
+    const first = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(owner.cookie),
+      body: JSON.stringify({ email: '  New.Person@Partners.TEST ' }),
+    });
+    const second = await SELF.fetch(`${BASE}/partner`, {
+      method: 'POST',
+      headers: authHeaders(owner.cookie),
+      body: JSON.stringify({ email: 'new.person@partners.test' }),
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    const invites = (await listEmailDeliveries()).filter((d) => d.kind === 'partner_invite');
+    expect(invites.map((d) => d.recipient_email)).toEqual(['new.person@partners.test']);
+    expect((await listPartners(owner.cookie)).watchers[0]).toMatchObject({
+      user: { email: 'new.person@partners.test' },
+    });
+  });
+
   it('answers 409 for a second invite to an address that already has one, and sends no second email (API-023)', async () => {
     const { owner } = await ownerAndPartner();
     await invitePartner(owner.cookie, 'par@partners.test');

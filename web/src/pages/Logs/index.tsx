@@ -38,6 +38,9 @@ function shiftDate(dateStr: string, days: number): string {
 
 type RangeKey = 'day' | 'week' | 'month';
 
+const RANGE_KEYS: readonly RangeKey[] = ['day', 'week', 'month'];
+const RISK_KEYS: readonly ('all' | RiskRating)[] = ['all', 'alert', 'high', 'moderate'];
+
 const RANGE_SEGMENTS = [
   { label: 'Past day', value: 'day' },
   { label: 'Past week', value: 'week' },
@@ -80,16 +83,15 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     'string',
     null,
   );
-  const [range, setRange] = useUrlState<RangeKey>('range', 'string', 'day');
+  const [range, setRange] = useUrlState<RangeKey>('range', 'string', 'day', RANGE_KEYS);
   const [visibleDate, setVisibleDate] = useState<string | null>(null);
   const filterDialogRef = useRef<HTMLDialogElement>(null);
   type RiskFilter = 'all' | RiskRating;
-  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all');
-  const [rawTypeFilter, setTypeFilter] = useUrlState<string | string[] | null>(
-    'type',
-    'string',
+  const [riskFilter, setRiskFilter] = useUrlState<RiskFilter>('risk', 'string', 'all', RISK_KEYS);
+  const [typeFilter, setTypeFilter] = useUrlState<string | null>('type', 'string', null, [
     null,
-  );
+    ...LOG_CATEGORIES,
+  ]);
   const [showSkippedScreenshots, setShowSkippedScreenshots] = useUrlState<boolean>(
     'show_skipped',
     'boolean',
@@ -113,7 +115,13 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
     processed: 0,
     total: 0,
   });
-  const activeTargetUserId = routeUserId ?? userId;
+  // A watched person's page for someone the user doesn't monitor (WEB-038).
+  const needsPartnerCheck = !!routeUserId && routeUserId !== userId;
+  const unavailable =
+    needsPartnerCheck && partnersLoaded && !watching.some((p) => p.user.id === routeUserId);
+  // No sync until we know the user may see this person's logs.
+  const activeTargetUserId =
+    needsPartnerCheck && (!partnersLoaded || unavailable) ? null : (routeUserId ?? userId);
   const scopeKeyRef = useRef<string | null>(null);
   // Bumped by the Retry button to re-run the query after a failed sync.
   const [retryCount, setRetryCount] = useState(0);
@@ -201,7 +209,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
   useEffect(() => {
     if (sidebarLoading) return;
     if (selectedDevice && !activeDevices.some((d) => d.id === selectedDevice)) {
-      setSelectedDevice(null);
+      setSelectedDevice(null, { replace: true });
     }
   }, [activeDevices, selectedDevice, sidebarLoading]);
 
@@ -222,7 +230,6 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
   const title = selectedDevice ? `${baseTitle} — ${deviceName(selectedDevice)}` : baseTitle;
   // Gallery is the default view; `/logs/gallery` stays valid so old links work.
   const isGallery = !path.endsWith('/list');
-  const typeFilter = Array.isArray(rawTypeFilter) ? (rawTypeFilter[0] ?? null) : rawTypeFilter;
 
   const logsBasePath = routeUserId ? `/logs/${routeUserId}` : '/logs';
   // Derived from the router's URL rather than `window.location` so the switcher
@@ -256,6 +263,23 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
       }),
     [logs, riskFilter, typeFilter, weekStart, weekEnd, showSkippedScreenshots],
   );
+
+  if (unavailable) {
+    return (
+      <div class="logs-page">
+        <div class="logs-layout">
+          <section class="logs-main">
+            <div class="logs-header">
+              <PageHeading icon={<LogsIcon />}>Logs</PageHeading>
+            </div>
+            <p class="empty">
+              These logs aren't available. You can only see logs for people you monitor.
+            </p>
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div class="logs-page">

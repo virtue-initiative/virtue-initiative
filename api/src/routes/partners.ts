@@ -48,7 +48,7 @@ partners.post(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    if (currentUser.email === email) {
+    if (currentUser.email.toLowerCase() === email) {
       return c.json({ error: 'Bad Request', details: { email: ['Cannot invite yourself'] } }, 400);
     }
 
