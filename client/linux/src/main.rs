@@ -534,7 +534,7 @@ fn log_command() -> String {
 }
 
 /// How much `virtue status` prints (CLIENT-020).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusDetail {
     Summary,
     Full,
@@ -551,20 +551,24 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    let backend = detect_backend().map(|backend| match backend {
-        CaptureBackend::Wayland => "wayland",
-        CaptureBackend::X11 => "x11",
-    });
-    let service_active = is_user_service_active().unwrap_or(false);
+    // Both probe the session (D-Bus, systemctl), so only the views that show
+    // them call these.
+    let backend = || {
+        detect_backend().map(|backend| match backend {
+            CaptureBackend::Wayland => "wayland",
+            CaptureBackend::X11 => "x11",
+        })
+    };
+    let service_active = || is_user_service_active().unwrap_or(false);
 
     if json {
         let mut value = serde_json::to_value(&status)?;
         if let Some(object) = value.as_object_mut() {
             // Linux-only extras, alongside the shared `ServiceStatus` fields
             // every platform's status page renders (CORE-010).
-            object.insert("backend".into(), backend.unwrap_or("<unknown>").into());
+            object.insert("backend".into(), backend().unwrap_or("<unknown>").into());
             object.insert("service_name".into(), service_name().into());
-            object.insert("service_active".into(), service_active.into());
+            object.insert("service_active".into(), service_active().into());
             object.insert(
                 "state_dir".into(),
                 paths.state_dir.display().to_string().into(),
@@ -588,8 +592,13 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
     };
     println!("{}", style::heading(&painted));
     let print_fix = || {
-        if let Some(command) = headline.fix_command {
-            println!("Run {} to fix this.", style::link(&format!("`{command}`")));
+        if !headline.fix_commands.is_empty() {
+            let commands: Vec<String> = headline
+                .fix_commands
+                .iter()
+                .map(|command| style::link(&format!("`{command}`")))
+                .collect();
+            println!("Run {} to fix this.", commands.join(", then "));
         }
     };
 
@@ -687,7 +696,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
             .map(|reason| style::warn(skip_reason_label(reason)))
             .unwrap_or_else(|| none.clone()),
     );
-    row("capture backend", backend.unwrap_or(&unknown));
+    row("capture backend", backend().unwrap_or(&unknown));
 
     section("Recent errors");
     if status.recent_errors.is_empty() {
@@ -703,7 +712,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         }
     }
 
-    if detail < StatusDetail::Advanced {
+    if detail == StatusDetail::Full {
         println!();
         println!(
             "Run {} for settings, paths and logs.",
@@ -734,7 +743,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         &format!(
             "{} ({})",
             service_name(),
-            if service_active {
+            if service_active() {
                 style::good("active")
             } else {
                 style::bad("inactive")
@@ -761,8 +770,8 @@ enum Tone {
 struct Headline {
     text: &'static str,
     tone: Tone,
-    /// The command that fixes this state, if the user can fix it.
-    fix_command: Option<&'static str>,
+    /// The commands that fix this state, in order; empty if there is nothing to fix.
+    fix_commands: &'static [&'static str],
 }
 
 /// The one-line monitoring state `virtue status` opens with (CLIENT-006).
@@ -771,25 +780,30 @@ fn status_headline(status: &ServiceStatus) -> Headline {
         Headline {
             text: "Signed out",
             tone: Tone::Bad,
-            fix_command: Some("virtue login"),
+            // `virtue login` talks to the daemon, so start it first if needed.
+            fix_commands: if status.is_running {
+                &["virtue login"]
+            } else {
+                &["virtue daemon start", "virtue login"]
+            },
         }
     } else if !status.is_running {
         Headline {
             text: "Monitoring stopped",
             tone: Tone::Bad,
-            fix_command: Some("virtue daemon start"),
+            fix_commands: &["virtue daemon start"],
         }
     } else if status.last_screenshot_at_ms.is_some() {
         Headline {
             text: "Monitoring active",
             tone: Tone::Good,
-            fix_command: None,
+            fix_commands: &[],
         }
     } else {
         Headline {
             text: "Waiting for the first screenshot",
             tone: Tone::Warn,
-            fix_command: None,
+            fix_commands: &[],
         }
     }
 }
@@ -1228,7 +1242,16 @@ mod tests {
         };
         let headline = status_headline(&signed_out);
         assert_eq!(headline.text, "Signed out");
-        assert_eq!(headline.fix_command, Some("virtue login"));
+        assert_eq!(headline.fix_commands, ["virtue login"]);
+
+        // Login needs the daemon, so a signed-out user with it stopped starts it first.
+        let signed_out_stopped = ServiceStatus::default();
+        let headline = status_headline(&signed_out_stopped);
+        assert_eq!(headline.text, "Signed out");
+        assert_eq!(
+            headline.fix_commands,
+            ["virtue daemon start", "virtue login"]
+        );
 
         let stopped = ServiceStatus {
             is_authenticated: true,
@@ -1237,7 +1260,7 @@ mod tests {
         };
         let headline = status_headline(&stopped);
         assert_eq!(headline.text, "Monitoring stopped");
-        assert_eq!(headline.fix_command, Some("virtue daemon start"));
+        assert_eq!(headline.fix_commands, ["virtue daemon start"]);
 
         let waiting = ServiceStatus {
             is_authenticated: true,
@@ -1247,7 +1270,7 @@ mod tests {
         let headline = status_headline(&waiting);
         assert_eq!(headline.text, "Waiting for the first screenshot");
         assert_eq!(headline.tone, Tone::Warn);
-        assert_eq!(headline.fix_command, None);
+        assert!(headline.fix_commands.is_empty());
 
         let active = ServiceStatus {
             last_screenshot_at_ms: Some(1),
@@ -1255,7 +1278,7 @@ mod tests {
         };
         let headline = status_headline(&active);
         assert_eq!(headline.text, "Monitoring active");
-        assert_eq!(headline.fix_command, None);
+        assert!(headline.fix_commands.is_empty());
     }
 
     // CLIENT-020: `virtue report-issue` parses with no flags.

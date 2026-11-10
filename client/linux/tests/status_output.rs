@@ -120,7 +120,11 @@ fn status_advanced_shows_everything() {
 #[test]
 fn status_json_ignores_detail_flags() {
     let dir = StateDir::signed_in("json");
-    let value: serde_json::Value = serde_json::from_str(&dir.status(&["--json"])).unwrap();
+    let parse =
+        |flags: &[&str]| -> serde_json::Value { serde_json::from_str(&dir.status(flags)).unwrap() };
+    let value = parse(&["--json"]);
     assert_eq!(value["device_id"], "dev-123");
     assert!(value.get("state_dir").is_some());
+    assert_eq!(parse(&["--json", "--full"]), value);
+    assert_eq!(parse(&["--advanced", "--json"]), value);
 }

@@ -64,7 +64,7 @@ While signed out, no screenshots are taken (CORE-009):
 
 Every app MUST show whether the user is signed in and a one-line monitoring state, and MUST give access to Status Details (CLIENT-007).
 
-- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021). `virtue status` MUST open with a headline, first match wins: "Signed out"; "Monitoring stopped" (daemon not running); "Monitoring active" (a screenshot has been taken); otherwise "Waiting for the first screenshot". The first two MUST be followed by the command that fixes them (`virtue login`, `virtue daemon start`).
+- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021). `virtue status` MUST open with a headline, first match wins: "Signed out"; "Monitoring stopped" (daemon not running); "Monitoring active" (a screenshot has been taken); otherwise "Waiting for the first screenshot". The first two MUST be followed by the command that fixes them (`virtue login`, `virtue daemon start`); when signed out with the daemon not running, `virtue daemon start` MUST come before `virtue login`, since login needs the daemon.
 - macOS window headline, first match wins: "Screen Recording off"; "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Monitoring active" (daemon running and a screenshot has been taken); otherwise "Starting…".
 - Windows: see CLIENT-027.
 - Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
