@@ -97,7 +97,9 @@ if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
   fi
 fi
 
-if [ "${1:-}" = "configure" ]; then
+# Only on a fresh install: on upgrade `configure` gets the old version as $2,
+# and the user is already signed in.
+if [ "${1:-}" = "configure" ] && [ -z "${2:-}" ]; then
   echo "Virtue is installed. Run \`virtue login\` in a terminal to sign in and start monitoring."
 fi
 

@@ -4,9 +4,9 @@ set -e
 ACTION="${1:-}"
 
 # Runs a shell command as a user without starting a login shell. `su -` would
-# source the user's ~/.profile, so one broken line there failed the whole
-# install (CLIENT-003). Errors are ignored: setting up one user's service must
-# not abort the package install. VIRTUE_RUN_USER_DIR exists for tests only.
+# source the user's ~/.profile, so one broken line there could fail removal or
+# upgrade (CLIENT-014). Errors are ignored: stopping one user's service must not
+# abort the package removal. VIRTUE_RUN_USER_DIR exists for tests only.
 run_as_user() {
   run_user="$1"
   run_uid="$2"

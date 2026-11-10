@@ -47,18 +47,28 @@ impl Sandbox {
             "systemctl",
             &format!("echo \"systemctl $*\" >> {log}\nexit {systemctl_exit}"),
         );
+        // Keeps the Cinnamon applet step off the host's real settings.
+        stub(
+            &bin,
+            "gsettings",
+            &format!("echo \"gsettings $*\" >> {log}"),
+        );
         stub(&bin, "loginctl", &format!("echo \"{uid} {user} seat0\""));
 
         Sandbox { dir }
     }
 
     fn run(&self, script: &str, arg: &str) -> Output {
+        self.run_with(script, &[arg])
+    }
+
+    fn run_with(&self, script: &str, args: &[&str]) -> Output {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("packaging/debian")
             .join(script);
         Command::new("sh")
             .arg(path)
-            .arg(arg)
+            .args(args)
             .env(
                 "PATH",
                 format!(
@@ -136,6 +146,18 @@ fn postinst_survives_user_failures_and_points_to_login() {
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("virtue login"),
         "postinst did not mention `virtue login`"
+    );
+}
+
+// CLIENT-003: an upgrade does not tell an already signed-in user to log in.
+#[test]
+fn postinst_upgrade_skips_login_prompt() {
+    let sandbox = Sandbox::new("postinst-upgrade", 0);
+    let output = sandbox.run_with("postinst", &["configure", "0.1.8"]);
+    assert_success(&output);
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("virtue login"),
+        "postinst told an upgrading user to run `virtue login`"
     );
 }
 

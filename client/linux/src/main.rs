@@ -390,7 +390,7 @@ fn report_issue(
 
     println!(
         "{}",
-        style::good("Thanks — your report was sent to the Virtue Initiative team.")
+        style::good("Thanks. Your report was sent to the Virtue Initiative team.")
     );
     Ok(())
 }
@@ -496,10 +496,7 @@ fn parse_os_release(contents: &str) -> (Option<String>, Option<String>) {
 
 /// Formats a UTC-ms timestamp as a local-time string plus a relative age,
 /// which is what actually answers "is this thing working right now?".
-fn format_timestamp(now_ms: i64, value: Option<i64>) -> String {
-    let Some(ms) = value else {
-        return "<none>".to_string();
-    };
+fn format_timestamp(now_ms: i64, ms: i64) -> String {
     let secs = ms / 1000;
     let stamp = chrono::DateTime::from_timestamp(secs, 0)
         .map(|dt| {
@@ -554,11 +551,10 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    let backend = match detect_backend() {
-        Some(CaptureBackend::Wayland) => "wayland",
-        Some(CaptureBackend::X11) => "x11",
-        None => "<unknown>",
-    };
+    let backend = detect_backend().map(|backend| match backend {
+        CaptureBackend::Wayland => "wayland",
+        CaptureBackend::X11 => "x11",
+    });
     let service_active = is_user_service_active().unwrap_or(false);
 
     if json {
@@ -566,7 +562,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         if let Some(object) = value.as_object_mut() {
             // Linux-only extras, alongside the shared `ServiceStatus` fields
             // every platform's status page renders (CORE-010).
-            object.insert("backend".into(), backend.into());
+            object.insert("backend".into(), backend.unwrap_or("<unknown>").into());
             object.insert("service_name".into(), service_name().into());
             object.insert("service_active".into(), service_active.into());
             object.insert(
@@ -651,10 +647,8 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         println!();
         println!("{}", style::heading(title));
     };
-    let timestamp = |value: Option<i64>| match value {
-        Some(_) => format_timestamp(now_ms, value),
-        None => none.clone(),
-    };
+    let timestamp =
+        |value: Option<i64>| value.map_or_else(|| none.clone(), |ms| format_timestamp(now_ms, ms));
 
     section("Account");
     row("signed in", &yes_no(status.is_authenticated));
@@ -693,14 +687,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
             .map(|reason| style::warn(skip_reason_label(reason)))
             .unwrap_or_else(|| none.clone()),
     );
-    row(
-        "capture backend",
-        if backend == "<unknown>" {
-            &unknown
-        } else {
-            backend
-        },
-    );
+    row("capture backend", backend.unwrap_or(&unknown));
 
     section("Recent errors");
     if status.recent_errors.is_empty() {
@@ -709,7 +696,7 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         for error in status.recent_errors.iter().take(5) {
             println!(
                 "  {} {} {}",
-                style::dim(&format_timestamp(now_ms, Some(error.at_ms))),
+                style::dim(&format_timestamp(now_ms, error.at_ms)),
                 style::warn(&format!("[{}]", error.context)),
                 style::bad(&error.message)
             );
@@ -732,10 +719,10 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
     row("api url", &status.api_base_url);
     row(
         "hash base url",
-        &status
+        status
             .hash_base_url
-            .clone()
-            .unwrap_or_else(|| style::dim("<default>")),
+            .as_deref()
+            .unwrap_or(&style::dim("<default>")),
     );
     row(
         "capture interval",
