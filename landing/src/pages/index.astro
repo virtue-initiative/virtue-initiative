@@ -39,12 +39,12 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       </div>
     </section>
 
-    <section class="home-section">
-      <div class="eyebrow">The app</div>
-      <div class="home-section-heading">
-        <h2>How it works</h2>
-      </div>
-      <div class="home-how">
+    <section class="home-section home-how">
+      <div class="home-how-copy">
+        <div class="eyebrow">The app</div>
+        <div class="home-section-heading">
+          <h2>How it works</h2>
+        </div>
         <ol class="steps-grid">
           <li class="step-card">
             <span class="step-number">1.</span>
@@ -63,20 +63,20 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
             <span>Your accountability partner can review them</span>
           </li>
         </ol>
-        <figure class="home-shot">
-          <img
-            src="/images/home/web-logs.webp"
-            width="1280"
-            height="800"
-            alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
-            loading="lazy"
-          />
-          <figcaption>
-            Your partner reviews screenshots from all of your devices on the web. Anything the app
-            flags as concerning is marked.
-          </figcaption>
-        </figure>
       </div>
+      <figure class="home-shot">
+        <img
+          src="/images/home/web-logs.webp"
+          width="1280"
+          height="800"
+          alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
+          loading="lazy"
+        />
+        <figcaption>
+          Your partner reviews screenshots from all of your devices on the web. Anything the app
+          flags as concerning is marked.
+        </figcaption>
+      </figure>
     </section>
 
     <section class="home-section home-section-split">

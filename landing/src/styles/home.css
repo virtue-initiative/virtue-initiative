@@ -91,11 +91,28 @@
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: var(--space-8);
   align-items: center;
-  margin-top: var(--space-4);
+}
+
+.home-how-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .home-how .steps-grid {
   grid-template-columns: 1fr;
+  gap: 0;
+  margin-top: var(--space-4);
+}
+
+.home-how .step-card {
+  padding-block: var(--space-4);
+  font-size: var(--text-xl);
+  line-height: 1.5;
+}
+
+.home-how .step-number {
+  font-size: inherit;
 }
 
 .home-section-heading {
@@ -364,6 +381,10 @@
   .home-how .steps-grid,
   .home-redaction-steps {
     grid-template-columns: 1fr;
+  }
+
+  .home-how .step-card {
+    font-size: var(--text-lg);
   }
 
   .privacy-points {
