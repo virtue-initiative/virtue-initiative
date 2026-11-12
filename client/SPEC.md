@@ -148,7 +148,7 @@ A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed s
 An OS sign-out or shutdown MUST stop the daemon cleanly without recording a user stop; the resulting gap is excused by login/logout evidence (CORE-002, CLIENT-018).
 
 - Linux and macOS: the service manager's SIGTERM or SIGINT MUST make the daemon finish its current tick and exit (CORE-014).
-- Windows: the app MUST stop monitoring when the tray host observes session logoff or system shutdown.
+- Windows: the app MUST stop monitoring when the tray host observes session logoff or system shutdown. Handling session end MUST NOT start a process and MUST NOT wait on anything slower than the daemon's final flush, so the OS never lists Virtue as preventing sign-out (see the event-log rule in CLIENT-018).
 - macOS: the daemon MUST ask for an immediate batch upload after the system wakes from sleep.
 
 ## CLIENT-013 Updates
@@ -207,13 +207,14 @@ Each platform MUST supply the following to the core. A signal that cannot be rea
 | -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
 | Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
 | macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
-| Windows  | every monitor as one image                                 | screensaver running, or the input desktop cannot be opened             | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
+| Windows  | every monitor as one image                                 | screensaver running, the session's WTS flags say locked, or the input desktop cannot be opened | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
 | Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
 | iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
+- Windows MUST read the last System event before boot through the Event Log API (`EvtQuery`) and MUST NOT start a process for it. The value cannot change during a boot, so it MUST be read at most once per run.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
 - Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
 
