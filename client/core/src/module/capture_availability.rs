@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::UploadKind;
+use crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT;
 use crate::module::upload::{self, UploadState};
 
 const FAILURE_WINDOW_MS: i64 = 30 * 60 * 1_000;
@@ -24,7 +25,12 @@ pub fn tick(state: &mut CaptureAvailabilityState, upload: &mut UploadState, now_
         .recent_failures_ms
         .retain(|&t| now_ms - t <= FAILURE_WINDOW_MS);
     if state.recent_failures_ms.len() >= FAILURE_THRESHOLD {
-        upload::enqueue(upload, now_ms, 0.5, UploadKind::CaptureFailed);
+        upload::enqueue(
+            upload,
+            now_ms,
+            HIGH_RISK_LIFECYCLE_ALERT,
+            UploadKind::CaptureFailed,
+        );
         state.recent_failures_ms.clear();
     }
 }
@@ -34,6 +40,7 @@ pub fn tick(state: &mut CaptureAvailabilityState, upload: &mut UploadState, now_
 mod tests {
     use super::*;
     use crate::model::DeviceCredentials;
+    use crate::module::lifecycle::risk_percent;
 
     #[allow(clippy::field_reassign_with_default)]
     fn authenticated_upload() -> UploadState {
@@ -64,11 +71,15 @@ mod tests {
             note_failure(&mut state, 1_000);
         }
         tick(&mut state, &mut upload, 1_000);
-        assert!(
-            upload
-                .pending_hash_events
-                .iter()
-                .any(|e| matches!(e.event, UploadKind::CaptureFailed))
+        let event = upload
+            .pending_hash_events
+            .iter()
+            .find(|e| matches!(e.event, UploadKind::CaptureFailed))
+            .expect("capture_failed event");
+        assert_eq!(
+            risk_percent(event.risk.unwrap_or(0.0)),
+            80,
+            "capture_failed is high risk"
         );
         assert!(
             state.recent_failures_ms.is_empty(),

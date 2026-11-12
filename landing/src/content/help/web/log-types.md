@@ -66,7 +66,7 @@ A general alert was raised. Open the entry to read the alert message.
 ## Capture Failed
 
 Screenshot capture failed several times in a row on the device (5 failures
-within 30 minutes). This usually points to a configuration or permissions
+within 30 minutes) and is rated high risk. This usually points to a configuration or permissions
 problem with screen capture. See the [installation guide](/download) for your
 platform.
 
