@@ -120,6 +120,19 @@ if [[ -n "$TEAM_ID" ]]; then
   )
 fi
 
+# A Simulator build has no team to sign with, but the App Group entitlement only
+# takes effect when the app and the extension are signed (CLIENT-002), so sign
+# them ad hoc during the build. Signing afterwards leaves the group preferences
+# unshared.
+if [[ "$CODE_SIGNING_ALLOWED" == "YES" && -z "$TEAM_ID" ]] \
+  && [[ "$SDK" == "iphonesimulator" || "$DESTINATION" == *Simulator* ]]; then
+  ARGS+=(
+    CODE_SIGN_IDENTITY="-"
+    CODE_SIGN_STYLE=Manual
+    PROVISIONING_PROFILE_SPECIFIER=""
+  )
+fi
+
 xcodebuild "${ARGS[@]}" build
 
 echo "Build complete"
