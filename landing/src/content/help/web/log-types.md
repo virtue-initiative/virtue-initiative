@@ -40,7 +40,8 @@ a longer-than-expected delay, and it was not explained by a nearby sign-in,
 sign-out, or the device being asleep. Time spent asleep does not create this
 event. It usually means the monitoring app was not running for a while, for
 example because it was killed or frozen, or the device was too busy to run it
-on time. Being offline does not cause it. An occasional one is normal; frequent ones are
+on time. Restarting the app after it was off for a few minutes creates it,
+and so does setting the device's clock back. Being offline does not cause it. An occasional one is normal; frequent ones are
 worth investigating.
 
 ## Monitoring Stopped by User

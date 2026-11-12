@@ -42,6 +42,17 @@ const SUSPEND_EVIDENCE_MIN_MS: i64 = 5_000;
 /// tolerates wake-up scheduling jitter without requiring an exact match.
 const SUSPEND_EVIDENCE_SLACK_MS: i64 = SINGLE_LATE_THRESHOLD_MS;
 
+/// How often the loop stamps `last_alive_utc_ms` while it waits, which is
+/// also how stale that stamp can be when the process dies. Taken off a
+/// restart gap so an ordinary restart measures as nothing. See CORE-002.
+const ALIVE_STAMP_INTERVAL_MS: i64 = 60_000;
+/// A wall clock found behind the suspend-safe clock by no more than this is
+/// clock jitter or a small time-sync step, not the clock being set back.
+const CLOCK_SET_BACK_MIN_MS: i64 = 5_000;
+/// A clock set back this soon after boot is the OS correcting its clock
+/// (time sync, or a hardware clock kept in local time), so it isn't recorded.
+const BOOT_SETTLE_MS: i64 = 10 * 60_000;
+
 /// See CORE-019.
 const RESTART_WINDOW_MS: i64 = 10 * 60_000; // 10 minutes
 const RESTART_ALERT_THRESHOLD: usize = 20;
@@ -69,6 +80,10 @@ pub struct LifecycleState {
     /// before the first tick. See CORE-002.
     pub last_tick_utc_ms: Option<i64>,
     pub last_tick_suspend_safe_ms: Option<i64>,
+    /// When the daemon was last known to be running: stamped at the end of
+    /// every tick, on every idle wake of the loop and on a clean stop. The
+    /// next start measures its restart gap from here. See CORE-002.
+    pub last_alive_utc_ms: Option<i64>,
     /// UTC timestamps of recent daemon (re)starts, oldest first, pruned to
     /// RESTART_WINDOW_MS. See CORE-019.
     pub restart_times: VecDeque<i64>,
@@ -105,6 +120,10 @@ impl SessionTimes {
 /// `expected_wakeup_at_ms == 0` means no wakeup has ever been scheduled yet
 /// (the daemon's very first tick, or the first tick after `note_user_start`
 /// reset the schedule) — nothing to compare against.
+///
+/// Returns how far the wall clock was set back since the previous tick (0
+/// when it wasn't), so the caller can drop schedules stored against the old
+/// clock.
 pub fn tick(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -112,7 +131,7 @@ pub fn tick(
     session: SessionTimes,
     now_ms: i64,
     expected_wakeup_at_ms: i64,
-) {
+) -> i64 {
     // Captured unconditionally (even on an early return below) so the next
     // call always has a fresh baseline to diff suspend evidence against.
     let previous_utc_ms = state.last_tick_utc_ms;
@@ -123,12 +142,69 @@ pub fn tick(
         state.last_tick_suspend_safe_ms = Some(current);
     }
 
+    // The wall clock was set back when less real time than suspend-safe time
+    // passed since the previous tick. Suspend, shutdown and reboot can't
+    // cause that (a suspend-safe clock that restarted from boot reads lower,
+    // not higher), so no evidence excuses it. See CORE-002.
+    let set_back_ms = match (
+        previous_utc_ms,
+        previous_suspend_safe_ms,
+        current_suspend_safe_ms,
+    ) {
+        (Some(prev_utc), Some(prev_suspend_safe), Some(current))
+            if current >= prev_suspend_safe =>
+        {
+            (current - prev_suspend_safe) - (now_ms - prev_utc)
+        }
+        _ => 0,
+    };
+    if set_back_ms > CLOCK_SET_BACK_MIN_MS {
+        if !state.monitoring_stopped {
+            record_clock_set_back(state, upload, current_suspend_safe_ms, now_ms, set_back_ms);
+        }
+        return set_back_ms;
+    }
+
     if expected_wakeup_at_ms == 0 || state.monitoring_stopped {
-        return;
+        return 0;
     }
 
     let diff_ms = now_ms - expected_wakeup_at_ms;
+    let suspended_ms = match (
+        previous_utc_ms,
+        previous_suspend_safe_ms,
+        current_suspend_safe_ms,
+    ) {
+        (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
+            Some(((now_ms - prev_utc) - (current - prev_suspend_safe)).max(0))
+        }
+        _ => None,
+    };
+    if !excused(
+        session,
+        now_ms,
+        expected_wakeup_at_ms,
+        diff_ms,
+        suspended_ms,
+    ) {
+        record_late_wakeup(state, upload, now_ms, diff_ms);
+    }
+    0
+}
 
+/// Whether a gap of `diff_ms` ending at `now_ms` is explained by a
+/// legitimate session transition or a suspend. `reference_ms` is the moment
+/// the logout evidence is compared against: the expected wakeup time for a
+/// late wakeup, the last-alive time for a restart gap. `suspended_ms` is how
+/// long the system spent suspended since the previous tick, when both clocks
+/// were read. See CORE-002.
+fn excused(
+    session: SessionTimes,
+    now_ms: i64,
+    reference_ms: i64,
+    diff_ms: i64,
+    suspended_ms: Option<i64>,
+) -> bool {
     // Raw proximity of each timestamp to the moment it's relevant to — but a
     // stale login/logout (e.g. from a reboot days ago, still the most recent
     // one logind/journald knows about) is *always* "far" in ordinary
@@ -141,14 +217,14 @@ pub fn tick(
         .map(|login_ms| (now_ms - login_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
     let logout_near = session
         .last_logout_ms
-        .map(|logout_ms| (expected_wakeup_at_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
+        .map(|logout_ms| (reference_ms - logout_ms).abs() <= LOGIN_LOGOUT_EXCUSE_MS);
 
     // Combined login/logout evidence: `None` (no evidence either way),
     // `Some(true)` (supports a legitimate session transition), or
     // `Some(false)` (contradicts one). A gap is excused only if at least one
     // side supports it and neither side contradicts — a single contradicting
     // signal (e.g. the daemon was killed well before an eventual reboot, so
-    // `expected_wakeup_at_ms` isn't actually near the logout) blocks the
+    // `reference_ms` isn't actually near the logout) blocks the
     // excuse even though the other side looks fine on its own. Requiring one
     // side to be near before the other's absence/mismatch counts for
     // anything is what keeps an ordinary suspend (neither timestamp
@@ -167,27 +243,40 @@ pub fn tick(
     // `Some(false)`) whenever it doesn't clearly explain the gap, so it can
     // never block a login/logout-supported excuse the way a contradicting
     // signal does.
-    let suspend_evidence = match (
-        previous_utc_ms,
-        previous_suspend_safe_ms,
-        current_suspend_safe_ms,
-    ) {
-        (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
-            let utc_elapsed_ms = now_ms - prev_utc;
-            let suspend_safe_elapsed_ms = current - prev_suspend_safe;
-            let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
-            let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
-            (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
-        }
-        _ => None,
-    };
+    let suspend_evidence = suspended_ms.and_then(|suspended_ms| {
+        let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
+        (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
+    });
 
     let has_evidence = login_logout_evidence.is_some() || suspend_evidence.is_some();
     let contradicted = login_logout_evidence == Some(false);
-    if has_evidence && !contradicted {
+    has_evidence && !contradicted
+}
+
+/// Records a clock set back by `set_back_ms` as a late wakeup of that
+/// length, unless the system only just booted. See CORE-002.
+fn record_clock_set_back(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    suspend_safe_ms: Option<i64>,
+    now_ms: i64,
+    set_back_ms: i64,
+) {
+    if suspend_safe_ms.is_some_and(|since_boot_ms| since_boot_ms < BOOT_SETTLE_MS) {
+        tracing::info!(set_back_ms, "clock corrected shortly after boot");
         return;
     }
+    tracing::warn!(set_back_ms, "wall clock was set back");
+    record_late_wakeup(state, upload, now_ms, set_back_ms);
+}
 
+/// Adds one unexcused late wakeup and alerts once the budget is crossed.
+fn record_late_wakeup(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    now_ms: i64,
+    diff_ms: i64,
+) {
     state.late_wakeups.push_back(diff_ms);
     while state.late_wakeups.len() > MAX_TRACKED_WAKEUPS {
         state.late_wakeups.pop_front();
@@ -207,6 +296,68 @@ pub fn tick(
         // doesn't still be sitting in the array to alert again on the very
         // next tick.
         state.late_wakeups.clear();
+    }
+}
+
+/// What [`note_start`] found.
+#[derive(Default)]
+pub struct StartCheck {
+    /// A last-alive time was on record, so the downtime has been judged here
+    /// and the first tick must not count it again as lateness.
+    pub measured: bool,
+    /// How far the wall clock is behind the last-alive time (0 when it isn't).
+    pub clock_set_back_ms: i64,
+}
+
+/// Run once per `Daemon::new`, unless the previous session ended in a user
+/// stop: measures the restart gap from the persisted last-alive time and
+/// treats it as a late wakeup, so a stop and restart that fits between two
+/// wakeups is still reported. A start that finds the wall clock earlier than
+/// the last-alive time reports the clock as set back instead. See CORE-002.
+pub fn note_start(
+    state: &mut LifecycleState,
+    upload: &mut UploadState,
+    hooks: &dyn LifecycleHooks,
+    session: SessionTimes,
+    now_ms: i64,
+) -> StartCheck {
+    let Some(last_alive_ms) = state.last_alive_utc_ms else {
+        return StartCheck::default();
+    };
+    let suspend_safe_ms = hooks.get_monotonic_clock_ms().ok();
+
+    let set_back_ms = last_alive_ms - now_ms;
+    if set_back_ms > CLOCK_SET_BACK_MIN_MS {
+        record_clock_set_back(state, upload, suspend_safe_ms, now_ms, set_back_ms);
+        // The first tick would measure the same change against these.
+        state.last_tick_utc_ms = None;
+        state.last_tick_suspend_safe_ms = None;
+        return StartCheck {
+            measured: true,
+            clock_set_back_ms: set_back_ms,
+        };
+    }
+
+    let gap_ms = now_ms - last_alive_ms - ALIVE_STAMP_INTERVAL_MS;
+    if gap_ms > 0 {
+        let suspended_ms = match (
+            state.last_tick_utc_ms,
+            state.last_tick_suspend_safe_ms,
+            suspend_safe_ms,
+        ) {
+            (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
+                Some(((now_ms - prev_utc) - (current - prev_suspend_safe)).max(0))
+            }
+            _ => None,
+        };
+        if !excused(session, now_ms, last_alive_ms, gap_ms, suspended_ms) {
+            tracing::warn!(gap_ms, "daemon was not running");
+            record_late_wakeup(state, upload, now_ms, gap_ms);
+        }
+    }
+    StartCheck {
+        measured: true,
+        clock_set_back_ms: 0,
     }
 }
 
