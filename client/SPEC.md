@@ -163,11 +163,12 @@ Shared rules for every platform that updates itself:
 ## CLIENT-014 Uninstalling
 
 - Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user. Upgrades run the same stop, then CLIENT-003's start.
-- macOS, Windows, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- macOS, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the app execution alias (`virtue-initiative.exe`) no longer exists, the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the alias exists, the task MUST relaunch the app as before.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
 
-> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app, and Windows leaves the `VirtueResidentWatchdog` task running every minute — should these be cleaned up?
+> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app — should it be cleaned up?
 
 ## CLIENT-015 Communication between UI and daemon
 
