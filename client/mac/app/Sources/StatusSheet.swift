@@ -111,7 +111,8 @@ struct StatusDetailsView: View {
     private var screenshots: some View {
         DetailSection("Screenshots") {
             if let last = status?.lastScreenshotAtMs {
-                StatusRow(kind: .good, label: "Last screenshot", value: shortTime(last))
+                StatusRow(
+                    kind: .good, label: "Last screenshot", value: StatusTimestamp.short(last))
             } else if coordinator.loggedIn {
                 StatusRow(
                     kind: .warn, label: "Last screenshot", value: "None yet",
