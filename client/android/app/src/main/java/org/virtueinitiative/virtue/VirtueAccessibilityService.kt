@@ -27,6 +27,12 @@ class VirtueAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         activeService = this
         Log.i(TAG, "Accessibility service connected")
+        // Back on: the notification stops saying Accessibility is off, and a
+        // signed-in user who never saw it gets it now (CLIENT-030).
+        if (NativeBridge.ensureInitialized(this) == null && NativeBridge.nativeIsLoggedIn()) {
+            ScreenshotService.start(this)
+            ScreenshotService.refreshNotification()
+        }
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
@@ -53,9 +59,20 @@ class VirtueAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        val wasRunning = !paused && daemonJob?.isActive == true
+        // Tell partners while the loop can still send it (CLIENT-030). Only
+        // when the setting really is off: a rebind or a uiautomator dump also
+        // destroys the service and must stay silent.
+        if (wasRunning && !MonitoringNotice.accessibilitySettingOn(applicationContext)) {
+            Log.i(TAG, "Accessibility turned off, recording a user stop")
+            val t = Thread { runCatching { NativeBridge.nativeNoteUserStop("accessibility_off") } }
+            t.start()
+            t.join(5000)
+        }
         stopDaemonLoop()
         scope.cancel()
         activeService = null
+        ScreenshotService.refreshNotification()
         super.onDestroy()
         Log.i(TAG, "Accessibility service destroyed")
     }

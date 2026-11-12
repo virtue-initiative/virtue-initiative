@@ -190,6 +190,7 @@ class MainActivity : AppCompatActivity() {
     // Status Details polls too, so its relative ages (CLIENT-007) keep counting.
     private val homePoll = object : Runnable {
         override fun run() {
+            // Status Details also picks up the test screenshot button following Accessibility (CLIENT-008).
             if (screen == Screen.HOME || screen == Screen.STATUS_DETAILS) refreshUi()
             binding.root.postDelayed(this, 3000)
         }
@@ -197,6 +198,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // The instance on screen is the one results must reach. Another
+        // instance being created and destroyed meanwhile would otherwise
+        // leave Session.activity null here, and a sign-in or test screenshot
+        // would finish into nothing (#874).
+        Session.activity = this
         AppUpdater.uiVisible = true
         binding.root.postDelayed(homePoll, 3000)
     }
@@ -609,6 +615,8 @@ class MainActivity : AppCompatActivity() {
             }
             Session.signingIn = false
             if (error == null) {
+                // Show the notification now, not at the next keep-alive run (CLIENT-030).
+                ScreenshotService.start(app)
                 AccountEmailStore.save(app, email)
                 Session.passwordDraft = ""
                 Session.loginError = null
@@ -1022,12 +1030,14 @@ class MainActivity : AppCompatActivity() {
         }.map { it.second }))
         advancedBody.addView(tonalButton(getString(R.string.btn_open_log)) { openLogFile(logFile) }.topMargin(12))
         val test = tonalButton(getString(R.string.btn_take_test_screenshot)) { forceCapture() }
-        test.isEnabled = loggedIn && !Session.capturing
+        val a11yConnected = VirtueAccessibilityService.isConnected()
+        test.isEnabled = loggedIn && a11yConnected && !Session.capturing
         testButton = test
         advancedBody.addView(test.topMargin(8))
-        val message = text(Session.detailsMessage.orEmpty(), 14f, R.color.ink_3).apply {
+        val hint = if (loggedIn && !a11yConnected) getString(R.string.msg_force_capture_needs_accessibility) else Session.detailsMessage
+        val message = text(hint.orEmpty(), 14f, R.color.ink_3).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = if (Session.detailsMessage == null) View.GONE else View.VISIBLE
+            visibility = if (hint == null) View.GONE else View.VISIBLE
         }.topMargin(8) as TextView
         detailsMessageView = message
         advancedBody.addView(message)
@@ -1080,8 +1090,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun forceCapture() {
-        // CLIENT-008: no second request while one is running.
-        if (Session.capturing) return
+        // CLIENT-008: no second request while one is running. Without
+        // Accessibility no loop runs to answer it.
+        if (Session.capturing || !VirtueAccessibilityService.isConnected()) return
         Session.capturing = true
         testButton?.isEnabled = false
         val app = applicationContext
@@ -1095,11 +1106,11 @@ class MainActivity : AppCompatActivity() {
             showDetailsMessage(app.getString(R.string.msg_force_capture_started), clear = false)
             // The native call waits for the batch to land, so its message
             // reports what actually happened rather than assuming an upload.
-            val raw = withContext(Dispatchers.IO) {
+            val raw = withDeadline(FORCE_CAPTURE_DEADLINE_MS) {
                 NativeBridge.nativeForceCapture()
-            }
+            } ?: """{"error":"timed out"}"""
             Session.capturing = false
-            Session.activity?.testButton?.isEnabled = true
+            Session.activity?.testButton?.isEnabled = VirtueAccessibilityService.isConnected()
 
             val report = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
             val error = if (report.isNull("error")) null else report.optString("error", "").ifBlank { null }
@@ -1262,6 +1273,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private companion object {
+        const val FORCE_CAPTURE_DEADLINE_MS = 30_000L
         const val KEY_SCREEN = "screen"
         const val TEST_SCREENSHOT_DELAY_SECONDS = 10
         const val KEY_ADVANCED_OPEN = "advanced_open"
