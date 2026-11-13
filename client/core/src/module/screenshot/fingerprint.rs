@@ -186,9 +186,7 @@ mod tests {
         // Below MIN_STRONG_CELLS and tiny mean: e.g. a small status indicator updating.
         let prev = fp(120, 34, vec![60; 120 * 34]);
         let mut cur = prev.clone();
-        for i in 0..MIN_STRONG_CELLS - 1 {
-            cur.cells[i] = 160; // +100, strongly changed
-        }
+        cur.cells[..MIN_STRONG_CELLS - 1].fill(160); // +100, strongly changed
         assert!(!changed(&prev, &cur));
     }
 
@@ -199,9 +197,7 @@ mod tests {
         // this is what keeps a small corner video from being diluted away.
         let prev = fp(120, 34, vec![30; 120 * 34]);
         let mut cur = prev.clone();
-        for i in 0..(MIN_STRONG_CELLS + 4) {
-            cur.cells[i] = 130; // +100
-        }
+        cur.cells[..MIN_STRONG_CELLS + 4].fill(130); // +100
         let total: u64 = prev
             .cells
             .iter()
