@@ -430,7 +430,7 @@ final class MonitoringCoordinator: ObservableObject {
         if let lastHeartbeatAt {
             let heartbeatAge = max(0, now - lastHeartbeatAt)
             safariLastHeartbeat =
-                "\(relativeTime(Date(timeIntervalSince1970: lastHeartbeatAt))) (\(formatAbsoluteTime(lastHeartbeatAt)))"
+                formatStatusTimestamp(Int64(lastHeartbeatAt * 1000))
             if heartbeatAge <= VirtueShared.safariHeartbeatStaleThresholdSeconds {
                 safariCaptureHealth = "Active in Safari"
             } else {
@@ -443,7 +443,7 @@ final class MonitoringCoordinator: ObservableObject {
 
         if let lastFrameAt {
             safariLastFrame =
-                "\(relativeTime(Date(timeIntervalSince1970: lastFrameAt))) (\(formatAbsoluteTime(lastFrameAt)))"
+                formatStatusTimestamp(Int64(lastFrameAt * 1000))
         } else {
             safariLastFrame = "<none>"
         }
@@ -495,8 +495,8 @@ final class MonitoringCoordinator: ObservableObject {
         let serviceStatus = loadCoreStatus()
 
         pendingRequestCount = serviceStatus?.pendingRequestCount ?? 0
-        lastCoreLoop = formatMillisTimestamp(serviceStatus?.lastLoopAtMs)
-        lastCoreScreenshotAttempt = formatMillisTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
+        lastCoreLoop = formatStatusTimestamp(serviceStatus?.lastLoopAtMs)
+        lastCoreScreenshotAttempt = formatStatusTimestamp(serviceStatus?.lastScreenshotAttemptAtMs)
         coreStatus = serviceStatus
         if let apiBaseUrl = serviceStatus?.apiBaseUrl, !apiBaseUrl.isEmpty {
             currentApiBaseUrl = apiBaseUrl
@@ -646,26 +646,7 @@ final class MonitoringCoordinator: ObservableObject {
     /// Local time plus a relative age, for the status sheet's timestamps —
     /// "when did this last work?" is what those rows are really answering.
     func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
-        guard let timestampMs else {
-            return "<none>"
-        }
-        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
-        return "\(formatAbsoluteTime(date.timeIntervalSince1970)) (\(relativeTime(date)))"
-    }
-
-    private func formatMillisTimestamp(_ timestampMs: Int64?) -> String {
-        guard let timestampMs else {
-            return "<none>"
-        }
-        let timestamp = TimeInterval(timestampMs) / 1000
-        return formatAbsoluteTime(timestamp)
-    }
-
-    private func formatAbsoluteTime(_ timestamp: TimeInterval) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .medium
-        return formatter.string(from: Date(timeIntervalSince1970: timestamp))
+        StatusTimestamp.full(timestampMs)
     }
 
     private func deriveSafariPermissionSummary(
