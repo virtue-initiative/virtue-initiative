@@ -64,6 +64,10 @@ private struct MenuBarMenuContent: View {
         } else {
             Divider()
             Button("Test Screenshot") {
+                // The progress and the outcome are a toast in the main
+                // window, so put it in front first (CLIENT-008).
+                openWindow(id: MonitoringCoordinator.mainWindowID)
+                NSApp.activate(ignoringOtherApps: true)
                 coordinator.forceCapture()
             }
             .disabled(coordinator.isForceCapturing || coordinator.needsScreenRecording)

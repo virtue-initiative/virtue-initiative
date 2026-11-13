@@ -99,7 +99,7 @@ A signed-in user MUST be able to request a screenshot now. The app MUST call COR
 
 While waiting, the app MUST show "Screenshot uploading…" and MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
 
-- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: a window menu item and a tray item, both shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
+- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off; the menu bar item MUST first open the main window and bring it to the front, so the progress and the outcome are seen whatever app was in front. Windows: a window menu item and a tray item, both shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
 - iOS: "Capture Next Safari Page" only records the request; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
 
 ## CLIENT-009 Permissions
