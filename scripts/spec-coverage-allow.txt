@@ -31,8 +31,6 @@ HASH-021    deployment and operations, not testable in CI
 
 # client/SPEC.md
 CLIENT-001  overview, covered through the sections it introduces
-CLIENT-003  todo: needs an OS-level or platform UI test harness
-CLIENT-006  todo
 CLIENT-009  todo: needs an OS-level or platform UI test harness
 CLIENT-010  todo: needs an OS-level or platform UI test harness
 CLIENT-013  todo
