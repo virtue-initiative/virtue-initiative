@@ -199,7 +199,36 @@ pub enum CaptureOutcome {
 
 /// Phase 2b (slow): capture -> fingerprint diff -> classify -> redact ->
 /// image process. Unit-testable on its own.
+///
+/// A panic anywhere in the pipeline (a framework that fails to load, say) is caught and
+/// reported as a failed capture, so it is counted towards Capture Failed (CORE-003).
 pub fn capture_and_process(
+    plan: CapturePlan,
+    hooks: &dyn ScreenshotHooks,
+    classifier: Option<&RiskClassifier>,
+    scoring: Scoring,
+    ocr: Option<&ScreenshotOCR>,
+) -> CaptureOutcome {
+    let run = std::panic::AssertUnwindSafe(|| {
+        capture_and_process_inner(plan, hooks, classifier, scoring, ocr)
+    });
+    match std::panic::catch_unwind(run) {
+        Ok(outcome) => outcome,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            tracing::error!(panic = msg, "capture panicked");
+            CaptureOutcome::Failed {
+                reason: format!("capture panicked: {msg}"),
+            }
+        }
+    }
+}
+
+fn capture_and_process_inner(
     plan: CapturePlan,
     hooks: &dyn ScreenshotHooks,
     classifier: Option<&RiskClassifier>,
@@ -540,6 +569,25 @@ mod tests {
         let outcome = capture_and_process(
             CapturePlan { anchor: None },
             &hooks,
+            None,
+            Scoring::WholeFrame,
+            None,
+        );
+        assert!(matches!(outcome, CaptureOutcome::Failed { .. }));
+    }
+
+    // CORE-003: screenshot scheduling and gates.
+    #[test]
+    fn capture_panic_is_a_capture_failure() {
+        struct Panics;
+        impl ScreenshotHooks for Panics {
+            fn take_screenshot(&self) -> crate::error::CoreResult<crate::Screenshot> {
+                panic!("class VNImageRequestHandler could not be found");
+            }
+        }
+        let outcome = capture_and_process(
+            CapturePlan { anchor: None },
+            &Panics,
             None,
             Scoring::WholeFrame,
             None,
