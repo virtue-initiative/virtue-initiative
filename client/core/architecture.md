@@ -154,7 +154,7 @@ thread) can drive the daemon synchronously.
 | Module                 | Owns                                                         | Notable functions                                                                                                                      |
 | ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                  |
-| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                           |
+| `lifecycle`            | `LifecycleState` (`late_wakeups`, `last_alive_utc_ms`)       | `tick()`, `note_start()`, `note_user_stop()`                                                                                           |
 | `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
 | `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
 | `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                             |
@@ -341,10 +341,16 @@ status — running normally. iOS is the only platform that overrides it to
 `false`, for the reason described above.
 
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
-suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
+suspended) feeds `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
-it never triggers). Screenshot scheduling itself is unaffected and still
-paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+it never triggers). The same clock shows when the wall clock was set back
+(less wall time than suspend-safe time passed since the previous tick):
+`lifecycle::tick` records that as a late wakeup and returns it, and
+`Daemon::reschedule_after_clock_set_back` then drops every schedule stored
+against the old clock. Schedules are still stored as wall-clock times, but
+`run_forever` also counts each wait on this clock (`wait_left_ms`, CORE-020),
+so a tick is never held off by the wall clock moving back. This hook isn't
+on `ScreenshotHooks`. Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.

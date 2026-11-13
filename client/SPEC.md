@@ -215,7 +215,7 @@ Each platform MUST supply the following to the core. A signal that cannot be rea
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
-- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
+- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance and counts from system boot.
 
 > OPEN: macOS captures only the main display, while Linux and Windows capture every screen — should macOS capture all displays?
 

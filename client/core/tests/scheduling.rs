@@ -271,6 +271,50 @@ fn an_applied_client_request_ticks_before_the_wakeup_time() {
     });
 }
 
+// CORE-020: the wait also runs on the suspend-excluding clock, so the wall clock set back cannot hold off a tick.
+#[test]
+fn the_wall_clock_set_back_does_not_hold_off_the_tick() {
+    const SET_BACK: i64 = 500_000;
+    let scenario = held_scenario();
+    let wake = wakeup(&scenario);
+    let ticked_at = scenario.state().last_tick_at_ms;
+    // 150 ms of waiting separates the loop from the wakeup time, on both clocks.
+    scenario.clock.set(wake - 150);
+    scenario
+        .platform
+        .set_monotonic_clock_override(Some(wake - 150));
+
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| scenario.daemon.run_forever());
+        std::thread::sleep(Duration::from_millis(100));
+
+        // The wall clock goes back while no time passes on the other clock.
+        scenario.clock.set(wake - SET_BACK);
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            scenario.state().last_tick_at_ms,
+            ticked_at,
+            "no tick may run before the wait has elapsed on either clock"
+        );
+
+        // The 150 ms pass on the suspend-excluding clock alone.
+        scenario.platform.set_monotonic_clock_override(Some(wake));
+        let ticked = eventually(|| scenario.state().last_tick_at_ms == Some(wake - SET_BACK));
+
+        scenario.daemon.request_stop();
+        handle.join().expect("loop must stop cleanly");
+        assert!(
+            ticked,
+            "the tick should run once the wait has elapsed on the suspend-excluding clock"
+        );
+    });
+    assert_eq!(
+        scenario.state().screenshot.last_attempt_at_ms,
+        Some(wake - SET_BACK),
+        "and that tick takes the screenshot that was due"
+    );
+}
+
 // ── Forced capture (CORE-021) ────────────────────────────────────────────────
 
 /// An authenticated scenario with a batch waiting out its interval and the next

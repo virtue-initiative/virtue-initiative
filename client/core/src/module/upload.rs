@@ -205,6 +205,21 @@ pub fn request_immediate_flush(state: &mut UploadState, now_ms: i64) {
     state.batch_backoff.make_ready_now(now_ms);
 }
 
+/// Pulls every stored time that is later than `now_ms` back to `now_ms`,
+/// after the wall clock was set back (CORE-002): left alone they would hold
+/// the batch interval, the retry backoffs and the hash token's age until
+/// the clock caught up.
+pub fn clamp_times_after_clock_set_back(state: &mut UploadState, now_ms: i64) {
+    if let Some(last_batch_at_ms) = state.last_batch_at_ms.as_mut() {
+        *last_batch_at_ms = (*last_batch_at_ms).min(now_ms);
+    }
+    state.hash_backoff.next_attempt_at_ms = state.hash_backoff.next_attempt_at_ms.min(now_ms);
+    state.batch_backoff.next_attempt_at_ms = state.batch_backoff.next_attempt_at_ms.min(now_ms);
+    if let Some((_, fetched_at_ms)) = state.hash_token_cache.as_mut() {
+        *fetched_at_ms = (*fetched_at_ms).min(now_ms);
+    }
+}
+
 fn can_capture(settings: &DeviceSettings) -> bool {
     !settings.wrapping_keys.is_empty()
 }
