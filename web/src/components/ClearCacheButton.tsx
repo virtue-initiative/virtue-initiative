@@ -14,8 +14,9 @@ export function ClearCacheButton({ variant = 'outline' }: ClearCacheButtonProps)
 
   function clear() {
     if (!cacheClient) return;
-    setClearing(
-      cacheClient.resetCache().then(() => {
+    const client = cacheClient;
+    setClearing(() =>
+      client.resetCache().then(() => {
         window.location.reload();
       }),
     );

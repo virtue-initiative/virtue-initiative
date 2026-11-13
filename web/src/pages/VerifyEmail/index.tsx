@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../utils/api';
 import { Card, Button } from '@virtueinitiative/shared-web';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import '../../styles/email-link.css';
 
 type State = 'loading' | 'success' | 'error';
 
 export function VerifyEmail() {
   const [state, setState] = useState<State>('loading');
+  useDocumentTitle('Verify email');
 
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get('token');

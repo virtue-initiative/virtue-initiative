@@ -1,7 +1,9 @@
 import { Button } from '@virtueinitiative/shared-web';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import './404.css';
 
 export function NotFound() {
+  useDocumentTitle('Page not found');
   return (
     <div class="not-found">
       <h1 class="not-found-title">Page not found</h1>

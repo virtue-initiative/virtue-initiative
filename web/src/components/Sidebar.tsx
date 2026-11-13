@@ -16,6 +16,9 @@ import { sendToast } from '../utils/toast';
 import { LANDING_URL } from '../utils/landing-url';
 import { ReportBugDialog } from './ReportBugDialog';
 
+// Matches the max-width breakpoint in sidebar.css where the sidebar becomes a drawer.
+const MOBILE_QUERY = '(max-width: 720px)';
+
 const HELP_URL = `${LANDING_URL}/help`;
 
 type IconProps = { class?: string };
@@ -165,12 +168,68 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const footerRef = useRef<HTMLDivElement>(null);
+  const mobileBarRef = useRef<HTMLDivElement>(null);
+  const mobileToggleRef = useRef<HTMLButtonElement>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement>(null);
+  const userButtonRef = useRef<HTMLButtonElement>(null);
+  const wasMobileOpen = useRef(false);
   const reportBugDialogRef = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     setMobileOpen(false);
     setDrawerOpen(false);
   }, [currentPath]);
+
+  // The drawer only exists below the desktop breakpoint (the same one the CSS
+  // uses), so close it when the window widens past it.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => {
+      if (!query.matches) setMobileOpen(false);
+    };
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  // While the drawer is open the page behind it is inert and does not scroll.
+  useEffect(() => {
+    if (!mobileOpen) {
+      if (wasMobileOpen.current) mobileToggleRef.current?.focus();
+      wasMobileOpen.current = false;
+      return;
+    }
+    wasMobileOpen.current = true;
+    const main = document.querySelector('.app-main');
+    const bar = mobileBarRef.current;
+    main?.setAttribute('inert', '');
+    bar?.setAttribute('inert', '');
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    mobileCloseRef.current?.focus();
+    return () => {
+      main?.removeAttribute('inert');
+      bar?.removeAttribute('inert');
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen && !drawerOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // A modal dialog (such as Report an issue) handles its own Escape.
+      if (document.querySelector('dialog[open]')) return;
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        userButtonRef.current?.focus();
+      } else {
+        setMobileOpen(false);
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen, drawerOpen]);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -219,8 +278,9 @@ export function Sidebar() {
 
   return (
     <>
-      <div class="sidebar-mobile-bar">
+      <div class="sidebar-mobile-bar" ref={mobileBarRef}>
         <button
+          ref={mobileToggleRef}
           class="sidebar-mobile-toggle"
           type="button"
           aria-label="Open navigation menu"
@@ -239,6 +299,8 @@ export function Sidebar() {
         class={`app-drawer-backdrop sidebar-backdrop${mobileOpen ? ' is-open' : ''}`}
         type="button"
         aria-label="Close navigation menu"
+        aria-hidden="true"
+        tabIndex={-1}
         onClick={closeMobile}
       />
 
@@ -248,6 +310,7 @@ export function Sidebar() {
             The Virtue Initiative
           </a>
           <button
+            ref={mobileCloseRef}
             class="app-drawer-close sidebar-mobile-close"
             type="button"
             aria-label="Close navigation menu"
@@ -351,7 +414,7 @@ export function Sidebar() {
 
         <div class="sidebar-footer" ref={footerRef}>
           <div class={`sidebar-footer-drawer${drawerOpen ? ' is-open' : ''}`}>
-            <div class="sidebar-footer-drawer-inner">
+            <div class="sidebar-footer-drawer-inner" inert={!drawerOpen}>
               <NavLink
                 href="/settings"
                 active={currentPath.startsWith('/settings')}
@@ -402,6 +465,7 @@ export function Sidebar() {
           </div>
 
           <button
+            ref={userButtonRef}
             class="sidebar-user"
             type="button"
             onClick={() => setDrawerOpen((o) => !o)}

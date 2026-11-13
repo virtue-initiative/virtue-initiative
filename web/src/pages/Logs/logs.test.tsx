@@ -5,10 +5,10 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { renderWithClient } from '../../test-utils';
 import { server } from '../../mocks/server';
-import { TEST_DEVICES } from '../../mocks/fixtures';
+import { TEST_DEVICES, TEST_WATCHING } from '../../mocks/fixtures';
 import type { FeedLog } from './types';
 import { Logs } from './index';
-import { LOG_CATEGORIES, LogDetailDialog } from './shared';
+import { formatDayAndTime, LOG_CATEGORIES, LogDetailDialog } from './shared';
 
 const DEFAULT_SAMPLE_LOGS: FeedLog[] = [
   {
@@ -522,5 +522,87 @@ describe('Logs — sync errors (WEB-040)', () => {
         'Another Virtue tab is using saved logs. Close other Virtue tabs, then select Retry.',
       ),
     ).toBeInTheDocument();
+  });
+});
+
+const selectWith = (options: HTMLElement[]) => options[0].closest('select') as HTMLSelectElement;
+
+describe('Logs — filters and history (WEB-039)', () => {
+  it('pushes a history entry per filter change, so Back undoes it', async () => {
+    window.history.replaceState({}, '', '/logs');
+    const user = userEvent.setup();
+    renderWithClient(<Logs />);
+    const range = selectWith(await screen.findAllByRole('option', { name: 'Past week' }));
+
+    await user.selectOptions(range, 'week');
+    await waitFor(() => expect(window.location.search).toBe('?range=week'));
+
+    window.history.back();
+    await waitFor(() => expect(window.location.search).toBe(''));
+    await waitFor(() =>
+      expect(selectWith(screen.getAllByRole('option', { name: 'Past week' })).value).toBe('day'),
+    );
+  });
+
+  it('replaces, not pushes, when dropping an unknown device_id', async () => {
+    window.history.replaceState({}, '', '/start');
+    window.history.pushState({}, '', '/logs?device_id=not-a-device');
+    renderWithClient(<Logs />);
+    await waitFor(() => expect(window.location.search).toBe(''));
+
+    window.history.back();
+    await waitFor(() => expect(window.location.pathname).toBe('/start'));
+  });
+
+  it('shows the defaults for unknown range, concern and type values', async () => {
+    window.history.replaceState({}, '', '/logs?range=bogus&risk=xx&type=zzz');
+    renderWithClient(<Logs />);
+    await screen.findByText('Logs synced');
+
+    expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
+    expect(selectWith(screen.getAllByRole('option', { name: 'Past week' })).value).toBe('day');
+    expect(
+      selectWith(screen.getAllByRole('option', { name: 'Past week' })).selectedOptions[0].text,
+    ).toBe('Past day');
+    expect(selectWith(screen.getAllByRole('option', { name: 'Medium' })).value).toBe('all');
+    expect(selectWith(screen.getAllByRole('option', { name: 'System Login' })).value).toBe('');
+  });
+});
+
+describe('Logs — date label (WEB-043)', () => {
+  it("shows the first event's date in List view before any scrolling", async () => {
+    window.history.replaceState({}, '', '/logs/list?range=week');
+    renderWithClient(<Logs />);
+    const label = DEFAULT_SAMPLE_LOGS[0].ts;
+    await waitFor(() => {
+      expect(document.querySelector('.logs-sticky-date')).toHaveTextContent(
+        formatDayAndTime(label),
+      );
+    });
+  });
+});
+
+describe('Logs — unwatched person (WEB-038)', () => {
+  it('says the logs are unavailable and does not sync for someone the user does not monitor', async () => {
+    window.history.replaceState({}, '', '/logs/nonexistent-id');
+    renderWithClient(<Logs userId="nonexistent-id" />);
+
+    expect(
+      await screen.findByText(
+        "These logs aren't available. You can only see logs for people you monitor.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Logs synced')).not.toBeInTheDocument();
+    expect(screen.queryByText('No logs found.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Past week' })).not.toBeInTheDocument();
+    expect(cacheQueryCalls).not.toHaveBeenCalled();
+  });
+
+  it("still shows a watched person's logs", async () => {
+    renderWithClient(<Logs userId={TEST_WATCHING.user.id} />);
+    expect(
+      await screen.findByRole('heading', { name: `${TEST_WATCHING.user.name}'s logs` }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/aren't available/)).not.toBeInTheDocument();
   });
 });

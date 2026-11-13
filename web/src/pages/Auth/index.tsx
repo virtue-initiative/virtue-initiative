@@ -44,11 +44,24 @@ function navigate(path: string, replace = false) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
+/**
+ * WEB-005: `to` comes from `URLSearchParams`, which has already decoded it once, so it is
+ * used as given. Only a path on this site is allowed: a single leading `/`, not `//` or
+ * `/\`, and no control characters (browsers strip them, which could turn `/\t/x` into `//x`).
+ * Anything else is dropped, which sends the user to `/`.
+ */
+function sameSitePath(to: string | null): string {
+  if (!to || !to.startsWith('/') || to.startsWith('//') || to.startsWith('/\\')) return '';
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(to)) return '';
+  return to;
+}
+
 export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' }) {
   const setClient = useSetAPIClient();
   const toParam = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return new URLSearchParams(window.location.search).get('to') ?? '';
+    return sameSitePath(new URLSearchParams(window.location.search).get('to'));
   }, []);
   const signupToken = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -149,9 +162,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
 
       if (authMode === 'login') {
         const client = await login(email, password);
-        if (toParam) {
-          navigate(decodeURIComponent(toParam), true);
-        }
+        navigate(toParam || '/', true);
         setClient(client);
       } else if (authMode === 'signup') {
         await requestSignup(email, toParam || undefined, turnstileToken);
@@ -184,7 +195,7 @@ export function Auth({ mode }: { mode: 'login' | 'signup' | 'forgot-password' })
         setName('');
         setPassword('');
         setConfirm('');
-        navigate(toParam ? decodeURIComponent(toParam) : '/', true);
+        navigate(toParam || '/', true);
       } else if (authMode === 'forgot') {
         await api.requestPasswordReset(email);
         setStatus('If that email exists, a reset link has been sent.');

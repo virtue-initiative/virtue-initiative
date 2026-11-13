@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setUnauthorizedHandler } from '../api/api';
 import { createCacheClient, type CacheQueryUpdate } from './client';
 
 // Each createCacheClient() stands in for one browser tab. The tabs share a fake Web Locks
@@ -273,5 +274,36 @@ describe('cache client liveness check (WEB-014)', () => {
 
     expect(liveWorkers()).toEqual([workerA]);
     expect(workerA.posted.filter((m) => m.method === 'cacheQuery')).toHaveLength(1);
+  });
+});
+
+describe('cache client session end (WEB-006)', () => {
+  afterEach(() => setUnauthorizedHandler(null));
+
+  it('ends the session when the log sync is answered with 401 (WEB-006)', async () => {
+    const handler = vi.fn();
+    setUnauthorizedHandler(handler);
+    const a = openTab();
+    a.client.setSession('user-1', null);
+    await vi.advanceTimersByTimeAsync(0);
+
+    FakeWorker.all[0].reply({ type: 'unauthorized' });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the session in a follower tab when the leader reports a 401 (WEB-006)', async () => {
+    const handler = vi.fn();
+    const a = openTab();
+    a.client.setSession('user-1', null);
+    await vi.advanceTimersByTimeAsync(0);
+    const b = openTab();
+    b.client.setSession('user-1', null);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    setUnauthorizedHandler(handler);
+    FakeWorker.all[0].reply({ type: 'unauthorized' });
+    await vi.advanceTimersByTimeAsync(10);
+    // Both tabs share this test's module state, so the leader and the follower each call it.
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 });

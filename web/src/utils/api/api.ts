@@ -90,6 +90,11 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
+/** WEB-006: for requests made outside `req`, such as the cache worker's log sync. */
+export function reportUnauthorized() {
+  unauthorizedHandler?.();
+}
+
 function firstValidationMessage(details: unknown): string | null {
   if (!details) {
     return null;

@@ -5,6 +5,8 @@ type DialogProps = Omit<JSX.IntrinsicElements['dialog'], 'ref'> & {
   children: ComponentChildren;
   dialogRef?: { current: HTMLDialogElement | null };
   size?: 'md' | 'lg';
+  /** While true, Escape and a click on the backdrop do not close the dialog (WEB-021). */
+  busy?: boolean;
 };
 
 type DialogActionsProps = {
@@ -48,12 +50,19 @@ export function Dialog({
   dialogRef,
   class: className,
   size,
+  busy,
   onClick,
+  onCancel,
   ...props
 }: DialogProps) {
+  function handleCancel(e: Event) {
+    if (busy) e.preventDefault();
+    (onCancel as ((e: Event) => void) | undefined)?.(e);
+  }
+
   function handleClick(e: MouseEvent) {
     const dialog = e.currentTarget as HTMLDialogElement;
-    if (e.target === e.currentTarget) {
+    if (e.target === e.currentTarget && !busy) {
       dialog.close();
     }
     (onClick as ((e: MouseEvent) => void) | undefined)?.(e);
@@ -69,6 +78,7 @@ export function Dialog({
         className as string | undefined,
       )}
       onClick={handleClick}
+      onCancel={handleCancel}
     >
       {children}
     </dialog>
