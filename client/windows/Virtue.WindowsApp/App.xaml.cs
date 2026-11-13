@@ -415,7 +415,8 @@ public partial class App : Application
 
         try
         {
-            RestartWatchdog.Unregister();
+            // Keeps only the uninstall cleanup (CLIENT-014), so Exit is not relaunched.
+            RestartWatchdog.StopRelaunching(WatchdogRelaunchArg);
             // A deliberate exit must not be resurrected by a relaunch armed for an update that
             // is no longer going to happen.
             UpdateRelaunchTask.Cancel();

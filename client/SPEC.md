@@ -130,7 +130,7 @@ A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed s
 | -------- | -------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
 | Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in |
 | macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                          |
-| Windows  | "Stop Monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog and relaunch task removed, app exits                  |
+| Windows  | "Stop Monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog stops relaunching (CLIENT-014 cleanup stays), relaunch task removed, app exits |
 | Android  | "Pause Monitoring" / "Resume Monitoring"                             | `android_pause_button` | loop stopped, app stays open                                   |
 | iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                            |
 
@@ -163,11 +163,12 @@ Shared rules for every platform that updates itself:
 ## CLIENT-014 Uninstalling
 
 - Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user, running each user's commands as CLIENT-003 does. Upgrades run the same stop, then CLIENT-003's start.
-- macOS, Windows, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- macOS, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the package is no longer installed (checked again after a short delay, so an update swap is not mistaken for an uninstall), the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the package is installed, the task MUST relaunch the app as before, and MUST NOT delete anything if only the alias is missing. After a deliberate Exit (CLIENT-011) the task MUST keep running only this cleanup and MUST NOT relaunch the app.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
 
-> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app, and Windows leaves the `VirtueResidentWatchdog` task running every minute — should these be cleaned up?
+> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app — should it be cleaned up?
 
 ## CLIENT-015 Communication between UI and daemon
 
