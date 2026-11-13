@@ -324,16 +324,54 @@ fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
 }
 
 // The last System event before this boot cannot change while the process
-// runs, so it is read once (CLIENT-018) instead of on every tick.
+// runs, so a successful read is kept (CLIENT-018) instead of repeated on every
+// tick. A failed read is not kept: it is retried, at most once per minute.
+#[cfg(any(target_os = "windows", test))]
+const EVENTLOG_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Default)]
+struct SuccessCache {
+    value: Option<i64>,
+    last_attempt: Option<std::time::Instant>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl SuccessCache {
+    fn get(
+        &mut self,
+        now: std::time::Instant,
+        retry_after: std::time::Duration,
+        read: impl FnOnce() -> Option<i64>,
+    ) -> Option<i64> {
+        if self.value.is_some() {
+            return self.value;
+        }
+        if let Some(last) = self.last_attempt
+            && now.duration_since(last) < retry_after
+        {
+            return None;
+        }
+        self.last_attempt = Some(now);
+        self.value = read();
+        self.value
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn cached_eventlog_last_before_boot_ms() -> Option<i64> {
-    static CACHE: std::sync::OnceLock<Option<i64>> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| {
-        let boot_start_utc_ms = read_boot_clock_ms()
-            .ok()
-            .and_then(|boot_ms| Some(read_utc_now_ms()? - boot_ms))?;
-        read_eventlog_last_before_boot_ms(boot_start_utc_ms)
-    })
+    static CACHE: std::sync::Mutex<Option<SuccessCache>> = std::sync::Mutex::new(None);
+    let mut guard = CACHE.lock().ok()?;
+    guard.get_or_insert_with(SuccessCache::default).get(
+        std::time::Instant::now(),
+        EVENTLOG_RETRY_INTERVAL,
+        || {
+            let boot_start_utc_ms = read_boot_clock_ms()
+                .ok()
+                .and_then(|boot_ms| Some(read_utc_now_ms()? - boot_ms))?;
+            read_eventlog_last_before_boot_ms(boot_start_utc_ms)
+        },
+    )
 }
 
 // This is a floor/approximation of the true logout time, not exact — see
@@ -538,7 +576,25 @@ impl LifecycleHooks for WindowsPlatformHooks {
 #[cfg(test)]
 // CLIENT-018: Windows event-log timestamp parsing for the last logout time.
 mod tests {
-    use super::{parse_eventlog_timecreated_ms, session_flags_are_locked};
+    use super::{SuccessCache, parse_eventlog_timecreated_ms, session_flags_are_locked};
+    use std::time::{Duration, Instant};
+
+    // CLIENT-018: a failed event-log read is retried after the interval, and a
+    // successful read is kept without reading again.
+    #[test]
+    fn eventlog_cache_retries_failures_and_keeps_successes() {
+        let mut cache = SuccessCache::default();
+        let t0 = Instant::now();
+        let minute = Duration::from_secs(60);
+        assert_eq!(cache.get(t0, minute, || None), None);
+        // Within the interval the read is not attempted again.
+        assert_eq!(
+            cache.get(t0 + Duration::from_secs(5), minute, || panic!()),
+            None
+        );
+        assert_eq!(cache.get(t0 + minute, minute, || Some(42)), Some(42));
+        assert_eq!(cache.get(t0 + minute * 5, minute, || panic!()), Some(42));
+    }
 
     // CLIENT-018: only the WTS "lock" flag reads as locked; unlock and unknown read as unlocked.
     #[test]
