@@ -102,7 +102,7 @@ When the daemon detects thtat hte System Logout time changed, it MUST send a "sy
 
 While authenticated, the daemon MUST send a `heartbeat` event (risk 0%) at least once every 24 hours.
 
-When five screenshot captures fail within 30 minutes, the daemon MUST send a `capture_failed` event (risk 50%) and reset the failure count. A failure older than 30 minutes MUST NOT count.
+When five screenshot captures fail within 30 minutes, the daemon MUST send a `capture_failed` event (risk 80%, high) and reset the failure count. A failure older than 30 minutes MUST NOT count.
 
 The first System Login/Logout time observed (i.e. there is no prior value to compare against) MUST NOT be reported — it only establishes the baseline a later change is measured against.
 
