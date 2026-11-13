@@ -1,16 +1,5 @@
-use std::io::Cursor;
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-use std::process::{Command, Stdio};
-
-// Suppresses the console window that would otherwise flash on screen when
-// spawning a console subprocess (e.g. `wevtutil`) from this GUI app, which
-// has no console of its own for the child to inherit.
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 use anyhow::{Context, Result, anyhow};
+use std::io::Cursor;
 use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 
 #[cfg(target_os = "windows")]
@@ -245,13 +234,18 @@ fn read_registry_shutdown_time_ms() -> Option<i64> {
     }
 }
 
-// Extracts the `SystemTime='...'` attribute of the first (i.e. newest, given
-// `/rd:true`) `<TimeCreated>` element in `wevtutil qe ... /f:xml` output.
-// `wevtutil` single-quotes XML attributes, not double-quotes.
+// Extracts the `SystemTime` attribute of the first (i.e. newest, given
+// reverse-direction order) `<TimeCreated>` element in the event XML. The Event
+// Log API single-quotes XML attributes, not double-quotes; both are accepted.
 fn parse_eventlog_timecreated_ms(xml: &str) -> Option<i64> {
-    let key = "SystemTime='";
+    let key = "SystemTime=";
     let start = xml.find(key)? + key.len();
-    let end = start + xml[start..].find('\'')?;
+    let quote = xml[start..]
+        .chars()
+        .next()
+        .filter(|c| *c == '\'' || *c == '"')?;
+    let start = start + 1;
+    let end = start + xml[start..].find(quote)?;
     let ts = &xml[start..end];
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
@@ -263,24 +257,121 @@ fn parse_eventlog_timecreated_ms(xml: &str) -> Option<i64> {
 // `ShutdownTime` registry key, Windows keeps writing to the event log right up
 // until a crash/power-loss, so its last pre-boot entry is a floor for the
 // true (unclean) shutdown moment. Best-effort: `None` on any failure.
+//
+// CLIENT-018: read through the Event Log API, never a child process. A process
+// started during session end fails (and the OS blames Virtue for blocking
+// sign-out), so this must not spawn anything.
 #[cfg(target_os = "windows")]
 fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
+    use windows::Win32::System::EventLog::{
+        EVT_HANDLE, EvtClose, EvtNext, EvtQuery, EvtQueryChannelPath, EvtQueryReverseDirection,
+        EvtRender, EvtRenderEventXml,
+    };
+    use windows::core::HSTRING;
+
     let boot_time_iso = chrono::DateTime::from_timestamp_millis(boot_start_utc_ms)?
         .format("%Y-%m-%dT%H:%M:%S%.3fZ");
     let query = format!("*[System[TimeCreated[@SystemTime<='{boot_time_iso}']]]");
-    let output = Command::new("wevtutil")
-        .args(["qe", "System", "/c:1", "/rd:true", "/f:xml"])
-        .arg(format!("/q:{query}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
+
+    unsafe {
+        let results = EvtQuery(
+            None,
+            &HSTRING::from("System"),
+            &HSTRING::from(query),
+            EvtQueryChannelPath.0 | EvtQueryReverseDirection.0,
+        )
         .ok()?;
-    if !output.status.success() {
-        return None;
+
+        let mut events = [0isize; 1];
+        let mut returned = 0u32;
+        let next = EvtNext(results, &mut events, 2_000, 0, &mut returned);
+        let mut xml = None;
+        if next.is_ok() && returned == 1 {
+            let event = EVT_HANDLE(events[0]);
+            let mut used = 0u32;
+            let mut props = 0u32;
+            // First call reports the buffer size needed.
+            let _ = EvtRender(
+                None,
+                event,
+                EvtRenderEventXml.0,
+                0,
+                None,
+                &mut used,
+                &mut props,
+            );
+            if used > 0 {
+                let mut buf = vec![0u16; (used as usize).div_ceil(2)];
+                if EvtRender(
+                    None,
+                    event,
+                    EvtRenderEventXml.0,
+                    used,
+                    Some(buf.as_mut_ptr() as *mut core::ffi::c_void),
+                    &mut used,
+                    &mut props,
+                )
+                .is_ok()
+                {
+                    xml = Some(String::from_utf16_lossy(&buf));
+                }
+            }
+            let _ = EvtClose(event);
+        }
+        let _ = EvtClose(results);
+        parse_eventlog_timecreated_ms(&xml?)
     }
-    parse_eventlog_timecreated_ms(&String::from_utf8_lossy(&output.stdout))
+}
+
+// The last System event before this boot cannot change while the process
+// runs, so a successful read is kept (CLIENT-018) instead of repeated on every
+// tick. A failed read is not kept: it is retried, at most once per minute.
+#[cfg(any(target_os = "windows", test))]
+const EVENTLOG_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Default)]
+struct SuccessCache {
+    value: Option<i64>,
+    last_attempt: Option<std::time::Instant>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl SuccessCache {
+    fn get(
+        &mut self,
+        now: std::time::Instant,
+        retry_after: std::time::Duration,
+        read: impl FnOnce() -> Option<i64>,
+    ) -> Option<i64> {
+        if self.value.is_some() {
+            return self.value;
+        }
+        if let Some(last) = self.last_attempt
+            && now.duration_since(last) < retry_after
+        {
+            return None;
+        }
+        self.last_attempt = Some(now);
+        self.value = read();
+        self.value
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cached_eventlog_last_before_boot_ms() -> Option<i64> {
+    static CACHE: std::sync::Mutex<Option<SuccessCache>> = std::sync::Mutex::new(None);
+    let mut guard = CACHE.lock().ok()?;
+    guard.get_or_insert_with(SuccessCache::default).get(
+        std::time::Instant::now(),
+        EVENTLOG_RETRY_INTERVAL,
+        || {
+            let boot_start_utc_ms = read_boot_clock_ms()
+                .ok()
+                .and_then(|boot_ms| Some(read_utc_now_ms()? - boot_ms))?;
+            read_eventlog_last_before_boot_ms(boot_start_utc_ms)
+        },
+    )
 }
 
 // This is a floor/approximation of the true logout time, not exact — see
@@ -291,10 +382,7 @@ fn read_eventlog_last_before_boot_ms(boot_start_utc_ms: i64) -> Option<i64> {
 pub fn read_last_logout_utc_ms() -> CoreResult<Option<i64>> {
     let registry_ms = read_registry_shutdown_time_ms();
 
-    let boot_start_utc_ms = read_boot_clock_ms()
-        .ok()
-        .and_then(|boot_ms| Some(read_utc_now_ms()? - boot_ms));
-    let eventlog_ms = boot_start_utc_ms.and_then(read_eventlog_last_before_boot_ms);
+    let eventlog_ms = cached_eventlog_last_before_boot_ms();
 
     Ok(registry_ms.into_iter().chain(eventlog_ms).max())
 }
@@ -371,6 +459,13 @@ pub fn read_locked_or_screensaver() -> bool {
             return true;
         }
 
+        // CLIENT-018: the session's own lock flag. OpenInputDesktop below can
+        // still succeed while the lock screen is up (issue #870), so this is
+        // the primary signal.
+        if session_flags_say_locked() {
+            return true;
+        }
+
         // When the workstation is locked the input desktop becomes the secure
         // (Winlogon) desktop, so a normal-privilege OpenInputDesktop fails.
         match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) {
@@ -380,6 +475,49 @@ pub fn read_locked_or_screensaver() -> bool {
             }
             Err(_) => true,
         }
+    }
+}
+
+// True when the lock flag from `WTSINFOEX_LEVEL1.SessionFlags` says locked.
+// `WTS_SESSIONSTATE_LOCK` is 0, `WTS_SESSIONSTATE_UNLOCK` is 1 and
+// `WTS_SESSIONSTATE_UNKNOWN` is -1, which reads as unlocked (fail safe).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn session_flags_are_locked(session_flags: i32) -> bool {
+    session_flags == 0
+}
+
+// Asks the Terminal Services API for the current session's lock flag.
+#[cfg(target_os = "windows")]
+fn session_flags_say_locked() -> bool {
+    use windows::Win32::System::RemoteDesktop::{
+        WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSFreeMemory, WTSINFOEXW,
+        WTSQuerySessionInformationW, WTSSessionInfoEx,
+    };
+    use windows::core::PWSTR;
+
+    unsafe {
+        let mut buffer = PWSTR::null();
+        let mut bytes = 0u32;
+        if WTSQuerySessionInformationW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            WTS_CURRENT_SESSION,
+            WTSSessionInfoEx,
+            &mut buffer,
+            &mut bytes,
+        )
+        .is_err()
+            || buffer.is_null()
+        {
+            return false;
+        }
+        let locked = if bytes as usize >= std::mem::size_of::<WTSINFOEXW>() {
+            let info = &*(buffer.0 as *const WTSINFOEXW);
+            info.Level == 1 && session_flags_are_locked(info.Data.WTSInfoExLevel1.SessionFlags)
+        } else {
+            false
+        };
+        WTSFreeMemory(buffer.0 as *mut core::ffi::c_void);
+        locked
     }
 }
 
@@ -438,11 +576,37 @@ impl LifecycleHooks for WindowsPlatformHooks {
 #[cfg(test)]
 // CLIENT-018: Windows event-log timestamp parsing for the last logout time.
 mod tests {
-    use super::parse_eventlog_timecreated_ms;
+    use super::{SuccessCache, parse_eventlog_timecreated_ms, session_flags_are_locked};
+    use std::time::{Duration, Instant};
+
+    // CLIENT-018: a failed event-log read is retried after the interval, and a
+    // successful read is kept without reading again.
+    #[test]
+    fn eventlog_cache_retries_failures_and_keeps_successes() {
+        let mut cache = SuccessCache::default();
+        let t0 = Instant::now();
+        let minute = Duration::from_secs(60);
+        assert_eq!(cache.get(t0, minute, || None), None);
+        // Within the interval the read is not attempted again.
+        assert_eq!(
+            cache.get(t0 + Duration::from_secs(5), minute, || panic!()),
+            None
+        );
+        assert_eq!(cache.get(t0 + minute, minute, || Some(42)), Some(42));
+        assert_eq!(cache.get(t0 + minute * 5, minute, || panic!()), Some(42));
+    }
+
+    // CLIENT-018: only the WTS "lock" flag reads as locked; unlock and unknown read as unlocked.
+    #[test]
+    fn session_flags_are_locked_only_for_the_lock_flag() {
+        assert!(session_flags_are_locked(0));
+        assert!(!session_flags_are_locked(1));
+        assert!(!session_flags_are_locked(-1));
+    }
 
     #[test]
     fn parse_eventlog_timecreated_ms_extracts_newest_entry() {
-        // `wevtutil qe ... /f:xml` single-quotes attributes, unlike typical XML.
+        // The Event Log API single-quotes attributes, unlike typical XML.
         let xml = r#"<Events><Event><System><TimeCreated SystemTime='2026-07-10T01:06:12.345Z'/></System></Event></Events>"#;
         assert_eq!(parse_eventlog_timecreated_ms(xml), Some(1783645572345));
     }
@@ -460,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_eventlog_timecreated_ms_handles_real_wevtutil_output() {
+    fn parse_eventlog_timecreated_ms_handles_real_event_log_output() {
         let xml = r#"<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-Kernel-General' Guid='{a68ca8b7-004f-d7b6-a698-07e2de0f1f5d}'/><EventID>16</EventID><TimeCreated SystemTime='2026-07-10T06:17:42.6765986Z'/><EventRecordID>4988</EventRecordID></System></Event>"#;
         assert_eq!(parse_eventlog_timecreated_ms(xml), Some(1783664262676));
     }

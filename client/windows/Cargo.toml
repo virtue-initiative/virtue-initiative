@@ -34,6 +34,8 @@ winresource = "0.1"
 version = "0.62"
 features = [
   "Win32_Foundation",
+  "Win32_System_EventLog",
+  "Win32_System_RemoteDesktop",
   "Win32_Graphics_Gdi",
   "Win32_Security",
   "Win32_Security_Authentication_Identity",
