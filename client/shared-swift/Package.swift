@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "VirtueKit", targets: ["VirtueKit"])
     ],
     targets: [
-        .target(name: "VirtueKit")
+        .target(name: "VirtueKit"),
+        .testTarget(name: "VirtueKitTests", dependencies: ["VirtueKit"]),
     ]
 )

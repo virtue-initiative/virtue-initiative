@@ -508,16 +508,29 @@ fn format_timestamp(now_ms: i64, ms: i64) -> String {
     format!("{stamp} ({})", format_age(now_ms - ms))
 }
 
+/// The relative age of CLIENT-007: one unit under an hour, two after, rounded
+/// down, without a second unit of zero.
 fn format_age(delta_ms: i64) -> String {
     if delta_ms < 0 {
         return "in the future".to_string();
     }
     let secs = delta_ms / 1000;
-    match secs {
-        0..=59 => format!("{secs}s ago"),
-        60..=3599 => format!("{}m ago", secs / 60),
-        3600..=86_399 => format!("{}h ago", secs / 3600),
-        _ => format!("{}d ago", secs / 86_400),
+    let (major, minor) = match secs {
+        0..=59 => return format!("{secs}s ago"),
+        60..=3599 => return format!("{}m ago", secs / 60),
+        3600..=86_399 => (
+            format!("{}h", secs / 3600),
+            format!("{}m", secs % 3600 / 60),
+        ),
+        _ => (
+            format!("{}d", secs / 86_400),
+            format!("{}h", secs % 86_400 / 3600),
+        ),
+    };
+    if minor.starts_with('0') {
+        format!("{major} ago")
+    } else {
+        format!("{major} {minor} ago")
     }
 }
 
@@ -1279,6 +1292,32 @@ mod tests {
         let headline = status_headline(&active);
         assert_eq!(headline.text, "Monitoring active");
         assert!(headline.fix_commands.is_empty());
+    }
+
+    // CLIENT-007: ages read Ns, Nm, Nh Mm or Nd Nh ago, rounded down, without
+    // a second unit of zero.
+    #[test]
+    fn formats_relative_ages() {
+        const S: i64 = 1000;
+        const M: i64 = 60 * S;
+        const H: i64 = 60 * M;
+        const D: i64 = 24 * H;
+        let cases = [
+            (-1, "in the future"),
+            (0, "0s ago"),
+            (59 * S + 999, "59s ago"),
+            (M, "1m ago"),
+            (59 * M + 59 * S, "59m ago"),
+            (H, "1h ago"),
+            (4 * H + 54 * M, "4h 54m ago"),
+            (23 * H + 59 * M + 59 * S, "23h 59m ago"),
+            (D, "1d ago"),
+            (2 * D + 3 * H + 30 * M, "2d 3h ago"),
+            (40 * D + 10 * H, "40d 10h ago"),
+        ];
+        for (delta_ms, expected) in cases {
+            assert_eq!(super::format_age(delta_ms), expected, "{delta_ms} ms");
+        }
     }
 
     // CLIENT-020: `virtue report-issue` parses with no flags.

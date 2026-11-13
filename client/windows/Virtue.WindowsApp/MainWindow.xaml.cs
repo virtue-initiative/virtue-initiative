@@ -1140,7 +1140,7 @@ public sealed partial class MainWindow : Window
         var rows = new List<RowSpec>();
         if (ViewModel.LastScreenshotAtMs is long last)
         {
-            rows.Add(new RowSpec(StatusKind.Good, "Last screenshot", SessionViewModel.FormatShortTime(last)));
+            rows.Add(new RowSpec(StatusKind.Good, "Last screenshot", StatusTimestamp.Short(last)));
         }
         else if (signedIn)
         {
@@ -1200,7 +1200,7 @@ public sealed partial class MainWindow : Window
             // day and as neutral after that.
             var newest = errors.OrderByDescending(e => e.AtMs).First();
             var recent = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(newest.AtMs) < TimeSpan.FromDays(1);
-            return new RowSpec(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", SessionViewModel.FormatShortTime(newest.AtMs), newest.Message);
+            return new RowSpec(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", StatusTimestamp.Short(newest.AtMs), newest.Message);
         }
 
         return status is null
@@ -1984,23 +1984,7 @@ public sealed partial class MainWindow : Window
         string.IsNullOrWhiteSpace(value) ? "<none>" : value;
 
     /// <summary>Local time with a relative age (CLIENT-007).</summary>
-    private static string FormatTimestamp(long? value)
-    {
-        if (!value.HasValue)
-        {
-            return "<none>";
-        }
-
-        var at = DateTimeOffset.FromUnixTimeMilliseconds(value.Value);
-        var age = DateTimeOffset.UtcNow - at;
-        var ageText = age.TotalSeconds < 0
-            ? "in the future"
-            : age.TotalSeconds < 60 ? $"{(int)age.TotalSeconds}s ago"
-            : age.TotalMinutes < 60 ? $"{(int)age.TotalMinutes}m ago"
-            : age.TotalHours < 24 ? $"{(int)age.TotalHours}h ago"
-            : $"{(int)age.TotalDays}d ago";
-        return $"{at.ToLocalTime():yyyy-MM-dd HH:mm:ss} ({ageText})";
-    }
+    private static string FormatTimestamp(long? value) => StatusTimestamp.Full(value);
 
     private static SolidColorBrush HexBrush(string value) => new(ColorFromHex(value));
 
