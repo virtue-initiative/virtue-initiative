@@ -43,9 +43,11 @@ public static class RestartWatchdog
         // CLIENT-014: when the task launches the execution alias it also cleans up after an
         // uninstall (MSIX runs no app code then), so it needs the script form. A task aimed at
         // anything else (an unpackaged or dev run) keeps the plain per-minute launch.
-        if (string.Equals(exePath, AppLaunchPath.ExecutionAliasPath, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(exePath, AppLaunchPath.ExecutionAliasPath, StringComparison.OrdinalIgnoreCase) || IsPackaged())
         {
-            return RegisterWithCleanup(exePath, quietArg, relaunch: true);
+            // Packaged with the alias switched off: the script still guards the cleanup and
+            // simply does not relaunch until the alias is back.
+            return RegisterWithCleanup(AppLaunchPath.ExecutionAliasPath, quietArg, relaunch: true);
         }
 
         var result = Schtasks.Run(
@@ -66,7 +68,7 @@ public static class RestartWatchdog
     /// </summary>
     public static void StopRelaunching(string quietArg)
     {
-        if (File.Exists(AppLaunchPath.ExecutionAliasPath))
+        if (IsPackaged())
         {
             RegisterWithCleanup(AppLaunchPath.ExecutionAliasPath, quietArg, relaunch: false);
         }
@@ -75,6 +77,11 @@ public static class RestartWatchdog
             Unregister();
         }
     }
+
+    // A packaged run lives under ...\WindowsApps\. Used instead of the alias, which the user
+    // can switch off while the app stays installed.
+    private static bool IsPackaged() =>
+        Environment.ProcessPath?.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase) == true;
 
     private static string RegisterWithCleanup(string aliasPath, string quietArg, bool relaunch)
     {
