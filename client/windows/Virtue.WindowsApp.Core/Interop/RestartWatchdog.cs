@@ -119,7 +119,7 @@ public static class RestartWatchdog
         var alias = aliasPath.Replace("'", "''");
         var arg = quietArg.Replace("'", "''");
         // A failed query counts as installed, so only a clean empty answer can delete anything.
-        var installed = $"(try {{ [bool](Get-AppxPackage -Name '{PackageName}' -ErrorAction Stop) }} catch {{ $true }})";
+        var installed = $"$(try {{ [bool](Get-AppxPackage -Name '{PackageName}' -ErrorAction Stop) }} catch {{ $true }})";
         var start = relaunch
             ? "if (Test-Path -LiteralPath $a) { Start-Process -FilePath $a -ArgumentList '" + arg + "' } "
             : "";
