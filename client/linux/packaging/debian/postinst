@@ -1,32 +1,54 @@
 #!/bin/sh
 set -e
 
+# Runs a shell command as a user without starting a login shell. `su -` would
+# source the user's ~/.profile, so one broken line there failed the whole
+# install (CLIENT-003). Errors are ignored: setting up one user's service must
+# not abort the package install. VIRTUE_RUN_USER_DIR exists for tests only.
+run_as_user() {
+  run_user="$1"
+  run_uid="$2"
+  run_cmd="$3"
+  run_runtime="${VIRTUE_RUN_USER_DIR:-/run/user}/$run_uid"
+  run_home=$(getent passwd "$run_user" 2>/dev/null | cut -d: -f6)
+  (
+    cd / &&
+      runuser -u "$run_user" -- env -i \
+        PATH="$PATH" \
+        HOME="${run_home:-/}" \
+        USER="$run_user" \
+        LOGNAME="$run_user" \
+        XDG_RUNTIME_DIR="$run_runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$run_runtime/bus" \
+        sh -c "$run_cmd"
+  ) >/dev/null 2>&1 || true
+}
+
 start_for_user() {
   user="$1"
   uid="$2"
-  runtime="/run/user/$uid"
 
-  if [ ! -d "$runtime" ]; then
+  if [ ! -d "${VIRTUE_RUN_USER_DIR:-/run/user}/$uid" ]; then
     return 0
   fi
 
   # Ensure user manager sees updated unit content from package upgrade.
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user daemon-reload >/dev/null 2>&1 || true"
+  run_as_user "$user" "$uid" "systemctl --user daemon-reload"
 
   # Legacy cleanup: avoid running both service names at once.
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user disable --now virtue.service >/dev/null 2>&1 || true"
+  run_as_user "$user" "$uid" "systemctl --user disable --now virtue.service"
 
   # Cinnamon uses the xapp-status panel applet as the StatusNotifier host.
   # If it's missing, the daemon can run but the tray icon has nowhere to render.
   if [ -d /usr/share/cinnamon/applets/xapp-status@cinnamon.org ]; then
-    su - "$user" -s /bin/sh -c "export XDG_RUNTIME_DIR=$runtime; export DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus; applets=\$(gsettings get org.cinnamon enabled-applets 2>/dev/null || true); case \"\$applets\" in *xapp-status@cinnamon.org*) : ;; *) trimmed=\${applets%]}; if [ \"\$trimmed\" != \"\$applets\" ]; then gsettings set org.cinnamon enabled-applets \"\$trimmed, 'panel1:right:1:xapp-status@cinnamon.org:90']\" >/dev/null 2>&1 || true; fi ;; esac"
+    run_as_user "$user" "$uid" "applets=\$(gsettings get org.cinnamon enabled-applets 2>/dev/null || true); case \"\$applets\" in *xapp-status@cinnamon.org*) : ;; *) trimmed=\${applets%]}; if [ \"\$trimmed\" != \"\$applets\" ]; then gsettings set org.cinnamon enabled-applets \"\$trimmed, 'panel1:right:1:xapp-status@cinnamon.org:90']\"; fi ;; esac"
   fi
 
   # Ensure enabled state for this user.
-  su - "$user" -s /bin/sh -c "XDG_RUNTIME_DIR=$runtime systemctl --user enable virtue.service >/dev/null 2>&1 || true"
+  run_as_user "$user" "$uid" "systemctl --user enable virtue.service"
 
   # Explicitly restart on upgrades so new binary/unit changes take effect now.
-  su - "$user" -s /bin/sh -c "export XDG_RUNTIME_DIR=$runtime; if systemctl --user is-active --quiet virtue.service; then systemctl --user restart virtue.service; else systemctl --user start virtue.service; fi >/dev/null 2>&1 || true"
+  run_as_user "$user" "$uid" "if systemctl --user is-active --quiet virtue.service; then systemctl --user restart virtue.service; else systemctl --user start virtue.service; fi"
 }
 
 start_for_user_once() {
@@ -73,6 +95,12 @@ if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
   if [ -n "$uid" ]; then
     start_for_user_once "$SUDO_USER" "$uid"
   fi
+fi
+
+# Only on a fresh install: on upgrade `configure` gets the old version as $2,
+# and the user is already signed in.
+if [ "${1:-}" = "configure" ] && [ -z "${2:-}" ]; then
+  echo "Virtue is installed. Run \`virtue login\` in a terminal to sign in and start monitoring."
 fi
 
 exit 0

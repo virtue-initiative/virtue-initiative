@@ -8,8 +8,9 @@
 - `virtue logout`
   - Warns that a log event is sent to indicate monitoring was turned off.
   - Clears local auth/device state and disables monitoring.
-- `virtue status`
-  - Shows login and monitoring state.
+- `virtue status [--full] [--advanced] [--json]`
+  - Shows whether monitoring is working, when the last screenshot was taken, and how much is waiting to upload.
+  - `--full` adds account, queue, capture and error details. `--advanced` also adds settings, paths and logs.
 - `virtue report-issue [--message ...] [--contact-email ...] [--yes]`
   - Prompts for a description (and optional contact email) and emails it to the Virtue Initiative team, attaching the last day of this device's `virtue` service logs (via `journalctl --user`). These are diagnostic logs only — no screenshots or screenshot content, no window titles — and any known secret/token patterns are redacted before sending.
   - Prints exactly what will be sent (message, contact email, platform details, log attachment) and asks for confirmation before submitting; `--yes` skips the prompt.
@@ -68,7 +69,7 @@ local API or with different intervals, set `VIRTUE_DEFAULT_API_URL`,
 `.env` file at the repo root, copied from `.env.example`) before running
 `cargo build`.
 
-`virtue status` prints the current build-resolved values.
+`virtue status --advanced` prints the current build-resolved values.
 
 The client uses `XDG_CONFIG_HOME` and `XDG_STATE_HOME` when those variables are set. Otherwise it falls back to `~/.config/virtue` for config and `~/.local/state/virtue` for mutable state.
 

@@ -1,6 +1,7 @@
 mod capture;
 mod config;
 mod daemon;
+mod style;
 mod tray;
 
 use std::fs;
@@ -18,7 +19,7 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::ScreenshotSkipReason;
 use virtue_core::ipc::ClientController;
-use virtue_core::{ScreenshotHooks, StatusSkipReason, Upload, UploadKind};
+use virtue_core::{ScreenshotHooks, ServiceStatus, StatusSkipReason, Upload, UploadKind};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
@@ -37,11 +38,16 @@ const MONITORING_SUMMARY: &[&str] = &[
 const MONITORING_HELP_URL: &str = "https://virtueinitiative.org/help/what-virtue-monitors/linux";
 
 fn print_monitoring_summary() {
-    println!("What Virtue monitors");
+    println!("{}", style::heading("What Virtue monitors"));
     for line in MONITORING_SUMMARY {
         println!("  {line}");
     }
-    println!("  Learn more: {MONITORING_HELP_URL}");
+    println!("  Learn more: {}", style::link(MONITORING_HELP_URL));
+}
+
+/// Prints a yellow "warning:" line, matching the `error:` prefix.
+fn print_warning(message: &str) {
+    println!("{} {message}", style::warn("warning:"));
 }
 
 #[derive(Debug, Parser)]
@@ -72,8 +78,15 @@ enum Commands {
         #[command(subcommand)]
         command: Option<DaemonCommands>,
     },
-    #[command(about = "Show current auth, capture, and upload status")]
+    #[command(about = "Show whether monitoring is working")]
     Status {
+        /// Also show account, queue, capture and error details.
+        #[arg(long)]
+        full: bool,
+        /// Show everything --full does, plus settings, paths and logs.
+        #[arg(long)]
+        advanced: bool,
+        /// Print every field as JSON.
         #[arg(long)]
         json: bool,
     },
@@ -161,7 +174,7 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("error: {err:#}");
+            eprintln!("{} {err:#}", style::error_prefix());
             ExitCode::FAILURE
         }
     }
@@ -178,7 +191,20 @@ async fn run() -> Result<()> {
         }
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
-        Commands::Status { json } => tokio::task::block_in_place(|| status(paths, json)),
+        Commands::Status {
+            full,
+            advanced,
+            json,
+        } => {
+            let detail = if advanced {
+                StatusDetail::Advanced
+            } else if full {
+                StatusDetail::Full
+            } else {
+                StatusDetail::Summary
+            };
+            tokio::task::block_in_place(|| status(paths, detail, json))
+        }
         Commands::Dev { command } => tokio::task::block_in_place(|| dev(paths, command)),
         Commands::ForceScreenshot => tokio::task::block_in_place(|| force_screenshot(paths)),
         Commands::ReportIssue {
@@ -200,7 +226,10 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
 }
 
 fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
-    println!("Don't have an account? Sign up at https://app.virtueinitiative.org/signup");
+    println!(
+        "Don't have an account? Sign up at {}",
+        style::link("https://app.virtueinitiative.org/signup")
+    );
     let email = match email {
         Some(email) => email,
         None => {
@@ -235,14 +264,20 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
         .context("login failed")?;
 
     let probe = probe_backend();
-    println!("{}", probe.guidance);
-    println!("Logged in. Device id: {device_id}");
+    println!();
+    if probe.captured_ok {
+        println!("{}", style::good(&probe.guidance));
+    } else {
+        println!("{}", style::warn(&probe.guidance));
+    }
+    println!("{} Device id: {device_id}", style::good("Logged in."));
     println!(
-        "Add partners on the Virtue website. Open {PARTNERS_URL} and select \"Invite partner\"."
+        "Add partners on the Virtue website. Open {} and select \"Invite partner\".",
+        style::link(PARTNERS_URL)
     );
     if !probe.captured_ok {
-        println!(
-            "Capture is not yet working; service will run and log missed captures until fixed."
+        print_warning(
+            "capture is not yet working; service will run and log missed captures until fixed.",
         );
     }
     println!();
@@ -252,9 +287,9 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
 }
 
 fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
-    println!(
-        "Warning: signing out will deactivate this device and stop monitoring. Anyone monitoring \
-         you may be alerted. Logging in again will create a new device."
+    print_warning(
+        "signing out will deactivate this device and stop monitoring. Anyone monitoring you may \
+         be alerted. Logging in again will create a new device.",
     );
 
     if !yes && !prompt_yes_no("Continue logout?", false)? {
@@ -267,7 +302,11 @@ fn logout(paths: ClientPaths, yes: bool) -> Result<()> {
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     client.logout().context("logout failed")?;
 
-    println!("Logged out. Monitoring is disabled on this device until you run `virtue login`.");
+    println!(
+        "{} Monitoring is disabled on this device until you run {}.",
+        style::good("Logged out."),
+        style::link("`virtue login`")
+    );
     Ok(())
 }
 
@@ -306,7 +345,10 @@ fn report_issue(
     let platform_details = linux_platform_details();
     let logs = recent_logs();
 
-    println!("This report will be sent to the Virtue Initiative team and will include:");
+    println!(
+        "{}",
+        style::heading("This report will be sent to the Virtue Initiative team and will include:")
+    );
     println!("  - Your message: \"{message}\"");
     if let Some(email) = &contact_email {
         println!("  - Your contact email: {email}");
@@ -346,7 +388,10 @@ fn report_issue(
     )
     .context("failed to submit bug report")?;
 
-    println!("Thanks — your report was sent to the Virtue Initiative team.");
+    println!(
+        "{}",
+        style::good("Thanks. Your report was sent to the Virtue Initiative team.")
+    );
     Ok(())
 }
 
@@ -451,10 +496,7 @@ fn parse_os_release(contents: &str) -> (Option<String>, Option<String>) {
 
 /// Formats a UTC-ms timestamp as a local-time string plus a relative age,
 /// which is what actually answers "is this thing working right now?".
-fn format_timestamp(now_ms: i64, value: Option<i64>) -> String {
-    let Some(ms) = value else {
-        return "<none>".to_string();
-    };
+fn format_timestamp(now_ms: i64, ms: i64) -> String {
     let secs = ms / 1000;
     let stamp = chrono::DateTime::from_timestamp(secs, 0)
         .map(|dt| {
@@ -504,7 +546,15 @@ fn log_command() -> String {
     format!("journalctl --user -u {} --since -1h", service_name())
 }
 
-fn status(paths: ClientPaths, json: bool) -> Result<()> {
+/// How much `virtue status` prints (CLIENT-020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusDetail {
+    Summary,
+    Full,
+    Advanced,
+}
+
+fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
     // Every field below comes from `load_service_status` — the shared
     // `status::build` (CORE-010), which already folds in the compile-time
     // config — so there is nothing for this command to assemble itself.
@@ -514,21 +564,24 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    let backend = match detect_backend() {
-        Some(CaptureBackend::Wayland) => "wayland",
-        Some(CaptureBackend::X11) => "x11",
-        None => "<unknown>",
+    // Both probe the session (D-Bus, systemctl), so only the views that show
+    // them call these.
+    let backend = || {
+        detect_backend().map(|backend| match backend {
+            CaptureBackend::Wayland => "wayland",
+            CaptureBackend::X11 => "x11",
+        })
     };
-    let service_active = is_user_service_active().unwrap_or(false);
+    let service_active = || is_user_service_active().unwrap_or(false);
 
     if json {
         let mut value = serde_json::to_value(&status)?;
         if let Some(object) = value.as_object_mut() {
             // Linux-only extras, alongside the shared `ServiceStatus` fields
             // every platform's status page renders (CORE-010).
-            object.insert("backend".into(), backend.into());
+            object.insert("backend".into(), backend().unwrap_or("<unknown>").into());
             object.insert("service_name".into(), service_name().into());
-            object.insert("service_active".into(), service_active.into());
+            object.insert("service_active".into(), service_active().into());
             object.insert(
                 "state_dir".into(),
                 paths.state_dir.display().to_string().into(),
@@ -544,106 +597,228 @@ fn status(paths: ClientPaths, json: bool) -> Result<()> {
         return Ok(());
     }
 
-    let none = "<none>".to_string();
+    let headline = status_headline(&status);
+    let painted = match headline.tone {
+        Tone::Good => style::good(headline.text),
+        Tone::Warn => style::warn(headline.text),
+        Tone::Bad => style::bad(headline.text),
+    };
+    println!("{}", style::heading(&painted));
+    let print_fix = || {
+        if !headline.fix_commands.is_empty() {
+            let commands: Vec<String> = headline
+                .fix_commands
+                .iter()
+                .map(|command| style::link(&format!("`{command}`")))
+                .collect();
+            println!("Run {} to fix this.", commands.join(", then "));
+        }
+    };
 
-    println!("Account");
-    println!("  signed in:            {}", status.is_authenticated);
-    println!(
-        "  email:                {}",
-        status.account_email.as_ref().unwrap_or(&none)
+    let row = |label: &str, value: &str| {
+        println!(
+            "  {} {value}",
+            style::dim(&format!("{:<21}", format!("{label}:")))
+        );
+    };
+
+    if detail == StatusDetail::Summary {
+        if let Some(email) = &status.account_email
+            && status.is_authenticated
+        {
+            row("signed in as", email);
+        }
+        row(
+            "last screenshot",
+            &status
+                .last_screenshot_at_ms
+                .map(|ms| format_age(now_ms - ms))
+                .unwrap_or_else(|| "None yet".to_string()),
+        );
+        row(
+            "waiting to upload",
+            &(status.pending_hash_count + status.pending_batch_count).to_string(),
+        );
+        let errors = status.recent_errors.len();
+        row(
+            "recent errors",
+            &if errors == 0 {
+                "None".to_string()
+            } else {
+                style::bad(&errors.to_string())
+            },
+        );
+        println!();
+        print_fix();
+        println!("Run {} for details.", style::link("`virtue status --full`"));
+        return Ok(());
+    }
+
+    print_fix();
+
+    let none = style::dim("<none>");
+    let unknown = style::dim("<unknown>");
+    let yes_no = |value: bool| {
+        if value {
+            style::good("yes")
+        } else {
+            style::bad("no")
+        }
+    };
+    let section = |title: &str| {
+        println!();
+        println!("{}", style::heading(title));
+    };
+    let timestamp =
+        |value: Option<i64>| value.map_or_else(|| none.clone(), |ms| format_timestamp(now_ms, ms));
+
+    section("Account");
+    row("signed in", &yes_no(status.is_authenticated));
+    row("email", status.account_email.as_deref().unwrap_or(&none));
+    row(
+        "device name",
+        status.device_name.as_deref().unwrap_or(&none),
     );
-    println!(
-        "  device name:          {}",
-        status.device_name.as_ref().unwrap_or(&none)
-    );
-    println!(
-        "  partners:             {}",
-        status
+    row(
+        "partners",
+        &status
             .partner_count
             .map(|count| count.to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
+            .unwrap_or_else(|| unknown.clone()),
     );
-    println!("  add partners at:      {PARTNERS_URL}");
+    row("add partners at", &style::link(PARTNERS_URL));
 
-    println!();
-    println!("Queues");
-    println!("  waiting for hash:     {}", status.pending_hash_count);
-    println!("  waiting in batch:     {}", status.pending_batch_count);
-    println!(
-        "  last batch upload:    {}",
-        format_timestamp(now_ms, status.last_batch_at_ms)
-    );
+    section("Queues");
+    row("waiting for hash", &status.pending_hash_count.to_string());
+    row("waiting in batch", &status.pending_batch_count.to_string());
+    row("last batch upload", &timestamp(status.last_batch_at_ms));
 
-    println!();
-    println!("Capture");
-    println!("  daemon running:       {}", status.is_running);
-    println!(
-        "  last loop:            {}",
-        format_timestamp(now_ms, status.last_loop_at_ms)
+    section("Capture");
+    row("daemon running", &yes_no(status.is_running));
+    row("last loop", &timestamp(status.last_loop_at_ms));
+    row(
+        "last attempt",
+        &timestamp(status.last_screenshot_attempt_at_ms),
     );
-    println!(
-        "  last attempt:         {}",
-        format_timestamp(now_ms, status.last_screenshot_attempt_at_ms)
-    );
-    println!(
-        "  last screenshot:      {}",
-        format_timestamp(now_ms, status.last_screenshot_at_ms)
-    );
-    println!(
-        "  last skip reason:     {}",
-        status
+    row("last screenshot", &timestamp(status.last_screenshot_at_ms));
+    row(
+        "last skip reason",
+        &status
             .last_skip_reason
             .as_ref()
-            .map(|reason| skip_reason_label(reason).to_string())
-            .unwrap_or_else(|| none.clone())
+            .map(|reason| style::warn(skip_reason_label(reason)))
+            .unwrap_or_else(|| none.clone()),
     );
-    println!("  capture backend:      {backend}");
+    row("capture backend", backend().unwrap_or(&unknown));
 
-    println!();
-    println!("Recent errors");
+    section("Recent errors");
     if status.recent_errors.is_empty() {
-        println!("  (none)");
+        println!("  {}", style::dim("(none)"));
     } else {
         for error in status.recent_errors.iter().take(5) {
             println!(
-                "  {} [{}] {}",
-                format_timestamp(now_ms, Some(error.at_ms)),
-                error.context,
-                error.message
+                "  {} {} {}",
+                style::dim(&format_timestamp(now_ms, error.at_ms)),
+                style::warn(&format!("[{}]", error.context)),
+                style::bad(&error.message)
             );
         }
     }
 
-    println!();
-    println!("Advanced");
-    println!(
-        "  device id:            {}",
-        status.device_id.unwrap_or(none.clone())
-    );
-    println!("  api url:              {}", status.api_base_url);
-    println!(
-        "  hash base url:        {}",
+    if detail == StatusDetail::Full {
+        println!();
+        println!(
+            "Run {} for settings, paths and logs.",
+            style::link("`virtue status --advanced`")
+        );
+        println!();
+        print_monitoring_summary();
+        return Ok(());
+    }
+
+    section("Advanced");
+    row("device id", status.device_id.as_deref().unwrap_or(&none));
+    row("api url", &status.api_base_url);
+    row(
+        "hash base url",
         status
             .hash_base_url
-            .unwrap_or_else(|| "<default>".to_string())
+            .as_deref()
+            .unwrap_or(&style::dim("<default>")),
     );
-    println!(
-        "  capture interval:     {}s",
-        status.capture_interval_seconds
+    row(
+        "capture interval",
+        &format!("{}s", status.capture_interval_seconds),
     );
-    println!("  batch window:         {}s", status.batch_window_seconds);
-    println!(
-        "  systemd service:      {} ({})",
-        service_name(),
-        if service_active { "active" } else { "inactive" }
+    row("batch window", &format!("{}s", status.batch_window_seconds));
+    row(
+        "systemd service",
+        &format!(
+            "{} ({})",
+            service_name(),
+            if service_active() {
+                style::good("active")
+            } else {
+                style::bad("inactive")
+            }
+        ),
     );
-    println!("  state dir:            {}", paths.state_dir.display());
-    println!("  logs:                 {}", log_command());
+    row("state dir", &paths.state_dir.display().to_string());
+    row("logs", &style::link(&log_command()));
 
     println!();
     print_monitoring_summary();
 
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Tone {
+    Good,
+    Warn,
+    Bad,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Headline {
+    text: &'static str,
+    tone: Tone,
+    /// The commands that fix this state, in order; empty if there is nothing to fix.
+    fix_commands: &'static [&'static str],
+}
+
+/// The one-line monitoring state `virtue status` opens with (CLIENT-006).
+fn status_headline(status: &ServiceStatus) -> Headline {
+    if !status.is_authenticated {
+        Headline {
+            text: "Signed out",
+            tone: Tone::Bad,
+            // `virtue login` talks to the daemon, so start it first if needed.
+            fix_commands: if status.is_running {
+                &["virtue login"]
+            } else {
+                &["virtue daemon start", "virtue login"]
+            },
+        }
+    } else if !status.is_running {
+        Headline {
+            text: "Monitoring stopped",
+            tone: Tone::Bad,
+            fix_commands: &["virtue daemon start"],
+        }
+    } else if status.last_screenshot_at_ms.is_some() {
+        Headline {
+            text: "Monitoring active",
+            tone: Tone::Good,
+            fix_commands: &[],
+        }
+    } else {
+        Headline {
+            text: "Waiting for the first screenshot",
+            tone: Tone::Warn,
+            fix_commands: &[],
+        }
+    }
 }
 
 fn service_name() -> String {
@@ -656,7 +831,7 @@ fn service_name() -> String {
 fn daemon_start() -> Result<()> {
     let svc = service_name();
     run_systemctl_user(["start", &svc])?;
-    println!("Started {svc}.");
+    println!("{}", style::good(&format!("Started {svc}.")));
     Ok(())
 }
 
@@ -667,7 +842,7 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!("Warning: stopping the daemon will alert people monitoring you.");
+    print_warning("stopping the daemon will alert people monitoring you.");
 
     if !yes && !prompt_yes_no("Continue stopping the daemon?", false)? {
         println!("Daemon stop cancelled.");
@@ -688,7 +863,7 @@ fn daemon_stop(paths: ClientPaths, yes: bool) -> Result<()> {
 
     run_systemctl_user(["stop", &svc])?;
 
-    println!("Stopped {svc}.");
+    println!("{}", style::good(&format!("Stopped {svc}.")));
     Ok(())
 }
 
@@ -950,7 +1125,12 @@ fn force_screenshot(paths: ClientPaths) -> Result<()> {
     )
     .context("failed to read daemon status while waiting for the upload")?;
 
-    println!("{}", outcome.message());
+    let message = outcome.message();
+    if outcome == virtue_core::force_capture::ForcedCaptureOutcome::Uploaded {
+        println!("{}", style::good(message));
+    } else {
+        println!("{}", style::warn(message));
+    }
     Ok(())
 }
 
@@ -1014,7 +1194,7 @@ fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
     let suffix = if default_yes { "[Y/n]" } else { "[y/N]" };
 
     loop {
-        print!("{prompt} {suffix} ");
+        print!("{} {suffix} ", style::heading(prompt));
         io::stdout().flush().context("failed flushing stdout")?;
 
         let mut value = String::new();
@@ -1060,8 +1240,59 @@ fn format_risk(risk: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, DaemonCommands, parse_os_release};
+    use super::{Cli, Commands, DaemonCommands, Tone, parse_os_release, status_headline};
     use clap::Parser;
+    use virtue_core::ServiceStatus;
+
+    // CLIENT-006: the status headline, first match wins, with the fixing command for the
+    // signed-out and stopped states.
+    #[test]
+    fn status_headline_picks_first_matching_state() {
+        let signed_out = ServiceStatus {
+            is_running: true,
+            last_screenshot_at_ms: Some(1),
+            ..Default::default()
+        };
+        let headline = status_headline(&signed_out);
+        assert_eq!(headline.text, "Signed out");
+        assert_eq!(headline.fix_commands, ["virtue login"]);
+
+        // Login needs the daemon, so a signed-out user with it stopped starts it first.
+        let signed_out_stopped = ServiceStatus::default();
+        let headline = status_headline(&signed_out_stopped);
+        assert_eq!(headline.text, "Signed out");
+        assert_eq!(
+            headline.fix_commands,
+            ["virtue daemon start", "virtue login"]
+        );
+
+        let stopped = ServiceStatus {
+            is_authenticated: true,
+            last_screenshot_at_ms: Some(1),
+            ..Default::default()
+        };
+        let headline = status_headline(&stopped);
+        assert_eq!(headline.text, "Monitoring stopped");
+        assert_eq!(headline.fix_commands, ["virtue daemon start"]);
+
+        let waiting = ServiceStatus {
+            is_authenticated: true,
+            is_running: true,
+            ..Default::default()
+        };
+        let headline = status_headline(&waiting);
+        assert_eq!(headline.text, "Waiting for the first screenshot");
+        assert_eq!(headline.tone, Tone::Warn);
+        assert!(headline.fix_commands.is_empty());
+
+        let active = ServiceStatus {
+            last_screenshot_at_ms: Some(1),
+            ..waiting
+        };
+        let headline = status_headline(&active);
+        assert_eq!(headline.text, "Monitoring active");
+        assert!(headline.fix_commands.is_empty());
+    }
 
     // CLIENT-007: ages read Ns, Nm, Nh Mm or Nd Nh ago, rounded down, without
     // a second unit of zero.
@@ -1181,7 +1412,29 @@ mod tests {
     #[test]
     fn cli_accepts_status_command() {
         let cli = Cli::try_parse_from(["virtue", "status"]).expect("status command should parse");
-        assert!(matches!(cli.command, Commands::Status { json: false }));
+        assert!(matches!(
+            cli.command,
+            Commands::Status {
+                full: false,
+                advanced: false,
+                json: false,
+            }
+        ));
+    }
+
+    // CLIENT-020: `virtue status --full --advanced` parses.
+    #[test]
+    fn cli_accepts_status_detail_flags() {
+        let cli = Cli::try_parse_from(["virtue", "status", "--full", "--advanced"])
+            .expect("status --full --advanced should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::Status {
+                full: true,
+                advanced: true,
+                json: false,
+            }
+        ));
     }
 
     // CLIENT-020: `virtue status --json` parses.
@@ -1189,7 +1442,7 @@ mod tests {
     fn cli_accepts_status_json_flag() {
         let cli = Cli::try_parse_from(["virtue", "status", "--json"])
             .expect("status --json should parse");
-        assert!(matches!(cli.command, Commands::Status { json: true }));
+        assert!(matches!(cli.command, Commands::Status { json: true, .. }));
     }
 
     // CLIENT-020: bare `virtue daemon` parses as the daemon run.
