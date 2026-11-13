@@ -27,6 +27,7 @@ class ScreenshotService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createNotificationChannel()
         // Android can still refuse a foreground-service start (e.g. a
         // background start with no exemption in effect), and uncaught that
@@ -34,7 +35,7 @@ class ScreenshotService : Service() {
         // Monitoring runs in VirtueAccessibilityService either way, so just
         // go without the notification until the next start attempt.
         try {
-            startForeground(NOTIFICATION_ID, buildNotification("Monitoring active"))
+            startForeground(NOTIFICATION_ID, buildNotification())
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Foreground service start refused", e)
             stopSelf()
@@ -44,7 +45,6 @@ class ScreenshotService : Service() {
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             Log.e(TAG, "Core init failed: $initError")
-            updateNotification("Core init failed")
             stopSelf()
         }
     }
@@ -58,6 +58,7 @@ class ScreenshotService : Service() {
     }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
         scope.cancel()
         super.onDestroy()
     }
@@ -85,9 +86,9 @@ class ScreenshotService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    fun updateNotification(text: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+    /** Re-posts the notification for the current Accessibility state (CLIENT-030). */
+    fun updateNotification() {
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
     }
 
     private fun createNotificationChannel() {
@@ -97,11 +98,19 @@ class ScreenshotService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(): Notification {
+        val notice = MonitoringNotice.text(VirtueAccessibilityService.isConnected())
+        val target = if (notice.opensAccessibilitySettings) {
+            Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        } else {
+            Intent(this, MainActivity::class.java)
+        }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val tap = PendingIntent.getActivity(this, 1996, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("Virtue")
-            .setContentText(text)
+            .setContentTitle(notice.title)
+            .setContentText(notice.text)
+            .setContentIntent(tap)
             .setOngoing(true)
             .build()
     }
@@ -111,6 +120,14 @@ class ScreenshotService : Service() {
         private const val ACTION_STOP = "org.virtueinitiative.virtue.STOP"
         private const val CHANNEL_ID = "virtue_monitoring"
         private const val NOTIFICATION_ID = 1001
+
+        @Volatile
+        private var instance: ScreenshotService? = null
+
+        /** Follows the Accessibility service connecting or disconnecting. A no-op when the service is not running. */
+        fun refreshNotification() {
+            runCatching { instance?.updateNotification() }
+        }
 
         fun start(context: Context): String? {
             val intent = Intent(context, ScreenshotService::class.java)
