@@ -2,9 +2,7 @@ package org.virtueinitiative.virtue
 
 import android.content.Context
 import android.provider.Settings
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** What the persistent notification says (CLIENT-030). */
@@ -41,8 +39,13 @@ object MonitoringNotice {
 }
 
 /** Test screenshot deadline (CLIENT-008). Returns null when [block] has not finished by [timeoutMs]. */
-suspend fun <T> withDeadline(timeoutMs: Long, block: () -> T): T? = withContext(Dispatchers.IO) {
-    // The blocking call itself cannot be cancelled, but waiting for it can.
-    val work = async { block() }
-    withTimeoutOrNull(timeoutMs) { work.await() }
+suspend fun <T> withDeadline(timeoutMs: Long, block: () -> T): T? {
+    // The blocking call cannot be cancelled and must not be a child of the
+    // caller's scope (the caller would wait for it), so it runs on its own
+    // thread. A result arriving after the deadline is dropped.
+    val result = CompletableDeferred<Result<T>>()
+    Thread { result.complete(runCatching(block)) }
+        .apply { isDaemon = true; name = "withDeadline" }
+        .start()
+    return withTimeoutOrNull(timeoutMs) { result.await() }?.getOrThrow()
 }

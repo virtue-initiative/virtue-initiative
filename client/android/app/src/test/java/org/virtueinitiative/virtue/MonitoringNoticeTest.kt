@@ -34,7 +34,10 @@ class MonitoringNoticeTest {
     // CLIENT-008: a request that never answers ends at the deadline.
     @Test
     fun deadlineEndsAStuckRequest() = runBlocking {
-        assertNull(withDeadline(100) { Thread.sleep(2000); "late" })
+        val start = System.nanoTime()
+        assertNull(withDeadline(100) { Thread.sleep(3000); "late" })
+        val elapsedMs = (System.nanoTime() - start) / 1_000_000
+        assertTrue("returned after ${elapsedMs}ms, not at the deadline", elapsedMs < 1500)
         assertEquals("ok", withDeadline(2000) { "ok" })
     }
 }

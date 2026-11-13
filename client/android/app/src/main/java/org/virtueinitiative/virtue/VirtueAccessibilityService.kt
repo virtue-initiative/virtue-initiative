@@ -67,7 +67,9 @@ class VirtueAccessibilityService : AccessibilityService() {
             Log.i(TAG, "Accessibility turned off, recording a user stop")
             val t = Thread { runCatching { NativeBridge.nativeNoteUserStop("accessibility_off") } }
             t.start()
-            t.join(5000)
+            // Bounded: onDestroy runs on the main thread. The foreground
+            // service keeps the process alive if the note needs longer.
+            t.join(1000)
         }
         stopDaemonLoop()
         scope.cancel()
