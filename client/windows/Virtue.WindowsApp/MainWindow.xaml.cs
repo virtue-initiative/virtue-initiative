@@ -1200,7 +1200,7 @@ public sealed partial class MainWindow : Window
             // day and as neutral after that.
             var newest = errors.OrderByDescending(e => e.AtMs).First();
             var recent = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(newest.AtMs) < TimeSpan.FromDays(1);
-            return new RowSpec(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", SessionViewModel.FormatShortTime(newest.AtMs), newest.Message);
+            return new RowSpec(recent ? StatusKind.Warn : StatusKind.Neutral, "Last problem", StatusTimestamp.Short(newest.AtMs), newest.Message);
         }
 
         return status is null
