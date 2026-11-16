@@ -29,6 +29,7 @@ is_locked_or_screensaver() -> Result<bool>
 // LifecycleHooks
 get_utc_clock_ms() -> Result<i64>
 get_monotonic_clock_ms() -> Result<i64>  // default: falls back to get_utc_clock_ms
+get_boot_clock_ms() -> Result<i64>       // default: falls back to get_utc_clock_ms
 get_last_login_utc_ms() -> Result<Option<i64>>
 get_last_logout_utc_ms() -> Result<Option<i64>>
 ```
@@ -36,8 +37,10 @@ get_last_logout_utc_ms() -> Result<Option<i64>>
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl — platforms
 never implement it directly. `get_monotonic_clock_ms` (a clock that doesn't
 advance while suspended) feeds only `lifecycle::tick`'s suspend evidence
-(CORE-002) — it's not on `ScreenshotHooks`, and screenshot scheduling
-itself still paces off the wall clock. Mac separately listens for IOKit wake
+(CORE-002) — it's not on `ScreenshotHooks`. Every time the daemon
+records, schedules or compares comes from its own clock (`src/clock.rs`,
+CORE-027): server time from response `Date` headers, carried forward on
+`get_boot_clock_ms`, never the system clock directly. Mac separately listens for IOKit wake
 notifications for a local post-wake UX flush unrelated to the core model —
 see `architecture.md`.
 
