@@ -111,6 +111,8 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     classifier: Option<Arc<RiskClassifier>>,
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
+    /// Read once: it can't change while the process runs. See CORE-002.
+    boot_id: Option<String>,
 }
 
 impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
@@ -129,6 +131,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
 
         let (request_tx, request_rx) = mpsc::channel();
+        let boot_id = platform.get_boot_id().ok().flatten();
 
         let daemon = Self {
             state: Arc::new(Mutex::new(state)),
@@ -141,6 +144,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             classifier: screenshot::load_classifier().map(Arc::new),
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
+            boot_id,
         };
 
         // Every fresh `Daemon` instance is a new monitoring session: if the
@@ -152,9 +156,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         {
             let now_ms = daemon.now_ms();
             daemon.with_locked_state(|working| {
-                daemon.apply_note_user_start(working, now_ms);
+                let was_stopped = daemon.apply_note_user_start(working, now_ms);
                 if daemon.platform.lifecycle_enabled() {
+                    if !was_stopped {
+                        daemon.apply_note_start(working, now_ms);
+                    }
                     daemon.apply_note_restart(working, now_ms);
+                    // Alive from here on, so a later start measures its
+                    // gap from this start and not from before it.
+                    daemon.note_alive(working, now_ms);
                 }
             });
         }
@@ -317,10 +327,42 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// Resets the wakeup schedule baseline too, but only when a stop was
     /// actually active — see `lifecycle::note_user_start`'s doc comment for
     /// why an unconditional reset would defeat detection of a plain kill.
-    fn apply_note_user_start(&self, state: &mut DaemonState, now_ms: i64) {
-        if lifecycle::note_user_start(&mut state.lifecycle, &mut state.upload, now_ms) {
+    fn apply_note_user_start(&self, state: &mut DaemonState, now_ms: i64) -> bool {
+        let was_stopped =
+            lifecycle::note_user_start(&mut state.lifecycle, &mut state.upload, now_ms);
+        if was_stopped {
             state.next_wakeup_at_ms = 0;
         }
+        was_stopped
+    }
+
+    /// The start-of-process half of CORE-002: judges the downtime since the
+    /// persisted last-alive time as a restart gap.
+    fn apply_note_start(&self, state: &mut DaemonState, now_ms: i64) {
+        let session = lifecycle::SessionTimes::read(&self.platform);
+        let measured = lifecycle::note_start(
+            &mut state.lifecycle,
+            &mut state.upload,
+            &self.platform,
+            self.boot_id.as_deref(),
+            session,
+            now_ms,
+        );
+        if measured && state.next_wakeup_at_ms != 0 {
+            // The downtime has been judged as a restart gap; an overdue
+            // wakeup must not count it a second time as lateness.
+            state.next_wakeup_at_ms = state.next_wakeup_at_ms.max(now_ms);
+        }
+    }
+
+    /// Stamps the last-alive time (CORE-002).
+    fn note_alive(&self, state: &mut DaemonState, now_ms: i64) {
+        lifecycle::note_alive(
+            &mut state.lifecycle,
+            now_ms,
+            self.platform.get_monotonic_clock_ms().ok(),
+            self.boot_id.as_deref(),
+        );
     }
 
     fn apply_note_restart(&self, state: &mut DaemonState, now_ms: i64) {
@@ -570,6 +612,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
+        self.note_alive(&mut working, self.now_ms());
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
         self.persist(&working);
     }
@@ -680,7 +723,14 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
             working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
             working.last_tick_at_ms = Some(now_ms);
+            // Read afresh: a tick that uploads can run for a while.
+            self.note_alive(working, self.now_ms());
         });
+    }
+
+    /// Stamps the last-alive time (CORE-002) without running a tick.
+    fn stamp_alive(&self, now_ms: i64) {
+        self.with_locked_state(|working| self.note_alive(working, now_ms));
     }
 
     /// Best-effort final flush on `Stop`: force any queued hash/batch items
@@ -693,6 +743,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
+            // The next start measures its restart gap from this (CORE-002).
+            self.note_alive(working, self.now_ms());
         });
     }
 
@@ -705,8 +757,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// The wait is capped at 60s because `recv_timeout` measures a clock
     /// that stops while the system is suspended, so an uncapped wait could
     /// overshoot its wall-clock deadline by however long the machine slept.
-    /// Waking at the cap without anything due goes straight back to waiting
-    /// rather than running a tick (CORE-020). Both the request-application step and the tick go through
+    /// Waking at the cap without anything due stamps the last-alive time
+    /// (CORE-002) and goes straight back to waiting rather than running a
+    /// tick (CORE-020). Both the request-application step and the tick go through
     /// `with_locked_state`, so each is its own cross-process-safe
     /// read-modify-write cycle (CORE-016) — there's still no *in-process*
     /// locking in the middle of either one.
@@ -765,6 +818,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                     .next_wakeup_at_ms;
             if applied_request || due {
                 self.run_tick(now_ms);
+            } else {
+                self.stamp_alive(now_ms);
             }
         }
     }

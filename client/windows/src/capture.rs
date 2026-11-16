@@ -245,6 +245,56 @@ fn read_registry_shutdown_time_ms() -> Option<i64> {
     }
 }
 
+// Reads the REG_DWORD boot counter Windows keeps at HKLM\SYSTEM\CurrentControlSet\
+// Control\Session Manager\Memory Management\PrefetchParameters\BootId, which goes
+// up by one on every boot (CLIENT-018).
+#[cfg(target_os = "windows")]
+pub fn read_boot_id() -> Option<String> {
+    use windows::core::PCWSTR;
+
+    let key_path: Vec<u16> =
+        "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters\0"
+            .encode_utf16()
+            .collect();
+    let value_name: Vec<u16> = "BootId\0".encode_utf16().collect();
+
+    unsafe {
+        let mut hkey = windows::Win32::System::Registry::HKEY::default();
+        let open_result = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR::from_raw(key_path.as_ptr()),
+            Some(0),
+            KEY_READ,
+            &mut hkey,
+        );
+        if open_result.is_err() {
+            return None;
+        }
+
+        let mut data = [0u8; 4];
+        let mut data_size = 4u32;
+        let query_result = RegQueryValueExW(
+            hkey,
+            PCWSTR::from_raw(value_name.as_ptr()),
+            None,
+            None,
+            Some(data.as_mut_ptr()),
+            Some(&mut data_size),
+        );
+        let _ = RegCloseKey(hkey);
+
+        if query_result.is_err() || data_size != 4 {
+            return None;
+        }
+        Some(u32::from_le_bytes(data).to_string())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_boot_id() -> Option<String> {
+    None
+}
+
 // Extracts the `SystemTime='...'` attribute of the first (i.e. newest, given
 // `/rd:true`) `<TimeCreated>` element in `wevtutil qe ... /f:xml` output.
 // `wevtutil` single-quotes XML attributes, not double-quotes.
@@ -424,6 +474,10 @@ impl LifecycleHooks for WindowsPlatformHooks {
     // `lifecycle::tick`'s suspend evidence (CORE-002).
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
         read_monotonic_clock_ms()
+    }
+
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(read_boot_id())
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

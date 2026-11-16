@@ -51,6 +51,15 @@ pub trait LifecycleHooks: Send + Sync + 'static {
         self.get_utc_clock_ms()
     }
 
+    /// An ID that changes on every boot and stays the same until the next
+    /// (CLIENT-018). On the same boot the restart gap is measured on
+    /// `get_monotonic_clock_ms` rather than the wall clock (CORE-002).
+    /// Default `None`: the restart gap is then always measured on the wall
+    /// clock.
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(None)
+    }
+
     /// Start of the current expected-running window (OS session/user login),
     /// as a UTC timestamp. `None` if not yet knowable.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;

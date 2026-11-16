@@ -229,6 +229,14 @@ impl LifecycleHooks for AndroidPlatformHooks {
         self.uptime_millis_ms()
     }
 
+    // The kernel's random per-boot UUID (CLIENT-018).
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+            .ok()
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty()))
+    }
+
     // Android has no OS "login" concept; the expected-running window is modeled
     // as "whenever the device is powered on", so login = device boot time.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

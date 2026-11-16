@@ -436,6 +436,12 @@ fn query_screensaver_active() -> Option<bool> {
     None
 }
 
+/// The kernel's random per-boot UUID (CLIENT-018).
+fn read_boot_id() -> Option<String> {
+    let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+    Some(id.trim().to_owned()).filter(|id| !id.is_empty())
+}
+
 impl LifecycleHooks for LinuxPlatformHooks {
     // `CLOCK_MONOTONIC` excludes time spent suspended (unlike
     // `CLOCK_BOOTTIME`, which includes it) — see `clock_gettime(2)`. Feeds
@@ -456,6 +462,10 @@ impl LifecycleHooks for LinuxPlatformHooks {
             )));
         }
         Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
+    }
+
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(read_boot_id())
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

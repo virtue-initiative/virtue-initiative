@@ -24,7 +24,13 @@ struct TestPlatformInner {
     /// When `Some`, overrides `get_monotonic_clock_ms()` instead of it
     /// mirroring `clock` (the default — see `set_monotonic_clock_override`).
     monotonic_override_ms: Option<i64>,
+    /// `get_boot_id()`. The same for every instance by default, so a
+    /// restarted scenario is on the same boot unless a test says otherwise.
+    boot_id: Option<String>,
 }
+
+/// The boot ID every [`TestPlatformHooks`] reports until a test changes it.
+const TEST_BOOT_ID: &str = "test-boot";
 
 impl TestPlatformHooks {
     pub fn new() -> Self {
@@ -43,6 +49,7 @@ impl TestPlatformHooks {
                 last_logout_utc_ms: None,
                 lifecycle_enabled: true,
                 monotonic_override_ms: None,
+                boot_id: Some(TEST_BOOT_ID.to_owned()),
             })),
         }
     }
@@ -87,6 +94,13 @@ impl TestPlatformHooks {
         self.lock().monotonic_override_ms = ms;
     }
 
+    /// Sets what `get_boot_id()` returns: another ID simulates a reboot,
+    /// `None` a platform that can't read one. Read once, when the daemon
+    /// starts.
+    pub fn set_boot_id(&self, boot_id: Option<&str>) {
+        self.lock().boot_id = boot_id.map(str::to_owned);
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
         self.inner.lock().expect("TestPlatformHooks state poisoned")
     }
@@ -128,6 +142,10 @@ impl LifecycleHooks for TestPlatformHooks {
             .lock()
             .monotonic_override_ms
             .unwrap_or(self.clock.now_ms()))
+    }
+
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(self.lock().boot_id.clone())
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

@@ -627,3 +627,348 @@ fn restarts_are_not_tracked_where_lifecycle_is_disabled() {
         "only the first instance (lifecycle enabled) recorded a restart"
     );
 }
+
+// ── The restart gap: downtime that fits between two wakeups ──────────────────
+
+const MINUTE: i64 = 60_000;
+const HOUR: i64 = 60 * MINUTE;
+/// When the scenarios below were last alive.
+const ALIVE: i64 = T0 + 1_000;
+
+/// A running daemon that last ticked at [`ALIVE`] and whose next wakeup is
+/// `wait_ms` later, with batches held back.
+fn waiting_scenario(wait_ms: i64) -> Scenario {
+    let mut scenario = held_scenario();
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(ALIVE + wait_ms));
+    scenario.at_t(ALIVE).tick();
+    assert_eq!(wakeup(&scenario), ALIVE + wait_ms);
+    scenario
+}
+
+/// [`restart`], with the new process's platform shaped before the daemon
+/// starts, as the start is when the restart gap is judged.
+fn restart_with(
+    previous: &Scenario,
+    now_ms: i64,
+    configure: impl FnOnce(&virtue_core::testing::TestPlatformHooks),
+) -> Scenario {
+    let mut next = Scenario::authenticated_with_state_dir_configured(
+        previous.state_dir_path().to_path_buf(),
+        now_ms,
+        |platform, _| configure(platform),
+    );
+    hold_batches(&mut next);
+    next
+}
+
+// CORE-002: a stop by a signal and a restart before the stored next wakeup is reported (Linux, #867).
+#[test]
+fn a_stop_and_restart_inside_one_interval_is_reported_on_start() {
+    let first = waiting_scenario(20 * MINUTE);
+    let wake = wakeup(&first);
+
+    // `systemctl --user stop`: the signal handler asks the loop to stop.
+    first.clock.set(ALIVE + 2 * MINUTE);
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| first.daemon.run_forever());
+        first.daemon.request_stop();
+        handle.join().expect("loop must stop cleanly");
+    });
+    assert_eq!(
+        persisted(&first).lifecycle.last_alive_utc_ms,
+        Some(ALIVE + 2 * MINUTE),
+        "the stop stamps the last-alive time"
+    );
+
+    // Started again 16 minutes later, still before the stored wakeup.
+    let mut second = restart(&first, ALIVE + 18 * MINUTE);
+    assert_eq!(missed_alerts(&second), 1, "the downtime is reported");
+
+    // The wakeup itself then arrives on time and adds nothing.
+    second.at_t(wake).tick();
+    assert_eq!(missed_alerts(&second), 1);
+    assert_eq!(second.state().lifecycle.late_wakeups, [0]);
+}
+
+// CORE-002: the gap is measured, not the lateness of the wakeup it happened to span (Windows reinstall, #867).
+#[test]
+fn a_restart_gap_over_the_threshold_is_reported_even_when_the_wakeup_was_barely_late() {
+    // The wakeup was due 133 s after the last tick; the process came back
+    // after 4 minutes, so its first tick is only 107 s late.
+    let first = waiting_scenario(133_000);
+    let mut second = restart(&first, ALIVE + 4 * MINUTE);
+    assert_eq!(
+        missed_alerts(&second),
+        1,
+        "4 minutes of downtime is reported"
+    );
+
+    // The same downtime is not counted again as lateness.
+    second.tick();
+    assert_eq!(missed_alerts(&second), 1);
+    assert_eq!(second.state().lifecycle.late_wakeups, [0]);
+}
+
+// CORE-002: the restart gap is the downtime less 60 seconds, held to the same thresholds.
+#[test]
+fn a_restart_gap_counts_as_a_late_wakeup_of_the_downtime_less_a_minute() {
+    struct Case {
+        name: &'static str,
+        downtime: i64,
+        recorded: &'static [i64],
+        alerts: usize,
+    }
+    let cases = [
+        Case {
+            name: "a restart within a minute records nothing",
+            downtime: 45_000,
+            recorded: &[],
+            alerts: 0,
+        },
+        Case {
+            name: "3 minutes down is 2 minutes of gap, on the threshold",
+            downtime: 3 * MINUTE,
+            recorded: &[2 * MINUTE],
+            alerts: 0,
+        },
+        Case {
+            name: "1 ms more alerts and clears the array",
+            downtime: 3 * MINUTE + 1,
+            recorded: &[],
+            alerts: 1,
+        },
+    ];
+    for case in &cases {
+        let first = waiting_scenario(20 * MINUTE);
+        let second = restart(&first, ALIVE + case.downtime);
+        assert_eq!(
+            second.state().lifecycle.late_wakeups,
+            case.recorded,
+            "{}",
+            case.name
+        );
+        assert_eq!(missed_alerts(&second), case.alerts, "{}", case.name);
+    }
+}
+
+// CORE-002: repeated starts each measure from the start before, not from the same old stamp.
+#[test]
+fn a_second_start_does_not_report_the_same_downtime_again() {
+    let first = waiting_scenario(20 * MINUTE);
+    let second = restart(&first, ALIVE + 10 * MINUTE);
+    assert_eq!(missed_alerts(&second), 1);
+    let third = restart(&second, ALIVE + 10 * MINUTE + 5_000);
+    assert_eq!(missed_alerts(&third), 1, "5 seconds later is no new gap");
+}
+
+// CORE-002: a restart gap is excused by the same evidence as a late wakeup (shutdown, reboot, sign-out, suspend).
+#[test]
+fn a_restart_gap_is_excused_by_login_logout_and_suspend_evidence() {
+    const START: i64 = ALIVE + 16 * MINUTE;
+    struct Case {
+        name: &'static str,
+        /// How long before the start the last login was.
+        login: Option<i64>,
+        /// How long after the last-alive time the last logout was.
+        logout: Option<i64>,
+        /// What the suspend-safe clock reads at the start, if not real time.
+        suspend_safe: Option<i64>,
+        excused: bool,
+    }
+    let cases = [
+        Case {
+            name: "no evidence: the downtime is reported",
+            login: None,
+            logout: None,
+            suspend_safe: None,
+            excused: false,
+        },
+        Case {
+            name: "a reboot: logout just after last alive, login just before the start",
+            login: Some(30_000),
+            logout: Some(20_000),
+            suspend_safe: None,
+            excused: true,
+        },
+        Case {
+            name: "a reboot, with the suspend-safe clock restarted from boot",
+            login: Some(30_000),
+            logout: Some(20_000),
+            suspend_safe: Some(45_000),
+            excused: true,
+        },
+        Case {
+            name: "a reboot with no login or logout known is not excused by the restarted clock",
+            login: None,
+            logout: None,
+            suspend_safe: Some(45_000),
+            excused: false,
+        },
+        Case {
+            name: "a sign-out and sign-in known only by the login",
+            login: Some(30_000),
+            logout: None,
+            suspend_safe: None,
+            excused: true,
+        },
+        Case {
+            name: "a clean shutdown known only by the logout",
+            login: None,
+            logout: Some(20_000),
+            suspend_safe: None,
+            excused: true,
+        },
+        Case {
+            name: "a shutdown long after the daemon died contradicts the login",
+            login: Some(30_000),
+            logout: Some(10 * MINUTE),
+            suspend_safe: None,
+            excused: false,
+        },
+        Case {
+            name: "a start long after the login contradicts the logout",
+            login: Some(10 * MINUTE),
+            logout: Some(20_000),
+            suspend_safe: None,
+            excused: false,
+        },
+        Case {
+            name: "the system was suspended for all but 30 seconds of the downtime",
+            login: None,
+            logout: None,
+            suspend_safe: Some(ALIVE + 30_000),
+            excused: true,
+        },
+        Case {
+            name: "a brief suspend inside the downtime does not excuse it",
+            login: None,
+            logout: None,
+            suspend_safe: Some(START - 30_000),
+            excused: false,
+        },
+    ];
+
+    let mut failures = Vec::new();
+    for case in &cases {
+        let first = waiting_scenario(20 * MINUTE);
+        let second = restart_with(&first, START, |platform| {
+            platform.set_last_login(case.login.map(|before| START - before));
+            platform.set_last_logout(case.logout.map(|after| ALIVE + after));
+            platform.set_monotonic_clock_override(case.suspend_safe);
+        });
+        let alerts = missed_alerts(&second);
+        if alerts != usize::from(!case.excused) {
+            failures.push(format!("{}: saw {alerts} alerts", case.name));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// CORE-002: no restart gap is measured after a user-initiated stop.
+#[test]
+fn a_user_stop_leaves_no_restart_gap() {
+    let mut first = waiting_scenario(20 * MINUTE);
+    first.note_user_stop("test");
+    hold_batches(&mut first);
+    first.at_t(ALIVE + 1_000).tick();
+
+    let second = restart(&first, ALIVE + HOUR);
+    assert!(second.state().lifecycle.late_wakeups.is_empty());
+    assert_eq!(missed_alerts(&second), 0);
+}
+
+// CORE-002: restart gaps are not measured where lifecycle is disabled.
+#[test]
+fn a_platform_without_lifecycle_signals_measures_no_restart_gap() {
+    let first = waiting_scenario(20 * MINUTE);
+    let second = restart_with(&first, ALIVE + HOUR, |platform| {
+        platform.set_lifecycle_enabled(false);
+    });
+    assert_eq!(missed_alerts(&second), 0);
+}
+
+// CORE-002: the loop stamps the last-alive time each time it wakes without running a tick.
+#[test]
+fn the_loop_stamps_the_last_alive_time_while_it_waits() {
+    let scenario = waiting_scenario(20 * MINUTE);
+    let wake = wakeup(&scenario);
+    // 100 ms of real waiting separates the loop from the wakeup time.
+    scenario.clock.set(wake - 100);
+
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| scenario.daemon.run_forever());
+        let stamped =
+            eventually(|| persisted(&scenario).lifecycle.last_alive_utc_ms == Some(wake - 100));
+        let ticked_at = scenario.state().last_tick_at_ms;
+        scenario.daemon.request_stop();
+        handle.join().expect("loop must stop cleanly");
+
+        assert!(stamped, "an idle wake should stamp the last-alive time");
+        assert_eq!(ticked_at, Some(ALIVE), "without running a tick");
+    });
+}
+
+// CORE-002: on the same boot the restart gap is measured on the suspend-excluding clock, otherwise on the wall clock.
+#[test]
+fn a_restart_gap_is_measured_on_the_suspend_excluding_clock_on_the_same_boot() {
+    struct Case {
+        name: &'static str,
+        boot_id: Option<&'static str>,
+        /// How far the wall clock moved while the daemon was stopped.
+        wall: i64,
+        /// What the suspend-excluding clock reads at the start.
+        suspend_safe: i64,
+        alerts: usize,
+    }
+    let cases = [
+        Case {
+            name: "10 minutes down with the wall clock set back 15 minutes is still reported",
+            boot_id: Some("test-boot"),
+            wall: 10 * MINUTE - 15 * MINUTE,
+            suspend_safe: ALIVE + 10 * MINUTE,
+            alerts: 1,
+        },
+        Case {
+            name: "30 seconds down with the wall clock set forward a day is not reported",
+            boot_id: Some("test-boot"),
+            wall: DAY_MS,
+            suspend_safe: ALIVE + 30_000,
+            alerts: 0,
+        },
+        Case {
+            name: "after a reboot the wall clock is used",
+            boot_id: Some("another-boot"),
+            wall: 10 * MINUTE,
+            suspend_safe: 30_000,
+            alerts: 1,
+        },
+        Case {
+            name: "without a boot ID the wall clock is used, which the set back hides",
+            boot_id: None,
+            wall: 10 * MINUTE - 15 * MINUTE,
+            suspend_safe: ALIVE + 10 * MINUTE,
+            alerts: 0,
+        },
+        Case {
+            name: "a suspend-excluding clock that went back is a reboot",
+            boot_id: Some("test-boot"),
+            wall: 10 * MINUTE,
+            suspend_safe: ALIVE - 1,
+            alerts: 1,
+        },
+    ];
+
+    let mut failures = Vec::new();
+    for case in &cases {
+        let first = waiting_scenario(20 * MINUTE);
+        let second = restart_with(&first, ALIVE + case.wall, |platform| {
+            platform.set_boot_id(case.boot_id);
+            platform.set_monotonic_clock_override(Some(case.suspend_safe));
+        });
+        let alerts = missed_alerts(&second);
+        if alerts != case.alerts {
+            failures.push(format!("{}: saw {alerts} alerts", case.name));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

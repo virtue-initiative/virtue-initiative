@@ -154,7 +154,7 @@ thread) can drive the daemon synchronously.
 | Module                 | Owns                                                         | Notable functions                                                                                                                      |
 | ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                  |
-| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                           |
+| `lifecycle`            | `LifecycleState` (`late_wakeups`, `last_alive_utc_ms`)       | `tick()`, `note_start()`, `note_user_stop()`                                                                                           |
 | `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
 | `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
 | `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                             |
@@ -329,6 +329,7 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 // LifecycleHooks
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
 fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;       // default: falls back to get_utc_clock_ms
+fn get_boot_id(&self) -> CoreResult<Option<String>>;       // default: None
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn lifecycle_enabled(&self) -> bool;                        // default: true
@@ -341,10 +342,15 @@ status — running normally. iOS is the only platform that overrides it to
 `false`, for the reason described above.
 
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
-suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
+suspended) feeds `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
-it never triggers). Screenshot scheduling itself is unaffected and still
-paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+it never triggers). It also measures the restart gap: each last-alive stamp
+saves its reading with `get_boot_id`, and `lifecycle::note_start` reads the
+downtime off this clock when the boot ID still matches, so a wall clock
+changed while the daemon was stopped can't hide or fake it. After a reboot,
+or with no boot ID, the gap falls back to the wall clock. Screenshot
+scheduling itself is unaffected and still paces off the wall clock; this
+hook isn't on `ScreenshotHooks`. Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.

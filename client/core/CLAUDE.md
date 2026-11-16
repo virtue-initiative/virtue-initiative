@@ -29,6 +29,7 @@ is_locked_or_screensaver() -> Result<bool>
 // LifecycleHooks
 get_utc_clock_ms() -> Result<i64>
 get_monotonic_clock_ms() -> Result<i64>  // default: falls back to get_utc_clock_ms
+get_boot_id() -> Result<Option<String>>  // default: None
 get_last_login_utc_ms() -> Result<Option<i64>>
 get_last_logout_utc_ms() -> Result<Option<i64>>
 ```

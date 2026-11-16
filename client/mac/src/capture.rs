@@ -361,6 +361,35 @@ struct MachTimebaseInfo {
 unsafe extern "C" {
     fn mach_absolute_time() -> u64;
     fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+    fn sysctlbyname(
+        name: *const std::ffi::c_char,
+        oldp: *mut std::ffi::c_void,
+        oldlenp: *mut usize,
+        newp: *mut std::ffi::c_void,
+        newlen: usize,
+    ) -> i32;
+}
+
+/// `kern.bootsessionuuid`, a UUID the kernel draws on every boot (CLIENT-018).
+fn read_boot_session_uuid() -> Option<String> {
+    let mut buf = [0u8; 64];
+    let mut len = buf.len();
+    // SAFETY: the name is NUL-terminated, `buf` and `len` are valid owned
+    // out-params sized to each other, and nothing is written (`newp` null).
+    let rc = unsafe {
+        sysctlbyname(
+            c"kern.bootsessionuuid".as_ptr(),
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc != 0 {
+        return None;
+    }
+    let id = std::ffi::CStr::from_bytes_until_nul(&buf[..len]).ok()?;
+    Some(id.to_str().ok()?.trim().to_owned()).filter(|id| !id.is_empty())
 }
 
 fn mach_ticks_to_ms(ticks: u64) -> CoreResult<i64> {
@@ -384,6 +413,10 @@ impl LifecycleHooks for MacPlatformHooks {
         // SAFETY: `mach_absolute_time` takes no arguments and has no
         // preconditions.
         mach_ticks_to_ms(unsafe { mach_absolute_time() })
+    }
+
+    fn get_boot_id(&self) -> CoreResult<Option<String>> {
+        Ok(read_boot_session_uuid())
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
