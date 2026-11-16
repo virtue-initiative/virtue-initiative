@@ -258,7 +258,11 @@ else
   [[ "$DESTINATION" == "simulator" ]] && sdk="iphonesimulator"
   configuration="Debug"
   [[ "$PROFILE" == "release" ]] && configuration="Release"
-  logged mac "cd $BUILD_DIR/client && $REMOTE_ENV VIRTUE_IOS_RUST_PREBUILT=1 ./ios/scripts/build-ios.sh --sdk $sdk --configuration $configuration --arch $ARCH --derived-data $REMOTE_HOME/$BUILD_DIR/derived-data-ios --code-signing-allowed NO"
+  # The Simulator build is signed ad hoc with entitlements (build-ios.sh), or the
+  # App Group is missing. A device build can't be signed here, so it isn't.
+  signing="NO"
+  [[ "$DESTINATION" == "simulator" ]] && signing="YES"
+  logged mac "cd $BUILD_DIR/client && $REMOTE_ENV VIRTUE_IOS_RUST_PREBUILT=1 ./ios/scripts/build-ios.sh --sdk $sdk --configuration $configuration --arch $ARCH --derived-data $REMOTE_HOME/$BUILD_DIR/derived-data-ios --code-signing-allowed $signing"
   app="$BUILD_DIR/derived-data-ios/Build/Products/$configuration-$sdk/VirtueIOS.app"
   echo "Built $HOST:$app"
   if [[ $RUN -eq 1 ]]; then

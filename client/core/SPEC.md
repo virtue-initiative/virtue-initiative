@@ -58,7 +58,7 @@ A capture that comes due while the screen is locked or a screensaver is active M
 
 A capture that has not materially changed from the last uploaded frame MUST NOT be uploaded; the daemon MUST send a `screenshot_skipped` event (reason `static_screen`) instead. The comparison MUST be against the last uploaded frame, not the previous capture, so that gradual change eventually counts. A broad change, even a low-contrast one such as a terminal filling with text, and a change concentrated in one region, such as a video, MUST count as changed. A few isolated cells changing, such as a clock, MUST NOT. The grid compared MUST scale with the screen size, and a change of screen size MUST count as changed.
 
-A capture or image processing failure MUST NOT be uploaded as a screenshot. It MUST be retained as in CORE-018 and counted towards CORE-006's `capture_failed` event.
+A capture or image processing failure MUST NOT be uploaded as a screenshot. A panic anywhere in capture or processing MUST be caught and treated as the same kind of failure, so a crash loop still reaches partners as Capture Failed. It MUST be retained as in CORE-018 and counted towards CORE-006's `capture_failed` event.
 
 ### CORE-004 Content detection
 
