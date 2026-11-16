@@ -26,11 +26,6 @@
   outline-offset: -2px;
 }
 
-.logs-gallery-item--risk-medium {
-  outline: 2px solid var(--warning);
-  outline-offset: -2px;
-}
-
 /* A thumbnail has no room for the list view's row of badges, so the concern
    level rides in the corner of the tile itself. */
 .logs-gallery-risk-badge {

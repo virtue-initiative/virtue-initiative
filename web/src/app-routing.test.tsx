@@ -92,6 +92,25 @@ describe('Pages and navigation (WEB-002)', () => {
     expect(location()).toBe(path);
   });
 
+  it.each(PAGES)('names %s "%s" in the browser tab title (WEB-002)', async (path, heading) => {
+    saveSession();
+    visit(path);
+    render(<App />);
+    await h1(heading);
+    await waitFor(() => expect(document.title).toBe(`${heading} - The Virtue Initiative`));
+  });
+
+  it.each([
+    ['/nope', 'Page not found'],
+    ['/invite-accept?partner_token=abc', 'Accept invite'],
+    ['/verify-email?token=abc', 'Verify email'],
+  ])('names %s "%s" in the browser tab title (WEB-002)', async (path, label) => {
+    saveSession();
+    visit(path);
+    render(<App />);
+    await waitFor(() => expect(document.title).toBe(`${label} - The Virtue Initiative`));
+  });
+
   it.each(['/logs/gallery', `/logs/${TEST_WATCHING.user.id}/gallery`])(
     'the old gallery link %s still opens the logs (WEB-002)',
     async (path) => {
@@ -284,6 +303,43 @@ describe('Logging in and returning (WEB-005)', () => {
     expect(await h1('Partners')).toBeInTheDocument();
     expect(location()).toBe('/partners');
   });
+
+  it('stops naming the login page in the tab title after logging in (WEB-002)', async () => {
+    vi.spyOn(Session, 'fromLogin').mockResolvedValue(makeFakeSession({ userId: TEST_USER.id }));
+    visit('/login');
+    render(<App />);
+    await screen.findByRole('heading', { name: 'The Virtue Initiative' });
+    expect(document.title).toBe('Log In to Virtue - The Virtue Initiative');
+    await logIn();
+    expect(await h1('Devices')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Devices - The Virtue Initiative'));
+  });
+
+  it.each([
+    ['a path', '%2Fpartners', '/partners'],
+    ['a path with a percent sign in its query', '%2Fpartners%3Fq%3D100%2525', '/partners?q=100%25'],
+    ['a path with an encoded space in its query', '%2Fx%3Fname%3Da%2520b', '/x?name=a%20b'],
+    ['a path with a bare percent sign', '%2Fpartners%3Fq%3D100%25', '/partners?q=100%'],
+    ['a protocol-relative URL', '%2F%2Fevil.com%2Fx', '/'],
+    ['a backslash after the slash', '%2F%5Cevil.com', '/'],
+    ['a tab hidden after the slash', '%2F%09%2Fevil.com', '/'],
+    ['an absolute URL', 'https%3A%2F%2Fevil.com%2Fx', '/'],
+    ['a path with no leading slash', 'partners', '/'],
+  ])(
+    'uses "to" exactly as given when it is a path on this site: %s (WEB-005)',
+    async (_name, to, expected) => {
+      vi.spyOn(Session, 'fromLogin').mockResolvedValue(makeFakeSession({ userId: TEST_USER.id }));
+      visit(`/login?to=${to}`);
+      render(<App />);
+      await screen.findByRole('heading', { name: 'The Virtue Initiative' });
+      await logIn();
+      await waitFor(() =>
+        expect(screen.queryByRole('heading', { name: 'The Virtue Initiative' })).toBeNull(),
+      );
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(location()).toBe(expected);
+    },
+  );
 
   it('returns to the page, query included, a signed-out visitor first asked for (WEB-005)', async () => {
     vi.spyOn(Session, 'fromLogin').mockResolvedValue(makeFakeSession({ userId: TEST_USER.id }));

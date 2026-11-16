@@ -698,6 +698,12 @@ function matchesQuery(log: FeedLog, query: WorkerCacheQuery): boolean {
   return true;
 }
 
+// WEB-006: the worker can't reach the page's 401 handler, so tell the leader tab, which
+// passes it on to every tab.
+function reportUnauthorized() {
+  (self as unknown as DedicatedWorkerGlobalScope).postMessage({ type: 'unauthorized' });
+}
+
 async function fetchData(params?: { since?: number }): Promise<DataPage> {
   const qs = new URLSearchParams();
   // /data only accepts an integer. Flooring can re-fetch the newest batch, which the merge
@@ -708,6 +714,7 @@ async function fetchData(params?: { since?: number }): Promise<DataPage> {
     credentials: 'include',
     signal: AbortSignal.timeout(DATA_FETCH_TIMEOUT_MS),
   });
+  if (res.status === 401) reportUnauthorized();
   if (!res.ok) throw new Error(`getData failed: ${res.status}`);
   return res.json() as Promise<DataPage>;
 }
@@ -731,6 +738,7 @@ async function fetchDeviceOwners(): Promise<Map<string, string>> {
       credentials: 'include',
       signal: AbortSignal.timeout(DATA_FETCH_TIMEOUT_MS),
     });
+    if (res.status === 401) reportUnauthorized();
     if (!res.ok) throw new Error(`getDevices failed: ${res.status}`);
     const devices = (await res.json()) as Array<{ id: string; owner: string }>;
     return new Map(devices.map((device) => [device.id, device.owner]));

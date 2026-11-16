@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useSingleFlight } from '../../hooks/usePromise';
 import { useLocation } from 'preact-iso';
 import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
 import { cacheClient } from '../../utils/cache';
@@ -208,6 +209,7 @@ function DeviceCard({
   const [name, setName] = useState(device.name);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
@@ -232,29 +234,33 @@ function DeviceCard({
 
   async function handleSave(e: Event) {
     e.preventDefault();
-    setSaving(true);
-    try {
-      await onUpdateDevice(device.id, { name });
-      dialogRef.current?.close();
-    } catch (err) {
-      const message = describeError(err, 'Failed to save');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setSaving(false);
-    }
+    await once(async () => {
+      setSaving(true);
+      try {
+        await onUpdateDevice(device.id, { name });
+        dialogRef.current?.close();
+      } catch (err) {
+        const message = describeError(err, 'Failed to save');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setSaving(false);
+      }
+    });
   }
 
   async function handleDeleteConfirmed() {
-    setDeleting(true);
-    try {
-      await onRemoveDevice(device.id);
-      closeDeleteDialog();
-    } catch (err) {
-      const message = describeError(err, 'Failed to delete device');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setDeleting(false);
-    }
+    await once(async () => {
+      setDeleting(true);
+      try {
+        await onRemoveDevice(device.id);
+        closeDeleteDialog();
+      } catch (err) {
+        const message = describeError(err, 'Failed to delete device');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setDeleting(false);
+      }
+    });
   }
 
   return (
@@ -280,7 +286,7 @@ function DeviceCard({
         </Button>
       </CardActions>
 
-      <Dialog dialogRef={dialogRef}>
+      <Dialog dialogRef={dialogRef} busy={saving}>
         <DialogHeader>Edit device</DialogHeader>
         <form onSubmit={handleSave}>
           <Field label="Name">
@@ -312,7 +318,7 @@ function DeviceCard({
         </form>
       </Dialog>
 
-      <Dialog dialogRef={deleteDialogRef}>
+      <Dialog dialogRef={deleteDialogRef} busy={deleting}>
         <DialogHeader>Delete device</DialogHeader>
         <p class="invite-desc">
           Delete "{device.name}"? This permanently removes its logs and uploads, and your partners

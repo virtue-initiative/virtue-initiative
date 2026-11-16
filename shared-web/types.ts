@@ -233,7 +233,8 @@ export const bugReportSchema = z.object({
 export type BugReportPayload = z.infer<typeof bugReportSchema>;
 
 export const createPartnerSchema = z.object({
-  email: z.email(),
+  // API-023: compared and stored trimmed and lowercased.
+  email: z.string().trim().toLowerCase().pipe(z.email()),
   replace_id: z.uuid().optional(),
 });
 export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
