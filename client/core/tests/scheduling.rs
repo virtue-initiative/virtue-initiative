@@ -52,7 +52,7 @@ fn the_wakeup_is_the_earliest_of_the_screenshot_heartbeat_and_batch_timers() {
     for case in &cases {
         let mut scenario = Scenario::authenticated();
         scenario.with_state_mut(|s| {
-            s.screenshot.next_screenshot_at_ms = Some(T0 + case.screenshot);
+            s.screenshot.next_screenshot_suspend_safe_ms = Some(T0 + case.screenshot);
             s.heartbeat.last_heartbeat_ms = T0 + case.heartbeat - DAY_MS;
             s.upload.last_batch_at_ms = Some(T0 + case.batch - BATCH_INTERVAL_MS);
         });
@@ -75,7 +75,7 @@ fn the_wakeup_is_the_earliest_of_the_screenshot_heartbeat_and_batch_timers() {
 #[test]
 fn a_hash_retry_backoff_expiring_sets_the_wakeup() {
     let mut scenario = Scenario::authenticated();
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(T0 + 500_000));
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(T0 + 500_000));
     scenario
         .api
         .program_hash(Err(CoreError::CommandFailed("hash server down".into())));
@@ -86,14 +86,14 @@ fn a_hash_retry_backoff_expiring_sets_the_wakeup() {
     let retry_at = state.upload.hash_backoff.next_attempt_at_ms;
     assert!(retry_at > T0, "the failed hash must not be retried at once");
     assert!(retry_at < T0 + 500_000);
-    assert_eq!(state.next_wakeup_at_ms, retry_at);
+    assert_eq!(scenario.daemon.next_wakeup_at_ms(), retry_at);
 }
 
 // CORE-020: a batch retry backoff expiring is a wakeup time.
 #[test]
 fn a_batch_retry_backoff_expiring_sets_the_wakeup() {
     let mut scenario = Scenario::authenticated();
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(T0 + 500_000));
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(T0 + 500_000));
     scenario
         .api
         .program_batch(Err(CoreError::CommandFailed("api down".into())));
@@ -108,17 +108,15 @@ fn a_batch_retry_backoff_expiring_sets_the_wakeup() {
     );
     assert!(retry_at < T0 + 500_000);
     assert_eq!(state.upload.pending_batch_events.len(), 1);
-    assert_eq!(state.next_wakeup_at_ms, retry_at);
+    assert_eq!(scenario.daemon.next_wakeup_at_ms(), retry_at);
 }
 
 // CORE-020: hash work that is ready to run again makes the wakeup immediate.
 #[test]
 fn hash_work_left_over_after_a_tick_is_due_immediately() {
     let mut scenario = Scenario::authenticated();
-    scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(T0 + 500_000);
-        s.upload.last_batch_at_ms = Some(FAR_FUTURE);
-    });
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(T0 + 500_000));
+    hold_batches(&mut scenario);
     // A tick hashes at most 8 events, so the rest are ready to go again.
     for i in 0..20 {
         scenario.queue_upload(dev(&format!("event {i}")));
@@ -127,7 +125,7 @@ fn hash_work_left_over_after_a_tick_is_due_immediately() {
 
     let state = scenario.state();
     assert!(!state.upload.pending_hash_events.is_empty());
-    assert_eq!(state.next_wakeup_at_ms, T0);
+    assert_eq!(scenario.daemon.next_wakeup_at_ms(), T0);
 }
 
 // CORE-020: a forced batch that failed to upload is next due when its backoff expires.
@@ -135,7 +133,7 @@ fn hash_work_left_over_after_a_tick_is_due_immediately() {
 fn a_forced_flush_that_failed_is_retried_when_its_backoff_expires_not_at_the_interval() {
     let mut scenario = Scenario::authenticated();
     scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(T0 + 500_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(T0 + 500_000);
         s.upload.last_batch_at_ms = Some(T0);
     });
     scenario
@@ -150,7 +148,7 @@ fn a_forced_flush_that_failed_is_retried_when_its_backoff_expires_not_at_the_int
     assert_eq!(state.upload.pending_batch_events.len(), 1);
     let retry_at = state.upload.batch_backoff.next_attempt_at_ms;
     assert!(retry_at < T0 + BATCH_INTERVAL_MS);
-    assert_eq!(state.next_wakeup_at_ms, retry_at);
+    assert_eq!(scenario.daemon.next_wakeup_at_ms(), retry_at);
 }
 
 // ── Held work does not pull the wakeup earlier ───────────────────────────────
@@ -164,7 +162,7 @@ fn held_work_waits_for_the_next_screenshot_draw_instead_of_pulling_the_wakeup_ea
     let cases: Vec<(&str, Scenario)> = vec![
         ("a hash upload held while the screen is locked", {
             let mut s = Scenario::authenticated();
-            s.with_state_mut(|st| st.screenshot.next_screenshot_at_ms = Some(draw));
+            s.with_state_mut(|st| st.screenshot.next_screenshot_suspend_safe_ms = Some(draw));
             s.platform.set_locked_or_screensaver(true);
             s.queue_upload(dev("held by the lock"));
             s
@@ -172,7 +170,7 @@ fn held_work_waits_for_the_next_screenshot_draw_instead_of_pulling_the_wakeup_ea
         ("a due batch held while the screen is locked", {
             let mut s = Scenario::authenticated();
             s.with_state_mut(|st| {
-                st.screenshot.next_screenshot_at_ms = Some(draw);
+                st.screenshot.next_screenshot_suspend_safe_ms = Some(draw);
                 st.upload.last_batch_at_ms = Some(T0 - 1_000);
             });
             s.queue_upload(dev("batch held by the lock"));
@@ -185,7 +183,7 @@ fn held_work_waits_for_the_next_screenshot_draw_instead_of_pulling_the_wakeup_ea
         ("a pending batch with no device settings", {
             let mut s = Scenario::authenticated();
             s.with_state_mut(|st| {
-                st.screenshot.next_screenshot_at_ms = Some(draw);
+                st.screenshot.next_screenshot_suspend_safe_ms = Some(draw);
                 st.upload.settings = None;
             });
             s.queue_upload(dev("batch with nowhere to go"));
@@ -193,7 +191,7 @@ fn held_work_waits_for_the_next_screenshot_draw_instead_of_pulling_the_wakeup_ea
         }),
         ("pending hashes with no device credentials", {
             let mut s = Scenario::authenticated();
-            s.with_state_mut(|st| st.screenshot.next_screenshot_at_ms = Some(draw));
+            s.with_state_mut(|st| st.screenshot.next_screenshot_suspend_safe_ms = Some(draw));
             s.queue_upload(dev("hash with no credentials"));
             s.with_state_mut(|st| st.upload.device_credentials = None);
             s
@@ -209,10 +207,10 @@ fn held_work_waits_for_the_next_screenshot_draw_instead_of_pulling_the_wakeup_ea
         if held == 0 {
             failures.push(format!("{name}: precondition failed, nothing was held"));
         }
-        if state.next_wakeup_at_ms != draw {
+        if scenario.daemon.next_wakeup_at_ms() != draw {
             failures.push(format!(
                 "{name}: wakeup {} should be the screenshot draw {draw} (now {now})",
-                state.next_wakeup_at_ms
+                scenario.daemon.next_wakeup_at_ms()
             ));
         }
     }
@@ -271,6 +269,216 @@ fn an_applied_client_request_ticks_before_the_wakeup_time() {
     });
 }
 
+// ── The wall clock set back ──────────────────────────────────────────────────
+
+const MINUTE: i64 = 60_000;
+/// Far enough from zero that the clock can be set back a day.
+const NOON: i64 = 10 * DAY_MS;
+
+// CORE-020: while the loop waits, setting the wall clock back cannot hold off the tick.
+#[test]
+fn the_wall_clock_set_back_does_not_hold_off_the_tick() {
+    const SET_BACK: i64 = 500_000;
+    let scenario = held_scenario();
+    let wake = wakeup(&scenario);
+    let ticked_at = scenario.state().last_tick_at_ms;
+    // 150 ms of waiting separates the loop from the wakeup time, on both clocks.
+    scenario.clock.set(wake - 150);
+    scenario
+        .platform
+        .set_monotonic_clock_override(Some(wake - 150));
+
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| scenario.daemon.run_forever());
+        std::thread::sleep(Duration::from_millis(100));
+
+        // The wall clock goes back while no time passes on the other clock.
+        scenario.clock.set(wake - SET_BACK);
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            scenario.state().last_tick_at_ms,
+            ticked_at,
+            "no tick may run before the wait has elapsed on either clock"
+        );
+
+        // The 150 ms pass on the suspend-excluding clock alone.
+        scenario.platform.set_monotonic_clock_override(Some(wake));
+        let ticked = eventually(|| scenario.state().last_tick_at_ms == Some(wake - SET_BACK));
+
+        scenario.daemon.request_stop();
+        handle.join().expect("loop must stop cleanly");
+        assert!(
+            ticked,
+            "the tick should run once the wait has elapsed on the suspend-excluding clock"
+        );
+    });
+    assert_eq!(
+        scenario.state().screenshot.last_attempt_at_ms,
+        Some(wake - SET_BACK),
+        "and that tick takes the screenshot that was due"
+    );
+}
+
+// CORE-020: a loop that has no wakeup time yet, because the daemon just started, ticks at once.
+#[test]
+fn a_loop_that_just_started_ticks_at_once() {
+    let first = held_scenario();
+    let second = Scenario::authenticated_with_state_dir_at(
+        first.state_dir_path().to_path_buf(),
+        T0 + 2 * DAY_MS,
+    );
+    assert_eq!(wakeup(&second), 0, "the wakeup time is not persisted");
+
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| second.daemon.run_forever());
+        let ticked = eventually(|| second.state().last_tick_at_ms == Some(T0 + 2 * DAY_MS));
+        second.daemon.request_stop();
+        handle.join().expect("loop must stop cleanly");
+        assert!(ticked, "the first tick runs without waiting");
+    });
+}
+
+// CORE-020: a clock set back an hour (Android) or a day (Windows) holds off no capture or upload, and is not reported (#867).
+#[test]
+fn a_clock_set_back_while_running_keeps_captures_going_without_a_report() {
+    for set_back in [60 * MINUTE, DAY_MS] {
+        let mut scenario = Scenario::authenticated();
+        scenario.at_t(NOON).tick();
+        let wake = wakeup(&scenario);
+
+        // The wakeup comes round in real time, with the wall clock behind.
+        let wall = wake - set_back;
+        scenario.platform.set_monotonic_clock_override(Some(wake));
+        scenario.at_t(wall).tick();
+
+        let state = scenario.state();
+        assert_eq!(
+            state.screenshot.last_attempt_at_ms,
+            Some(wall),
+            "the screenshot that was due is taken ({set_back} ms back)"
+        );
+        assert!(state.upload.last_batch_at_ms.is_some_and(|at| at <= wall));
+        assert!(state.heartbeat.last_heartbeat_ms <= wall);
+        let next = wakeup(&scenario);
+        assert!(
+            next <= wall + 10 * MINUTE,
+            "the next wakeup {next} is on the new clock, not held to the old one"
+        );
+
+        // A minute later on both clocks, the batch goes out on schedule.
+        scenario
+            .platform
+            .set_monotonic_clock_override(Some(wake + MINUTE));
+        scenario.at_t(wall + MINUTE).tick();
+        let api = scenario.api.state();
+        assert!(!api.batch_uploads.is_empty(), "batches are not held");
+        let alerts: u32 = api
+            .batch_uploads
+            .iter()
+            .map(|call| call.batch.high_risk_count)
+            .sum();
+        assert_eq!(alerts, 0, "nothing is reported");
+        drop(api);
+        assert_eq!(missed_alerts(&scenario), 0);
+    }
+}
+
+// CORE-020: at start and on every tick, persisted times later than now are pulled back, and retry backoffs to at most the longest backoff from now.
+#[test]
+fn persisted_times_later_than_now_are_pulled_back() {
+    const LONGEST_BACKOFF: i64 = 20 * MINUTE;
+    let first = Scenario::authenticated();
+    first.daemon.with_state_mut(|s| {
+        s.upload.last_batch_at_ms = Some(NOON + DAY_MS);
+        s.upload.hash_token_cache = Some(("token".into(), NOON + DAY_MS));
+        s.upload.hash_backoff.next_attempt_at_ms = NOON + DAY_MS;
+        s.upload.batch_backoff.next_attempt_at_ms = NOON + DAY_MS;
+        s.heartbeat.last_heartbeat_ms = NOON + DAY_MS;
+        s.capture_availability.recent_failures_ms = vec![NOON + DAY_MS];
+        s.lifecycle.restart_times.push_back(NOON + DAY_MS);
+        s.lifecycle.last_restart_alert_at_ms = Some(NOON + DAY_MS);
+    });
+    virtue_core::store_state(
+        &first.state_dir_path().join("event_state.json"),
+        &first.state(),
+    )
+    .expect("persist the seeded state");
+
+    let second =
+        Scenario::authenticated_with_state_dir_at(first.state_dir_path().to_path_buf(), NOON);
+    let state = second.state();
+    assert_eq!(state.upload.last_batch_at_ms, Some(NOON));
+    assert_eq!(state.upload.hash_token_cache.map(|(_, at)| at), Some(NOON));
+    assert_eq!(
+        state.upload.hash_backoff.next_attempt_at_ms,
+        NOON + LONGEST_BACKOFF
+    );
+    assert_eq!(
+        state.upload.batch_backoff.next_attempt_at_ms,
+        NOON + LONGEST_BACKOFF
+    );
+    assert_eq!(state.heartbeat.last_heartbeat_ms, NOON);
+    assert_eq!(state.capture_availability.recent_failures_ms, [NOON]);
+    assert!(state.lifecycle.restart_times.iter().all(|&at| at <= NOON));
+    assert_eq!(state.lifecycle.last_restart_alert_at_ms, Some(NOON));
+
+    // The same on a tick, for a clock set back while the daemon runs.
+    let mut second = second;
+    second.with_state_mut(|s| s.upload.last_batch_at_ms = Some(NOON + DAY_MS));
+    second.at_t(NOON + 1_000).tick();
+    assert!(
+        second
+            .state()
+            .upload
+            .last_batch_at_ms
+            .is_some_and(|at| at <= NOON + 1_000)
+    );
+}
+
+// CORE-003: the next screenshot time is drawn again on another boot, and kept on the same boot.
+#[test]
+fn the_next_screenshot_is_drawn_again_after_a_reboot() {
+    const FROM_THE_LAST_BOOT: i64 = 20 * DAY_MS;
+    for (name, boot_id, suspend_safe, kept) in [
+        ("the same boot", Some("test-boot"), NOON + MINUTE, true),
+        ("another boot", Some("another-boot"), 30_000, false),
+        ("no boot ID", None, NOON + MINUTE, false),
+    ] {
+        let mut first = held_scenario();
+        first.with_state_mut(|s| {
+            s.screenshot.next_screenshot_suspend_safe_ms = Some(FROM_THE_LAST_BOOT);
+        });
+        first.platform.set_monotonic_clock_override(Some(NOON));
+        first.at_t(NOON).tick();
+        assert_eq!(
+            first.state().screenshot.next_screenshot_suspend_safe_ms,
+            Some(FROM_THE_LAST_BOOT)
+        );
+
+        let second = Scenario::authenticated_with_state_dir_configured(
+            first.state_dir_path().to_path_buf(),
+            NOON + MINUTE,
+            |platform, _| {
+                platform.set_boot_id(boot_id);
+                platform.set_monotonic_clock_override(Some(suspend_safe));
+            },
+        );
+        let next = second
+            .state()
+            .screenshot
+            .next_screenshot_suspend_safe_ms
+            .expect("a screenshot stays scheduled");
+        if kept {
+            assert_eq!(next, FROM_THE_LAST_BOOT, "{name}: kept");
+        } else {
+            assert!(
+                (suspend_safe..suspend_safe + DAY_MS).contains(&next),
+                "{name}: drawn again from {suspend_safe}, got {next}"
+            );
+        }
+    }
+}
+
 // ── Forced capture (CORE-021) ────────────────────────────────────────────────
 
 /// An authenticated scenario with a batch waiting out its interval and the next
@@ -278,7 +486,7 @@ fn an_applied_client_request_ticks_before_the_wakeup_time() {
 fn scenario_with_a_batch_waiting() -> Scenario {
     let mut scenario = Scenario::authenticated();
     scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(FAR_FUTURE);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(FAR_FUTURE);
         s.upload.last_batch_at_ms = Some(T0);
     });
     scenario.queue_upload(dev("waiting for the batch"));

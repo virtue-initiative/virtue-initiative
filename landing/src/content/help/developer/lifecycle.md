@@ -44,6 +44,15 @@ clock, so changing the wall clock while the daemon is stopped does not hide
 or fake downtime, and time asleep does not count. After a reboot, or on a
 platform with no boot ID, it uses the wall clock.
 
+## Clock changes
+
+Setting the wall clock back does not hold off captures or uploads, and it is
+not reported. The daemon keeps its next wakeup in memory and counts the wait
+on both clocks, so the suspend-safe clock ends the wait when the wall clock
+went back. The next screenshot time is kept on the suspend-safe clock. Every
+saved time of a past event that later work is scheduled from is pulled back
+to now when it is later than now.
+
 ## Other lifecycle events
 
 | Event               | Risk                                       | When                                                       |

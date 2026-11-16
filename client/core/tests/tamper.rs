@@ -639,7 +639,8 @@ const ALIVE: i64 = T0 + 1_000;
 /// `wait_ms` later, with batches held back.
 fn waiting_scenario(wait_ms: i64) -> Scenario {
     let mut scenario = held_scenario();
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(ALIVE + wait_ms));
+    scenario
+        .with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(ALIVE + wait_ms));
     scenario.at_t(ALIVE).tick();
     assert_eq!(wakeup(&scenario), ALIVE + wait_ms);
     scenario
@@ -684,10 +685,10 @@ fn a_stop_and_restart_inside_one_interval_is_reported_on_start() {
     let mut second = restart(&first, ALIVE + 18 * MINUTE);
     assert_eq!(missed_alerts(&second), 1, "the downtime is reported");
 
-    // The wakeup itself then arrives on time and adds nothing.
+    // The first tick after the start measures no lateness at all.
     second.at_t(wake).tick();
     assert_eq!(missed_alerts(&second), 1);
-    assert_eq!(second.state().lifecycle.late_wakeups, [0]);
+    assert!(second.state().lifecycle.late_wakeups.is_empty());
 }
 
 // CORE-002: the gap is measured, not the lateness of the wakeup it happened to span (Windows reinstall, #867).
@@ -706,7 +707,7 @@ fn a_restart_gap_over_the_threshold_is_reported_even_when_the_wakeup_was_barely_
     // The same downtime is not counted again as lateness.
     second.tick();
     assert_eq!(missed_alerts(&second), 1);
-    assert_eq!(second.state().lifecycle.late_wakeups, [0]);
+    assert!(second.state().lifecycle.late_wakeups.is_empty());
 }
 
 // CORE-002: the restart gap is the downtime less 60 seconds, held to the same thresholds.

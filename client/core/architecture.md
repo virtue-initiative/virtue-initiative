@@ -56,12 +56,14 @@ middle — before writing the result back to the shared snapshot and to disk:
 
 ```
 run_forever loop:
-  wait for the next scheduled wakeup (capped at 60s) or an incoming DaemonRequest
+  wait for the next scheduled wakeup (capped at 60s; none yet means tick at once)
+    or an incoming DaemonRequest
   drain any requests that arrived; apply + persist them; reply to each
     (only after the persist succeeds)
   if no request was applied and the wakeup isn't due yet: continue  // CORE-020
   working = state.lock().clone()
   run_phases(&mut working, now_ms):
+    clamp_to_now                                                   // CORE-020
     lifecycle::tick, screenshot::plan                              // phase 1, 2a
     screenshot::capture_and_process                                // phase 2b
     screenshot::commit, capture_availability::tick,
@@ -70,8 +72,19 @@ run_forever loop:
     upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
     upload::execute_batch (network)                                // phase 5b
     upload::commit_batch                                           // phase 5d
-  compute_next_wakeup, persist, state.lock() = working              // phase 6, 7
+  compute_next_wakeup (kept in memory), persist, state.lock() = working  // phase 6, 7
 ```
+
+The wakeup is the one schedule not persisted. `Daemon.wakeup` holds it with
+the suspend-safe clock reading it corresponds to, and `wait_left_ms` counts
+the wait on both clocks, so whichever reaches it first ends the wait: the
+wall clock after a suspend, the suspend-safe clock after the wall clock was
+set back. Times persisted in the module states that later work is scheduled
+from are pulled back within reach of now by `Daemon::clamp_to_now` at start
+and on every tick, and the next screenshot is kept on the suspend-safe clock
+(`ScreenshotState.next_screenshot_suspend_safe_ms`, drawn again on another
+boot). Together these keep a wall clock set back from holding off any work,
+without detecting or reporting it (CORE-020).
 
 Hash results are committed _before_ the batch is planned so an event hashed
 this tick is eligible for the same tick's batch upload — SPEC.md's phase
@@ -106,7 +119,6 @@ pub struct DaemonState {
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
     pub errors: ErrorState,
-    pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
 }
 ```
@@ -348,9 +360,9 @@ it never triggers). It also measures the restart gap: each last-alive stamp
 saves its reading with `get_boot_id`, and `lifecycle::note_start` reads the
 downtime off this clock when the boot ID still matches, so a wall clock
 changed while the daemon was stopped can't hide or fake it. After a reboot,
-or with no boot ID, the gap falls back to the wall clock. Screenshot
-scheduling itself is unaffected and still paces off the wall clock; this
-hook isn't on `ScreenshotHooks`. Mac
+or with no boot ID, the gap falls back to the wall clock. The loop's wait
+and the next screenshot time are counted on it too (CORE-020, CORE-003);
+this hook isn't on `ScreenshotHooks`. Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.

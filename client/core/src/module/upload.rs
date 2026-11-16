@@ -198,6 +198,22 @@ pub fn enqueue(state: &mut UploadState, now_ms: i64, risk: f32, kind: UploadKind
 /// Bypasses the batch/hash backoff cooldown and forces the next tick to flush
 /// immediately, regardless of screen-lock state. Used by `Daemon::flush_batch_now`
 /// and the daemon's shutdown-time flush.
+/// Pulls times that schedule later work back within reach of `now_ms`, so a
+/// wall clock set back can't hold off the batch interval, a retry or a
+/// hash-token refresh: past events to `now_ms`, a retry's next attempt to
+/// at most the longest backoff from it. See CORE-020.
+pub fn clamp_to_now(state: &mut UploadState, now_ms: i64) {
+    if let Some(last_batch_at_ms) = state.last_batch_at_ms.as_mut() {
+        *last_batch_at_ms = (*last_batch_at_ms).min(now_ms);
+    }
+    if let Some((_, fetched_at_ms)) = state.hash_token_cache.as_mut() {
+        *fetched_at_ms = (*fetched_at_ms).min(now_ms);
+    }
+    for backoff in [&mut state.hash_backoff, &mut state.batch_backoff] {
+        backoff.next_attempt_at_ms = backoff.next_attempt_at_ms.min(now_ms + MAX_BACKOFF_MS);
+    }
+}
+
 pub fn request_immediate_flush(state: &mut UploadState, now_ms: i64) {
     state.force_flush = true;
     state.bypass_lock = true;

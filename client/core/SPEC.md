@@ -29,6 +29,10 @@ The wakeup time picked at the end of a tick MUST be the earliest time at which s
 
 The loop MUST NOT run a tick before the wakeup time unless a client request was applied. It MAY wake before the wakeup time (e.g. to bound how far a platform timer can drift across a system suspend), but MUST then go back to waiting without running a tick.
 
+The wakeup time MUST be kept in memory only, with the suspend-excluding clock (CLIENT-018) reading it corresponds to. It is reached when the wall clock reaches it or when the wait has elapsed on the suspend-excluding clock, whichever comes first, so setting the wall clock back cannot hold off a tick. A loop with no wakeup time yet, because the daemon just started, MUST run a tick at once.
+
+At start and on every tick, a persisted time of a past event that later work is scheduled from (the last batch upload, the last heartbeat, when the hash token was fetched, recent capture failures, the restart times and the last restart alert) MUST be pulled back to the current time when it is later, and a retry backoff's next attempt MUST be pulled back to at most the longest backoff from now. Setting the wall clock back then delays no work by more than one of its intervals. A wall clock set back MUST NOT be reported.
+
 ## CORE-002 Tamper detection
 
 It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless the gap is explained by a legitimate session transition, checked from both ends:
@@ -46,7 +50,7 @@ The late wakeups array MUST be cleared after an alert is sent (to prevent duplic
 
 The late wakeup event SHOULD be called "screenshot_missed".
 
-The daemon MUST persist a last-alive time: at the end of every tick, each time it wakes without running a tick (so at least every 60 seconds while it waits), and when it stops. With it, it MUST persist the suspend-excluding clock reading and the boot ID (CLIENT-018) at that moment. On start it MUST measure the restart gap, the downtime since the last-alive time less those 60 seconds, so a stop and restart that fits between two wakeups is still seen. When the boot ID is the one persisted and the suspend-excluding clock has not gone back, the downtime MUST be measured on the suspend-excluding clock, so setting the wall clock while the daemon is stopped neither hides nor fakes downtime, and time spent suspended does not count. Otherwise (a reboot, or no boot ID) it MUST be measured on the wall clock. A restart gap MUST be treated as a late wakeup of that length: added to the late wakeups array and alerted on by the same thresholds, unless excused by the same evidence, with the start time as the current time and the last-alive time in place of the expected wakeup time. The first tick after such a start MUST NOT count the same downtime again as lateness. With no last-alive time persisted (state from an older build), the first tick measures lateness as above.
+The daemon MUST persist a last-alive time: at the end of every tick, each time it wakes without running a tick (so at least every 60 seconds while it waits), and when it stops. With it, it MUST persist the suspend-excluding clock reading and the boot ID (CLIENT-018) at that moment. On start it MUST measure the restart gap, the downtime since the last-alive time less those 60 seconds, so a stop and restart that fits between two wakeups is still seen. When the boot ID is the one persisted and the suspend-excluding clock has not gone back, the downtime MUST be measured on the suspend-excluding clock, so setting the wall clock while the daemon is stopped neither hides nor fakes downtime, and time spent suspended does not count. Otherwise (a reboot, or no boot ID) it MUST be measured on the wall clock. A restart gap MUST be treated as a late wakeup of that length: added to the late wakeups array and alerted on by the same thresholds, unless excused by the same evidence, with the start time as the current time and the last-alive time in place of the expected wakeup time. The first tick after a start has no wakeup time to compare against (CORE-020), so it measures no lateness and the downtime is never counted twice.
 
 Suspend evidence MUST NOT be computed across a reboot: when the suspend-excluding clock reads lower than at the previous tick, it is unavailable.
 
@@ -57,6 +61,8 @@ A user-initiated stop MUST excuse the gap that follows it — the lateness check
 ## CORE-003 Screenshots
 
 Screenshots MUST be captured randomly (i.e. every second there is the same chance as any other second) about every 5 minutes. The first screenshot after login MUST be taken on the next tick. Nothing is captured while logged out.
+
+The time of the next screenshot MUST be kept on the suspend-excluding clock (CLIENT-018), so setting the wall clock does not move it. A daemon that starts on another boot than the one persisted with the last-alive time (CORE-002), or without a boot ID, MUST draw it again; the draw is memoryless, so that does not change how often screenshots are taken.
 
 A capture that comes due while the screen is locked or a screensaver is active MUST be skipped: the daemon MUST send a `screenshot_skipped` event (reason `locked_or_screensaver`, BATCH-003) and draw the next capture time as usual.
 

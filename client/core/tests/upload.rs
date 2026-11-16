@@ -16,7 +16,7 @@ use virtue_core::testing::Scenario;
 /// events are the ones a test queues.
 fn quiet_scenario() -> Scenario {
     let mut scenario = Scenario::authenticated();
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(FAR_FUTURE));
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(FAR_FUTURE));
     scenario
 }
 
@@ -187,7 +187,7 @@ fn a_batch_that_cannot_be_built_backs_off_like_a_failed_upload() {
     assert_eq!(build_errors(&mut scenario), 1);
     let retry_at = scenario.state().upload.batch_backoff.next_attempt_at_ms;
     assert!(retry_at > T0, "must not be due again at once");
-    assert_eq!(scenario.state().next_wakeup_at_ms, retry_at);
+    assert_eq!(scenario.daemon.next_wakeup_at_ms(), retry_at);
 
     // Inside the backoff nothing is attempted.
     scenario.at_t(retry_at - 1).tick();

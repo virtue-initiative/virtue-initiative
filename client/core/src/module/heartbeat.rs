@@ -25,6 +25,12 @@ pub fn tick(state: &mut HeartbeatState, upload: &mut UploadState, now_ms: i64) {
 }
 
 /// When `tick` will next emit a heartbeat, or `None` while unauthenticated.
+/// Pulls the last heartbeat back to `now_ms` if the wall clock has since
+/// gone back past it. See CORE-020.
+pub fn clamp_to_now(state: &mut HeartbeatState, now_ms: i64) {
+    state.last_heartbeat_ms = state.last_heartbeat_ms.min(now_ms);
+}
+
 pub fn next_heartbeat_at_ms(state: &HeartbeatState, upload: &UploadState) -> Option<i64> {
     upload.device_credentials.as_ref()?;
     Some(state.last_heartbeat_ms + HEARTBEAT_INTERVAL_MS)

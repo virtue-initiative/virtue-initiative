@@ -66,7 +66,7 @@ impl Scenario {
         if let Some(ref auth) = auth {
             let event_state = serde_json::json!({
                 "auth": auth,
-                "screenshot": { "enabled": true, "next_screenshot_at_ms": null },
+                "screenshot": { "enabled": true, "next_screenshot_suspend_safe_ms": null },
                 "upload": { "device_credentials": auth.device_credentials },
             });
             let path = state_dir.join("event_state.json");

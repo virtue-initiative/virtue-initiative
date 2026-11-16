@@ -270,7 +270,6 @@ fn dirty_state(scenario: &mut Scenario) {
         s.upload.batch_backoff.current_backoff_ms = 60_000;
         s.capture_availability.recent_failures_ms.push(T0);
         s.heartbeat.last_heartbeat_ms = T0;
-        s.next_wakeup_at_ms = T0;
         s.last_tick_at_ms = Some(T0);
     });
 }
@@ -292,7 +291,6 @@ fn assert_old_state_is_gone(state: &DaemonState) {
     assert_eq!(state.upload.batch_backoff.current_backoff_ms, 0);
     assert!(state.capture_availability.recent_failures_ms.is_empty());
     assert_eq!(state.heartbeat.last_heartbeat_ms, 0);
-    assert_eq!(state.next_wakeup_at_ms, 0);
     assert_eq!(state.last_tick_at_ms, None);
     assert!(state.errors.recent.is_empty());
 }

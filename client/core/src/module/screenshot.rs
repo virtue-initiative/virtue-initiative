@@ -34,9 +34,10 @@ where
 #[serde(default)]
 pub struct ScreenshotState {
     /// Randomly-drawn (exponential inter-arrival) time of the next screenshot
-    /// attempt. `None` means "take one immediately" — the state right after
-    /// login, before the first draw.
-    pub next_screenshot_at_ms: Option<i64>,
+    /// attempt, on the suspend-safe clock so setting the wall clock can't
+    /// move it (CORE-003). `None` means "take one immediately" — the state
+    /// right after login, before the first draw.
+    pub next_screenshot_suspend_safe_ms: Option<i64>,
     pub enabled: bool,
     /// Grayscale grid fingerprint of the last frame we actually uploaded (size scales
     /// with the screen resolution; see [`fingerprint`]). Used to dedup: a capture whose
@@ -60,23 +61,42 @@ pub struct ScreenshotState {
 /// Draws the next screenshot time via an exponential inter-arrival: every
 /// second has the same chance of being chosen, averaging `mean_ms` apart. See
 /// CORE-003.
-fn draw_next_screenshot_at_ms(now_ms: i64, mean_ms: i64, rng: &dyn RandomSource) -> i64 {
+fn draw_next_screenshot_suspend_safe_ms(now_ms: i64, mean_ms: i64, rng: &dyn RandomSource) -> i64 {
     let u = rng.uniform();
     let delay_ms = -(mean_ms as f64) * (1.0 - u).ln();
     now_ms + delay_ms.round() as i64
+}
+
+/// Draws the next screenshot time again from `suspend_safe_ms`, unless one
+/// is due immediately. For a daemon starting on another boot, whose stored
+/// time was read off a suspend-safe clock that has since restarted. The draw
+/// is memoryless, so this doesn't change the cadence. See CORE-003.
+pub fn redraw(
+    state: &mut ScreenshotState,
+    suspend_safe_ms: i64,
+    mean_ms: i64,
+    rng: &dyn RandomSource,
+) {
+    if state.next_screenshot_suspend_safe_ms.is_some() {
+        state.next_screenshot_suspend_safe_ms = Some(draw_next_screenshot_suspend_safe_ms(
+            suspend_safe_ms,
+            mean_ms,
+            rng,
+        ));
+    }
 }
 
 /// Enable screenshot capture on login: the first screenshot is taken
 /// immediately, on the next tick.
 pub fn enable(state: &mut ScreenshotState) {
     state.enabled = true;
-    state.next_screenshot_at_ms = None;
+    state.next_screenshot_suspend_safe_ms = None;
 }
 
 /// Disable screenshot capture on logout.
 pub fn disable(state: &mut ScreenshotState) {
     state.enabled = false;
-    state.next_screenshot_at_ms = None;
+    state.next_screenshot_suspend_safe_ms = None;
 }
 
 /// What `plan` decided to do this tick — passed to `capture_and_process`.
@@ -114,12 +134,15 @@ impl Scoring {
 /// Phase 2a (cheap): decide whether a screenshot is due this tick, applying
 /// the locked/screensaver gate. Draws and stores the next scheduled time
 /// whenever a decision (capture or skip) is made, so pacing continues either
-/// way.
+/// way. `suspend_safe_ms` is the suspend-safe clock's reading, which the
+/// schedule is kept on; `now_ms` stamps what's recorded.
+#[allow(clippy::too_many_arguments)]
 pub fn plan(
     state: &mut ScreenshotState,
     upload: &mut UploadState,
     hooks: &dyn ScreenshotHooks,
     now_ms: i64,
+    suspend_safe_ms: i64,
     mean_interval_ms: i64,
     rng: &dyn RandomSource,
 ) -> CoreResult<Option<CapturePlan>> {
@@ -128,8 +151,8 @@ pub fn plan(
     }
 
     let due = state
-        .next_screenshot_at_ms
-        .is_none_or(|next| now_ms >= next);
+        .next_screenshot_suspend_safe_ms
+        .is_none_or(|next| suspend_safe_ms >= next);
     if !due {
         return Ok(None);
     }
@@ -137,8 +160,11 @@ pub fn plan(
     // Gate 1 — locked / screensaver: checked before capturing (cheap). Fail-safe
     // to `false` (fall back to the diff gate), never silently suppress.
     if hooks.is_locked_or_screensaver()? {
-        state.next_screenshot_at_ms =
-            Some(draw_next_screenshot_at_ms(now_ms, mean_interval_ms, rng));
+        state.next_screenshot_suspend_safe_ms = Some(draw_next_screenshot_suspend_safe_ms(
+            suspend_safe_ms,
+            mean_interval_ms,
+            rng,
+        ));
         state.last_attempt_at_ms = Some(now_ms);
         state.last_skip_reason = Some(StatusSkipReason::LockedOrScreensaver);
         upload::enqueue(
@@ -152,7 +178,11 @@ pub fn plan(
         return Ok(None);
     }
 
-    state.next_screenshot_at_ms = Some(draw_next_screenshot_at_ms(now_ms, mean_interval_ms, rng));
+    state.next_screenshot_suspend_safe_ms = Some(draw_next_screenshot_suspend_safe_ms(
+        suspend_safe_ms,
+        mean_interval_ms,
+        rng,
+    ));
     Ok(Some(CapturePlan {
         anchor: state.last_uploaded_fingerprint.clone(),
     }))
@@ -161,7 +191,7 @@ pub fn plan(
 /// Builds a forced-capture plan, bypassing the interval-due gate (Gate 0)
 /// but keeping the locked/screensaver gate (Gate 1). Used for an
 /// on-demand "capture now" request rather than the normal cadence. Unlike
-/// `plan`, this never touches `state.next_screenshot_at_ms` — the schedule
+/// `plan`, this never touches `state.next_screenshot_suspend_safe_ms` — the schedule
 /// for the next *automatic* capture is left undisturbed — and never
 /// enqueues a `ScreenshotSkipped` upload when locked, since there's no
 /// scheduled slot being consumed. `anchor` is always `None`, so the
@@ -444,7 +474,7 @@ mod tests {
         let mut upload = authenticated_upload();
         let hooks = TestPlatformHooks::new();
         let rng = TestRandomSource::new();
-        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 1_000, 300_000, &rng).unwrap();
         assert!(plan.is_none());
     }
 
@@ -456,9 +486,9 @@ mod tests {
         let mut upload = authenticated_upload();
         let hooks = TestPlatformHooks::new();
         let rng = TestRandomSource::new();
-        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 1_000, 300_000, &rng).unwrap();
         assert!(plan.is_some());
-        assert!(state.next_screenshot_at_ms.is_some());
+        assert!(state.next_screenshot_suspend_safe_ms.is_some());
     }
 
     // CORE-003: screenshot scheduling and gates.
@@ -466,11 +496,20 @@ mod tests {
     fn not_due_before_the_drawn_time() {
         let mut state = ScreenshotState::default();
         enable(&mut state);
-        state.next_screenshot_at_ms = Some(60_000);
+        state.next_screenshot_suspend_safe_ms = Some(60_000);
         let mut upload = authenticated_upload();
         let hooks = TestPlatformHooks::new();
         let rng = TestRandomSource::new();
-        let plan = plan(&mut state, &mut upload, &hooks, 30_000, 300_000, &rng).unwrap();
+        let plan = plan(
+            &mut state,
+            &mut upload,
+            &hooks,
+            30_000,
+            30_000,
+            300_000,
+            &rng,
+        )
+        .unwrap();
         assert!(plan.is_none());
     }
 
@@ -483,9 +522,9 @@ mod tests {
         let hooks = TestPlatformHooks::new();
         hooks.set_locked_or_screensaver(true);
         let rng = TestRandomSource::new();
-        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 300_000, &rng).unwrap();
+        let plan = plan(&mut state, &mut upload, &hooks, 1_000, 1_000, 300_000, &rng).unwrap();
         assert!(plan.is_none());
-        assert!(state.next_screenshot_at_ms.is_some());
+        assert!(state.next_screenshot_suspend_safe_ms.is_some());
         assert!(upload.pending_hash_events.iter().any(|e| matches!(
             e.event,
             UploadKind::ScreenshotSkipped {
@@ -578,12 +617,12 @@ mod tests {
     fn plan_forced_bypasses_the_interval_due_gate() {
         let mut state = ScreenshotState::default();
         enable(&mut state);
-        state.next_screenshot_at_ms = Some(1_000_000_000);
+        state.next_screenshot_suspend_safe_ms = Some(1_000_000_000);
         let hooks = TestPlatformHooks::new();
         let plan = plan_forced(&state, &hooks).unwrap();
         assert!(plan.is_some());
         assert_eq!(
-            state.next_screenshot_at_ms,
+            state.next_screenshot_suspend_safe_ms,
             Some(1_000_000_000),
             "plan_forced must not disturb the normal capture schedule"
         );
@@ -614,7 +653,7 @@ mod tests {
     fn draw_next_screenshot_is_deterministic_given_a_fixed_uniform() {
         let rng = TestRandomSource::new();
         rng.queue(0.5);
-        let next = draw_next_screenshot_at_ms(0, 300_000, &rng);
+        let next = draw_next_screenshot_suspend_safe_ms(0, 300_000, &rng);
         let expected = (-(300_000f64) * (0.5f64).ln()).round() as i64;
         assert_eq!(next, expected);
         assert!(next > 0);

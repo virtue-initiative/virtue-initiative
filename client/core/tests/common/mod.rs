@@ -81,11 +81,15 @@ pub fn missed_alerts(scenario: &Scenario) -> usize {
 /// Stops the batch interval from elapsing, so events queued from here on stay
 /// in the pending lists (unless something forces a flush).
 pub fn hold_batches(scenario: &mut Scenario) {
-    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(FAR_FUTURE));
+    scenario
+        .daemon
+        .set_batch_interval_for_test(Duration::from_millis(FAR_FUTURE as u64));
+    let now_ms = scenario.clock.now_ms();
+    scenario.with_state_mut(|s| s.upload.last_batch_at_ms = Some(now_ms));
 }
 
 /// An authenticated scenario whose first tick has run at [`T0`] with batches
-/// held back, so `next_wakeup_at_ms` is the next screenshot draw and every
+/// held back, so the wakeup is the next screenshot draw and every
 /// event the daemon queues from here on stays visible.
 pub fn held_scenario() -> Scenario {
     let mut scenario = Scenario::authenticated();
@@ -95,7 +99,7 @@ pub fn held_scenario() -> Scenario {
 }
 
 pub fn wakeup(scenario: &Scenario) -> i64 {
-    scenario.state().next_wakeup_at_ms
+    scenario.daemon.next_wakeup_at_ms()
 }
 
 /// Ticks once for each entry of `lateness_ms`, each at the scheduled wakeup

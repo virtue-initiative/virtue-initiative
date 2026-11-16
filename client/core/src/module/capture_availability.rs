@@ -19,6 +19,14 @@ pub fn note_failure(state: &mut CaptureAvailabilityState, now_ms: i64) {
 
 /// Phase 3: prune the failure window and alert (then reset) once the
 /// threshold is crossed.
+/// Pulls failure times back to `now_ms` if the wall clock has since gone
+/// back past them, so they don't stay in the window longer. See CORE-020.
+pub fn clamp_to_now(state: &mut CaptureAvailabilityState, now_ms: i64) {
+    for failure_ms in &mut state.recent_failures_ms {
+        *failure_ms = (*failure_ms).min(now_ms);
+    }
+}
+
 pub fn tick(state: &mut CaptureAvailabilityState, upload: &mut UploadState, now_ms: i64) {
     state
         .recent_failures_ms

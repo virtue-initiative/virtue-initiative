@@ -53,7 +53,7 @@ fn screenshot_taken_immediately_on_first_loop() {
 #[test]
 fn screenshot_not_retaken_before_interval_elapses() {
     let mut scenario = Scenario::authenticated();
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(60_000));
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(60_000));
     let uploads_before = {
         let s = scenario.api.state();
         s.batch_uploads.len() + s.hash_uploads.len()
@@ -76,7 +76,7 @@ fn screenshot_not_retaken_before_interval_elapses() {
 fn screenshot_retaken_after_interval() {
     let mut scenario = Scenario::authenticated();
     scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(30_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(30_000);
         s.upload.last_batch_at_ms = Some(0);
     });
 
@@ -135,7 +135,7 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
     // so the only possible source of an upload below is the lifecycle
     // late-wakeup alert this test is checking for.
     scenario2.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(1_000_000_000);
         s.upload.pending_hash_events.clear();
         s.upload.pending_batch_events.clear();
         s.upload.force_flush = false;
@@ -168,9 +168,9 @@ fn user_stop_excuse_survives_across_a_real_restart_not_just_the_next_tick() {
 #[test]
 fn late_wakeup_over_two_minutes_triggers_alert() {
     let mut scenario = Scenario::authenticated();
-    // First tick establishes a scheduled `next_wakeup_at_ms`.
+    // First tick schedules the next wakeup.
     scenario.at_t(0).tick();
-    let expected = scenario.state().next_wakeup_at_ms;
+    let expected = scenario.daemon.next_wakeup_at_ms();
 
     // Wake up 130s later than scheduled: over the 2-minute single-wakeup threshold.
     scenario.at_t(expected + 130_000).tick();
@@ -195,7 +195,7 @@ fn late_wakeup_over_two_minutes_triggers_alert() {
 fn late_wakeup_near_login_is_excused() {
     let mut scenario = Scenario::authenticated();
     scenario.at_t(0).tick();
-    let expected = scenario.state().next_wakeup_at_ms;
+    let expected = scenario.daemon.next_wakeup_at_ms();
     let late_at = expected + 70_000;
 
     scenario.platform.set_last_login(Some(late_at));
@@ -214,7 +214,7 @@ fn lifecycle_disabled_never_records_or_alerts_regardless_of_lateness() {
     let mut scenario = Scenario::authenticated();
     scenario.platform.set_lifecycle_enabled(false);
     scenario.at_t(0).tick();
-    let expected = scenario.state().next_wakeup_at_ms;
+    let expected = scenario.daemon.next_wakeup_at_ms();
 
     // Wildly late — would easily cross the 2-minute single-wakeup threshold
     // if the check ran at all.
@@ -382,7 +382,7 @@ fn a_burst_after_the_cooldown_expires_alerts_again() {
 // ── CaptureAvailability ─────────────────────────────────────────────────────────
 
 fn force_screenshot_due(scenario: &mut Scenario) {
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = None);
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = None);
 }
 
 // CORE-006: capture_failed after repeated capture failures.
@@ -435,7 +435,7 @@ fn forced_capture_uploads_immediately_bypassing_interval_and_dedup() {
     // right now would neither be due nor pass the fingerprint diff gate.
     scenario.at_t(0).tick();
     scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(1_000_000_000);
     });
     let uploads_before = {
         let s = scenario.api.state();
@@ -453,7 +453,7 @@ fn forced_capture_uploads_immediately_bypassing_interval_and_dedup() {
         "forced capture should upload even though the interval hasn't elapsed"
     );
     assert_eq!(
-        scenario.state().screenshot.next_screenshot_at_ms,
+        scenario.state().screenshot.next_screenshot_suspend_safe_ms,
         Some(1_000_000_000),
         "forced capture must not disturb the normal capture schedule"
     );
@@ -479,7 +479,7 @@ fn tick_once_forced_captures_and_uploads_without_a_loop_thread() {
     let mut scenario = Scenario::authenticated();
     scenario.at_t(0).tick();
     scenario.with_state_mut(|s| {
-        s.screenshot.next_screenshot_at_ms = Some(1_000_000_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(1_000_000_000);
         s.upload.last_batch_at_ms = Some(0);
     });
     let batches_before = scenario.api.state().batch_uploads.len();
@@ -579,7 +579,7 @@ fn screenshot_state_survives_restart() {
     // Create first service, backdate the schedule so the next screenshot is
     // due well in the future.
     let mut scenario1 = Scenario::authenticated();
-    scenario1.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = Some(60_000));
+    scenario1.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = Some(60_000));
     scenario1.at_t(0).tick(); // persists the seeded state via a no-op tick
     let state_dir = scenario1.state_dir_path().to_path_buf();
 
@@ -646,7 +646,7 @@ fn status_reports_a_skip_reason_when_the_screen_is_locked() {
 
     // Unlocking and capturing clears the reason rather than leaving it stale.
     scenario.platform.set_locked_or_screensaver(false);
-    scenario.with_state_mut(|s| s.screenshot.next_screenshot_at_ms = None);
+    scenario.with_state_mut(|s| s.screenshot.next_screenshot_suspend_safe_ms = None);
     scenario.at_t(2_000).tick();
     assert_eq!(scenario.status().last_skip_reason, None);
 }
@@ -701,7 +701,7 @@ fn scenario_with_batch_waiting_on_interval() -> Scenario {
         s.upload.force_flush = false;
         s.upload.bypass_lock = false;
         s.upload.last_batch_at_ms = Some(10_000);
-        s.screenshot.next_screenshot_at_ms = Some(20_000);
+        s.screenshot.next_screenshot_suspend_safe_ms = Some(20_000);
     });
     scenario.at_t(20_000).tick();
     assert!(
@@ -718,7 +718,7 @@ fn scenario_with_batch_waiting_on_interval() -> Scenario {
 #[test]
 fn batch_waiting_on_its_interval_does_not_schedule_an_immediate_wakeup() {
     let scenario = scenario_with_batch_waiting_on_interval();
-    let next = scenario.state().next_wakeup_at_ms;
+    let next = scenario.daemon.next_wakeup_at_ms();
     assert!(next > 20_000, "next wakeup {next} should be in the future");
     assert!(
         next <= 70_000,
@@ -738,8 +738,8 @@ fn due_batch_held_by_screen_lock_does_not_schedule_an_immediate_wakeup() {
     let state = scenario.state();
     assert!(!state.upload.pending_batch_events.is_empty());
     assert!(
-        state.next_wakeup_at_ms > 100_000,
+        scenario.daemon.next_wakeup_at_ms() > 100_000,
         "next wakeup {} should wait for the next screenshot draw",
-        state.next_wakeup_at_ms
+        scenario.daemon.next_wakeup_at_ms()
     );
 }

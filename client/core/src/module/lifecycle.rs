@@ -110,8 +110,7 @@ impl SessionTimes {
 }
 
 /// Phase 1 of `Daemon::run_phases`: compares `now_ms` to the wakeup time this
-/// tick was scheduled for (the daemon's `next_wakeup_at_ms` as of the end of
-/// the previous tick) and records how late the daemon woke, unless excused by
+/// tick was scheduled for (picked at the end of the previous tick) and records how late the daemon woke, unless excused by
 /// a login/logout bracket that isn't contradicted by the other side's
 /// evidence (see the excuse logic below). Alerts via [`upload::enqueue`] once
 /// the late-wakeup budget is crossed. See CORE-002.
@@ -291,8 +290,8 @@ pub fn note_alive(
 /// treats it as a late wakeup, so a stop and restart that fits between two
 /// wakeups is still reported. On the same boot the downtime is read off the
 /// suspend-safe clock, so a wall clock changed while the daemon was stopped
-/// neither hides nor fakes it. Returns whether the downtime was judged here,
-/// so the first tick must not count it again. See CORE-002.
+/// neither hides nor fakes it. The first tick after a start has no wakeup
+/// to compare against, so the downtime is only counted here. See CORE-002.
 pub fn note_start(
     state: &mut LifecycleState,
     upload: &mut UploadState,
@@ -300,9 +299,9 @@ pub fn note_start(
     boot_id: Option<&str>,
     session: SessionTimes,
     now_ms: i64,
-) -> bool {
+) {
     let Some(last_alive_ms) = state.last_alive_utc_ms else {
-        return false;
+        return;
     };
     let suspend_safe_ms = hooks.get_monotonic_clock_ms().ok();
 
@@ -325,7 +324,18 @@ pub fn note_start(
         tracing::warn!(gap_ms, "daemon was not running");
         record_late_wakeup(state, upload, now_ms, gap_ms);
     }
-    true
+}
+
+/// Pulls the restart times and the last restart alert back to `now_ms` if
+/// the wall clock has since gone back past them, so they don't stay in the
+/// window or the cooldown longer. See CORE-020.
+pub fn clamp_to_now(state: &mut LifecycleState, now_ms: i64) {
+    for restart_ms in &mut state.restart_times {
+        *restart_ms = (*restart_ms).min(now_ms);
+    }
+    if let Some(alert_ms) = state.last_restart_alert_at_ms.as_mut() {
+        *alert_ms = (*alert_ms).min(now_ms);
+    }
 }
 
 /// Phase 1b of `Daemon::run_phases`: detects a change in the last known

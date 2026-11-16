@@ -88,8 +88,17 @@ pub struct DaemonState {
     pub heartbeat: HeartbeatState,
     #[serde(default)]
     pub errors: ErrorState,
-    pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
+}
+
+/// When the loop next runs a tick (CORE-020): `at_ms` on the wall clock, and
+/// the same moment on the suspend-safe clock as read when it was picked. It's
+/// reached on whichever clock gets there first, so a wall clock set back
+/// can't hold it off. Kept in memory only.
+#[derive(Clone, Copy)]
+struct Wakeup {
+    at_ms: i64,
+    suspend_safe_at_ms: Option<i64>,
 }
 
 /// One sequential daemon loop: check lifecycle, maybe take a screenshot,
@@ -113,6 +122,9 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     rng: Arc<dyn RandomSource>,
     /// Read once: it can't change while the process runs. See CORE-002.
     boot_id: Option<String>,
+    /// `None` until the first tick of this process, and again after a user
+    /// stop is lifted. See CORE-020.
+    wakeup: Mutex<Option<Wakeup>>,
 }
 
 impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
@@ -145,6 +157,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
             boot_id,
+            wakeup: Mutex::new(None),
         };
 
         // Every fresh `Daemon` instance is a new monitoring session: if the
@@ -156,6 +169,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         {
             let now_ms = daemon.now_ms();
             daemon.with_locked_state(|working| {
+                daemon.clamp_to_now(working, now_ms);
+                daemon.redraw_after_reboot(working);
                 let was_stopped = daemon.apply_note_user_start(working, now_ms);
                 if daemon.platform.lifecycle_enabled() {
                     if !was_stopped {
@@ -331,7 +346,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let was_stopped =
             lifecycle::note_user_start(&mut state.lifecycle, &mut state.upload, now_ms);
         if was_stopped {
-            state.next_wakeup_at_ms = 0;
+            *self.wakeup.lock().expect("daemon wakeup lock poisoned") = None;
         }
         was_stopped
     }
@@ -340,7 +355,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// persisted last-alive time as a restart gap.
     fn apply_note_start(&self, state: &mut DaemonState, now_ms: i64) {
         let session = lifecycle::SessionTimes::read(&self.platform);
-        let measured = lifecycle::note_start(
+        lifecycle::note_start(
             &mut state.lifecycle,
             &mut state.upload,
             &self.platform,
@@ -348,11 +363,96 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             session,
             now_ms,
         );
-        if measured && state.next_wakeup_at_ms != 0 {
-            // The downtime has been judged as a restart gap; an overdue
-            // wakeup must not count it a second time as lateness.
-            state.next_wakeup_at_ms = state.next_wakeup_at_ms.max(now_ms);
+    }
+
+    /// Pulls every persisted time that later work is scheduled from back
+    /// within reach of `now_ms`, so a wall clock set back holds nothing off
+    /// for longer than one interval. Not reported. See CORE-020.
+    fn clamp_to_now(&self, state: &mut DaemonState, now_ms: i64) {
+        upload::clamp_to_now(&mut state.upload, now_ms);
+        heartbeat::clamp_to_now(&mut state.heartbeat, now_ms);
+        capture_availability::clamp_to_now(&mut state.capture_availability, now_ms);
+        lifecycle::clamp_to_now(&mut state.lifecycle, now_ms);
+    }
+
+    /// The next screenshot time is on the suspend-safe clock, which restarts
+    /// with every boot, so a start on another boot (or with no boot ID to
+    /// tell) draws it again. See CORE-003.
+    fn redraw_after_reboot(&self, state: &mut DaemonState) {
+        let suspend_safe_ms = self.platform.get_monotonic_clock_ms().ok();
+        let same_boot = self.boot_id.is_some()
+            && self.boot_id == state.lifecycle.last_alive_boot_id
+            && matches!(
+                (state.lifecycle.last_alive_suspend_safe_ms, suspend_safe_ms),
+                (Some(then), Some(now)) if now >= then
+            );
+        if !same_boot {
+            screenshot::redraw(
+                &mut state.screenshot,
+                self.suspend_safe_ms(self.now_ms()),
+                self.config.screenshot_interval.as_millis() as i64,
+                self.rng.as_ref(),
+            );
         }
+    }
+
+    /// The suspend-safe clock (CLIENT-018), or the wall clock if it can't be
+    /// read.
+    fn suspend_safe_ms(&self, now_ms: i64) -> i64 {
+        self.platform.get_monotonic_clock_ms().unwrap_or(now_ms)
+    }
+
+    /// Picks the wakeup `at_ms` as the next tick's time (CORE-020).
+    fn set_wakeup(&self, at_ms: i64, now_ms: i64) {
+        let suspend_safe_at_ms = self
+            .platform
+            .get_monotonic_clock_ms()
+            .ok()
+            .map(|suspend_safe_ms| suspend_safe_ms + (at_ms - now_ms));
+        *self.wakeup.lock().expect("daemon wakeup lock poisoned") = Some(Wakeup {
+            at_ms,
+            suspend_safe_at_ms,
+        });
+    }
+
+    /// How long until the wakeup is reached, 0 or less once it has been or
+    /// when there is none yet: the shorter of the wait left on the wall clock
+    /// and on the suspend-safe clock. See CORE-020.
+    fn wait_left_ms(&self, now_ms: i64) -> i64 {
+        let Some(wakeup) = *self.wakeup.lock().expect("daemon wakeup lock poisoned") else {
+            return 0;
+        };
+        let on_wall_clock = wakeup.at_ms - now_ms;
+        match (
+            wakeup.suspend_safe_at_ms,
+            self.platform.get_monotonic_clock_ms().ok(),
+        ) {
+            (Some(at), Some(suspend_safe_ms)) => on_wall_clock.min(at - suspend_safe_ms),
+            _ => on_wall_clock,
+        }
+    }
+
+    /// Test-only: change the batch interval, e.g. to hold batches back until
+    /// something forces one out.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn set_batch_interval_for_test(&mut self, interval: Duration) {
+        self.config.batch_interval = interval;
+    }
+
+    /// Test-only: the wall-clock time of the next tick, 0 before the first.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn next_wakeup_at_ms(&self) -> i64 {
+        self.next_wakeup_at_ms_or_zero()
+    }
+
+    /// The wall-clock time this tick was scheduled for, 0 when nothing was
+    /// scheduled: the first tick of a process, or the first after a user stop
+    /// is lifted, which measures no lateness. See CORE-002.
+    fn next_wakeup_at_ms_or_zero(&self) -> i64 {
+        self.wakeup
+            .lock()
+            .expect("daemon wakeup lock poisoned")
+            .map_or(0, |wakeup| wakeup.at_ms)
     }
 
     /// Stamps the last-alive time (CORE-002).
@@ -610,7 +710,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         if should_logout {
             self.apply_rejected_device_logout(&mut working);
         }
-        working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
+        self.set_wakeup(
+            self.compute_next_wakeup(&working, now_ms, screen_active),
+            now_ms,
+        );
         working.last_tick_at_ms = Some(now_ms);
         self.note_alive(&mut working, self.now_ms());
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
@@ -721,7 +824,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
-            working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
+            self.set_wakeup(
+                self.compute_next_wakeup(working, now_ms, screen_active),
+                now_ms,
+            );
             working.last_tick_at_ms = Some(now_ms);
             // Read afresh: a tick that uploads can run for a while.
             self.note_alive(working, self.now_ms());
@@ -774,13 +880,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     pub fn run_forever(&self) {
         let rx = self.take_request_receiver();
         loop {
-            let next_wakeup_at_ms = self
-                .state
-                .lock()
-                .expect("daemon state lock poisoned")
-                .next_wakeup_at_ms;
-            let now_ms = self.now_ms();
-            let wait_ms = (next_wakeup_at_ms - now_ms).clamp(0, 60_000) as u64;
+            let wait_ms = self.wait_left_ms(self.now_ms()).clamp(0, 60_000) as u64;
             let first = match rx.recv_timeout(Duration::from_millis(wait_ms)) {
                 Ok(req) => Some(req),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -810,13 +910,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 return;
             }
 
-            let due = now_ms
-                >= self
-                    .state
-                    .lock()
-                    .expect("daemon state lock poisoned")
-                    .next_wakeup_at_ms;
-            if applied_request || due {
+            if applied_request || self.wait_left_ms(now_ms) <= 0 {
                 self.run_tick(now_ms);
             } else {
                 self.stamp_alive(now_ms);
@@ -885,7 +979,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// the caller applies the logout (never this function, to avoid
     /// recursing into the request-channel machinery).
     fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {
-        let expected_wakeup = working.next_wakeup_at_ms;
+        self.clamp_to_now(working, now_ms);
+        let expected_wakeup = self.next_wakeup_at_ms_or_zero();
         if self.platform.lifecycle_enabled() {
             let session = lifecycle::SessionTimes::read(&self.platform);
             lifecycle::tick(
@@ -911,6 +1006,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             &mut working.upload,
             &self.platform,
             now_ms,
+            self.suspend_safe_ms(now_ms),
             mean_interval_ms,
             self.rng.as_ref(),
         ) {
@@ -990,8 +1086,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let batch_interval_ms = self.config.batch_interval.as_millis() as i64;
         let screenshot = state
             .screenshot
-            .next_screenshot_at_ms
-            .unwrap_or(now_ms + mean_interval_ms);
+            .next_screenshot_suspend_safe_ms
+            .map_or(now_ms + mean_interval_ms, |next| {
+                now_ms + (next - self.suspend_safe_ms(now_ms))
+            });
 
         [
             heartbeat::next_heartbeat_at_ms(&state.heartbeat, &state.upload),

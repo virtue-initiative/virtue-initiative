@@ -36,9 +36,10 @@ get_last_logout_utc_ms() -> Result<Option<i64>>
 
 `PlatformHooks: ScreenshotHooks + LifecycleHooks` is a blanket impl — platforms
 never implement it directly. `get_monotonic_clock_ms` (a clock that doesn't
-advance while suspended) feeds only `lifecycle::tick`'s suspend evidence
-(CORE-002) — it's not on `ScreenshotHooks`, and screenshot scheduling
-itself still paces off the wall clock. Mac separately listens for IOKit wake
+advance while suspended) feeds `lifecycle::tick`'s suspend evidence and the
+restart gap (CORE-002), and the loop's wait and the next screenshot time are
+counted on it so setting the wall clock back holds off nothing (CORE-020,
+CORE-003). It's not on `ScreenshotHooks`. Mac separately listens for IOKit wake
 notifications for a local post-wake UX flush unrelated to the core model —
 see `architecture.md`.
 
