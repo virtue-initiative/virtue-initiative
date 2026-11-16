@@ -179,6 +179,7 @@ cargo clippy -p virtue-core --all-targets -- -D warnings
 cargo clippy -p virtue-mac --all-targets -- -D warnings
 cargo test -p virtue-core
 cargo test -p virtue-core --features testing --tests
+(cd shared-swift && swift test)
 ./mac/scripts/build-dmg.sh
 ```
 

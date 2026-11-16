@@ -529,18 +529,11 @@ final class MonitoringCoordinator: ObservableObject {
         return "Login failed: \(raw)"
     }
 
-    /// Local time plus a relative age — "when did this last work?" is the
-    /// question every timestamp on the status sheet is really answering.
+    /// Local time plus a relative age (CLIENT-007) — "when did this last
+    /// work?" is the question every timestamp on the status sheet is really
+    /// answering.
     func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
-        guard let timestampMs else { return "<none>" }
-        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .medium
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .short
-        return
-            "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+        StatusTimestamp.full(timestampMs)
     }
 
     /// Where this app's daemon writes its rolling log files — surfaced on the
