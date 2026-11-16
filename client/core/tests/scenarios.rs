@@ -605,6 +605,39 @@ fn screenshot_state_survives_restart() {
     );
 }
 
+// CORE-016: a state file from an older client is saved with the current
+// version, through a tick, a `tick_once` and a logout.
+#[test]
+fn an_older_state_file_is_saved_with_the_current_version() {
+    fn saved_version(scenario: &Scenario) -> u64 {
+        let saved: serde_json::Value =
+            serde_json::from_str(&scenario.read_file("event_state.json")).unwrap();
+        saved["version"].as_u64().unwrap()
+    }
+    let current = u64::from(virtue_core::DAEMON_STATE_VERSION);
+
+    let mut older = Scenario::authenticated();
+    older.at_t(0).tick();
+    let state_dir = older.state_dir_path().to_path_buf();
+    let path = state_dir.join("event_state.json");
+    let mut saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    saved["version"] = 0.into();
+    std::fs::write(&path, saved.to_string()).unwrap();
+
+    let scenario = Scenario::authenticated_with_state_dir(state_dir.clone());
+    scenario.daemon.tick_once();
+    assert_eq!(saved_version(&scenario), current, "after tick_once");
+
+    let mut scenario = Scenario::authenticated_with_state_dir(state_dir);
+    scenario.at_t(1_000).tick();
+    assert_eq!(saved_version(&scenario), current, "after a tick");
+    scenario.logout().unwrap();
+    assert_eq!(saved_version(&scenario), current, "after a logout");
+
+    drop(older);
+}
+
 // ── Status page data (CORE-010 / CORE-018) ────────────────────────────────────
 
 // CORE-010, CORE-018: status reports capture data.

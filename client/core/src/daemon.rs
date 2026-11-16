@@ -27,8 +27,9 @@ use virtue_text_detection::ScreenshotOCR;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
 /// `#[serde(default)]` alone can't absorb; `Daemon::new` logs the version
-/// transition. No real migration step exists yet — every change so far has
-/// been additive/subtractive.
+/// transition, and every write saves the current version (CORE-016). No real
+/// migration step exists yet — every change so far has been
+/// additive/subtractive.
 pub const DAEMON_STATE_VERSION: u32 = 1;
 
 /// A caller's request to mutate the daemon's state, serviced only by the
@@ -221,7 +222,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.platform.get_time_utc_ms().unwrap_or(0)
     }
 
-    fn persist(&self, state: &DaemonState) {
+    /// Every write records the current version (CORE-016), including a
+    /// reset state's, whose `Default` version is 0.
+    fn persist(&self, state: &mut DaemonState) {
+        state.version = DAEMON_STATE_VERSION;
         if let Err(err) = store_state(&self.state_path, state) {
             tracing::error!(error = %err, "daemon: failed to persist state");
         }
@@ -261,7 +265,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
         let result = f(&mut working);
 
-        self.persist(&working);
+        self.persist(&mut working);
         *self.state.lock().expect("daemon state lock poisoned") = working;
 
         result
@@ -502,7 +506,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         let result = self.apply_login(&mut guard, email, password, device_name, now_ms);
-        self.persist(&guard);
+        self.persist(&mut guard);
         result
     }
 
@@ -510,7 +514,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     pub fn test_logout(&self) -> CoreResult<()> {
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_logout(&mut guard);
-        self.persist(&guard);
+        self.persist(&mut guard);
         Ok(())
     }
 
@@ -519,7 +523,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_note_user_stop(&mut guard, now_ms, source);
-        self.persist(&guard);
+        self.persist(&mut guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -527,7 +531,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_note_user_start(&mut guard, now_ms);
-        self.persist(&guard);
+        self.persist(&mut guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -535,7 +539,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_queue_upload(&mut guard, now_ms, upload);
-        self.persist(&guard);
+        self.persist(&mut guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -543,7 +547,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_flush_batch_now(&mut guard, now_ms);
-        self.persist(&guard);
+        self.persist(&mut guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -551,7 +555,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_force_capture(&mut guard, now_ms);
-        self.persist(&guard);
+        self.persist(&mut guard);
     }
 
     /// Test-only: run one tick directly against the live state, mirroring
@@ -571,7 +575,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
-        self.persist(&working);
+        self.persist(&mut working);
     }
 
     // ── The loop itself ──────────────────────────────────────────────────
