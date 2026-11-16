@@ -187,9 +187,10 @@ class MainActivity : AppCompatActivity() {
 
     // Home follows the monitoring state while it is on screen, so "Waiting for
     // first capture" turns into "Monitoring active" without leaving the app.
+    // Status Details polls too, so its relative ages (CLIENT-007) keep counting.
     private val homePoll = object : Runnable {
         override fun run() {
-            if (screen == Screen.HOME) refreshUi()
+            if (screen == Screen.HOME || screen == Screen.STATUS_DETAILS) refreshUi()
             binding.root.postDelayed(this, 3000)
         }
     }
