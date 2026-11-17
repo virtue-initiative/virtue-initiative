@@ -654,35 +654,32 @@ public sealed class SessionViewModelTests
         Assert.Null(viewModel.ErrorText);
     }
 
-    // CLIENT-008: Test Screenshot waits 10 s, saying so, before it captures, then shows it is uploading.
+    // CLIENT-008: Test Screenshot counts down 10 s, once a second, before it captures, then shows it is uploading.
     [Fact]
-    public async Task ForceCaptureAsync_WaitsTenSecondsBeforeCapturing()
+    public async Task ForceCaptureAsync_CountsDownTenSecondsBeforeCapturing()
     {
         var fakeClient = new FakeRustInteropClient
         {
             ForceScreenshotAndUploadGate = new ManualResetEventSlim(false),
         };
-        var waited = new List<TimeSpan>();
-        var delay = new TaskCompletionSource();
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", span =>
+        var waits = new List<(TimeSpan Span, string? Message, bool Captured)>();
+        SessionViewModel? viewModel = null;
+        viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", span =>
         {
-            waited.Add(span);
-            return delay.Task;
+            waits.Add((span, viewModel!.TransitionMessage, fakeClient.ForceScreenshotAndUploadCalled));
+            return Task.CompletedTask;
         });
 
         var capture = viewModel.ForceCaptureAsync();
-        Assert.Equal(new[] { TimeSpan.FromSeconds(10) }, waited);
-        Assert.Equal(TestScreenshotWaiting, viewModel.TransitionMessage);
-        Assert.True(viewModel.IsBusy);
 
-        delay.SetResult();
-        // xUnit's sync context may run the continuation a moment later.
-        for (var i = 0; i < 500 && viewModel.TransitionMessage == TestScreenshotWaiting; i++)
-        {
-            await Task.Delay(10);
-        }
+        var expected = Enumerable.Range(1, 10).Reverse()
+            .Select(left => (TimeSpan.FromSeconds(1),
+                (string?)(left == 1 ? "Taking screenshot in 1 second..." : $"Taking screenshot in {left} seconds..."),
+                false))
+            .ToList();
+        Assert.Equal(expected, waits);
         Assert.Equal("Screenshot uploading...", viewModel.TransitionMessage);
-        Assert.False(fakeClient.ForceScreenshotAndUploadCalled);
+        Assert.True(viewModel.IsBusy);
 
         fakeClient.ForceScreenshotAndUploadGate.Set();
         var result = await capture;
@@ -885,8 +882,6 @@ public sealed class SessionViewModelTests
 
         Assert.False(viewModel.UpdateInstalling);
     }
-
-    private const string TestScreenshotWaiting = "Taking screenshot in 10 seconds...";
 
     /// <summary>A delay that doesn't really wait, for tests that don't look at it.</summary>
     private static Task NoDelay(TimeSpan _) => Task.CompletedTask;

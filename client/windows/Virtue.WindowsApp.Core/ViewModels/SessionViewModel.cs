@@ -50,7 +50,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     /// <summary>How long Test Screenshot waits before it captures (CLIENT-008).</summary>
     public static readonly TimeSpan TestScreenshotDelay = TimeSpan.FromSeconds(10);
 
-    public const string TestScreenshotWaitingMessage = "Taking screenshot in 10 seconds...";
+    /// <summary>The countdown line for <paramref name="seconds"/> left (CLIENT-008).</summary>
+    public static string TestScreenshotWaitingMessage(int seconds) =>
+        seconds == 1 ? "Taking screenshot in 1 second..." : $"Taking screenshot in {seconds} seconds...";
 
     /// <param name="delay">Waits out a delay; tests pass one that doesn't really wait.</param>
     public SessionViewModel(
@@ -469,8 +471,8 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Runs a test screenshot after <see cref="TestScreenshotDelay"/>, so the
-    /// user can bring up the screen they want captured, and returns what it
+    /// Runs a test screenshot after counting down <see cref="TestScreenshotDelay"/>,
+    /// so the user can bring up the screen they want captured, and returns what it
     /// actually did — the interop call only comes back once the resulting
     /// batch has landed or the wait timed out. Null means the call failed;
     /// <see cref="ErrorText"/> says why.
@@ -480,7 +482,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         ForceCapturePayload? result = null;
         await RunBusyAsync(async () =>
         {
-            await _delay(TestScreenshotDelay);
+            for (var left = (int)TestScreenshotDelay.TotalSeconds; left > 0; left--)
+            {
+                TransitionMessage = TestScreenshotWaitingMessage(left);
+                await _delay(TimeSpan.FromSeconds(1));
+            }
+
             TransitionMessage = "Screenshot uploading...";
             try
             {
@@ -492,7 +499,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
                 throw new InvalidOperationException($"Test screenshot failed: {ex.Message}", ex);
             }
             await RefreshInternalAsync();
-        }, TestScreenshotWaitingMessage);
+        });
         return result;
     }
 

@@ -320,7 +320,7 @@ public partial class App : Application
         try
         {
             // CLIENT-008: wait so the user can bring up the screen they want captured.
-            _trayController?.ShowBalloonTip("Virtue", SessionViewModel.TestScreenshotWaitingMessage);
+            _trayController?.ShowBalloonTip("Virtue", SessionViewModel.TestScreenshotWaitingMessage((int)SessionViewModel.TestScreenshotDelay.TotalSeconds));
             await Task.Delay(SessionViewModel.TestScreenshotDelay);
             // Returns once the batch has landed (or the wait gave up), so the
             // balloon reports what happened instead of assuming success.
