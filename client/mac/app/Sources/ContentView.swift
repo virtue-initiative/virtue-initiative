@@ -121,7 +121,8 @@ struct ContentView: View {
     @ViewBuilder
     private var menuItems: some View {
         if coordinator.loggedIn {
-            Button(coordinator.isForceCapturing ? "Screenshot uploading…" : "Test Screenshot") {
+            Button(coordinator.isForceCapturing
+                ? (coordinator.forceCaptureMessage ?? "Screenshot uploading…") : "Test Screenshot") {
                 coordinator.forceCapture()
             }
             .disabled(coordinator.needsScreenRecording || coordinator.isForceCapturing)

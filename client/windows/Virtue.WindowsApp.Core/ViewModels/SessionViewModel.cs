@@ -21,6 +21,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 {
     private readonly IRustInteropClient _interopClient;
     private readonly string _windowsPackageVersion;
+    private readonly Func<TimeSpan, Task> _delay;
     private string _buildLabel = "unknown";
     private bool _loggedIn;
     private string _accountEmail = string.Empty;
@@ -46,9 +47,19 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private bool _isCheckingForUpdates;
     private Task _currentAction = Task.CompletedTask;
 
-    public SessionViewModel(IRustInteropClient interopClient, string? windowsPackageVersion = null)
+    /// <summary>How long Test Screenshot waits before it captures (CLIENT-008).</summary>
+    public static readonly TimeSpan TestScreenshotDelay = TimeSpan.FromSeconds(10);
+
+    public const string TestScreenshotWaitingMessage = "Taking screenshot in 10 seconds...";
+
+    /// <param name="delay">Waits out a delay; tests pass one that doesn't really wait.</param>
+    public SessionViewModel(
+        IRustInteropClient interopClient,
+        string? windowsPackageVersion = null,
+        Func<TimeSpan, Task>? delay = null)
     {
         _interopClient = interopClient;
+        _delay = delay ?? (span => Task.Delay(span));
         _windowsPackageVersion = windowsPackageVersion?.Trim() ?? string.Empty;
         RefreshCommand = new DelegateCommand(RefreshAsync, () => !IsBusy);
         LogoutCommand = new DelegateCommand(LogoutAsync, () => !IsBusy);
@@ -458,15 +469,19 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Runs a test screenshot and returns what it actually did — the interop
-    /// call only comes back once the resulting batch has landed or the wait
-    /// timed out. Null means the call failed; <see cref="ErrorText"/> says why.
+    /// Runs a test screenshot after <see cref="TestScreenshotDelay"/>, so the
+    /// user can bring up the screen they want captured, and returns what it
+    /// actually did — the interop call only comes back once the resulting
+    /// batch has landed or the wait timed out. Null means the call failed;
+    /// <see cref="ErrorText"/> says why.
     /// </summary>
     public async Task<ForceCapturePayload?> ForceCaptureAsync()
     {
         ForceCapturePayload? result = null;
         await RunBusyAsync(async () =>
         {
+            await _delay(TestScreenshotDelay);
+            TransitionMessage = "Screenshot uploading...";
             try
             {
                 result = await Task.Run(() => _interopClient.ForceScreenshotAndUpload());
@@ -477,7 +492,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
                 throw new InvalidOperationException($"Test screenshot failed: {ex.Message}", ex);
             }
             await RefreshInternalAsync();
-        }, "Screenshot uploading...");
+        }, TestScreenshotWaitingMessage);
         return result;
     }
 

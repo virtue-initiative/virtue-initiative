@@ -28,7 +28,7 @@
 - `virtue dev add-log --risk 0.7 [--title ...] [--details ...]`
   - Queues a metadata-only developer log into the next encrypted batch.
 - `virtue test-screenshot`
-  - Takes a real screenshot and uploads it immediately, the same as the "Test Screenshot" action on Mac/Windows/Android.
+  - Waits 10 seconds, then takes a real screenshot and uploads it, the same as the "Test Screenshot" action on Mac/Windows/Android.
 
 ## Service behavior
 

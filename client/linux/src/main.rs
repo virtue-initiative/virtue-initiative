@@ -97,7 +97,7 @@ enum Commands {
     },
     #[command(
         name = "test-screenshot",
-        about = "Take a screenshot and upload it now, same as Test Screenshot on other platforms"
+        about = "Take a screenshot in 10 seconds and upload it, same as Test Screenshot on other platforms"
     )]
     ForceScreenshot,
     #[command(about = "Report an issue to the Virtue Initiative team")]
@@ -1099,7 +1099,16 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     Ok(())
 }
 
+/// How long `test-screenshot` waits before it captures, so the user can bring
+/// up the screen they want captured (CLIENT-008).
+const TEST_SCREENSHOT_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn force_screenshot(paths: ClientPaths) -> Result<()> {
+    // Fail now, not after the wait, when the daemon isn't running.
+    drop(connect_to_daemon(&paths)?);
+    println!("Taking screenshot in 10 seconds...");
+    std::thread::sleep(TEST_SCREENSHOT_DELAY);
+
     // The baseline the wait compares against: `force_capture_now` returns once
     // the capture is committed, not once its batch has landed.
     let before = {

@@ -363,7 +363,7 @@ public sealed class SessionViewModelTests
             MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
             ForceScreenshotAndUploadGate = new ManualResetEventSlim(false),
         };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", NoDelay);
 
         var capture = viewModel.ForceCaptureAsync();
         Assert.True(viewModel.IsBusy);
@@ -644,7 +644,7 @@ public sealed class SessionViewModelTests
     public async Task ForceCaptureAsync_ReturnsTheOutcomeAndInvokesInteropOnSuccess()
     {
         var fakeClient = new FakeRustInteropClient();
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", NoDelay);
 
         var result = await viewModel.ForceCaptureAsync();
 
@@ -652,6 +652,44 @@ public sealed class SessionViewModelTests
         Assert.Equal("uploaded", result!.Outcome);
         Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
         Assert.Null(viewModel.ErrorText);
+    }
+
+    // CLIENT-008: Test Screenshot waits 10 s, saying so, before it captures, then shows it is uploading.
+    [Fact]
+    public async Task ForceCaptureAsync_WaitsTenSecondsBeforeCapturing()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            ForceScreenshotAndUploadGate = new ManualResetEventSlim(false),
+        };
+        var waited = new List<TimeSpan>();
+        var delay = new TaskCompletionSource();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", span =>
+        {
+            waited.Add(span);
+            return delay.Task;
+        });
+
+        var capture = viewModel.ForceCaptureAsync();
+        Assert.Equal(new[] { TimeSpan.FromSeconds(10) }, waited);
+        Assert.Equal(TestScreenshotWaiting, viewModel.TransitionMessage);
+        Assert.True(viewModel.IsBusy);
+
+        delay.SetResult();
+        // xUnit's sync context may run the continuation a moment later.
+        for (var i = 0; i < 500 && viewModel.TransitionMessage == TestScreenshotWaiting; i++)
+        {
+            await Task.Delay(10);
+        }
+        Assert.Equal("Screenshot uploading...", viewModel.TransitionMessage);
+        Assert.False(fakeClient.ForceScreenshotAndUploadCalled);
+
+        fakeClient.ForceScreenshotAndUploadGate.Set();
+        var result = await capture;
+
+        Assert.NotNull(result);
+        Assert.True(fakeClient.ForceScreenshotAndUploadCalled);
+        Assert.Null(viewModel.TransitionMessage);
     }
 
     // CLIENT-008: a not-captured outcome and its message are passed through.
@@ -662,7 +700,7 @@ public sealed class SessionViewModelTests
         {
             ForceScreenshotAndUploadResult = new("not_captured", "No screenshot was taken."),
         };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", NoDelay);
 
         var result = await viewModel.ForceCaptureAsync();
 
@@ -680,7 +718,7 @@ public sealed class SessionViewModelTests
         {
             ForceScreenshotAndUploadError = new InvalidOperationException("monitoring is not running"),
         };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234", NoDelay);
 
         var result = await viewModel.ForceCaptureAsync();
 
@@ -847,6 +885,11 @@ public sealed class SessionViewModelTests
 
         Assert.False(viewModel.UpdateInstalling);
     }
+
+    private const string TestScreenshotWaiting = "Taking screenshot in 10 seconds...";
+
+    /// <summary>A delay that doesn't really wait, for tests that don't look at it.</summary>
+    private static Task NoDelay(TimeSpan _) => Task.CompletedTask;
 
     private sealed class FakeRustInteropClient : IRustInteropClient
     {
