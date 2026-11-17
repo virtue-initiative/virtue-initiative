@@ -206,18 +206,17 @@ Each platform MUST supply the following to the core. A signal that cannot be rea
 | Platform | Capture                                                    | Locked or screensaver                                                  | Last login                           | Last logout                                                                 |
 | -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
 | Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
-| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
+| macOS    | every display as one image, via `screencapture`            | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
 | Windows  | every monitor as one image                                 | screensaver running, or the input desktop cannot be opened             | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
 | Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
 | iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
+- macOS MUST capture every active display in one `screencapture` run and, with more than one, MUST combine them into one image placed as the displays are arranged, at the highest pixel density among them. If the captured images do not match the display list (a display was added or removed mid-capture), it MUST still combine every captured image, side by side.
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
 - Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
-
-> OPEN: macOS captures only the main display, while Linux and Windows capture every screen — should macOS capture all displays?
 
 ## CLIENT-019 Text recognition for redaction
 

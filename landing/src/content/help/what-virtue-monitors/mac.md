@@ -2,11 +2,9 @@
 
 This page lists everything the Virtue app on Mac captures and sends.
 
-Other displays are not captured yet. Virtue only captures the display macOS treats as the main one.
-
 ## Screenshots
 
-- Virtue takes a screenshot of your main display at random times, about every 5 minutes on average.
+- Virtue takes a screenshot of every display at random times, about every 5 minutes on average.
 - No screenshot is taken while the screen is locked or the screensaver is on.
 - If the screen has not changed since the last screenshot, Virtue sends a note saying so instead of a new screenshot.
 

@@ -526,7 +526,7 @@ private struct StatusFocus: View {
                 coordinator.coreStatus?.lastScreenshotAtMs.map {
                     " Last screenshot at \(shortTime($0))."
                 } ?? ""
-            return "Virtue is capturing your main display.\(last)"
+            return "Virtue is capturing every display.\(last)"
         default:
             return "Virtue is getting ready. The first screenshot is taken within a few minutes."
         }
@@ -543,7 +543,7 @@ private struct WhatVirtueMonitorsView: View {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(
-                        "Virtue takes a screenshot of your main display about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners."
+                        "Virtue takes a screenshot of every display about every 5 minutes. Screenshots are blurred, have text blacked out, and can only be seen by you and your partners."
                     )
                     .font(.system(size: 14))
                     .foregroundStyle(VirtueBrand.text)
