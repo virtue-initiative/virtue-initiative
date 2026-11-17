@@ -993,6 +993,10 @@ A failure to build or send one watcher's digest MUST NOT stop the server from se
 
 The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
 
+### API-067 Email delivery retries
+
+When a send to the email provider fails with any 5xx status, the server SHOULD retry it a few times with backoff before treating the send as failed, whatever the response body is. This includes statuses such as 520 that Cloudflare returns when the connection to the provider fails.
+
 ### API-058 `POST /newsletter`
 
 The newsletter list lives in the donations worker's database (`newsletter_signups`), which this server reaches through its `DONATE_DB` binding. Each row is an email with the country (ISO 3166-1 alpha-2) and region (ISO 3166-2 subdivision code, e.g. a US state) that Cloudflare reports for the request that added it, which MAY be absent. Each row also has a random, unguessable `token` that its confirmation and unsubscribe links carry. Newsletters MUST only be sent to rows that are confirmed and not unsubscribed.

@@ -457,6 +457,36 @@ describe('Notification scheduler (API-057)', () => {
     expect(errors).toHaveBeenCalledWith('digest email failed', expect.anything());
   });
 
+  it('retries a digest send that Cloudflare answers with a non-JSON 520 (API-067)', async () => {
+    const now = Date.UTC(2026, 0, 6, 6, 5, 0);
+    const { cookie: ownerCookie } = await signupAndGetCookie('retry-owner@example.com', 'pw');
+    await addVerifiedWatcher(ownerCookie, 'retry-watcher@example.com');
+
+    let attempts = 0;
+    fetchMock.activate();
+    fetchMock.disableNetConnect();
+    fetchMock
+      .get('https://email.us-east-1.amazonaws.com')
+      .intercept({ path: '/v2/email/outbound-emails', method: 'POST' })
+      .reply(() => {
+        attempts += 1;
+        if (attempts === 1) {
+          return { statusCode: 520, data: 'error code: 520\n' };
+        }
+        return { statusCode: 200, data: JSON.stringify({ MessageId: 'msg-retried' }) };
+      })
+      .times(2);
+
+    try {
+      await runNotificationSchedule({ ...env, EMAIL_DELIVERY_MODE: 'ses' }, now);
+    } finally {
+      fetchMock.deactivate();
+    }
+
+    expect(attempts).toBe(2);
+    expect(await listDailyDigests()).toEqual([]);
+  });
+
   it('keeps sending digests to other watchers when one fails to build', async () => {
     const now = Date.UTC(2026, 0, 6, 6, 5, 0);
     const { cookie: ownerCookie } = await signupAndGetCookie('build-owner@example.com', 'pw');
