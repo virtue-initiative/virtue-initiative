@@ -37,31 +37,14 @@ Read `TESTING.md` before writing or changing a test. In short:
 
 ## Running checks
 
-When you change code, run the checks for every area you touched. If you change shared code or cross-cutting behavior, run all affected sections, not just the one you started in. `just --list` shows the everyday commands; [`docs/ci-checks.md`](docs/ci-checks.md) has the exact commands each CI workflow runs.
+[`docs/checking-changes.md`](docs/checking-changes.md) says what to run and in what order. In short:
 
-- Prefer matching the existing GitHub Actions workflows in `.github/workflows/`.
-- Use `bun install` for Node projects when you need a clean install matching CI.
-- Run Rust workspace checks from `client/`, always naming the package (`-p virtue-core`).
-- If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
-- Release packaging steps in `docs/ci-checks.md` are only needed when validating packaging or release changes.
-- If you add or change a test or a `SPEC.md`, run `just spec-check` from the repo root. It checks that every test cites an existing spec ID and that no spec section has lost its tests. `just spec-coverage` prints the coverage report. See `TESTING.md`.
-- If you move, rename or delete a file, or edit a markdown doc, run `just doc-check`. It fails when a doc names a file that doesn't exist. CI runs it in the Spec Check workflow.
+- While you work, run the narrowest tests first. `just tests-for <SPEC-ID>` lists the tests citing a spec section and prints a command that runs just those.
+- Before you finish, run `just check`. It runs the CI checks for every area changed since `staging` (including uncommitted files), including `spec-check` and `doc-check`, and lists the platform checks it can't run on this OS. Say in your summary which of those you didn't run.
+- For a change a user would see, also run it: the web app through `playwright-cli`, the Linux client through the `virtue-login` skill.
+- Run Rust commands from `client/`, always naming the package (`-p virtue-core`).
+- `just spec-coverage` prints spec coverage. [`docs/ci-checks.md`](docs/ci-checks.md) has the exact commands each CI workflow runs, including release packaging, which you need only when changing packaging.
 - When a change makes a doc wrong, fix the doc in the same change. [`docs/README.md`](docs/README.md) lists which doc covers what.
-
-Minimum per area:
-
-- `api/` changes: run API typecheck, tests, and Prettier check.
-- `web/` changes: run web typecheck, Prettier check, and build.
-- `landing/` changes: run landing typecheck, Prettier check, and build.
-- `shared-web/` changes: run shared-web Prettier check plus both `web` and `landing` checks.
-- `client/core/` changes: run Linux Rust checks at minimum; add macOS/Windows/mobile checks when relevant to the code touched.
-- `client/linux/` changes: run the Linux client CI commands.
-- `client/mac/` changes: run the macOS client CI commands.
-- `client/windows/` changes: run the Windows client CI commands.
-- `client/android/` changes: run the Android debug lint/build command.
-- `client/ios/` changes: run the iOS Rust build plus simulator build.
-- `hash-server/` changes: run `cargo fmt --check`, `cargo clippy` and `cargo test` there.
-- Any `.swift` change: run `./scripts/swift-format.sh --check`.
 
 ## Local dev
 
@@ -175,4 +158,4 @@ Checklist for user-facing text (website, help docs, app UI copy):
 
 When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
 
-For UI or copy changes, attach screenshots with `gh pr create --attach` (see `AGENTS.md`).
+For UI or copy changes, attach screenshots with `gh pr create --attach` (see `.claude/skills/playwright-cli/references/pr-attachments.md`).

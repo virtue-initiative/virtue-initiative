@@ -2,8 +2,9 @@
 
 The exact commands each GitHub Actions workflow runs, per component, so you can run the same
 thing locally. `just --list` wraps the everyday ones. When a workflow's commands change, update
-this page and the matching `just` recipe. For which checks a change needs, see "Running checks"
-in [`AGENTS.md`](../AGENTS.md).
+this page, the matching `just` recipe and `scripts/check-changed.ts`, which `just check` uses to
+run these for every area a branch touches. For what to run while working, see
+[`checking-changes.md`](checking-changes.md).
 
 ## Web/API CI (`.github/workflows/web.yml`)
 
@@ -49,6 +50,7 @@ From `web/`:
 ```bash
 bun install
 bun run typecheck
+bun run test
 bun run format:check
 bun run build
 ```

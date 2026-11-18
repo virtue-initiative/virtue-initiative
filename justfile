@@ -32,6 +32,11 @@ dev domain="":
 dev-donate domain="":
     ./scripts/launch.sh --donate {{domain}}
 
+# Run the CI checks for every area changed since staging. `--list` prints them; `just check web` runs one area.
+[group('dev')]
+check *args:
+    bun scripts/check-changed.ts {{args}}
+
 # --- specs ---------------------------------------------------------------
 
 # Check every test cites a SPEC.md section ID and uncovered sections match the allow-list.
@@ -43,6 +48,11 @@ spec-check:
 [group('specs')]
 spec-coverage:
     bun scripts/spec-check.ts --report
+
+# List the tests that cite each spec ID, with a command that runs just those, e.g. `just tests-for CORE-002`.
+[group('specs')]
+tests-for +ids:
+    bun scripts/spec-check.ts --tests-for {{ids}}
 
 # Check that every file path and relative link in the markdown docs exists.
 [group('specs')]

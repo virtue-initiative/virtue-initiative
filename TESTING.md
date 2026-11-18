@@ -1,5 +1,8 @@
 # Testing
 
+How specs and tests connect, and how to write a test. For what to run while you work, see
+[`docs/checking-changes.md`](docs/checking-changes.md).
+
 The specs say what the software must do, and the tests prove it. A test that proves
 a guarantee should still pass after the code behind it is rewritten, so tests check
 behavior at a component's public interface, not its internals.

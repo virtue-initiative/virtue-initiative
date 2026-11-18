@@ -14,6 +14,7 @@ Where each kind of doc lives. When a change makes a doc wrong, fix it in the sam
 | Releasing            | Signing, stores and release pipelines                        | `client/*/RELEASING.md`, `api/README.md`, `api-donate/README.md`                |
 | Agent instructions   | Rules that are easy to break, for coding agents              | `AGENTS.md` at the root and in `api/`, `web/`, `client/`, `client/core/`        |
 | Testing              | How specs and tests connect                                  | [`../TESTING.md`](../TESTING.md), `api/TESTING.md`                              |
+| Checking a change    | What to run, in what order, and how to see it working        | [`checking-changes.md`](checking-changes.md)                                    |
 | CI                   | The exact commands each workflow runs                        | [`ci-checks.md`](ci-checks.md)                                                  |
 | User help            | What users read on the website                               | `landing/src/content/help/`, `landing/src/content/download-instructions/`       |
 
