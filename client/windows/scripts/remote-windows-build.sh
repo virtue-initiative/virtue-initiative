@@ -204,6 +204,8 @@ if [[ $SKIP_SYNC -eq 0 ]]; then
       --exclude='client/windows/dist' \
       --exclude='client/android/.gradle' \
       --exclude='client/android/**/build' \
+      --exclude='client/target-docker' \
+      --exclude='client/.docker-cargo-home' \
       -czf "$ARCHIVE_PATH" \
       client
   fi
