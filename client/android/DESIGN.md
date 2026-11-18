@@ -40,7 +40,7 @@ build never replaces itself with the stable APK.
   GitHub release: its version, APK URL, and the SHA-256 GitHub reports for the APK. `{}`
   means no update.
 - An update is offered when the feed's version is above `VERSION`. The APK is downloaded to
-  `no_backup/updates/`, its SHA-256 checked against the feed, and its package name and
+  the app's private `no_backup/updates` directory, its SHA-256 checked against the feed, and its package name and
   versionCode checked against the installed app. Stable releases always raise
   `ANDROID_VERSION_CODE` (`check-version-bump.sh`). Android rejects an APK signed with a
   different key.

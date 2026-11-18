@@ -73,7 +73,16 @@ function looksLikePath(code: string): boolean {
 function ignored(rel: string): boolean {
   if (rel.startsWith('..')) return false;
   try {
-    execFileSync('git', ['check-ignore', '-q', '--no-index', rel], { cwd: ROOT, stdio: 'ignore' });
+    // Only the repo's own ignore rules count, not a global excludes file, so
+    // the result is the same on every machine and in CI.
+    execFileSync(
+      'git',
+      ['-c', 'core.excludesFile=/dev/null', 'check-ignore', '-q', '--no-index', rel],
+      {
+        cwd: ROOT,
+        stdio: 'ignore',
+      },
+    );
     return true;
   } catch {
     return false;
