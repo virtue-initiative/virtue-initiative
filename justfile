@@ -1,6 +1,6 @@
 # Catalog of the commands devs actually run day to day, grouped by component.
 # Run `just --list` to see everything. Each recipe is a thin delegation to an
-# existing script or package.json command — see AGENTS.md for the exact
+# existing script or package.json command — see docs/ci-checks.md for the exact
 # command sequences CI runs.
 
 set positional-arguments
@@ -43,6 +43,11 @@ spec-check:
 [group('specs')]
 spec-coverage:
     bun scripts/spec-check.ts --report
+
+# Check that every file path and relative link in the markdown docs exists.
+[group('specs')]
+doc-check:
+    bun scripts/doc-check.ts
 
 # --- api -----------------------------------------------------------------
 

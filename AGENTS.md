@@ -1,431 +1,54 @@
 # AGENTS.md
 
-This repository is split across several independently-tested areas. When you change code, run the checks for every area you touched. If you change shared code or cross-cutting behavior, run all affected sections, not just the one you started in.
+Instructions for coding agents working in this repo. Humans: start with [`README.md`](README.md).
 
-Run `just --list` to see the everyday build/dev/format/test/typecheck commands, grouped by component. The root `justfile` is a thin catalog wrapping the commands documented below — it only covers the common dev-loop commands, not every script in the repo (deploys, DB migrations, packaging, etc. are still run directly; see the relevant section below). When a command sequence below changes, keep the matching `just` recipe in sync.
+- [`docs/README.md`](docs/README.md) lists every doc and what it covers.
+- [`docs/overview.md`](docs/overview.md) explains how the system fits together and what it is for. Read its goals and non-goals before reviewing a change: they say what matters here and what doesn't.
+- Each component's `AGENTS.md`, where there is one, lists the rules that are easy to break there.
 
-## General rules
+## SPEC.md files
+
+Some components have a SPEC.md file. These files MUST be written with RFC-like language. If you need to change one, you SHOULD keep your changes as minimal as possible.
+
+SPEC.md is the source of truth and MUST be updated before the code is updated. They SHOULD NOT include full implementation details, but include enough to recreate something similar to the existing component.
+
+Each numbered section is tagged with a stable ID scoped to its file (e.g. `API-032`, `HASH-005`, `CORE-002`), not a positional number, so cross-references in code comments survive reordering or insertion. A new section MUST get the next unused number for its file; numbers MUST NOT be reused, even after the section they named is deleted. IDs need not stay in numeric or document order. Code comments SHOULD cite the bare ID (e.g. `HASH-005`) rather than repeating the file path:
+
+| Prefix   | File                   |
+| -------- | ---------------------- |
+| `API`    | `api/SPEC.md`          |
+| `DONATE` | `api-donate/SPEC.md`   |
+| `WEB`    | `web/SPEC.md`          |
+| `HASH`   | `hash-server/SPEC.md`  |
+| `CORE`   | `client/core/SPEC.md`  |
+| `CLIENT` | `client/SPEC.md`       |
+| `BATCH`  | `batch-format/SPEC.md` |
+
+`web/SPEC.md` and `client/SPEC.md` describe what users see and can do in the web app and the platform client apps. The others describe server, core and wire behavior.
+
+## Tests
+
+Read `TESTING.md` before writing or changing a test. In short:
+
+- Every test MUST cite the spec ID it proves, in its title (TypeScript) or a comment above it (Rust, C#, Kotlin, Swift). `just spec-check` enforces this. A self-test of a test helper cites `NO-SPEC` instead.
+- Test behavior through the component's public interface (HTTP, the `Scenario` DSL, what the user sees), so refactoring internals doesn't break tests.
+- A behavior change updates the spec, then a test citing it, then the code. A bug fix adds a test that fails without the fix.
+- When a test shows the code doesn't meet the spec and the fix is out of scope, mark the test `KNOWN-BUG` as `TESTING.md` describes instead of fixing or weakening it.
+
+## Running checks
+
+When you change code, run the checks for every area you touched. If you change shared code or cross-cutting behavior, run all affected sections, not just the one you started in. `just --list` shows the everyday commands; [`docs/ci-checks.md`](docs/ci-checks.md) has the exact commands each CI workflow runs.
 
 - Prefer matching the existing GitHub Actions workflows in `.github/workflows/`.
 - Use `bun install` for Node projects when you need a clean install matching CI.
-- Use `cargo` commands from `client/` for Rust workspace checks unless a section below says otherwise.
+- Run Rust workspace checks from `client/`, always naming the package (`-p virtue-core`).
 - If you only change docs or non-executable assets, format checks may still be relevant if those files are covered by Prettier.
-- Release packaging steps are listed below because CI runs them, but they are usually only needed when validating packaging or release changes.
+- Release packaging steps in `docs/ci-checks.md` are only needed when validating packaging or release changes.
 - If you add or change a test or a `SPEC.md`, run `just spec-check` from the repo root. It checks that every test cites an existing spec ID and that no spec section has lost its tests. `just spec-coverage` prints the coverage report. See `TESTING.md`.
+- If you move, rename or delete a file, or edit a markdown doc, run `just doc-check`. It fails when a doc names a file that doesn't exist. CI runs it in the Spec Check workflow.
+- When a change makes a doc wrong, fix the doc in the same change. [`docs/README.md`](docs/README.md) lists which doc covers what.
 
-## Repo-wide quick map
-
-- `api/`: Cloudflare Workers API
-- `api-donate/`: standalone donations Worker (Stripe Checkout)
-- `web/`: main web app
-- `landing/`: marketing site and help pages
-- `shared-web/`: shared web assets used by `web` and `landing`
-- `client/core/`: shared Rust core used by desktop/mobile clients
-- `client/linux/`, `client/mac/`, `client/windows/`, `client/android/`, `client/ios/`: platform clients
-
-## Web/API CI (`.github/workflows/web.yml`)
-
-Run this when touching `api/`, `api-donate/`, `web/`, `landing/`, `shared-web/`, or `theme.json`.
-
-### API
-
-From `api/`:
-
-```bash
-bun install
-bun run typecheck
-bun test
-bun run format:check
-```
-
-Notes:
-
-- `bun test` runs `vitest run`.
-- API tests are documented in `api/TESTING.md`.
-
-### Donate API
-
-From `api-donate/`:
-
-```bash
-bun install
-bun run typecheck
-bun test
-bun run format:check
-```
-
-Notes:
-
-- `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
-- Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
-- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
-
-### Web app
-
-From `web/`:
-
-```bash
-bun install
-bun run typecheck
-bun run format:check
-bun run build
-```
-
-### Landing site
-
-From `landing/`:
-
-```bash
-bun install
-GITHUB_TOKEN=stub bun run typecheck
-bun run format:check
-GITHUB_TOKEN=stub bun run build
-```
-
-Notes:
-
-- CI provides `GITHUB_TOKEN` for landing checks because release metadata scripts may read GitHub releases.
-- `typecheck` and `build` both prepare release data first.
-
-### Shared web package
-
-`shared-web/` does not currently have its own typecheck or test step in CI. If you change it, at minimum run:
-
-From `shared-web/`:
-
-```bash
-bun run format:check
-```
-
-Also rerun the dependent checks in both `web/` and `landing/`, since that is where breakage will surface.
-
-## Client version check (`.github/workflows/version-check.yml`)
-
-This only applies to pull requests into `main` that change client release versions.
-
-CI compares `client/version.properties` on the PR branch against the base branch. To run the same script locally:
-
-```bash
-base_version_file="$(mktemp)"
-git show <base-sha>:client/version.properties > "${base_version_file}"
-./client/scripts/check-version-bump.sh "${base_version_file}" ./client/version.properties
-```
-
-Replace `<base-sha>` with the commit or branch you are targeting, for example `origin/main`.
-
-## TestFlight "What to Test" (`.github/workflows/testflight-notes-check.yml`)
-
-Pull requests into `main` must have a `# What to Test (iOS)` section in the PR body, with plain sentences for TestFlight testers. The check fails without it. The section is read by `client/scripts/extract-testflight-notes.sh`, which prints the text under the heading up to the next heading of the same or higher level. The `client-ios.yml` distribution step on `main` uses that text as the build's "What to Test". Staging builds keep the version label.
-
-## Rust client workspace
-
-The Rust workspace lives in `client/` and includes:
-
-- `virtue-core`
-- `virtue-linux`
-- `virtue-mac`
-- `virtue-windows`
-
-If you touch shared Rust code in `client/core/`, run the checks for every platform you can validate, because platform crates depend on it.
-
-### Linux client CI (`.github/workflows/client-linux.yml`)
-
-From `client/`:
-
-```bash
-cargo fmt --all -- --check
-cargo clippy -p virtue-core --all-targets -- -D warnings
-cargo clippy -p virtue-linux --all-targets -- -D warnings
-cargo test -p virtue-core
-cargo test -p virtue-core --features testing --tests
-cargo test -p virtue-linux
-./linux/scripts/build-deb.sh
-```
-
-Notes:
-
-- This is the most complete Rust CI workflow and is the baseline for Linux or shared-core changes.
-- `build-deb.sh` is the packaging step CI runs after tests.
-
-### Linux client integration test (`.github/workflows/client-linux.yml`, `client-linux-integration` job)
-
-End-to-end smoke test: boots the api worker locally against a fresh D1 database (the api's own D1-backed `/hash` routes stand in for the standalone Rust hash-server in local dev, same as `scripts/launch.sh`), builds the real `virtue-linux` binary, runs its daemon under Xvfb (screenshot capture works for real against a blank virtual display, so no mocking code is needed), logs in as the seeded dev account, and asserts hash/batch rows actually land in the database after a short delay.
-
-Run it locally from the repo root:
-
-```bash
-bun client/linux/scripts/integration-test.ts
-```
-
-Requires `bun`, `cargo`, `curl`, `xvfb-run` on `PATH` (on Debian/Ubuntu: `apt-get install xvfb`).
-
-Notes:
-
-- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` (port picking, api dev server bootstrap, dev-user seeding, D1 verification/retry) with the macOS integration test below.
-- Runs against an isolated `HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME` in a temp directory, so it won't touch a real local `virtue` install.
-- `client/linux/scripts/ci-login.ts` drives `virtue login`'s password prompt non-interactively via `script(1)` (Bun has no built-in pty allocation); it exports `ciLogin()` so the script can call it in-process instead of shelling out.
-- The same api-dev-server + seed + verify shape has since been extended to macOS and Windows (below); Android/iOS remain follow-up work.
-
-### macOS client CI (`.github/workflows/client-macos.yml`)
-
-Run these on macOS.
-
-From `client/`:
-
-```bash
-cargo build -p virtue-core
-cargo build -p virtue-mac
-cargo clippy -p virtue-core --all-targets -- -D warnings
-cargo clippy -p virtue-mac --all-targets -- -D warnings
-cargo test -p virtue-core
-cargo test -p virtue-core --features testing --tests
-(cd shared-swift && swift test)
-./mac/scripts/build-dmg.sh
-```
-
-Notes:
-
-- `build-dmg.sh` validates the app bundle and DMG packaging path.
-
-### macOS client integration test (`.github/workflows/client-macos.yml`, `client-macos-integration` job)
-
-Same device -> api/hash-server smoke test as Linux's, adapted to how macOS is actually driven: builds and runs the real `virtue-mac` daemon binary directly (no launchd, no packaged `.app`), then logs it in over its IPC socket with a small `virtue-mac-ci-login` helper instead of a CLI login command — macOS login normally goes through the SwiftUI app's FFI bridge (`mac/rust/src/lib.rs`), which itself just calls `ClientController::login` over the same socket, so the helper does exactly that with no interactive terminal or pty involved.
-
-Run it locally from the repo root (macOS only):
-
-```bash
-bun client/mac/scripts/integration-test.ts
-```
-
-Requires `bun`, `cargo`, `curl` on `PATH`.
-
-Notes:
-
-- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux integration test above.
-- Runs against an isolated `$HOME` in a temp directory (macOS resolves config/data/state dirs off `$HOME`, unlike Linux's XDG vars), so it won't touch a real local `virtue` install.
-- CI runners don't have Screen Recording permission granted, and there's no headless way to grant it. Rather than exercising the `CaptureFailed` alert fallback instead of a real capture, the daemon is built with the `mock-capture` Cargo feature (`client/mac/src/capture.rs`), which swaps in a fixed embedded PNG in place of shelling out to `screencapture`. It's compiled in only when explicitly requested (`cargo build -p virtue-mac --features mock-capture`) — never by `build-app.sh`/`build-dmg.sh` — so it can't end up in a shipped build, and it still exercises the real capture → classify → upload → hash → batch pipeline, just not the permission-gating logic itself.
-
-### Windows client CI (`.github/workflows/client-windows.yml`)
-
-Run these on Windows.
-
-From `client/`:
-
-```powershell
-cargo build --target x86_64-pc-windows-msvc -p virtue-core
-cargo build --target x86_64-pc-windows-msvc -p virtue-windows
-cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
-cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
-cargo test --target x86_64-pc-windows-msvc -p virtue-core
-cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --tests
-cargo test --target x86_64-pc-windows-msvc -p virtue-windows
-./windows/scripts/build-msix.ps1 -Profile Debug
-```
-
-Note: this file previously named the packaging script `build-installer.ps1`; the actual script is `build-msix.ps1` (see `client/windows/scripts/`).
-
-Notes:
-
-- CI installs NSIS before building the installer.
-- Release builds use `-Profile Release -Version <build_label>`, but debug packaging is the PR-time smoke test.
-
-### Windows client integration test (`.github/workflows/client-windows.yml`, `client-windows-integration` job)
-
-Same device -> api/hash-server smoke test as Linux's and macOS's, adapted to how Windows is actually driven: `virtue_windows` has no standalone daemon process or CLI at all -- it's a cdylib the WinUI app loads via P/Invoke, and monitoring/login both happen as in-process calls against a background thread that same process spawns (see `RustInteropClient.cs`/`SessionViewModel.cs` for the app's own call sequence: Initialize -> StartMonitoring -> Login). A small `virtue-windows-ci-runner` binary reproduces that exact sequence directly against the `virtue-windows` library, then blocks for a fixed run window so the monitor's background thread can actually capture/hash/batch/upload before the process exits (which would otherwise kill that thread immediately), and exits on its own once that window elapses -- there's no separate daemon process to start, log in to, and kill.
-
-Run it locally from the repo root (Windows only):
-
-```bash
-bun client/windows/scripts/integration-test.ts
-```
-
-Requires `bun`, `cargo` on `PATH`.
-
-Notes:
-
-- Written in TypeScript, run directly with `bun` -- no build step. Shares `client/scripts/integration-test-lib.ts` with the Linux and macOS integration tests above.
-- Runs against an isolated `PROGRAMDATA` in a temp directory (`ClientPaths::discover()` resolves everything off `PROGRAMDATA`), so it won't touch a real local `virtue` install.
-- GitHub's `windows-latest` runners have a real interactive desktop session, so GDI screen capture (`capture.rs`) produces a genuine screenshot with no permission prompt and no virtual-display trick needed (unlike Linux's Xvfb or macOS's missing Screen Recording grant).
-
-### Android client CI (`.github/workflows/client-android.yml`)
-
-Run these on a machine with Java 17, Android SDK, NDK `26.1.10909125`, and Rust Android targets installed.
-
-From `client/android/`:
-
-```bash
-./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
-```
-
-Notes:
-
-- CI also installs `cargo-ndk`.
-- Release packaging in CI additionally runs:
-
-```bash
-./gradlew --no-daemon :app:assembleRelease
-```
-
-### iOS client CI (`.github/workflows/client-ios.yml`)
-
-Run these on macOS with Xcode.
-
-From `client/`:
-
-```bash
-cargo build -p virtue-core
-```
-
-From `client/ios/rust/`:
-
-```bash
-cargo build --manifest-path Cargo.toml
-```
-
-From `client/ios/`:
-
-```bash
-./scripts/build-ios.sh --destination "generic/platform=iOS Simulator" --derived-data .derived-data-ci-ios
-```
-
-Notes:
-
-- CI's PR-time smoke test is the simulator build above.
-- Release CI also builds an unsigned device app bundle:
-
-```bash
-./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
-```
-
-### Swift style (`.github/workflows/swift-format.yml`)
-
-Run this when touching any `.swift` file (`client/mac/`, `client/ios/`, `client/shared-swift/`).
-
-From the repo root:
-
-```bash
-./scripts/swift-format.sh --check
-```
-
-Notes:
-
-- Uses Apple's `swift-format` with the repo-root `.swift-format` config (4-space indent, 100 columns). It ships with Xcode 16+ and Swift 6 toolchains, so there's nothing extra to install, on macOS or Linux.
-- `./scripts/swift-format.sh` (`just swift-format`) fixes formatting in place. `--check` (`just swift-format-check`) also fails on lint rules the formatter can't fix.
-- It only looks at tracked files, so build output and checked-out packages are skipped.
-- CI pins `swift:6.1.2`, because `swift-format`'s output can change between releases. If your local version formats differently from CI, CI's version wins.
-- C FFI declarations (`@_silgen_name`/`@_cdecl`) keep their snake_case Rust symbol names, with `// swift-format-ignore: AlwaysUseLowerCamelCase` above each one.
-
-### Building the macOS and iOS apps from Linux
-
-`client/scripts/remote-apple-build.sh` compiles the Rust on Linux and has a Mac compile the Swift, link and sign over SSH. Use it to test on a device. It's much faster than building Rust on the Mac, and CI still builds what ships.
-
-```bash
-just mac-remote                # Virtue.app, ad-hoc signed, in /Users/Shared/virtue-builds/<worktree>/ on the Mac.
-just ios-remote --run          # Build for the simulator, then install and launch it in the booted one.
-just ios-remote --destination device --profile release
-```
-
-- Apple's SDK isn't licensed for use off Apple hardware, so Linux doesn't have it. `client/scripts/apple-cross/apple-cc` compiles the C dependencies with Linux's `clang` and hand-written declarations in `apple-cross/include/` for the libc functions they call. A new C dependency that calls something else fails at compile time: add its declaration there.
-- The daemon binary links on the Mac, through `apple-cross/apple-link`.
-- Linux needs `clang`, `rsync` and SSH access to the Mac. The Mac needs Xcode. The default host is `virtue-ios@$VD_MAC_HOST`; override it with `--host` or `VIRTUE_APPLE_BUILD_HOST`.
-- If the Mac's simulator runtime doesn't match Xcode's SDK, asset catalogs fail with `No simulator runtime version ... available`. Fix that once per account by pairing them, for example `xcrun simctl runtime match set iphoneos18.5 22G86`.
-- `--prune` deletes the Mac's build dirs for worktrees that no longer exist.
-
-Windows still builds entirely in the VM, through `remote-windows-build.sh`. `tract-linalg` needs Microsoft's `ml64.exe` and `lib.exe` at build time, and once a worktree has built, Rust is only about 15 seconds of a 60-second build, so cross-compiling it wouldn't pay. What keeps it fast is a current base: run `just cow-cache warm-windows` when the VM's first build in a new worktree recompiles most of the crates.
-
-`vd <device> deploy` (see the `test-devices` skill) calls `client/scripts/install-on-test-device.sh` to build the current worktree, install it on a test device and launch it.
-
-## Deployment workflows
-
-`deploy.yml` is not a PR validation workflow. It runs on pushes to `main` and `staging` and deploys `web`, `api`, `landing`, and `api-donate`. Pushes to `staging` also deploy `api-donate` to prod.
-
-If you need to mirror deployment locally:
-
-- `api/`: `bun run deploy:staging` or `bun run deploy:prod`
-- `web/`: `bun run deploy:staging` or `bun run deploy:prod`
-- `landing/`: `bun run deploy:staging` or `bun run deploy:prod`
-- `api-donate/`: `bun run deploy:staging` or `bun run deploy:prod`
-
-These require the appropriate Cloudflare credentials and, for landing, GitHub release access.
-
-## Centralized dev config: `~/.config/virtue-dev.env` and `.env`
-
-The user typically works across several worktrees of this repo at once. Two plain shell files
-(`KEY=value` lines) layer together as the source of dev-time secrets and machine/worktree config,
-in priority order (later wins over earlier, and real process/CI env vars always win over both):
-
-1. `~/.config/virtue-dev.env` (overridable via `VIRTUE_DEV_ENV`) — the machine-wide layer.
-   Anything genuinely identical across every worktree on a given machine (most secrets, SDK
-   paths) goes here so it isn't re-entered per worktree.
-2. `.env` at the repo root (gitignored; see `.env.example`) — the per-worktree override layer,
-   for anything that should vary between worktrees (or that you don't want machine-wide).
-
-Both are sourced by:
-
-- `scripts/launch.sh` — exports the merged values to the dev servers it starts, and passes the
-  `api/.dev.vars` keys below through to `wrangler dev` as `--var` flags, so they take effect
-  live without editing `.dev.vars`.
-- `scripts/setup.sh` — sources them and copies any of the `.dev.vars` keys below that are set
-  onto the freshly copied `.dev.vars` files, so a new worktree (or one run without `launch.sh`,
-  e.g. `wrangler dev` directly) still picks them up.
-- `client/android/scripts/env.sh` — sources them as an override layer for the Android dev
-  scripts (`build.sh`, `install.sh`, etc.), beneath its own built-in defaults.
-- `client/core/build.rs` — reads them (repo-root `.env` first) to fill in whichever of the
-  `VIRTUE_DEFAULT_*` compile-time keys below aren't already set by a real env var, replacing
-  the old `client/.env`-only mechanism.
-
-Recognized keys:
-
-| Key                                                                                                                           | Used by                                                        |
-| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`                                                                                           | `api/.dev.vars`                                                |
-| `APP_NAME`, `API_BASE_PATH`, `EMAIL_DELIVERY_MODE`, `BUG_REPORT_EMAIL`                                                        | `api/.dev.vars`                                                |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`                                                                    | `api/.dev.vars` (SES)                                          |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                                                                                  | `api-donate/.dev.vars`, `scripts/launch.sh --donate`           |
-| `PUBLIC_STRIPE_PORTAL_URL`                                                                                                    | `scripts/launch.sh --donate` (landing "Manage donations" link) |
-| `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS`                    | `client/core/build.rs` (compile-time client defaults)          |
-| `ANDROID_SDK_ROOT`, `ANDROID_HOME`, `ANDROID_NDK_ROOT`, `ANDROID_NDK_HOME`, `VIRTUE_AVD`, `VIRTUE_PACKAGE`, `VIRTUE_ACTIVITY` | `client/android/scripts/*.sh`                                  |
-
-Note: `APP_URL`, `LANDING_URL`, `R2_URL`, and `HASH_SERVER_URL` are _not_ on this list — `launch.sh`
-always computes them itself from the ports it picks that run, so overriding them here would have
-no effect under `launch.sh` (they'd only apply if you ran `wrangler dev` directly).
-
-## Driving the web app in a browser
-
-Agents check UI changes in `web/` and `landing/` with Playwright CLI (`@playwright/cli`, a root
-devDependency). The `playwright-cli` skill in `.claude/skills/` documents the commands. Run it as
-`bunx playwright-cli`, not a global install. It runs headless by default, so it works on machines
-with no display.
-
-On a new machine, run `bun install` at the repo root, then `bunx playwright-cli install` once. That
-uses an installed Chrome or Edge if it finds one, otherwise it downloads Chromium and writes a
-local `.playwright/cli.config.json`. Its output goes to `.playwright-cli/`, which is gitignored.
-
-1. Start the stack with `./scripts/launch.sh` in the background, writing its output to a file.
-   Never pipe it into `head`/`tail`, which wedges the API. Read the Web/Landing URLs from its
-   startup banner, because the ports change every run.
-2. Log in with the account `setup.sh` seeds: `dev@dev.com` / `devpassword`.
-3. Run `bunx playwright-cli close` when done, so headless browsers aren't left running.
-
-Gotchas:
-
-- Use refs from the latest snapshot only. Actions such as `open`, `goto` and `click` save their
-  automatic snapshot to a `.playwright-cli/page-*.yml` file, while an explicit `snapshot` prints
-  it inline. Ref prefixes change after a navigation or reload (`e16` becomes `f1e16`), so refs
-  read from an older `.yml` file stop working.
-- On the first visit after `launch.sh` starts, Vite may reload the page while it optimizes
-  dependencies, which invalidates refs. Take a fresh snapshot if a ref is "not found".
-- `screenshot --filename` must be a path inside the repo. An absolute path elsewhere (such as
-  `/tmp`) is silently not written. Save the file inside the repo, then move it.
-- `playwright-cli open` blocks `file:` URLs. To screenshot local HTML (such as a rendered email),
-  serve it over http (for example `python3 -m http.server`) and open that.
-- Attach PR screenshots with `gh pr create --attach`, or `gh pr edit --attach` on an existing PR
-  (add `--repo` if running outside the checkout). It needs `gh` 2.99 or later, so upgrade `gh`
-  if it is older. Do not commit screenshots to the repo or push them to a separate branch.
-
-## Minimum recommended local validation
-
-If you want a practical rule instead of the full matrix:
+Minimum per area:
 
 - `api/` changes: run API typecheck, tests, and Prettier check.
 - `web/` changes: run web typecheck, Prettier check, and build.
@@ -437,4 +60,119 @@ If you want a practical rule instead of the full matrix:
 - `client/windows/` changes: run the Windows client CI commands.
 - `client/android/` changes: run the Android debug lint/build command.
 - `client/ios/` changes: run the iOS Rust build plus simulator build.
+- `hash-server/` changes: run `cargo fmt --check`, `cargo clippy` and `cargo test` there.
 - Any `.swift` change: run `./scripts/swift-format.sh --check`.
+
+## Local dev
+
+[`docs/development.md`](docs/development.md) covers setup, `launch.sh`, seeding, the shared Rust build cache, dev config files and building the Apple apps from Linux. The things agents trip on:
+
+- Start the stack with `./scripts/launch.sh` in the background, writing its output to a file. Never pipe it into `head`/`tail`, which wedges the API. Ports change every run; read them from its startup banner.
+- `just seed` creates `dev@dev.com` / `devpassword` (admin; watches `sam@dev.com` and `jordan@dev.com`, same password) and a week of activity.
+- `EMAIL_DELIVERY_MODE=log` in `api/.dev.vars` prints outgoing emails, including token-bearing links, to the `[api]` log instead of sending them.
+- Check `web/` and `landing/` changes in a browser with `bunx playwright-cli` (the `playwright-cli` skill). See "Driving the web app in a browser" in `docs/development.md`.
+
+## Cross-component contracts
+
+These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
+
+The shared test vectors in `batch-format/vectors/` (BATCH-008) pin all five. Both sides' tests check them, so drift on either side fails CI.
+
+### 1. Batch wire format
+
+Rust produces, TypeScript consumes. `batch-format/SPEC.md` is the source of truth:
+
+```
+event → msgpack({ts, risk?, type, data?})
+events → msgpack([event, ...]) → gzip → AES-256-GCM(batchKey)
+wire:  nonce[12 bytes] || ciphertext+tag
+```
+
+Key files:
+
+- Rust: `client/core/src/module/upload/batch.rs`, `client/core/src/crypto.rs`
+- TypeScript: `web/src/utils/api/batch-materializer.ts`, `web/src/utils/api/crypto.ts`
+
+### 2. Per-event content hash
+
+Used to build the hash chain uploaded to `POST /hash`:
+
+```
+contentHash = sha256(msgpack-encoded event bytes, exactly as they appear in the batch)
+```
+
+See BATCH-006.
+
+Key files:
+
+- Rust: `client/core/src/crypto.rs` (`compute_event_hash`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`verifyBatch`)
+
+### 3. Rolling hash state
+
+```
+new_state = sha256(current_state[32] || contentHash[32])
+```
+
+### 4. Password auth derivation
+
+Login must hash the password the same way on both platforms before sending. The salt and argon2 parameters come from `GET /user/login-material` (API-015):
+
+```
+argon2id(password, salt=password_salt, m/t/p=params, len=32)
+then HKDF-SHA256("auth", argon_output) → Base64 string sent as password_auth
+```
+
+Key files:
+
+- Rust: `client/core/src/crypto.rs` (`derive_password_auth`)
+- TypeScript: `web/src/utils/api/crypto.ts` (`derivePasswordMaterial`)
+
+### 5. HPKE key wrapping
+
+Batch keys are wrapped per-recipient using `DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`.
+Wire format: `enc[kem.encSize bytes] || ciphertext`.
+
+Key files:
+
+- Rust: `client/core/src/crypto.rs`
+- TypeScript: `web/src/utils/api/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
+
+The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
+the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
+aren't listed as one of the five contracts above. See `api/SPEC.md` for their wire shapes.
+
+## Key invariant files
+
+Read these before touching crypto, batch, or auth code:
+
+- `client/core/architecture.md` — canonical design doc for the Rust core
+- `api/SPEC.md` — full API endpoint specification
+
+## What not to change without full cross-component review
+
+- The AES-GCM nonce position or length (must be first 12 bytes)
+- The msgpack schema (an array at the outer level, each event double-encoded)
+- The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
+- The JWT token `type` claim values (`"device"`, `"server"`)
+- The hash chain input (the encoded event bytes, hashed as-is)
+
+## Copy style
+
+Checklist for user-facing text (website, help docs, app UI copy):
+
+- [ ] No em dashes — reasonable comma clause or a new sentence instead
+- [ ] Every line ends with terminal punctuation
+- [ ] No sentence opens on a dangling fragment before a colon
+- [ ] No rhetorical questions used as scene-setting
+- [ ] No "which of those..." style callbacks — say the answer plainly
+- [ ] Long compound sentences split where each half stands alone
+- [ ] No sentence that only restates what the next sentence already implies
+- [ ] Instructions phrased as direct commands ("Update...", "Delete...")
+- [ ] User-facing terms match what's in the UI, not internal jargon
+
+## Pull requests
+
+When creating a PR, follow the template at `.github/PULL_REQUEST_TEMPLATE.md`. Fill in every section: summary, changes (type of change + components touched), and testing.
+
+For UI or copy changes, attach screenshots with `gh pr create --attach` (see `AGENTS.md`).

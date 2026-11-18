@@ -6,7 +6,7 @@ allowed-tools: Bash(bunx playwright-cli:*) Bash(playwright-cli:*)
 
 > **In this repo:** `@playwright/cli` is a root devDependency. Run it as `bunx playwright-cli`
 > wherever this skill says `playwright-cli`, and do not install it globally. See "Driving the web
-> app in a browser" in `AGENTS.md` for the dev stack URLs, the dev account and known gotchas.
+> app in a browser" in `docs/development.md` for the dev stack URLs, the dev account and known gotchas.
 
 # Browser Automation with playwright-cli
 

@@ -1,5 +1,5 @@
 -- api/SPEC.md API-051: admin status lives only in this table and is granted by
--- hand (see api/CLAUDE.md), never through the API.
+-- hand (see api/AGENTS.md), never through the API.
 CREATE TABLE admins (
   user_id BLOB PRIMARY KEY,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),

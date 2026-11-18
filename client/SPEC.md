@@ -58,6 +58,8 @@ While signed out, no screenshots are taken (CORE-009):
 - Android: sign-out MUST also stop the daemon loop and remove the persistent notification.
 - iOS: sign-out MUST also turn the monitoring switch off (CLIENT-032).
 
+<!-- doc-check: ignore -->
+
 > OPEN: when native logout fails, Android deletes `core-data/auth.json`, a file that no longer exists (auth lives in `event_state.json`), so the fallback does nothing — should it be removed or retargeted?
 
 ## CLIENT-006 Status the user can see

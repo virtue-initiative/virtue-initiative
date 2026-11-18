@@ -131,11 +131,6 @@ replace_line \
   "VERSION=\"${DEV_VERSION}\""
 
 replace_line \
-  "${CLIENT_ROOT}/windows/README.md" \
-  '[0-9]+\.[0-9]+\.[0-9]+-dev' \
-  "${DEV_VERSION}"
-
-replace_line \
   "${CLIENT_ROOT}/windows/VM_SETUP.md" \
   '[0-9]+\.[0-9]+\.[0-9]+-dev' \
   "${DEV_VERSION}"
