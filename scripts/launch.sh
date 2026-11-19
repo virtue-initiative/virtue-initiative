@@ -12,7 +12,7 @@
 # Shared configuration (e.g. STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 # PUBLIC_STRIPE_PORTAL_URL) can live in ~/.config/virtue-dev.env so it doesn't
 # have to be copied into each worker's .dev.vars. That file is sourced below,
-# then .env (repo root, per-worktree overrides — see AGENTS.md) is sourced on
+# then .env (repo root, per-worktree overrides — see docs/development.md) is sourced on
 # top of it, and the merged values are passed through to the relevant dev
 # servers.
 
@@ -53,7 +53,7 @@ if [ -f "$ROOT/.env" ]; then
     set +a
 fi
 
-# api/.dev.vars keys that can be centrally overridden (see AGENTS.md); passed
+# api/.dev.vars keys that can be centrally overridden (see docs/development.md); passed
 # as --var so they win over api/.dev.vars without editing that file.
 API_EXTRA_VARS=()
 for _key in JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_NAME API_BASE_PATH EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do

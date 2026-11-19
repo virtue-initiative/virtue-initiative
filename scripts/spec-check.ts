@@ -4,6 +4,7 @@
 //
 //   bun scripts/spec-check.ts                    # CI check, exits 1 on problems
 //   bun scripts/spec-check.ts --report           # markdown coverage report, never fails
+//   bun scripts/spec-check.ts --tests-for ID...  # the tests citing each ID, and how to run them
 //   bun scripts/spec-check.ts --write-allowlist  # rewrite scripts/spec-coverage-allow.txt
 //   bun scripts/spec-check.ts --root <dir>       # run against another tree (for fixtures)
 //
@@ -343,6 +344,68 @@ const isExempt = (t: Test) => t.refs.some((r) => r.id === NO_SPEC);
 const uncovered = sections.filter((s) => !citing.has(s.id));
 const loc = (s: Section) => `${s.file}:${s.line}`;
 
+// ---------- --tests-for ----------
+
+// The nearest ancestor directory of `file` that holds `marker`.
+function nearest(file: string, marker: string): string | undefined {
+  for (let dir = dirname(file); dir !== '.' && dir !== '/'; dir = dirname(dir)) {
+    if (existsSync(join(ROOT, dir, marker))) return dir;
+  }
+}
+
+// A command that runs just these tests, from the repo root.
+function runCommand(file: string, lang: Lang, names: string[]): string | undefined {
+  if (lang === 'ts') {
+    const pkg = nearest(file, 'package.json');
+    return pkg && `(cd ${pkg} && bun run test -- ${relative(pkg, file)})`;
+  }
+  if (lang !== 'rust') return undefined;
+  const crate = nearest(file, 'Cargo.toml');
+  if (!crate) return undefined;
+  const pkg = read(join(crate, 'Cargo.toml')).match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+  const workspace = file.startsWith('client/') ? 'client' : crate;
+  const parts = [`cargo test -p ${pkg}`];
+  if (pkg === 'virtue-core') parts.push('--features testing');
+  const rel = relative(crate, file).replace(/\.rs$/, '').split('/');
+  const testFile = rel[0] === 'tests' && rel.length === 2;
+  if (testFile) parts.push(`--test ${rel[1]}`);
+  // Past a few names, run the whole test file, or filter by the module's path.
+  if (names.length <= 3) parts.push('--', ...names);
+  else if (rel[0] === 'src') {
+    const mod = rel
+      .slice(1)
+      .filter((p, i, a) => !(i === a.length - 1 && /^(mod|lib|main)$/.test(p)));
+    if (mod.length) parts.push('--', `${mod.join('::')}::`);
+  }
+  return `(cd ${workspace} && ${parts.join(' ')})`;
+}
+
+// Lists the tests that cite each ID, grouped by file, with a command to run them.
+function testsFor(ids: string[]) {
+  let missing = false;
+  for (const id of ids) {
+    const section = sections.find((s) => s.id === id);
+    const cited = tests.filter((t) => t.refs.some((r) => r.id === id));
+    if (!section) {
+      console.error(`${id}: no such spec section.`);
+      missing = true;
+      continue;
+    }
+    console.log(`${id} ${section.title} (${loc(section)}): ${cited.length} test(s)`);
+    const byFile = new Map<string, Test[]>();
+    for (const t of cited) byFile.set(t.file, [...(byFile.get(t.file) ?? []), t]);
+    for (const [file, ts] of byFile) {
+      console.log(`  ${file}`);
+      for (const t of ts) console.log(`    :${t.line}  ${t.name}`);
+      const names = [...new Set(ts.map((t) => t.name))];
+      const cmd = runCommand(file, ts[0].lang, names);
+      if (cmd) console.log(`    run: ${cmd}`);
+    }
+    console.log();
+  }
+  if (missing) process.exit(1);
+}
+
 function knownBugs() {
   return testFiles.flatMap(({ file }) =>
     read(file)
@@ -483,7 +546,9 @@ function check(): string[] {
   return problems;
 }
 
-if (argv.includes('--report')) {
+if (argv.includes('--tests-for')) {
+  testsFor(argv.slice(argv.indexOf('--tests-for') + 1).map((a) => a.toUpperCase()));
+} else if (argv.includes('--report')) {
   report();
 } else if (argv.includes('--write-allowlist')) {
   writeAllowlist(uncovered, parseAllowlist([]));

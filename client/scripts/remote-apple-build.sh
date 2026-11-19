@@ -33,7 +33,7 @@ Options:
 
 The Mac keeps a build dir per worktree in ~/virtue-builds, so worktrees don't clobber each other. The
 macOS app also lands in /Users/Shared/virtue-builds/<worktree>/, where the test account can open it.
-Full logs: client/target/remote-apple/. CI still builds what ships. See AGENTS.md.
+Full logs: client/target/remote-apple/. CI still builds what ships. See docs/development.md.
 EOF
 }
 
