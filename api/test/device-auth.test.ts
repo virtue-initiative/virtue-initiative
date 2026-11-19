@@ -264,6 +264,7 @@ describe('GET /d/device (API-036)', () => {
       wrapping_keys: [{ user_id: userId, pub_key: await publicKeyFor(EMAIL) }],
       hash_base_url: expect.stringMatching(/^https:\/\//),
       feature_flags: [],
+      dns_filter_domain: null,
     });
 
     const claims = decodeJwt(settings.hash_token);

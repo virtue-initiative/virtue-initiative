@@ -102,7 +102,13 @@ async function createDeviceSession(
  */
 async function buildDeviceSettings(
   c: Context<{ Bindings: Env; Variables: Variables }>,
-  device: { id: string; owner: string; name: string; platform: string },
+  device: {
+    id: string;
+    owner: string;
+    name: string;
+    platform: string;
+    dns_filter_domain: string | null;
+  },
 ) {
   const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
   if (!hashBaseUrl) {
@@ -123,6 +129,7 @@ async function buildDeviceSettings(
     id: device.id,
     name: device.name,
     platform: device.platform,
+    dns_filter_domain: device.dns_filter_domain,
     wrapping_keys: recipients.map((recipient) => ({
       user_id: recipient.id,
       pub_key: encodeBase64(recipient.pub_key!),
@@ -158,7 +165,13 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
   await createDevice(c.env.DB, { id, owner, name, platform });
   const refreshToken = await createDeviceSession(c, id);
 
-  const settings = await buildDeviceSettings(c, { id, owner, name, platform });
+  const settings = await buildDeviceSettings(c, {
+    id,
+    owner,
+    name,
+    platform,
+    dns_filter_domain: null,
+  });
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }

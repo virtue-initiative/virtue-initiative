@@ -60,6 +60,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "owner": UUID,
   "name": "My Laptop",
   "platform": "linux",
+  "dns_filter_domain": "example.net" | null,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
   "status": "online" | "offline" | "logged_out"
@@ -110,6 +111,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "id": UUID,
   "name": "My Laptop",
   "platform": "linux",
+  "dns_filter_domain": "example.net" | null,
   "wrapping_keys": [
     {
       "user_id": UUID,
@@ -123,6 +125,8 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```
 
 `feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+
+`dns_filter_domain` is the domain the owner blocks in their DNS filter, or `null` when the check is off; the device uses it for the check in CORE-027. It MUST be `null` until the owner sets it (API-030).
 
 **FeatureFlag**
 
@@ -763,7 +767,7 @@ The server SHOULD fetch the count from the hash server and the last updated from
 
 The server MUST report `status` as `logged_out` for a logged-out device, `online` when `last_hash_at` is within the last 2 hours, and `offline` otherwise, including when the hash server cannot be reached. The server SHOULD NOT read batches to build this response. A client that needs a device's last upload SHOULD derive it from the batches returned by `GET /data` (API-033).
 
-The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
+The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view. Each device MUST include its `dns_filter_domain` (see API-030).
 
 ```js
 Device[]
@@ -775,9 +779,12 @@ The client MUST be authenticated with a **Web Token** and send
 
 ```js
 {
-  "name": "New Device Name"
+  "name": "New Device Name" | undefined,
+  "dns_filter_domain": "example.net" | null | undefined
 }
 ```
+
+At least one field MUST be present. `dns_filter_domain` names the domain the owner blocks in their DNS filter, which the device resolves to check that the filter is in use (CORE-027). The server MUST trim and lowercase it, and MUST respond **HTTP 400** unless it is a plain domain name of at most 253 characters with at least one dot and no scheme, port, path or whitespace. `null` MUST clear the setting.
 
 The server MUST respond **HTTP 404** if the device does not exist or is not owned by the user.
 
