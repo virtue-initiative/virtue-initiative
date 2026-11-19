@@ -47,7 +47,10 @@ Real environment variables win over `.env`, and `.env` wins over `~/.config/virt
 so this works the same on every platform.
 
 From an Android emulator, use `http://10.0.2.2:<port>` to reach the host. `localhost` inside the
-emulator is the emulator itself.
+emulator is the emulator itself. For a VM, a phone or another machine, start the stack with
+`./scripts/launch.sh --host <address>` and use the "Devices" URL it prints (see
+[`docs/development.md`](../docs/development.md)). The Windows remote build copies these settings to the
+VM with the source.
 
 ## Building from Linux
 

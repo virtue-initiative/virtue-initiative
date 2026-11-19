@@ -198,6 +198,18 @@ if [[ $SKIP_SYNC -eq 0 ]]; then
   if [[ -n "$SOURCE_REV" ]]; then
     git -C "$REPO_ROOT" archive --format=tar.gz -o "$ARCHIVE_PATH" "$SOURCE_REV" client
   else
+    # The archive holds only client/, so the build's compile-time defaults (API URL, capture
+    # interval, batch window) would otherwise come from nothing on this machine. Ship them as the
+    # VM copy's repo-root .env, in client/core/build.rs's order: environment variables first, then
+    # this checkout's .env, then the machine-wide file. Its first value for a key wins. An empty
+    # file still goes, so one left by an earlier build doesn't linger.
+    mkdir -p "$TMP_DIR/env"
+    {
+      env | grep -E '^VIRTUE_DEFAULT_[A-Z_]+=' || true
+      [[ -f "$REPO_ROOT/.env" ]] && cat "$REPO_ROOT/.env"
+      dev_env="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
+      [[ -f "$dev_env" ]] && cat "$dev_env"
+    } >"$TMP_DIR/env/.env"
     tar -C "$REPO_ROOT" \
       --exclude='client/target' \
       --exclude='client/**/target' \
@@ -205,7 +217,8 @@ if [[ $SKIP_SYNC -eq 0 ]]; then
       --exclude='client/android/.gradle' \
       --exclude='client/android/**/build' \
       -czf "$ARCHIVE_PATH" \
-      client
+      client \
+      -C "$TMP_DIR/env" .env
   fi
   scp -q "$ARCHIVE_PATH" "$BUILD_HOST:$REMOTE_ARCHIVE_NAME"
 fi
