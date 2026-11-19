@@ -79,9 +79,37 @@ function getSesClient(env: Env) {
         secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
       },
     });
+    // API-067: the SDK only retries 500, 502, 503 and 504. When the connection
+    // to SES fails, Cloudflare answers a Worker's fetch with a 520-style status
+    // and a plain-text body, which the SDK reports as a JSON parse error and
+    // does not retry. Marking every 5xx retryable lets the SDK's own retry
+    // middleware, which wraps this one, try again with backoff.
+    sesClient.middlewareStack.add(
+      (next) => async (args) => {
+        try {
+          return await next(args);
+        } catch (error) {
+          markServerErrorRetryable(error);
+          throw error;
+        }
+      },
+      { step: 'finalizeRequest', priority: 'low', name: 'retryAnyServerError' },
+    );
   }
 
   return sesClient;
+}
+
+function markServerErrorRetryable(error: unknown) {
+  if (typeof error !== 'object' || error === null) return;
+  const sdkError = error as {
+    $metadata?: { httpStatusCode?: number };
+    $retryable?: unknown;
+  };
+  const status = sdkError.$metadata?.httpStatusCode;
+  if (status !== undefined && status >= 500 && status <= 599 && !sdkError.$retryable) {
+    sdkError.$retryable = {};
+  }
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
