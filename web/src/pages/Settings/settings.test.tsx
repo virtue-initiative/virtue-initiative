@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
 import { TEST_USER } from '../../mocks/fixtures';
 import { makeFakeSession, renderWithClient } from '../../test-utils';
@@ -247,35 +247,72 @@ describe('Settings — change password (WEB-061)', () => {
 });
 
 describe('Settings — DNS check domain (WEB-073)', () => {
-  function capturePatches() {
+  // The saved domain as the mocked API holds it. A successful PATCH updates it like the real API.
+  let savedDomain: string | null = null;
+
+  beforeEach(() => {
+    savedDomain = null;
+  });
+
+  function capturePatches(status = 200) {
     const bodies: Record<string, unknown>[] = [];
     server.use(
+      http.get(`${BASE}/user`, () =>
+        HttpResponse.json({ ...TEST_USER, dns_filter_domain: savedDomain }),
+      ),
       http.patch(`${BASE}/user`, async ({ request }) => {
-        bodies.push((await request.json()) as Record<string, unknown>);
+        const body = (await request.json()) as Record<string, unknown>;
+        bodies.push(body);
+        if (status !== 200) return HttpResponse.json({ error: 'nope' }, { status });
+        if ('dns_filter_domain' in body) savedDomain = body.dns_filter_domain as string | null;
         return HttpResponse.json({ ok: true });
       }),
     );
     return bodies;
   }
 
-  const domainInput = () => screen.findByLabelText('DNS check domain');
+  function withSavedDomain() {
+    savedDomain = 'block.example.net';
+  }
+
+  const checkSwitch = () => screen.findByRole('switch', { name: 'Check my DNS filter' });
+  const field = () => screen.queryByLabelText('DNS check domain');
   const saveDomain = () =>
     within(screen.getByLabelText('DNS check domain').closest('form')!).getByRole('button', {
       name: /^save$/i,
     });
 
-  it('starts with the current domain and explains the check', async () => {
-    server.use(
-      http.get(`${BASE}/user`, () =>
-        HttpResponse.json({ ...TEST_USER, dns_filter_domain: 'block.example.net' }),
-      ),
-    );
+  it('starts on with the current domain and explains the check when a domain is saved', async () => {
+    withSavedDomain();
+    capturePatches();
     renderWithClient(<Settings />);
 
     expect(await screen.findByDisplayValue('block.example.net')).toBeInTheDocument();
+    expect(await checkSwitch()).toBeChecked();
     expect(screen.getByText(/add a domain to your dns filter's block list/i)).toBeInTheDocument();
     expect(screen.getByText(/all your devices check that it stays blocked/i)).toBeInTheDocument();
     expect(saveDomain()).toBeDisabled();
+  });
+
+  it('starts off with no field when no domain is saved', async () => {
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    expect(await checkSwitch()).not.toBeChecked();
+    expect(field()).not.toBeInTheDocument();
+  });
+
+  it('reveals and focuses the field when switched on, and sends nothing yet', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    await user.click(await checkSwitch());
+
+    expect(await screen.findByLabelText('DNS check domain')).toHaveFocus();
+    expect(await checkSwitch()).toBeChecked();
+    expect(bodies).toHaveLength(0);
   });
 
   it('saves the domain trimmed and lowercased', async () => {
@@ -284,11 +321,27 @@ describe('Settings — DNS check domain (WEB-073)', () => {
     renderWithClient(<Settings />);
 
     await screen.findByDisplayValue(TEST_USER.name!);
-    await user.type(await domainInput(), '  Block.Example.NET ');
+    await user.click(await checkSwitch());
+    await user.type(await screen.findByLabelText('DNS check domain'), '  Block.Example.NET ');
     await user.click(saveDomain());
 
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ dns_filter_domain: 'block.example.net' });
+  });
+
+  it('shows an error and sends nothing for an empty domain', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    await user.click(await checkSwitch());
+    await user.type(await screen.findByLabelText('DNS check domain'), ' ');
+    await user.click(saveDomain());
+
+    expect(await screen.findByText(/./, { selector: '.vi-field__error' })).toBeInTheDocument();
+    expect(screen.getByLabelText('DNS check domain')).toHaveAttribute('aria-invalid', 'true');
+    expect(bodies).toHaveLength(0);
   });
 
   it('shows the validation message and sends nothing for an invalid domain', async () => {
@@ -297,30 +350,59 @@ describe('Settings — DNS check domain (WEB-073)', () => {
     renderWithClient(<Settings />);
 
     await screen.findByDisplayValue(TEST_USER.name!);
-    const input = await domainInput();
+    await user.click(await checkSwitch());
+    const input = await screen.findByLabelText('DNS check domain');
     await user.type(input, 'https://example.net/path');
     await user.click(saveDomain());
 
-    expect(await screen.findByText('Enter a domain such as example.net')).toBeInTheDocument();
+    expect(await screen.findByText(/enter a domain such as example\.net/i)).toBeInTheDocument();
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(bodies).toHaveLength(0);
   });
 
-  it('sends null when the user clears the domain', async () => {
-    server.use(
-      http.get(`${BASE}/user`, () =>
-        HttpResponse.json({ ...TEST_USER, dns_filter_domain: 'block.example.net' }),
-      ),
-    );
+  it('sends null at once and hides the field when switched off with a saved domain', async () => {
+    withSavedDomain();
     const bodies = capturePatches();
     const user = userEvent.setup();
     renderWithClient(<Settings />);
 
-    const input = await screen.findByDisplayValue('block.example.net');
-    await user.clear(input);
-    await user.click(saveDomain());
+    await screen.findByDisplayValue('block.example.net');
+    await user.click(await checkSwitch());
 
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ dns_filter_domain: null });
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(field()).not.toBeInTheDocument();
+    expect(await checkSwitch()).not.toBeChecked();
+  });
+
+  it('returns the switch to on and shows an error when switching off fails', async () => {
+    withSavedDomain();
+    const bodies = capturePatches(500);
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue('block.example.net');
+    await user.click(await checkSwitch());
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(await checkSwitch()).toBeChecked();
+    expect(screen.getByDisplayValue('block.example.net')).toBeInTheDocument();
+  });
+
+  it('sends nothing when switched off with no saved domain', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    await user.click(await checkSwitch());
+    await screen.findByLabelText('DNS check domain');
+    await user.click(await checkSwitch());
+
+    expect(field()).not.toBeInTheDocument();
+    expect(await checkSwitch()).not.toBeChecked();
+    expect(bodies).toHaveLength(0);
   });
 });

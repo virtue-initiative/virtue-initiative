@@ -17,9 +17,9 @@ import {
   DialogActions,
   DialogHeader,
   DialogSecondaryActions,
-  Checkbox,
   Field,
   Input,
+  Switch,
   useToast,
 } from '@virtueinitiative/shared-web';
 import { formatRelativeTimestamp } from '../../utils/time';
@@ -314,11 +314,11 @@ function DeviceCard({
             />
           </Field>
           <div class="device-dns-check">
-            <Checkbox
+            <Switch
               id={`device-dns-${device.id}`}
               label="Check the DNS filter on this device"
               checked={dnsCheck}
-              onChange={(e) => setDnsCheck((e.target as HTMLInputElement).checked)}
+              onChange={setDnsCheck}
             />
             {accountDomain ? (
               <p class="hint-text">

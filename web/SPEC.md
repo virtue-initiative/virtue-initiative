@@ -256,7 +256,7 @@ Each card MUST show the device's name, status tag (WEB-019), platform, **Last up
 
 ### WEB-072 DNS filter check
 
-The **Edit** dialog (WEB-037) MUST also offer the checkbox "Check the DNS filter on this device", checked unless the device has `dns_filter_disabled` set, and saving MUST send `dns_filter_disabled` when it changed (API-030). Its help text MUST name the account's DNS check domain (WEB-073) and say that partners are notified when the check is turned off (CORE-027). When the account has no DNS check domain, it MUST instead say to set one in Settings, linking there. Partners MUST NOT be able to change it: the Devices page lists only the user's own devices.
+The **Edit** dialog (WEB-037) MUST also offer the switch "Check the DNS filter on this device", on unless the device has `dns_filter_disabled` set, and saving MUST send `dns_filter_disabled` when it changed (API-030). Its help text MUST name the account's DNS check domain (WEB-073) and say that partners are notified when the check is turned off (CORE-027). When the account has no DNS check domain, it MUST instead say to set one in Settings, linking there. Partners MUST NOT be able to change it: the Devices page lists only the user's own devices.
 
 > OPEN: partner device rows (WEB-049) do not show the DNS check. Partners see it only through the log events (WEB-041).
 
@@ -463,7 +463,7 @@ The user MUST enter their current password and a new one twice (WEB-021). The fo
 
 ### WEB-073 DNS check domain
 
-Settings MUST let the user set, change or clear their DNS check domain (API-020, CORE-027) in its own form, starting with the current domain, with its own **Save** button that behaves as the Profile one does (WEB-059). Its help text MUST say to add the domain to the DNS filter's block list, that it applies to all the user's devices, and that partners are alerted if it stops being blocked and notified when the domain is cleared or the check is turned off for a device (WEB-072). The value MUST be checked against `dnsFilterDomainSchema` before saving, an invalid one MUST show its message and send nothing, and a valid one MUST be sent lowercased. An empty field MUST send `null`.
+Settings MUST show the switch "Check my DNS filter" (API-020, CORE-027), on when the user has a DNS check domain. Switching it on MUST reveal the **DNS check domain** field and its own **Save** button (behaving as the Profile one does, WEB-059) and focus the field, and MUST send nothing until the user saves. The field MUST start with the current domain, and **Save** MUST be enabled only after a change. The value MUST be checked against `dnsFilterDomainSchema` before saving, an empty or invalid one MUST show an error and send nothing, and a valid one MUST be sent lowercased. Switching it off MUST hide the field and, when a domain is saved, send `null` at once and show "Saved"; if that fails, the switch MUST return to on and show an error. Switching it off with no saved domain MUST send nothing. The help text MUST say to add the domain to the DNS filter's block list, that it applies to all the user's devices, and that partners are alerted if it stops being blocked and notified when the check is turned off, for all devices or for one (WEB-072).
 
 ### WEB-062 Local cache
 

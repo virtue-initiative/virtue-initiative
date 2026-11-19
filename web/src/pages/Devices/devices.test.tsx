@@ -208,7 +208,7 @@ describe('Devices — DNS filter check (WEB-072, WEB-035)', () => {
   async function openEditor(user: ReturnType<typeof userEvent.setup>) {
     const editBtns = await screen.findAllByRole('button', { name: /^edit$/i });
     await user.click(editBtns[0]);
-    return screen.getAllByRole('checkbox', { name: 'Check the DNS filter on this device' })[0];
+    return screen.getAllByRole('switch', { name: 'Check the DNS filter on this device' })[0];
   }
 
   function capturePatches() {
@@ -252,13 +252,13 @@ describe('Devices — DNS filter check (WEB-072, WEB-035)', () => {
     const user = userEvent.setup();
     renderWithClient(<Devices />);
 
-    const checkbox = await openEditor(user);
-    expect(checkbox).toBeChecked();
+    const dnsSwitch = await openEditor(user);
+    expect(dnsSwitch).toBeChecked();
     expect(
       await screen.findAllByText(/your DNS check domain, block\.example\.net, stays blocked/i),
     ).not.toHaveLength(0);
     expect(screen.getAllByText(/partners are notified when you turn it off/i)).not.toHaveLength(0);
-    await user.click(checkbox);
+    await user.click(dnsSwitch);
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(bodies).toHaveLength(1));
@@ -276,9 +276,9 @@ describe('Devices — DNS filter check (WEB-072, WEB-035)', () => {
     const user = userEvent.setup();
     renderWithClient(<Devices />);
 
-    const checkbox = await openEditor(user);
-    expect(checkbox).not.toBeChecked();
-    await user.click(checkbox);
+    const dnsSwitch = await openEditor(user);
+    expect(dnsSwitch).not.toBeChecked();
+    await user.click(dnsSwitch);
     await user.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(bodies).toHaveLength(1));
