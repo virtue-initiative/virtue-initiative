@@ -50,6 +50,7 @@ devices.get('/', authenticateWebSession(), async (c) => {
         owner: device.owner,
         name: device.name,
         platform: device.platform,
+        dns_filter_domain: device.dns_filter_domain,
         last_hash_at: lastHashAt,
         pending_count: hi ? hi.seq : 0,
         // API-029: a device posts a hash on every capture, so last_hash_at is
@@ -76,8 +77,8 @@ devices.patch(
       return c.json({ error: 'Not found' }, 404);
     }
 
-    const { name } = c.req.valid('json');
-    await updateDevice(c.env.DB, deviceId, { name });
+    const { name, dns_filter_domain } = c.req.valid('json');
+    await updateDevice(c.env.DB, deviceId, { name, dns_filter_domain });
 
     return c.body(null, 204);
   },

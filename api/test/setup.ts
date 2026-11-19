@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS devices (
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
+  dns_filter_domain TEXT,
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
   FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE

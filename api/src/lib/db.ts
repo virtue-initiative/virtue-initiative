@@ -490,10 +490,13 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
     owner: string;
     name: string;
     platform: string;
+    dns_filter_domain: string | null;
     created_at: number;
   }>(
     db
-      .prepare('SELECT id, owner, name, platform, created_at FROM devices WHERE id = ?')
+      .prepare(
+        'SELECT id, owner, name, platform, dns_filter_domain, created_at FROM devices WHERE id = ?',
+      )
       .bind(uuidToBytes(deviceId)),
     ['id', 'owner'],
   );
@@ -505,24 +508,34 @@ export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId:
     owner: string;
     name: string;
     platform: string;
+    dns_filter_domain: string | null;
     created_at: number;
   }>(
     db
       .prepare(
-        'SELECT id, owner, name, platform, created_at FROM devices WHERE id = ? AND owner = ?',
+        'SELECT id, owner, name, platform, dns_filter_domain, created_at FROM devices WHERE id = ? AND owner = ?',
       )
       .bind(uuidToBytes(deviceId), uuidToBytes(ownerId)),
     ['id', 'owner'],
   );
 }
 
-export async function updateDevice(db: D1Database, deviceId: string, fields: { name?: string }) {
+export async function updateDevice(
+  db: D1Database,
+  deviceId: string,
+  fields: { name?: string; dns_filter_domain?: string | null },
+) {
   const updates: string[] = [];
   const params: SqlValue[] = [];
 
   if (fields.name !== undefined) {
     updates.push('name = ?');
     params.push(fields.name);
+  }
+
+  if (fields.dns_filter_domain !== undefined) {
+    updates.push('dns_filter_domain = ?');
+    params.push(fields.dns_filter_domain);
   }
 
   if (updates.length === 0) {
@@ -599,6 +612,7 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     owner: string;
     name: string;
     platform: string;
+    dns_filter_domain: string | null;
     created_at: number;
     deleted_at: number | null;
   }>(
@@ -607,7 +621,7 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
         // No batches here (API-029): a device's last upload is derived by the web
         // app from the batches /data already sends it, and status comes from the
         // hash server's last_received (hashGetMany in lib/hash-server.ts).
-        `SELECT d.id, d.owner, d.name, d.platform, d.created_at, d.deleted_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.dns_filter_domain, d.created_at, d.deleted_at
          FROM devices d
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
