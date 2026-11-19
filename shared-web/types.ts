@@ -46,6 +46,8 @@ export const deviceSchema = z.object({
   last_hash_at: z.number().nullable(),
   pending_count: z.number(),
   status: z.enum(['online', 'offline', 'logged_out']),
+  // CORE-027: the domain the owner blocks in their DNS filter, or null when the check is off.
+  dns_filter_domain: z.string().nullable(),
 });
 export type Device = z.infer<typeof deviceSchema>;
 
@@ -242,8 +244,22 @@ export type CreatePartnerPayload = z.infer<typeof createPartnerSchema>;
 export const inviteTokenSchema = z.object({ token: z.string().min(1) });
 export type InviteTokenPayload = z.infer<typeof inviteTokenSchema>;
 
+// A plain DNS name such as `example.net`: lowercase labels, at least one dot, no scheme or port.
+export const dnsFilterDomainSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/, {
+    message: 'Enter a domain such as example.net',
+  });
+
 export const updateDeviceSchema = z
-  .object({ name: z.string().min(1).optional() })
+  .object({
+    name: z.string().min(1).optional(),
+    // CORE-027: null turns the DNS filter check off.
+    dns_filter_domain: dnsFilterDomainSchema.nullable().optional(),
+  })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
 export type UpdateDevicePayload = z.infer<typeof updateDeviceSchema>;
 
