@@ -33,21 +33,30 @@ pub const DAEMON_STATE_VERSION: u32 = 1;
 
 /// Loads the state at `path` and runs its upgrade steps (CORE-016). Every
 /// read that may be written back goes through this, so each step's changes
-/// are what gets saved.
+/// are what gets saved. Logs nothing, because it runs before every write:
+/// `Daemon::new` runs the same steps on its first load and logs them, once
+/// per start.
 fn load_current_state(path: &Path) -> CoreResult<DaemonState> {
     let mut state: DaemonState = load_state(path)?;
-    let from = state.version;
     state.upgrade();
-    if from > DAEMON_STATE_VERSION {
+    Ok(state)
+}
+
+/// Logs what loading a state saved at `saved_version` does to it.
+fn log_state_upgrade(saved_version: u32) {
+    if saved_version > DAEMON_STATE_VERSION {
         tracing::warn!(
-            version = from,
+            version = saved_version,
             current = DAEMON_STATE_VERSION,
             "daemon state was saved by a newer client; not upgrading it"
         );
-    } else if from != state.version {
-        tracing::info!(from, to = state.version, "daemon state upgraded");
+    } else if saved_version < DAEMON_STATE_VERSION {
+        tracing::info!(
+            from = saved_version,
+            to = DAEMON_STATE_VERSION,
+            "daemon state upgraded"
+        );
     }
-    Ok(state)
 }
 
 /// A caller's request to mutate the daemon's state, serviced only by the
@@ -164,7 +173,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// `get_device_settings` refresh before returning (SPEC §4's "refreshed
     /// on process startup" requirement).
     pub fn new(config: Config, platform: P, api: A, state_path: PathBuf) -> CoreResult<Self> {
-        let state = load_current_state(&state_path)?;
+        let mut state: DaemonState = load_state(&state_path)?;
+        log_state_upgrade(state.version);
+        state.upgrade();
 
         let (request_tx, request_rx) = mpsc::channel();
 
