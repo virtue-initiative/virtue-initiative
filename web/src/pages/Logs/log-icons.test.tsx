@@ -67,6 +67,36 @@ describe('getLogMessage (WEB-041)', () => {
   });
 });
 
+describe('DNS filter events (WEB-041, CORE-027)', () => {
+  it.each([
+    [
+      'dns_filter_inactive',
+      'DNS Filter Off',
+      'Laptop resolved its DNS check domain example.net normally, so the DNS filter is off.',
+    ],
+    [
+      'dns_filter_active',
+      'DNS Filter On',
+      'Laptop blocked its DNS check domain example.net again, so the DNS filter is on.',
+    ],
+    [
+      'dns_filter_check_removed',
+      'DNS Check Removed',
+      'The DNS check domain example.net was removed from Laptop, so its DNS filter is no longer checked.',
+    ],
+  ])('shows %s as "%s" with a message naming the device and domain', (type, category, message) => {
+    const event = log(type, { domain: 'example.net' });
+    expect(getLogCategory(event)).toBe(category);
+    expect(getLogMessage(event, 'Laptop')).toBe(message);
+  });
+
+  it('links each DNS filter category to its help section', () => {
+    expect(getLogHelpUrl(log('dns_filter_inactive', { domain: 'example.net' }))).toBe(
+      'https://virtueinitiative.org/help/web/log-types#dns-filter-off',
+    );
+  });
+});
+
 describe('getLogHelpAnchor / getLogHelpUrl (WEB-041)', () => {
   it('slugifies the category title into an anchor', () => {
     expect(getLogHelpAnchor(log('lifecycle_alert', { reason: 'unexpected_gap' }))).toBe(

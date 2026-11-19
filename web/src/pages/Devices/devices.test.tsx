@@ -195,3 +195,105 @@ describe('Devices — Device delete (WEB-037, WEB-020)', () => {
     });
   });
 });
+
+describe('Devices — DNS check domain (WEB-072, WEB-035)', () => {
+  async function openEditor(user: ReturnType<typeof userEvent.setup>) {
+    const editBtns = await screen.findAllByRole('button', { name: /^edit$/i });
+    await user.click(editBtns[0]);
+    return screen.getAllByLabelText('DNS check domain')[0];
+  }
+
+  function capturePatches() {
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.patch(`${BASE}/device/:id`, async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return bodies;
+  }
+
+  it('shows the current domain on the card, or "Not set"', async () => {
+    server.use(
+      http.get(`${BASE}/device`, () =>
+        HttpResponse.json([
+          { ...TEST_DEVICES[0], dns_filter_domain: 'block.example.net' },
+          TEST_DEVICES[1],
+        ]),
+      ),
+    );
+    renderWithClient(<Devices />);
+    expect(await screen.findByText('block.example.net')).toBeInTheDocument();
+    expect(screen.getByText('Not set')).toBeInTheDocument();
+  });
+
+  it('sends the domain lowercased and trimmed when the owner sets it', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    const input = await openEditor(user);
+    expect(
+      screen.getAllByText(/add this domain to your dns filter's block list/i),
+    ).not.toHaveLength(0);
+    await user.type(input, '  Block.Example.NET ');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ name: 'My Laptop', dns_filter_domain: 'block.example.net' });
+  });
+
+  it('shows the validation message and sends nothing for an invalid domain', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    const input = await openEditor(user);
+    await user.type(input, 'https://example.net/path');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    expect(await screen.findByText('Enter a domain such as example.net')).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('sends null when the owner clears the domain', async () => {
+    server.use(
+      http.get(`${BASE}/device`, () =>
+        HttpResponse.json([{ ...TEST_DEVICES[0], dns_filter_domain: 'block.example.net' }]),
+      ),
+    );
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Devices />);
+
+    await screen.findByText('block.example.net');
+    const input = await openEditor(user);
+    await user.clear(input);
+    await user.click(screen.getByRole('button', { name: /save/i }));
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0].dns_filter_domain).toBeNull();
+  });
+
+  it("does not list or offer editing for another person's devices (partners only watch)", async () => {
+    server.use(
+      http.get(`${BASE}/device`, () =>
+        HttpResponse.json([
+          {
+            ...TEST_DEVICES[0],
+            owner: 'someone-else',
+            name: 'Bobs PC',
+            dns_filter_domain: 'x.example.net',
+          },
+        ]),
+      ),
+    );
+    renderWithClient(<Devices />);
+
+    expect(await screen.findByText('Add your first device')).toBeInTheDocument();
+    expect(screen.queryByText('Bobs PC')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+  });
+});

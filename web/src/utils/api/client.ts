@@ -327,7 +327,10 @@ export class APIClient {
     return this.fetchDevices();
   }
 
-  async updateDevice(id: string, patch: { name?: string }): Promise<void> {
+  async updateDevice(
+    id: string,
+    patch: { name?: string; dns_filter_domain?: string | null },
+  ): Promise<void> {
     await api.patchDevice(id, patch);
     await this.fetchDevices(true);
   }
