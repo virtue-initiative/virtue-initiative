@@ -32,6 +32,7 @@ export const TEST_DEVICES: Device[] = [
     status: 'offline',
     last_hash_at: Date.now() - 30_000,
     pending_count: 0,
+    dns_filter_domain: null,
   },
   {
     id: 'device-2',
@@ -41,6 +42,7 @@ export const TEST_DEVICES: Device[] = [
     status: 'online',
     last_hash_at: Date.now() - 2_000,
     pending_count: 0,
+    dns_filter_domain: null,
   },
 ];
 

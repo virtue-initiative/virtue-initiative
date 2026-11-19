@@ -21,9 +21,12 @@ import {
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
+import { dnsFilterDomainSchema } from '@virtueinitiative/shared-web/types';
 import { formatRelativeTimestamp } from '../../utils/time';
 import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
+
+type DevicePatch = { name?: string; dns_filter_domain?: string | null };
 
 const DOWNLOAD_URL = `${LANDING_URL}/download`;
 
@@ -38,7 +41,7 @@ export function Devices() {
     void api?.refreshDevices();
   }, [api]);
 
-  const updateDevice = (id: string, patch: { name?: string }) =>
+  const updateDevice = (id: string, patch: DevicePatch) =>
     api ? api.updateDevice(id, patch) : Promise.reject(new Error('Not signed in'));
   const removeDevice = (id: string) =>
     api ? api.removeDevice(id) : Promise.reject(new Error('Not signed in'));
@@ -202,11 +205,13 @@ function DeviceCard({
   device: Device;
   // undefined while unknown, null when the device has never uploaded.
   lastUpload: number | null | undefined;
-  onUpdateDevice: (id: string, patch: { name?: string }) => Promise<void>;
+  onUpdateDevice: (id: string, patch: DevicePatch) => Promise<void>;
   onRemoveDevice: (id: string) => Promise<void>;
 }) {
   const { route } = useLocation();
   const [name, setName] = useState(device.name);
+  const [dnsDomain, setDnsDomain] = useState(device.dns_filter_domain ?? '');
+  const [dnsError, setDnsError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const once = useSingleFlight();
@@ -216,6 +221,8 @@ function DeviceCard({
 
   function openEdit() {
     setName(device.name);
+    setDnsDomain(device.dns_filter_domain ?? '');
+    setDnsError(undefined);
     dialogRef.current?.showModal();
   }
 
@@ -234,10 +241,23 @@ function DeviceCard({
 
   async function handleSave(e: Event) {
     e.preventDefault();
+    // An empty field clears the domain (WEB-072).
+    let nextDomain: string | null = null;
+    if (dnsDomain.trim() !== '') {
+      const parsed = dnsFilterDomainSchema.safeParse(dnsDomain);
+      if (!parsed.success) {
+        setDnsError(parsed.error.issues[0]?.message ?? 'Enter a domain such as example.net');
+        return;
+      }
+      nextDomain = parsed.data;
+    }
+    setDnsError(undefined);
     await once(async () => {
       setSaving(true);
       try {
-        await onUpdateDevice(device.id, { name });
+        const patch: DevicePatch = { name };
+        if (nextDomain !== device.dns_filter_domain) patch.dns_filter_domain = nextDomain;
+        await onUpdateDevice(device.id, patch);
         dialogRef.current?.close();
       } catch (err) {
         const message = describeError(err, 'Failed to save');
@@ -276,6 +296,8 @@ function DeviceCard({
         <dd>{lastUpload === undefined ? '—' : formatRelativeTimestamp(lastUpload)}</dd>
         <dt>Last activity</dt>
         <dd>{formatRelativeTimestamp(device.last_hash_at)}</dd>
+        <dt>DNS check domain</dt>
+        <dd>{device.dns_filter_domain ?? 'Not set'}</dd>
       </dl>
       <CardActions>
         <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
@@ -289,12 +311,33 @@ function DeviceCard({
       <Dialog dialogRef={dialogRef} busy={saving}>
         <DialogHeader>Edit device</DialogHeader>
         <form onSubmit={handleSave}>
-          <Field label="Name">
+          <Field label="Name" id={`device-name-${device.id}`}>
             <Input
+              id={`device-name-${device.id}`}
               type="text"
               value={name}
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
               required
+            />
+          </Field>
+          <Field
+            label="DNS check domain"
+            id={`device-dns-${device.id}`}
+            helpText="Add this domain to your DNS filter's block list. Virtue alerts your partners if it stops being blocked. Leave it empty to turn the check off."
+            error={dnsError}
+          >
+            <Input
+              id={`device-dns-${device.id}`}
+              type="text"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellcheck={false}
+              placeholder="example.net"
+              value={dnsDomain}
+              error={!!dnsError}
+              aria-invalid={dnsError ? true : undefined}
+              onInput={(e) => setDnsDomain((e.target as HTMLInputElement).value)}
             />
           </Field>
           <DialogSecondaryActions>

@@ -239,7 +239,7 @@ The Devices page (`/`) MUST list the user's own devices, not those of people the
 
 ### WEB-035 Device card
 
-Each card MUST show the device's name, status tag (WEB-019), platform, **Last upload** and **Last activity** (from `last_hash_at`, API-029).
+Each card MUST show the device's name, status tag (WEB-019), platform, **Last upload**, **Last activity** (from `last_hash_at`, API-029) and **DNS check domain** (WEB-072), which MUST read "Not set" when the device has none.
 
 - **Last upload** MUST be the end time of the device's newest batch, taken from the log cache after syncing (WEB-013). It MUST show "Never" for a device with no batches, and "—" while unknown: before the cache answers, or when it has never synced and cannot now.
 - **View logs** MUST open Logs filtered to that device.
@@ -253,6 +253,12 @@ Each card MUST show the device's name, status tag (WEB-019), platform, **Last up
 **Edit** MUST open a dialog to rename the device (a name is required) (API-030). A failed save MUST show a toast and keep the dialog open.
 
 **Delete device permanently** MUST ask for confirmation, warning that it permanently removes the device's logs and uploads and that partners will be notified (WEB-020, API-031).
+
+### WEB-072 DNS filter check
+
+The **Edit** dialog (WEB-037) MUST also let the owner set, change or clear the device's DNS check domain (API-030, CORE-027), with help text saying to add the domain to the DNS filter's block list and that partners are alerted if it stops being blocked. The value MUST be checked against `dnsFilterDomainSchema` before saving, an invalid one MUST show its message and send nothing, and a valid one MUST be sent lowercased. An empty field MUST clear the domain. Partners MUST NOT be able to edit it: the Devices page lists only the user's own devices.
+
+> OPEN: partner device rows (WEB-049) do not show the DNS check domain. Partners see it only through the log events (WEB-041).
 
 ## WEB-038 Logs
 
@@ -284,21 +290,26 @@ The line above the logs MUST show one of:
 
 Each event MUST be shown with an icon (never emoji text), a category and a message naming the device. The device name MUST fall back to the first 8 characters of its ID. Categories MUST match the headings of the log types help page, and **Learn more** MUST link to the category's section there (the category lowercased, with each run of other characters as `-`).
 
-| `type` (and `data`)  | Category                   | Message                                                                                                     |
-| -------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `screenshot`         | Screenshot                 | Screenshot captured on D                                                                                    |
-| `screenshot_skipped` | Screenshot Skipped         | "Duplicate screenshot skipped on D", "Screen locked, screenshot skipped on D", or "Screenshot skipped on D" |
-| `screenshot_missed`  | Screenshot Missed          | D missed a scheduled screenshot                                                                             |
-| `system_login`       | System Login               | D was logged into or started up                                                                             |
-| `system_logout`      | System Logout              | D was logged out of or shut down                                                                            |
-| `user_stop`          | Monitoring Stopped by User | Monitoring stopped by user on D                                                                             |
-| `user_start`         | Monitoring Resumed by User | Monitoring resumed by user on D                                                                             |
-| `repeated_restarts`  | Repeated Restarts          | D restarted N times in a short window                                                                       |
-| `alert`              | Alert                      | the alert's `message`                                                                                       |
-| `capture_failed`     | Capture Failed             | Capture failed repeatedly on D                                                                              |
-| `dev`                | Developer                  | `title: details`                                                                                            |
-| `heartbeat`          | Daily Check-in             | an explanation of the daily check-in                                                                        |
-| anything else        | the type, `_` as spaces    | Event on D                                                                                                  |
+| `type` (and `data`)                   | Category                   | Message                                                                                                     |
+| ------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `screenshot`                          | Screenshot                 | Screenshot captured on D                                                                                    |
+| `screenshot_skipped`                  | Screenshot Skipped         | "Duplicate screenshot skipped on D", "Screen locked, screenshot skipped on D", or "Screenshot skipped on D" |
+| `screenshot_missed`                   | Screenshot Missed          | D missed a scheduled screenshot                                                                             |
+| `system_login`                        | System Login               | D was logged into or started up                                                                             |
+| `system_logout`                       | System Logout              | D was logged out of or shut down                                                                            |
+| `user_stop`                           | Monitoring Stopped by User | Monitoring stopped by user on D                                                                             |
+| `user_start`                          | Monitoring Resumed by User | Monitoring resumed by user on D                                                                             |
+| `repeated_restarts`                   | Repeated Restarts          | D restarted N times in a short window                                                                       |
+| `alert`                               | Alert                      | the alert's `message`                                                                                       |
+| `capture_failed`                      | Capture Failed             | Capture failed repeatedly on D                                                                              |
+| `dns_filter_inactive` (`domain`)      | DNS Filter Off             | D resolved its DNS check domain normally, so the DNS filter is off                                          |
+| `dns_filter_active` (`domain`)        | DNS Filter On              | D blocked its DNS check domain again, so the DNS filter is on                                               |
+| `dns_filter_check_removed` (`domain`) | DNS Check Removed          | The DNS check domain was removed from D, so its DNS filter is no longer checked                             |
+| `dev`                                 | Developer                  | `title: details`                                                                                            |
+| `heartbeat`                           | Daily Check-in             | an explanation of the daily check-in                                                                        |
+| anything else                         | the type, `_` as spaces    | Event on D                                                                                                  |
+
+The three `dns_filter_*` events come from the DNS filter check (CORE-027); the message MUST name the domain when `data.domain` is present.
 
 Events stored by older clients MUST still be shown: `lifecycle` with `kind` `system_login`, `system_logout` or `suspend_detected` ("Suspend Detected", "D was asleep for N min"), and `lifecycle_alert` with `reason` `unexpected_gap` ("Unexpected Gap"), `unexpected_stop` ("Process Stopped Unexpectedly"), `unexpected_start` ("Unexpected Restart") or `user_stop`. Other `lifecycle` events MUST read "Activity" and other `lifecycle_alert` events "Alert".
 
@@ -365,6 +376,7 @@ Each alert card MUST show the category, concern badge, device, time and a plain 
 - `user_stop`: how many minutes or hours later monitoring was turned back on on that device; otherwise that it "has not been turned back on yet", or for a finished period that it "was not turned back on before the end of this report".
 - `repeated_restarts`: the restart count and window, noting a crash loop or someone trying to stop it.
 - `screenshot_missed`, `capture_failed`: what usually causes them.
+- `dns_filter_inactive`, `dns_filter_check_removed`: that the device's DNS filter may be off or no longer checked (CORE-027), naming the domain.
 - `alert`: its message.
 
 Clicking a card or screenshot MUST open the detail dialog (WEB-044), stepping within that row.
