@@ -28,8 +28,8 @@ it relaunches the app if it isn't running, which covers crashes and hangs. The a
 single-instance redirect turns each relaunch into a no-op while it is already running.
 
 For a packaged install the task is a hidden PowerShell script, hosted by `conhost.exe --headless`
-so no console flashes (CLIENT-014). While `Get-AppxPackage` finds the package, it launches the
-app execution alias (and does nothing if the user switched the alias off). Once the package is gone (checked
+so no console flashes (CLIENT-014). While `Get-AppxPackage` finds the package, it launches
+`Virtue.WindowsApp.exe` from the package's `InstallLocation`. Once the package is gone (checked
 again after 20 seconds, so an update swap doesn't count), it deletes `%ProgramData%\Virtue` and
 unregisters itself, since an MSIX uninstall runs no app code. Tray Exit re-registers the task
 cleanup-only, so a deliberate exit stays exited but a later uninstall still removes the device
@@ -38,11 +38,11 @@ state. An unpackaged or dev run gets a plain task that launches its own exe, and
 - **Every minute** is Task Scheduler's floor for a repeating trigger (`Repetition/Interval` is
   `minInclusive="PT1M"`, and `schtasks.exe` rejects less). The core's late-wakeup threshold
   (CORE-002) is 2 minutes partly so a normal relaunch doesn't raise a tamper alert.
-- **The task launches the app execution alias**,
-  `%LOCALAPPDATA%\Microsoft\WindowsApps\virtue-initiative.exe` (declared in
-  `Package.appxmanifest`, resolved by `AppLaunchPath`), not `Environment.ProcessPath`. An MSIX
-  app's process path contains its version, so after a Store update the old path no longer
-  exists and every run failed with `0x80070002`. `explorer.exe shell:AppsFolder\...` is also
+- **The script looks up the install location on every run**, rather than registering
+  `Environment.ProcessPath`. An MSIX app's process path contains its version, so after a Store
+  update the old path no longer exists and every run failed with `0x80070002`. It doesn't use the
+  app execution alias (`virtue-initiative.exe`) either, since the user can switch that off in
+  Settings > Apps > App execution aliases. `explorer.exe shell:AppsFolder\...` is also
   version-independent but drops the command-line arguments the quiet relaunch needs.
 - **Not `RegisterApplicationRestart`.** Windows' restart API registers fine for MSIX apps and
   Windows Error Reporting sees the crash, but nothing is relaunched.
@@ -147,8 +147,8 @@ instance with no extra code, exactly like a crash-recovery relaunch.
 The watchdog poll alone leaves the app gone for anywhere from 0 to 60 seconds after an update.
 `UpdateRelaunchTask` (`Virtue.WindowsApp.Core/Interop/UpdateRelaunchTask.cs`, unit-tested) closes
 that to a measured ~15s: immediately before each install attempt, `App.ScheduleUpdateRelaunch()`
-registers a **one-shot** `VirtueUpdateRelaunch` task pointing at the same `AppLaunchPath`
-execution alias the watchdog uses.
+registers a **one-shot** `VirtueUpdateRelaunch` task pointing at the `AppLaunchPath`
+execution alias.
 
 The app cannot restart itself here. The OS terminates the process for the package swap, so there
 is no "after" in which to run code, and every process carrying the package identity — including

@@ -6,21 +6,22 @@ namespace Virtue.WindowsApp.Tests;
 
 public sealed class RestartWatchdogTests
 {
-    private const string AliasPath = @"C:\Users\someone\AppData\Local\Microsoft\WindowsApps\virtue-initiative.exe";
     private static readonly XNamespace Ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
     private static XElement Build() =>
-        XDocument.Parse(RestartWatchdog.BuildTaskXml(AliasPath, "--restarted-by-watchdog", new DateTime(2026, 8, 28, 15, 22, 43))).Root!;
+        XDocument.Parse(RestartWatchdog.BuildTaskXml("--restarted-by-watchdog", new DateTime(2026, 8, 28, 15, 22, 43))).Root!;
 
-    // CLIENT-014: the watchdog relaunches while the package is installed, and once it is gone
-    // (re-checked after a pause) it deletes the device state and unregisters itself.
+    // CLIENT-014: the watchdog relaunches from the package's install location while it is
+    // installed, and once it is gone (re-checked after a pause) it deletes the device state and
+    // unregisters itself.
     [Fact]
     public void BuildScript_RelaunchesWhileThePackageIsInstalled_AndCleansUpWhenItIsGone()
     {
-        var script = RestartWatchdog.BuildScript(AliasPath, "--restarted-by-watchdog");
+        var script = RestartWatchdog.BuildScript("--restarted-by-watchdog");
 
-        Assert.Contains($"$a='{AliasPath}'", script);
-        Assert.Contains("Start-Process -FilePath $a -ArgumentList '--restarted-by-watchdog'", script);
+        Assert.Contains(
+            "Start-Process -FilePath (Join-Path $p.InstallLocation 'Virtue.WindowsApp.exe') -ArgumentList '--restarted-by-watchdog'",
+            script);
         Assert.Contains("Get-AppxPackage -Name 'VirtueInitiative.VirtueAccountability'", script);
         Assert.Contains("Remove-Item -LiteralPath (Join-Path $env:ProgramData 'Virtue') -Recurse -Force", script);
         Assert.Contains("Unregister-ScheduledTask -TaskName 'VirtueResidentWatchdog'", script);
@@ -28,16 +29,15 @@ public sealed class RestartWatchdogTests
         var sleep = script.IndexOf("Start-Sleep", StringComparison.Ordinal);
         Assert.True(script.IndexOf("Get-AppxPackage", sleep, StringComparison.Ordinal) > sleep);
         Assert.True(sleep < script.IndexOf("Remove-Item", StringComparison.Ordinal));
-        // Deleting never depends on the alias, which the user can switch off.
-        Assert.True(script.IndexOf("Test-Path", StringComparison.Ordinal) < sleep);
-        Assert.DoesNotContain("Test-Path", script[sleep..]);
+        // Nothing depends on the execution alias, which the user can switch off.
+        Assert.DoesNotContain("virtue-initiative.exe", script);
     }
 
     // CLIENT-014: after a deliberate Exit the task only cleans up and never launches the app.
     [Fact]
     public void BuildScript_CleanupOnly_NeverStartsTheApp_ButStillCleansUp()
     {
-        var script = RestartWatchdog.BuildScript(AliasPath, "--restarted-by-watchdog", relaunch: false);
+        var script = RestartWatchdog.BuildScript("--restarted-by-watchdog", relaunch: false);
 
         Assert.DoesNotContain("Start-Process", script);
         Assert.Contains("Remove-Item", script);

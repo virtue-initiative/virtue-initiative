@@ -235,8 +235,9 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// A launch through the app execution alias (how the watchdog starts us now — see
-    /// <see cref="AppLaunchPath"/>) does not always surface its arguments through
+    /// A launch through the app execution alias (how the update relaunch starts us — see
+    /// <see cref="AppLaunchPath"/>) or straight from the package's exe (the watchdog) does not
+    /// always surface its arguments through
     /// <c>ILaunchActivatedEventArgs</c>, so the process command line is checked as well. Only
     /// valid for this process's own activation: a <i>redirected</i> activation carries another
     /// process's arguments, and this one's command line says nothing about it.
@@ -246,9 +247,10 @@ public partial class App : Application
             string.Equals(argument, WatchdogRelaunchArg, StringComparison.Ordinal));
 
     /// <summary>
-    /// Registers the watchdog against the app execution alias rather than the running
-    /// executable, so the task survives a package update — see <see cref="AppLaunchPath"/> for
-    /// why the version-stamped process path silently breaks auto-relaunch after every update.
+    /// Registers the watchdog. A packaged install gets a script that finds the app through the
+    /// package on every run (CLIENT-014), so the task survives a package update — see
+    /// <see cref="AppLaunchPath"/> for why the version-stamped process path silently breaks
+    /// auto-relaunch after every update. The resolved path is used only for an unpackaged run.
     /// </summary>
     private static void RegisterWatchdog()
     {

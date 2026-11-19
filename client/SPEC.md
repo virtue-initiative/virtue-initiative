@@ -129,13 +129,13 @@ Monitoring MUST start without user action after a reboot or sign-in to the OS, a
 
 A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed stop MUST be recorded with CORE-011 before monitoring stops, so partners see Monitoring Stopped by User and the gap is excused (CORE-002). The next start records Monitoring Resumed by User (CORE-022).
 
-| Platform | Control                                                              | Source tag             | After stopping                                                 |
-| -------- | -------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
-| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in |
-| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                          |
+| Platform | Control                                                              | Source tag             | After stopping                                                                          |
+| -------- | -------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in                          |
+| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                                                   |
 | Windows  | "Stop Monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog stops relaunching (CLIENT-014 cleanup stays), relaunch task removed, app exits |
-| Android  | "Pause Monitoring" / "Resume Monitoring"                             | `android_pause_button` | loop stopped, app stays open                                   |
-| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                            |
+| Android  | "Pause Monitoring" / "Resume Monitoring"                             | `android_pause_button` | loop stopped, app stays open                                                            |
+| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                                                     |
 
 - Confirmation text: Linux "warning: stopping the daemon will alert people monitoring you." with the prompt defaulting to No; macOS "Stop monitoring and quit?" / "This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted."; Windows "Stop monitoring and close Virtue?" / "This will stop monitoring on this device and close the main window and tray app." / "People monitoring you may be alerted."; Android and iOS "This will stop monitoring on this device. People monitoring you may be alerted."
 - Linux MUST say "<service> is already stopped." and do nothing when the service is inactive, and MUST NOT stop the service if the stop could not be recorded.
@@ -167,7 +167,7 @@ Shared rules for every platform that updates itself:
 
 - Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user, running each user's commands as CLIENT-003 does. Upgrades run the same stop, then CLIENT-003's start.
 - macOS, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
-- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the package is no longer installed (checked again after a short delay, so an update swap is not mistaken for an uninstall), the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the package is installed, the task MUST relaunch the app as before, and MUST NOT delete anything if only the alias is missing. After a deliberate Exit (CLIENT-011) the task MUST keep running only this cleanup and MUST NOT relaunch the app.
+- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the package is no longer installed (checked again after a short delay, so an update swap is not mistaken for an uninstall), the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the package is installed, the task MUST relaunch the app from the package's current install location, so the launch survives an update and does not depend on the app execution alias. After a deliberate Exit (CLIENT-011) the task MUST keep running only this cleanup and MUST NOT relaunch the app.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
 
