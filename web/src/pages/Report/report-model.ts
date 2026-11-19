@@ -13,12 +13,21 @@ export interface ReportWindow {
 /** Local-time YYYY-MM-DD (unlike toISOString, which is UTC). */
 export function toDateString(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `${String(d.getFullYear()).padStart(4, '0')}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 export function parseDateString(date: string): Date {
   const [y, m, d] = date.split('-').map(Number);
-  return new Date(y, m - 1, d);
+  const result = new Date(2000, 0, 1);
+  // setFullYear, unlike the Date constructor, keeps years 0-99 as written.
+  result.setFullYear(y, m - 1, d);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+/** True for a YYYY-MM-DD that names a real calendar day (not 2026-02-30). */
+export function isRealDateString(date: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && toDateString(parseDateString(date)) === date;
 }
 
 export function shiftDateString(date: string, days: number): string {

@@ -1,4 +1,4 @@
-# CLAUDE.md — API
+# AGENTS.md — API
 
 Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
 
@@ -37,19 +37,15 @@ All error responses:
 
 HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict, 500 server error.
 
-## Key files
+## Where things are
 
-- `src/lib/db.ts` — all D1 database queries
-- `src/lib/hash-server.ts` — client for the standalone hash server (`GET`/`DELETE /hash`), used by `device-only.ts`, `devices.ts`
-- `src/lib/credentials.ts` — `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`
-- `src/lib/app-url.ts` — `getAppUrl`, shared by every route that links back to the web app in an email
-- `src/lib/batch-url.ts` — `batchObject` derives a batch's R2 key and URL from its version, owner and id (API-038); nothing stores the URL
-- `src/lib/access-keys.ts` — msgpack encoding of `batches.access_keys`
-- `src/middleware/auth.ts` — JWT verification, sets `c.get('sub')`
-- `src/middleware/validation.ts` — Zod validation wrapper
-- `src/routes/device-only.ts` — device registration, settings, and batch upload endpoints
-- `src/routes/data.ts` — data retrieval with access control
-- `SPEC.md` — complete endpoint specification
+- `src/routes/`: one file per route group. `device-only.ts` is the `/d/*` device API; `data.ts` serves batches with access control.
+- `src/lib/db.ts`: every D1 query.
+- `src/lib/hash-server.ts`: the client for the standalone hash server (`GET`/`DELETE /hash`).
+- `src/lib/credentials.ts`: `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`.
+- `src/lib/batch-url.ts`: derives a batch's R2 key and URL from its version, owner and id (API-038). Nothing stores the URL.
+- `src/middleware/`: auth (`auth.ts`), admin gate, rate limiting and Zod validation.
+- `SPEC.md`: every endpoint (`API-` IDs). [README.md](README.md) covers running and deploying.
 
 ## Type source of truth
 

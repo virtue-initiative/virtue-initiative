@@ -98,6 +98,10 @@ jobs:
         run: cargo test ${{ steps.profile.outputs.cargo_release_flag }} --target aarch64-apple-darwin -p virtue-core --features testing --tests
         working-directory: client
 
+      - name: Swift tests (VirtueKit)
+        run: swift test
+        working-directory: client/shared-swift
+
       - name: Build hash server
         run: cargo build
         working-directory: hash-server

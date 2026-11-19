@@ -120,6 +120,23 @@ if [[ -n "$TEAM_ID" ]]; then
   )
 fi
 
+# A Simulator build has no team to sign with, but the App Group entitlement only
+# takes effect when the app and the extension are signed (CLIENT-002), so sign
+# them ad hoc during the build. Signing afterwards leaves the group preferences
+# unshared. --sdk wins over --destination, which xcodebuild then ignores.
+is_simulator() {
+  if [[ -n "$SDK" ]]; then [[ "$SDK" == "iphonesimulator" ]]; return; fi
+  [[ "$DESTINATION" == *Simulator* ]] && return
+  [[ "$DESTINATION" =~ id=([^,]+) ]] && xcrun simctl list devices | grep -q "${BASH_REMATCH[1]}"
+}
+if [[ "$CODE_SIGNING_ALLOWED" == "YES" && -z "$TEAM_ID" ]] && is_simulator; then
+  ARGS+=(
+    CODE_SIGN_IDENTITY="-"
+    CODE_SIGN_STYLE=Manual
+    PROVISIONING_PROFILE_SPECIFIER=""
+  )
+fi
+
 xcodebuild "${ARGS[@]}" build
 
 echo "Build complete"

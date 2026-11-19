@@ -33,12 +33,18 @@ export function useUrlState<T>(
   key: string,
   type: 'string' | 'number' | 'boolean' | 'object',
   defaultValue: T,
-): [T, (value: T) => void] {
+  /** When given, any parsed value outside this list is treated as the default (WEB-039). */
+  allowed?: readonly T[],
+): [T, (value: T, options?: { replace?: boolean }) => void] {
   const { query, route } = useLocation();
   const raw = query[key];
-  const state = raw === undefined ? defaultValue : parseValue(raw, type, defaultValue);
+  const parsed = raw === undefined ? defaultValue : parseValue(raw, type, defaultValue);
+  const state = allowed && !allowed.includes(parsed) ? defaultValue : parsed;
 
-  const setUrlState = (value: T) => {
+  // Each change pushes a history entry so Back undoes it (WEB-039). Pass
+  // `replace` for automatic corrections the user didn't make, or Back would
+  // return to the value that was just corrected and loop.
+  const setUrlState = (value: T, options?: { replace?: boolean }) => {
     const urlParams = new URLSearchParams(window.location.search);
 
     if (value === defaultValue) {
@@ -52,7 +58,7 @@ export function useUrlState<T>(
     }
 
     const qs = urlParams.toString();
-    route(`${window.location.pathname}${qs ? `?${qs}` : ''}`, true);
+    route(`${window.location.pathname}${qs ? `?${qs}` : ''}`, options?.replace ?? false);
   };
 
   return [state, setUrlState];

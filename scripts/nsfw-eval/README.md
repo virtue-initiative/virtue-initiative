@@ -14,7 +14,7 @@ The archive is an `openssl enc -aes-256-cbc -pbkdf2 -iter 600000` encrypted `.ta
 screenshots with labels: a `labels.jsonl` (each file's `nsfw` flag, `category`, `kind` and
 `size`) and/or a `manifest.json` (a `target` per file; `normal-*` is safe, anything else is
 NSFW). PNGs at the archive root are collected into `OUT_DIR`; otherwise each subdirectory
-holding PNGs (`desktop/`, `mobile-android/`, ...) goes to `OUT_DIR/<subdirectory>`. The
+holding PNGs (`desktop/`, `mobile-android/`, ...) goes to <!-- doc-check: ignore --> `OUT_DIR/<subdirectory>`. The
 script decrypts into `/dev/shm`, runs the `nsfw_eval` example
 (`client/core/examples/nsfw_eval/`) and deletes the plaintext. Each output directory gets:
 
@@ -24,7 +24,7 @@ script decrypts into `/dev/shm`, runs the `nsfw_eval` example
   window each region was found in. Nothing is gated, so any gate or threshold can be
   replayed offline. With default extraction settings it also stores what Rust's
   `classify_regions` returned, for the parity check below.
-- `blur/`: each screenshot and region as the blurred, compressed WebP the upload pipeline
+- `blur/`: each screenshot and region as the blurred, compressed WebP the upload pipeline <!-- doc-check: ignore -->
   produces.
 - `labels.jsonl` / `manifest.json`: the labels.
 - `bench.json`: model build time, time per run and memory, which `score.py` uses to

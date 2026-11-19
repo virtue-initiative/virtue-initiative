@@ -27,7 +27,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: app/Info.plist
         CODE_SIGN_ENTITLEMENTS: app/VirtueIOS.entitlements
-        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust'
+        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust -framework Vision'
       configs:
         Release:
           CODE_SIGN_STYLE: Manual
@@ -57,7 +57,7 @@ targets:
         INFOPLIST_FILE: app/SafariWebExtension/Info.plist
         CODE_SIGN_ENTITLEMENTS: app/SafariWebExtension/VirtueSafariWebExtension.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
-        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust'
+        OTHER_LDFLAGS: '$(inherited) -lvirtue_ios_rust -framework Vision'
       configs:
         Release:
           CODE_SIGN_STYLE: Manual

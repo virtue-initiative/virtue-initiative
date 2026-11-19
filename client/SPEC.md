@@ -45,6 +45,7 @@ The sign-in form MUST take an email, a password and an optional device name, and
 - Sign-in needs a running daemon loop (CORE-007). Linux and macOS MUST fail with "failed to connect to daemon (is it running?)" when the daemon is unreachable; Windows with "monitoring is not running". Android MUST show the Accessibility guide instead of attempting sign-in while the service is disconnected, and MUST restart a paused loop before signing in.
 - Linux `virtue login` MUST mask the typed password with `*`, abort on Ctrl+C or Ctrl+D, prompt `Device name [<hostname>]:` unless `--device-name` is given, and skip the email prompt when `--email` is given. On success it MUST print the capture probe result (CLIENT-020), the device id, the partners instruction and the monitoring summary, plus a warning when the probe failed.
 - macOS MUST show "Login failed. Check your email and password and try again." when the error mentions unauthorized, bad request or login failed, and "Login failed: <error>" otherwise. Android MUST show "Sign in failed. <error>." (adding the period only when the error lacks terminal punctuation).
+- Windows MUST NOT show raw core text for the two common failures. A rejected email or password (HTTP 400, 401 or 403) MUST show "Sign in failed. Check your email and password and try again." A request that never reaches the server (no network, unknown host, timeout) MUST show "Can't reach Virtue. Check your internet connection and try again." Any other failure MUST show "Sign in failed. <error>." with the period added only when the error lacks terminal punctuation. A failed sign-in MUST save nothing and leave the form usable.
 
 > OPEN: Android retries a sign-in that fails with "serialization error" after deleting the entire `core-data` directory, including any events still waiting to upload, although CORE-017 already recovers unreadable state — is the wipe still needed, and may it discard queued alerts?
 
@@ -57,6 +58,8 @@ While signed out, no screenshots are taken (CORE-009):
 - Linux, macOS and Windows: the daemon MUST keep running, so signing in again works without restarting anything. The macOS menu bar MUST NOT offer Sign Out; it is in the window only.
 - Android: sign-out MUST also stop the daemon loop and remove the persistent notification.
 - iOS: sign-out MUST also turn the monitoring switch off (CLIENT-032).
+
+<!-- doc-check: ignore -->
 
 > OPEN: when native logout fails, Android deletes `core-data/auth.json`, a file that no longer exists (auth lives in `event_state.json`), so the fallback does nothing — should it be removed or retargeted?
 
@@ -81,10 +84,10 @@ Status Details MUST render the CORE-010 fields, grouped as:
 - Recent errors: each with its time, context and message, or a none marker.
 - Advanced: device id, API URL, hash base URL (`<default>` when unset), capture interval, batch window, and where the logs are (CLIENT-017).
 
-Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
+Timestamps MUST be shown in local time followed by a relative age in parentheses, such as `2026-11-11 19:32:05 (5m ago)`. A summary row MAY shorten the time to the time of day, with the date added when it is not today, such as `7:32 PM (5m ago)`. The age MUST read `Ns ago` under a minute, `Nm ago` under an hour, `Nh Mm ago` under a day and `Nd Nh ago` from then on, rounded down and without a second unit of zero, or `in the future` for a timestamp ahead of now. Absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
 
-- macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot.
-- Linux Status Details is `virtue status --full`, which MUST leave out the Advanced group; `virtue status --advanced` MUST show every group. It MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.
+- macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot. Android's daemon state row is "Monitor state", reading "Running", "Paused" or "Stopped" for its capture loop.
+- Linux Status Details is `virtue status --full`, which MUST leave out the Advanced group; `virtue status --advanced` MUST show every group. It MUST show the five newest errors.
 
 ## CLIENT-008 Test Screenshot
 
@@ -355,7 +358,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Check Extension MUST open a check page in Safari, which reports back with `virtueinitiative://check-extension?extension=on|off&all_sites=0|1&private=0|1`. Missing flags keep their last values. Any extension message after the check started also counts as on.
 - Status Details MUST show the extension's last check-in, which counts as stale after 10 s, its last frame, last page, last error and daemon state.
 - Pause MUST record CORE-011 and turn the switch off; capture stops at the extension's next message. Resume MUST record CORE-022 and turn it on. Signing in MUST turn it on.
-- The Open Settings button MUST, on iOS 26.2 and later, open Safari's settings for the Virtue extension directly (`SFSafariSettings.openExtensionsSettings`), and otherwise, or if that fails, open Virtue's own page in Settings.
+- The Open Settings button MUST, on iOS 26.2 and later, open Safari's settings for the Virtue extension directly (`SFSafariSettings.openExtensionsSettings`), and otherwise, or if that fails, open Settings with `openSettingsURLString`. Where Settings lands varies by iOS version (Virtue's own page, or the Apps list), so the step text MUST be right wherever it lands.
 - Home MUST show a one-line header (the V logo and "Virtue Initiative", together one link to the website) with an icon-only menu button labelled "Menu", and below it exactly one focus area chosen by the headline state:
   - signed out: the sign-in form (CLIENT-004) with "Email is required" or "Password is required" when a field is empty;
   - setup not finished or Safari permission needed: one setup step at a time, starting at the first step not done, with the step number, headline, "Step N of 5", a progress bar, and Back and Next buttons;

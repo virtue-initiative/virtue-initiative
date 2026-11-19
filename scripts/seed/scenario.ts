@@ -327,7 +327,7 @@ export function generateBatches(now: number): SeedBatch[] {
           });
         }
         if (r.chance(0.12 * device.riskiness)) {
-          events.push({ ts: mid + 2 * MINUTE, risk: r.range(0.42, 0.6), type: 'capture_failed' });
+          events.push({ ts: mid + 2 * MINUTE, risk: 0.8, type: 'capture_failed' });
         }
         if (index === sessions.length - 1 && r.chance(0.35 * device.riskiness)) {
           // Stopped monitoring early, then turned it back on later.

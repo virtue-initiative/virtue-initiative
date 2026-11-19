@@ -588,6 +588,8 @@ The client MUST authenticate with a **Web Token** and send
 
 The server SHOULD send a partner request email to the provided email address.
 
+The server MUST compare and store `email` trimmed and lowercased. If it is the user's own email, the server MUST respond **HTTP 400**.
+
 If `replace_id` is provided, it MUST name a partnership the user owns that has not been accepted, otherwise the server MUST respond **HTTP 404**. The server MUST delete that partnership and its invite token before creating the new one. This is how a failed invite is resent.
 
 The server SHOULD then respond **HTTP 200**

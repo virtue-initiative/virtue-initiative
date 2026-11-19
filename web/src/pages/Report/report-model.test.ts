@@ -3,6 +3,8 @@ import type { FeedLog } from '../Logs/types';
 import {
   buildReport,
   explainAlert,
+  isRealDateString,
+  parseDateString,
   reportWindow,
   shiftDateString,
   toDateString,
@@ -134,4 +136,26 @@ describe('explainAlert (WEB-048)', () => {
       'Custom alert.',
     );
   });
+});
+
+describe('date strings (WEB-046)', () => {
+  it.each([
+    ['2026-02-30', false],
+    ['2026-04-31', false],
+    ['2026-13-01', false],
+    ['2026-00-10', false],
+    ['2026-1-5', false],
+    ['2026-02-29', false],
+    ['2024-02-29', true],
+    ['2026-03-14', true],
+  ])('isRealDateString(%s) is %s', (date, expected) => {
+    expect(isRealDateString(date)).toBe(expected);
+  });
+
+  it.each(['0050-06-15', '2026-03-14', '1999-12-31'])(
+    'round-trips %s without shifting the year',
+    (date) => {
+      expect(toDateString(parseDateString(date))).toBe(date);
+    },
+  );
 });

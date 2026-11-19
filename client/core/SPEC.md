@@ -58,7 +58,7 @@ A capture that comes due while the screen is locked or a screensaver is active M
 
 A capture that has not materially changed from the last uploaded frame MUST NOT be uploaded; the daemon MUST send a `screenshot_skipped` event (reason `static_screen`) instead. The comparison MUST be against the last uploaded frame, not the previous capture, so that gradual change eventually counts. A broad change, even a low-contrast one such as a terminal filling with text, and a change concentrated in one region, such as a video, MUST count as changed. A few isolated cells changing, such as a clock, MUST NOT. The grid compared MUST scale with the screen size, and a change of screen size MUST count as changed.
 
-A capture or image processing failure MUST NOT be uploaded as a screenshot. It MUST be retained as in CORE-018 and counted towards CORE-006's `capture_failed` event.
+A capture or image processing failure MUST NOT be uploaded as a screenshot. A panic anywhere in capture or processing MUST be caught and treated as the same kind of failure, so a crash loop still reaches partners as Capture Failed. It MUST be retained as in CORE-018 and counted towards CORE-006's `capture_failed` event.
 
 ### CORE-004 Content detection
 
@@ -102,7 +102,7 @@ When the daemon detects thtat hte System Logout time changed, it MUST send a "sy
 
 While authenticated, the daemon MUST send a `heartbeat` event (risk 0%) at least once every 24 hours.
 
-When five screenshot captures fail within 30 minutes, the daemon MUST send a `capture_failed` event (risk 50%) and reset the failure count. A failure older than 30 minutes MUST NOT count.
+When five screenshot captures fail within 30 minutes, the daemon MUST send a `capture_failed` event (risk 80%, high) and reset the failure count. A failure older than 30 minutes MUST NOT count.
 
 The first System Login/Logout time observed (i.e. there is no prior value to compare against) MUST NOT be reported — it only establishes the baseline a later change is measured against.
 
