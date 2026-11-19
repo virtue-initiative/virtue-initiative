@@ -98,6 +98,9 @@ Top-level field names match the pre-rewrite per-observer keys (`auth`,
 `lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`) —
 existing installs load cleanly. `Daemon::new` loads it (or defaults) and, if
 already authenticated, refreshes device settings once before returning.
+Every load that a write may follow runs `DaemonState::upgrade`'s version
+steps first; a breaking shape change adds a step there (CORE-016, see
+`architecture.md`).
 
 ## IPC (Linux/Mac only)
 

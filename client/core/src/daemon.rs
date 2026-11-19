@@ -26,24 +26,26 @@ use crate::state::{load_state, lock_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
-/// `#[serde(default)]` alone can't absorb, and add its upgrade step to
-/// `load_current_state`; every write saves the current version (CORE-016). No real
-/// migration step exists yet — every change so far has been
-/// additive/subtractive.
+/// `#[serde(default)]` alone can't absorb, and add the step from the old
+/// version to [`DaemonState::upgrade`] (CORE-016). No step changes any data
+/// yet — every change so far has been additive/subtractive.
 pub const DAEMON_STATE_VERSION: u32 = 1;
 
-/// Loads the state at `path` and upgrades it to [`DAEMON_STATE_VERSION`]
-/// (CORE-016). Every read that may be written back goes through this, so
-/// stamping the current version on a write never skips an upgrade.
+/// Loads the state at `path` and runs its upgrade steps (CORE-016). Every
+/// read that may be written back goes through this, so each step's changes
+/// are what gets saved.
 fn load_current_state(path: &Path) -> CoreResult<DaemonState> {
     let mut state: DaemonState = load_state(path)?;
-    if state.version != DAEMON_STATE_VERSION {
-        tracing::info!(
-            from = state.version,
-            to = DAEMON_STATE_VERSION,
-            "daemon state version upgraded"
+    let from = state.version;
+    state.upgrade();
+    if from > DAEMON_STATE_VERSION {
+        tracing::warn!(
+            version = from,
+            current = DAEMON_STATE_VERSION,
+            "daemon state was saved by a newer client; not upgrading it"
         );
-        state.version = DAEMON_STATE_VERSION;
+    } else if from != state.version {
+        tracing::info!(from, to = state.version, "daemon state upgraded");
     }
     Ok(state)
 }
@@ -107,6 +109,33 @@ pub struct DaemonState {
     pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
+}
+
+impl DaemonState {
+    /// An empty state at the current version: version 0 (nothing saved yet)
+    /// run through the upgrade steps, the same way a missing file is. A reset
+    /// such as a logout starts from this (CORE-016).
+    pub(crate) fn initial() -> Self {
+        let mut state = Self::default();
+        state.upgrade();
+        state
+    }
+
+    /// Runs each upgrade step from `self.version` up to
+    /// [`DAEMON_STATE_VERSION`], in order (CORE-016). Leaves a state saved by
+    /// a newer client alone.
+    fn upgrade(&mut self) {
+        while self.version < DAEMON_STATE_VERSION {
+            match self.version {
+                // 0 → 1 initializes the state and must not change its data:
+                // version 0 means no file, or one saved before versions were
+                // recorded, whose data is already in the version 1 format.
+                0 => {}
+                version => unreachable!("no upgrade step from daemon state version {version}"),
+            }
+            self.version += 1;
+        }
+    }
 }
 
 /// One sequential daemon loop: check lifecycle, maybe take a screenshot,
@@ -230,11 +259,13 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.platform.get_time_utc_ms().unwrap_or(0)
     }
 
-    /// Every write records the current version (CORE-016). State read from
-    /// disk is already upgraded by `load_current_state`; this covers a reset
-    /// state, whose `Default` version is 0.
-    fn persist(&self, state: &mut DaemonState) {
-        state.version = DAEMON_STATE_VERSION;
+    /// Writes `state` with the version its upgrade steps reached (CORE-016).
+    fn persist(&self, state: &DaemonState) {
+        debug_assert!(
+            state.version >= DAEMON_STATE_VERSION,
+            "persisting daemon state version {} that skipped its upgrade steps",
+            state.version
+        );
         if let Err(err) = store_state(&self.state_path, state) {
             tracing::error!(error = %err, "daemon: failed to persist state");
         }
@@ -274,7 +305,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
         let result = f(&mut working);
 
-        self.persist(&mut working);
+        self.persist(&working);
         *self.state.lock().expect("daemon state lock poisoned") = working;
 
         result
@@ -515,7 +546,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         let result = self.apply_login(&mut guard, email, password, device_name, now_ms);
-        self.persist(&mut guard);
+        self.persist(&guard);
         result
     }
 
@@ -523,7 +554,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     pub fn test_logout(&self) -> CoreResult<()> {
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_logout(&mut guard);
-        self.persist(&mut guard);
+        self.persist(&guard);
         Ok(())
     }
 
@@ -532,7 +563,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_note_user_stop(&mut guard, now_ms, source);
-        self.persist(&mut guard);
+        self.persist(&guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -540,7 +571,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_note_user_start(&mut guard, now_ms);
-        self.persist(&mut guard);
+        self.persist(&guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -548,7 +579,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_queue_upload(&mut guard, now_ms, upload);
-        self.persist(&mut guard);
+        self.persist(&guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -556,7 +587,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_flush_batch_now(&mut guard, now_ms);
-        self.persist(&mut guard);
+        self.persist(&guard);
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -564,7 +595,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
         self.apply_force_capture(&mut guard, now_ms);
-        self.persist(&mut guard);
+        self.persist(&guard);
     }
 
     /// Test-only: run one tick directly against the live state, mirroring
@@ -584,7 +615,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
-        self.persist(&mut working);
+        self.persist(&working);
     }
 
     // ── The loop itself ──────────────────────────────────────────────────
