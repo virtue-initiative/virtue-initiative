@@ -8,7 +8,7 @@ unresolved LFS pointer.
 ## Where it came from
 
 It was converted offline from a source ONNX model, `nsfw_small_v1.onnx`, by a
-one-off example, `examples/onnx_to_nnef.rs`. That example read the ONNX file
+one-off example, `examples/onnx_to_nnef.rs` (since deleted). <!-- doc-check: ignore --> That example read the ONNX file
 with `tract-onnx`, called `into_typed()`, and wrote the result out as an NNEF
 tar with `tract-nnef`.
 

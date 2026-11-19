@@ -29,6 +29,16 @@ The wakeup time picked at the end of a tick MUST be the earliest time at which s
 
 The loop MUST NOT run a tick before the wakeup time unless a client request was applied. It MAY wake before the wakeup time (e.g. to bound how far a platform timer can drift across a system suspend), but MUST then go back to waiting without running a tick.
 
+## CORE-027 Time
+
+The daemon MUST take every time it records, schedules or compares from its own clock, not from the system clock, so changing the system clock while the daemon runs changes nothing.
+
+Its clock MUST be the server's time, read from the `Date` header of each API response and carried forward on the boot clock (CLIENT-018), which counts time spent suspended and which setting the system clock does not move. Before the first response since the daemon started, it MUST start from the system clock, but no earlier than the persisted last tick's time. A restart hidden by setting the system clock back is then caught by the correction alert below once the server is reached.
+
+When a response's time is more than 2 seconds from the daemon's clock, the daemon MUST move its clock to the response's time. It MUST move the next wakeup time, and every persisted time that later work is scheduled or measured from, by the same amount, so the correction neither holds off nor brings forward scheduled work. Events already recorded MUST keep their times. A correction made while the daemon starts, before it has recorded anything, MUST NOT move anything.
+
+Any other correction of more than 5 minutes MUST send an `alert` event (risk 80%) saying how far the clock was off. It MUST NOT be sent where `lifecycle_enabled` is false (CORE-002).
+
 ## CORE-002 Tamper detection
 
 It SHOULD do tamper detection by comparing the current time to the expected wakeup time. The difference SHOULD be added to the late wakeups array unless the gap is explained by a legitimate session transition, checked from both ends:
@@ -38,13 +48,15 @@ It SHOULD do tamper detection by comparing the current time to the expected wake
 
 Each piece of evidence is either unavailable (the platform hook returned nothing), supporting (within its 2-minute window), or contradicting (available but outside the window). A timestamp outside its window is contradicting only when the other timestamp is supporting; on its own, or beside another out-of-window timestamp, it is just a stale record (e.g. a login from days ago) and counts as unavailable. The gap MUST be excused (skipped, not added to the late wakeups array) only if at least one piece of evidence is supporting and neither piece is contradicting. A single contradicting signal MUST block the excuse even if the other signal is supporting — this is what keeps a daemon that was killed well before an eventual reboot (stale expected-wakeup vs. the reboot's logout) or one that isn't restarted until long after the surrounding login (e.g. autostart disabled) from riding a login/logout event it wasn't actually bracketed by.
 
-A third piece of evidence — suspend evidence — MUST also be considered, to excuse a gap caused by the system being suspended rather than by tampering. It is computed by comparing the real-time elapsed since the previous tick against the elapsed time on a clock that does not advance while the system is suspended, over that same span; a shortfall reveals how much of the span the system spent suspended. Unlike login/logout evidence, suspend evidence MUST only ever support an excuse, never contradict one — it MUST NOT be able to block a login/logout-supported excuse. It MUST support the excuse only when the detected suspended duration accounts for essentially the whole gap (allowing a small amount of slack for wake-up scheduling jitter); a gap only partially covered by a brief suspend (e.g. a killed process whose downtime happens to also span a real suspend) MUST NOT be excused by this evidence.
+A third piece of evidence — suspend evidence — MUST also be considered, to excuse a gap caused by the system being suspended rather than by tampering. It is computed by comparing the elapsed time on the boot clock (CLIENT-018) since the previous tick against the elapsed time on a clock that does not advance while the system is suspended, over that same span; a shortfall reveals how much of the span the system spent suspended. It MUST NOT be computed when either clock reads lower than at the previous tick, since the span then crossed a reboot. Unlike login/logout evidence, suspend evidence MUST only ever support an excuse, never contradict one — it MUST NOT be able to block a login/logout-supported excuse. It MUST support the excuse only when the detected suspended duration accounts for essentially the whole gap (allowing a small amount of slack for wake-up scheduling jitter); a gap only partially covered by a brief suspend (e.g. a killed process whose downtime happens to also span a real suspend) MUST NOT be excused by this evidence.
 
 The late wakeups array SHOULD track the last 10 wakeups. If a single late wakeup is greater than 2 minutes or the sum (of the non-negative values) is greater than 5 minutes we SHOULD alert.
 
 The late wakeups array MUST be cleared after an alert is sent (to prevent duplicates).
 
 The late wakeup event SHOULD be called "screenshot_missed".
+
+Login and logout times MUST be compared with the daemon's clock as the platform reports them, not adjusted for how far the system clock is off, so setting the system clock cannot make one look near.
 
 Tamper detection MUST be skipped, recording nothing, on a platform whose hooks report `lifecycle_enabled` as false (iOS, which has no boot or session signal to compare against).
 
@@ -196,7 +208,7 @@ A platform that drives the daemon with `tick_once` has no loop to service this r
 
 ## CORE-016 State persistence
 
-State MUST be persisted to a single JSON file (`state_path`) via a tmp-file-plus-rename so a reader never observes a partially-written file.
+State MUST be persisted to a single JSON file (`state_path`) via a tmp-file-plus-rename so a reader never observes a partially-written file. The file MUST record the version of its format. A missing file, or one with no version, is version 0. Every read of the file that a write may follow MUST, before the state is changed, run each upgrade step in order from the file's version up to the current version, and a write MUST record the version those steps reached, so each step runs once. The step from 0 to 1 initializes the state and MUST NOT change its data, because clients before this rule saved version 0 with data already in the version 1 format. A reset of the state, such as a logout, MUST start again from version 0 and run the same steps. A file saved by a newer client MUST keep its version, and the client MUST NOT run any upgrade step on it.
 
 On platforms where more than one OS process can construct a `Daemon` against the same `state_path` concurrently (iOS: the Safari extension's own daemon and the app's on-demand daemon started to service a blocking client call), each read-modify-write of that state — whether applying a client request or running a tick — MUST be serialized against other processes by holding an OS-level advisory exclusive lock on a sibling lock file (`state_path` with its extension replaced by `.lock`) for the full span from re-reading state through persisting the result. The lock MUST be released between iterations/requests rather than held for a `Daemon`'s whole lifetime, so a process not currently mutating state cannot starve another process's access.
 

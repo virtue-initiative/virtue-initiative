@@ -27,7 +27,7 @@ So for another device you need:
 For Debian/Ubuntu hosts, use the helper script in this directory:
 
 ```bash
-cd /home/jeff/code/virtue-initiative/web
+cd web
 bash ./scripts/install-cloudflared.sh
 ```
 
@@ -36,13 +36,13 @@ bash ./scripts/install-cloudflared.sh
 In separate terminals:
 
 ```bash
-cd /home/jeff/code/virtue-initiative/api
-npm run dev -- --ip 0.0.0.0 --port 8787
+cd api
+bun run dev -- --ip 0.0.0.0 --port 8787
 ```
 
 ```bash
-cd /home/jeff/code/virtue-initiative/web
-npm run dev -- --host 0.0.0.0
+cd web
+bun run dev -- --host 0.0.0.0
 ```
 
 ## Start Cloudflare quick tunnels
@@ -95,9 +95,9 @@ For the web server, also allow the generated tunnel hostname. You can do that
 either as a one-off shell env var:
 
 ```bash
-cd /home/jeff/code/virtue-initiative/web
+cd web
 __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=<web-tunnel-host> \
-  npm run dev -- --host 0.0.0.0 --force
+  bun run dev -- --host 0.0.0.0 --force
 ```
 
 Or by setting it in [`web/.env.local`](./.env.local):

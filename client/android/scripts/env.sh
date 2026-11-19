@@ -6,9 +6,9 @@
 #
 #   1. Defaults in this file.
 #   2. ~/.config/virtue-dev.env  (untracked, shared across every worktree on
-#                                 this machine — see AGENTS.md)
+#                                 this machine — see docs/development.md)
 #   3. .env at the repo root     (untracked, this worktree's overrides — e.g.
-#                                 a storage-redirected SDK setup; see AGENTS.md
+#                                 a storage-redirected SDK setup; see docs/development.md
 #                                 and .env.example)
 #   4. Variables already exported in your shell.
 #

@@ -2,7 +2,7 @@ AI
 node_modules
 .DS_Store
 
-# Per-worktree overrides layered on top of ~/.config/virtue-dev.env — see AGENTS.md.
+# Per-worktree overrides layered on top of ~/.config/virtue-dev.env — see docs/development.md.
 /.env
 /.dev.vars
 # Playwright CLI output (may contain credentials)
