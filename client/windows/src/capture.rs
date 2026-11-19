@@ -236,16 +236,11 @@ fn read_registry_shutdown_time_ms() -> Option<i64> {
 
 // Extracts the `SystemTime` attribute of the first (i.e. newest, given
 // reverse-direction order) `<TimeCreated>` element in the event XML. The Event
-// Log API single-quotes XML attributes, not double-quotes; both are accepted.
+// Log API single-quotes XML attributes, not double-quotes.
 fn parse_eventlog_timecreated_ms(xml: &str) -> Option<i64> {
-    let key = "SystemTime=";
+    let key = "SystemTime='";
     let start = xml.find(key)? + key.len();
-    let quote = xml[start..]
-        .chars()
-        .next()
-        .filter(|c| *c == '\'' || *c == '"')?;
-    let start = start + 1;
-    let end = start + xml[start..].find(quote)?;
+    let end = start + xml[start..].find('\'')?;
     let ts = &xml[start..end];
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()

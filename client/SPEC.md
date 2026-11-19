@@ -214,7 +214,7 @@ Each platform MUST supply the following to the core. A signal that cannot be rea
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
-- Windows MUST read the last System event before boot through the Event Log API (`EvtQuery`) and MUST NOT start a process for it. The value cannot change during a boot, so it MUST be read at most once per run.
+- Windows MUST read the last System event before boot through the Event Log API (`EvtQuery`) and MUST NOT start a process for it. The value cannot change during a boot, so a successful read MUST be kept for the rest of the run, and a failed read MAY be retried at most once per minute.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
 - Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
 
