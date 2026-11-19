@@ -26,6 +26,9 @@ docker build -t "$IMAGE_TAG" -f linux/docker/Dockerfile linux/docker
 
 mkdir -p "$CARGO_CACHE_DIR" "$DOCKER_TARGET_DIR"
 
+# The build-time settings (core/build.rs) pass through as variables, since the
+# container sees neither the repo root's .env nor ~/.config/virtue-dev.env.
+#
 # target/ is bind-mounted from a directory separate from the host's normal
 # build output (target-docker/, not target/). Build artifacts are tied to the
 # glibc/rustc of whatever environment produced them; reusing the host's
@@ -40,6 +43,9 @@ docker run --rm \
     -e VIRTUE_BUILD_DATE \
     -e VIRTUE_GIT_REF_NAME \
     -e VIRTUE_ENABLE_AUTO_UPDATE \
+    -e VIRTUE_DEFAULT_API_URL \
+    -e VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS \
+    -e VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS \
     -v "$CLIENT_ROOT:/workspace" \
     -v "$DOCKER_TARGET_DIR:/workspace/target" \
     -w /workspace \

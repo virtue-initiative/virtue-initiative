@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "landing",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "landing", "run", "dev"],
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--cwd", "landing", "run", "dev"],
       "port": 4321
     },
     {
       "name": "web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "web", "run", "dev"],
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--cwd", "web", "run", "dev"],
       "port": 5173
     }
   ]

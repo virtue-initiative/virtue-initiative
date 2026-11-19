@@ -107,7 +107,7 @@ async fn run_daemon_service_loop(paths: &ClientPaths) -> Result<()> {
 
     // Flush the batch promptly after waking from sleep rather than waiting
     // out the batch interval. This is daemon-loop UX plumbing, not part of
-    // the core alerting model. See `client/CLAUDE.md`.
+    // the core alerting model. See `client/mac/DESIGN.md`.
     let (wake_tx, mut wake_rx) = mpsc::unbounded_channel::<()>();
     spawn_wake_watcher(wake_tx);
 
