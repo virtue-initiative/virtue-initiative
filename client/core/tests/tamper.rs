@@ -508,9 +508,9 @@ fn a_clean_exit_without_a_user_stop_does_not_excuse_the_restart_gap() {
 
 // ── Restarts ─────────────────────────────────────────────────────────────────
 
-// CORE-027: a restart offline with the system clock set back still measures the lateness of the first tick.
+// CORE-027: a restart offline with the system clock set back to hide the gap is reported once the server is reached.
 #[test]
-fn a_restart_offline_with_the_clock_set_back_still_measures_lateness() {
+fn a_restart_offline_with_the_clock_set_back_is_reported_once_online() {
     let first = held_scenario();
     let restart_ms = wakeup(&first) + 10 * 60_000;
     let mut second = restart_with(&first, restart_ms, |platform, api| {
@@ -518,7 +518,10 @@ fn a_restart_offline_with_the_clock_set_back_still_measures_lateness() {
         platform.set_system_clock_offset(-3_600_000);
     });
     second.tick();
-    assert_eq!(missed_alerts(&second), 1, "ten minutes late is reported");
+    reach_server(&mut second);
+    let alerts = alert_messages(&second);
+    assert_eq!(alerts.len(), 1, "{alerts:?}");
+    assert!(alerts[0].contains("behind"), "{alerts:?}");
 }
 
 // CORE-002: time asleep while the daemon was stopped, on the same boot, is still excused as a suspend.

@@ -136,10 +136,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         let clock = DaemonClock::start(
             platform.get_time_utc_ms().unwrap_or(0),
             boot_clock_ms(&platform),
-            state
-                .lifecycle
-                .last_tick_utc_ms
-                .map(|utc_ms| (utc_ms, state.lifecycle.last_tick_boot_ms)),
+            state.lifecycle.last_tick_utc_ms,
         );
 
         let daemon = Self {

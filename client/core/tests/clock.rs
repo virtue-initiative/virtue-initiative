@@ -36,42 +36,21 @@ fn setting_the_system_clock_while_running_changes_nothing() {
     assert!(alert_messages(&scenario).is_empty());
 }
 
-/// A `restart_with` configuration for a restart at `restart_ms`: rebooted a
-/// minute before, the server can't be reached, and the system clock is
-/// `offset_ms` off.
-fn rebooted_offline(
-    restart_ms: i64,
-    offset_ms: i64,
-) -> impl FnOnce(&TestPlatformHooks, &MockApiClient) {
+/// A `restart_with` configuration: the server can't be reached, and the
+/// system clock is `offset_ms` off.
+fn offline_with_clock_off(offset_ms: i64) -> impl FnOnce(&TestPlatformHooks, &MockApiClient) {
     move |platform, api| {
         offline(platform, api);
-        platform.set_boot_clock_offset(60_000 - restart_ms);
         platform.set_system_clock_offset(offset_ms);
     }
 }
 
-// CORE-027: on the same boot, a restart offline carries the clock on from the last tick, whatever the system clock says.
+// CORE-027: after an offline restart, the clock starts no earlier than the last tick; the server corrects it and the correction is reported.
 #[test]
-fn a_restart_offline_on_the_same_boot_carries_the_clock_on() {
+fn a_clock_set_back_before_an_offline_restart_is_corrected_and_reported() {
     let first = held_scenario();
     let start = T0 + HOUR_MS;
-    let mut second = restart_with(&first, start, |platform, api| {
-        offline(platform, api);
-        platform.set_system_clock_offset(-2 * HOUR_MS);
-    });
-    second.tick();
-    assert_eq!(second.state().last_tick_at_ms, Some(start));
-
-    reach_server(&mut second);
-    assert!(alert_messages(&second).is_empty(), "nothing to correct");
-}
-
-// CORE-027: after an offline reboot, the clock starts no earlier than the last tick; the server corrects it and the correction is reported.
-#[test]
-fn a_clock_set_back_before_an_offline_reboot_is_corrected_and_reported() {
-    let first = held_scenario();
-    let start = T0 + HOUR_MS;
-    let mut second = restart_with(&first, start, rebooted_offline(start, -2 * HOUR_MS));
+    let mut second = restart_with(&first, start, offline_with_clock_off(-2 * HOUR_MS));
     second.tick();
     assert_eq!(
         second.state().last_tick_at_ms,
@@ -94,7 +73,7 @@ fn a_clock_set_back_before_an_offline_reboot_is_corrected_and_reported() {
 fn a_correction_moves_scheduled_work_with_it() {
     let first = held_scenario();
     let start = T0 + 30_000;
-    let mut second = restart_with(&first, start, rebooted_offline(start, DAY_MS));
+    let mut second = restart_with(&first, start, offline_with_clock_off(DAY_MS));
     second.tick();
     assert!(wakeup(&second) > second.clock.now_ms() + DAY_MS / 2);
 
@@ -118,7 +97,6 @@ fn a_correction_while_starting_is_not_reported() {
     let first = held_scenario();
     let start = T0 + 30_000;
     let mut second = restart_with(&first, start, |platform, _| {
-        platform.set_boot_clock_offset(60_000 - start);
         platform.set_system_clock_offset(-DAY_MS);
     });
     second.tick();
@@ -131,7 +109,7 @@ fn a_correction_while_starting_is_not_reported() {
 fn a_correction_of_five_minutes_or_less_is_not_reported() {
     let first = held_scenario();
     let start = T0 + HOUR_MS;
-    let mut second = restart_with(&first, start, rebooted_offline(start, -5 * 60_000));
+    let mut second = restart_with(&first, start, offline_with_clock_off(-5 * 60_000));
     second.tick();
     reach_server(&mut second);
     assert!(alert_messages(&second).is_empty());
@@ -144,7 +122,7 @@ fn a_correction_is_not_reported_where_lifecycle_is_disabled() {
     let first = held_scenario();
     let start = T0 + HOUR_MS;
     let mut second = restart_with(&first, start, |platform, api| {
-        rebooted_offline(start, -2 * HOUR_MS)(platform, api);
+        offline_with_clock_off(-2 * HOUR_MS)(platform, api);
         platform.set_lifecycle_enabled(false);
     });
     second.tick();

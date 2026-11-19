@@ -67,8 +67,8 @@ pub struct LifecycleState {
     /// (`LifecycleHooks::get_boot_clock_ms`, `get_monotonic_clock_ms`)
     /// readings, all captured at the previous `tick()` call. `tick()` diffs
     /// the two clocks against them for suspend evidence (CORE-002), and a
-    /// restart on the same boot carries the daemon's time on from them
-    /// (CORE-027). `None` before the first tick.
+    /// restart starts the daemon's clock no earlier than the time (CORE-027).
+    /// `None` before the first tick.
     pub last_tick_utc_ms: Option<i64>,
     pub last_tick_boot_ms: Option<i64>,
     pub last_tick_suspend_safe_ms: Option<i64>,

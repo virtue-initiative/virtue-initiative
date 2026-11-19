@@ -323,8 +323,8 @@ CORE-027): the server's time from the latest response's `Date` header
 (`ApiTransport::take_server_time_ms`), carried forward on
 `get_boot_clock_ms`, a clock that counts from boot including suspend and
 that setting the system clock doesn't move. Until the first response it
-carries on from the last tick on the same boot (`lifecycle.last_tick_*`),
-or after a reboot starts from the system clock, no earlier than that tick. A
+starts from the system clock, no earlier than the last tick
+(`lifecycle.last_tick_utc_ms`). A
 correction moves every persisted schedule time with it (`shift_times` in
 `daemon.rs`). Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a

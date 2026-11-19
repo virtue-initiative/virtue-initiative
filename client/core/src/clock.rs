@@ -19,22 +19,13 @@ pub(crate) struct DaemonClock {
 }
 
 impl DaemonClock {
-    /// Starts where the daemon's time stood at the last tick, `last_tick`
-    /// (its time and boot-clock reading), carried forward on the boot clock,
-    /// when that tick was on this boot: the boot clock hasn't gone back
-    /// since. Otherwise starts from the system clock, but no earlier than
-    /// the last tick, so a system clock set back can't move the daemon's
-    /// time before one it has already recorded.
-    pub fn start(system_ms: i64, boot_ms: i64, last_tick: Option<(i64, Option<i64>)>) -> Self {
-        let utc_ms = match last_tick {
-            Some((tick_ms, Some(tick_boot_ms))) if boot_ms >= tick_boot_ms => {
-                tick_ms + (boot_ms - tick_boot_ms)
-            }
-            Some((tick_ms, _)) => system_ms.max(tick_ms),
-            None => system_ms,
-        };
+    /// Starts from the system clock, but no earlier than the last tick's
+    /// time, `last_tick_ms`, so a system clock set back can't move the
+    /// daemon's time before one it has already recorded. A clock set back
+    /// further is corrected, and reported, by the first response.
+    pub fn start(system_ms: i64, boot_ms: i64, last_tick_ms: Option<i64>) -> Self {
         Self {
-            utc_ms,
+            utc_ms: last_tick_ms.map_or(system_ms, |tick_ms| system_ms.max(tick_ms)),
             boot_ms,
             synced: false,
         }
@@ -108,32 +99,19 @@ mod tests {
         assert_eq!(clock.now_ms(10_050), 1_010_000);
     }
 
-    // CORE-027: on the same boot, the clock carries on from the last tick,
-    // whatever the system clock says.
+    // CORE-027: after a tick, the clock starts from the system clock, but no
+    // earlier than the last tick.
     #[test]
-    fn carries_on_from_the_last_tick_on_the_same_boot() {
-        let last_tick = Some((5_000_000, Some(1_000)));
-        for system_ms in [0, 5_000_000, 99_000_000] {
-            let clock = DaemonClock::start(system_ms, 61_000, last_tick);
-            assert_eq!(clock.now_ms(61_000), 5_060_000);
-        }
-    }
-
-    // CORE-027: after a reboot, the clock starts from the system clock, but
-    // no earlier than the last tick.
-    #[test]
-    fn starts_no_earlier_than_the_last_tick_after_a_reboot() {
-        for tick_boot_ms in [Some(90_000), None] {
-            let last_tick = Some((5_000_000, tick_boot_ms));
-            assert_eq!(
-                DaemonClock::start(1_000_000, 0, last_tick).now_ms(0),
-                5_000_000
-            );
-            assert_eq!(
-                DaemonClock::start(9_000_000, 0, last_tick).now_ms(0),
-                9_000_000
-            );
-        }
+    fn starts_no_earlier_than_the_last_tick() {
+        let last_tick = Some(5_000_000);
+        assert_eq!(
+            DaemonClock::start(1_000_000, 0, last_tick).now_ms(0),
+            5_000_000
+        );
+        assert_eq!(
+            DaemonClock::start(9_000_000, 0, last_tick).now_ms(0),
+            9_000_000
+        );
     }
 
     // CORE-027: the first response always sets the clock, and a later one

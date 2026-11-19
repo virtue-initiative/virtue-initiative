@@ -34,12 +34,11 @@ The daemon does not read the system clock for any time it records or
 schedules. It uses the server's time, taken from each API response and carried
 forward on a clock that counts from boot, so changing the system clock does
 nothing while the daemon runs. Until it first reaches the server after
-starting, it carries on from its time at the last tick when the device hasn't
-rebooted since, so a restart can't hide a missed screenshot by changing the
-clock. After a reboot, it uses the system clock, but never earlier than the
-last tick. If the server then corrects it by more than 5 minutes, it sends an
-`alert` (risk 0.8) saying how far off the clock was, since times recorded
-before then may be wrong by that much.
+starting, it uses the system clock, but never earlier than the last tick. If
+the server then corrects it by more than 5 minutes, it sends an `alert` (risk
+0.8) saying how far off the clock was, since times recorded before then may be
+wrong by that much. This is also what reports a restart hidden by setting the
+clock back.
 
 ## Other lifecycle events
 
