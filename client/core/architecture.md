@@ -8,42 +8,16 @@ Platform crates provide only raw screen data and OS hooks. `core` owns
 everything else: the daemon loop, persistence, retrying, hashing, batch
 construction, compression, encryption, and upload semantics.
 
-## Workspace layout
+## Where things are
 
-```
-client/
-  core/
-    architecture.md
-    SPEC.md             — source of truth for the daemon loop's behavior
-    Cargo.toml
-    src/
-      api.rs            — ApiTransport trait + HttpApiClient
-      config.rs         — Config struct (compile-time defaults via env!())
-      crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
-      daemon.rs         — Daemon<P, A> / DaemonState — the sequential loop itself
-      error.rs          — CoreError / CoreResult
-      ipc.rs            — ClientController + cross-process Unix-socket transport
-                           (Linux/Mac only)
-      model.rs          — Shared structs (ServiceStatus, Screenshot, …)
-      module/
-        auth.rs                  — login()/logout()
-        capture_availability.rs  — failure-window threshold
-        errors.rs                — bounded recent-errors ring (CORE-018)
-        heartbeat.rs             — 24h liveness ping
-        lifecycle.rs             — late-wakeup tamper check + UserStop
-        screenshot.rs            — plan/capture/commit + dedup + redaction
-        status.rs                — pure ServiceStatus assembly
-        upload.rs                — hash/batch queues, backoff, plan/execute/commit
-      platform.rs       — ScreenshotHooks / LifecycleHooks / PlatformHooks traits
-      rng.rs            — RandomSource (screenshot cadence draws)
-      state.rs          — load_state / store_state (event_state.json)
-      testing/          — MockApiClient, TestPlatformHooks, MockClock,
-                           TestRandomSource, Scenario
-  linux/  mac/  windows/  android/  ios/   — platform wrappers (ios has its
-                                              own standalone Cargo workspace,
-                                              not a member of client/'s — see
-                                              below)
-```
+- `src/daemon.rs`: `Daemon<P, A>` and `DaemonState`, the loop itself.
+- `src/module/`: one file per module (see "The modules" below).
+- `src/platform.rs`: the `ScreenshotHooks`, `LifecycleHooks` and `PlatformHooks` traits.
+- `src/api.rs`: the `ApiTransport` trait and `HttpApiClient`.
+- `src/crypto.rs`: AES-256-GCM, HPKE key wrapping and hashing.
+- `src/ipc.rs`: the Unix-socket transport for Linux and macOS.
+- `src/state.rs`: loading and storing `event_state.json`.
+- `src/testing/`: the mocks and the `Scenario` test harness.
 
 ## The daemon loop
 
@@ -93,8 +67,8 @@ daemon.run_forever(); // blocking; call from its own thread
 One flat struct, persisted to `event_state.json` with **the same top-level
 field names as the pre-rewrite per-observer keys** (`auth`, `lifecycle`,
 `screenshot`, `upload`, `capture_availability`, `heartbeat`) so existing
-installs load cleanly and `client/*/src/config.rs::read_auth_state` (which
-reads the `auth` key directly, bypassing the daemon) needs no changes:
+installs load cleanly, and readers that bypass the daemon and read the `auth`
+key directly (`read_auth_state` in `client/mac/src/config.rs`) keep working:
 
 ```rust
 pub struct DaemonState {
@@ -149,7 +123,7 @@ under a lock instead of going through the channel, so the single-threaded
 `Scenario` test harness (which never runs `run_forever` on a background
 thread) can drive the daemon synchronously.
 
-### The 7 modules
+### The modules
 
 | Module                 | Owns                                                         | Notable functions                                                                                                                      |
 | ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -271,10 +245,7 @@ the daemon, unchanged from before.
 `virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, HttpApiClient>`
 and stores it in process-global state, same pattern as Android's JNI bridge;
 every other `virtue_ios_native_*` call is a direct method call on that shared
-daemon. `client/ios/rust` is its own standalone Cargo workspace (not a
-`client/Cargo.toml` member — this predates the daemon rewrite), so it isn't
-covered by `cargo check --workspace` from `client/`; it has its own CI job
-(`.github/workflows/client-ios.yml`) that builds it directly.
+daemon.
 
 `IosPlatformHooks::lifecycle_enabled()` returns `false`: the monitoring
 process is a short-lived Safari extension host that the OS can suspend the
@@ -303,7 +274,7 @@ like `DEFAULT_API_BASE_URL`. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
 back to the repo-root `.env` (gitignored; see `.env.example`) and then to
-`~/.config/virtue-dev.env` (see root `AGENTS.md`) for any of those not already
+`~/.config/virtue-dev.env` (see `docs/development.md`) for any of those not already
 set by a real env var — and emits them via `cargo:rustc-env`. `config.rs`
 exposes them as `DEFAULT_API_BASE_URL` (const) and
 `default_capture_interval_seconds()`/`default_batch_window_seconds()`

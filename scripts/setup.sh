@@ -92,7 +92,7 @@ fi
 
 # Shared config that's identical across worktrees (secrets, machine-local
 # paths), then .env (repo root, per-worktree overrides) on top of it. See
-# AGENTS.md for the recognized keys.
+# docs/development.md for the recognized keys.
 VIRTUE_DEV_ENV="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
 if [ -f "$VIRTUE_DEV_ENV" ]; then
   set -a

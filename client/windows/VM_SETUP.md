@@ -4,11 +4,11 @@ This guide assumes:
 
 - Linux host with `virt-manager` / libvirt
 - one Windows VM used for both build and GUI testing
-- repo path on Linux: `/home/jeff/code/virtue-initiative`
+- commands are run from your checkout of this repo on Linux
 
-The Windows build path now targets:
+The Windows build produces:
 
-- Rust backend artifact (`virtue_windows.dll`)
+- the Rust library (`virtue_windows.dll`)
 - C# WinUI 3 resident app in `client/windows/`
 - MSIX output built remotely over SSH
 
@@ -84,7 +84,7 @@ When first-login setup requires internet but no adapter is detected:
 In a Linux terminal:
 
 ```bash
-cd /home/jeff/code/virtue-initiative/client/windows/scripts
+cd client/windows/scripts
 python3 -m http.server 8765 --bind 0.0.0.0
 ```
 
@@ -161,7 +161,6 @@ ssh win11 'echo connected'
 ## 5) Run the first remote smoke build
 
 ```bash
-cd /home/jeff/code/virtue-initiative
 ./client/windows/scripts/remote-windows-build.sh \
   --build-host win11 \
   --mode smoke
