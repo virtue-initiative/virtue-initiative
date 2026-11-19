@@ -239,7 +239,7 @@ The Devices page (`/`) MUST list the user's own devices, not those of people the
 
 ### WEB-035 Device card
 
-Each card MUST show the device's name, status tag (WEB-019), platform, **Last upload**, **Last activity** (from `last_hash_at`, API-029) and **DNS check domain** (WEB-072), which MUST read "Not set" when the device has none.
+Each card MUST show the device's name, status tag (WEB-019), platform, **Last upload**, **Last activity** (from `last_hash_at`, API-029) and **DNS check** (WEB-072), which MUST read "Off" when the check is off for the device, otherwise "Not set up" when the account has no DNS check domain (WEB-073), and otherwise "On".
 
 - **Last upload** MUST be the end time of the device's newest batch, taken from the log cache after syncing (WEB-013). It MUST show "Never" for a device with no batches, and "—" while unknown: before the cache answers, or when it has never synced and cannot now.
 - **View logs** MUST open Logs filtered to that device.
@@ -256,9 +256,9 @@ Each card MUST show the device's name, status tag (WEB-019), platform, **Last up
 
 ### WEB-072 DNS filter check
 
-The **Edit** dialog (WEB-037) MUST also let the owner set, change or clear the device's DNS check domain (API-030, CORE-027), with help text saying to add the domain to the DNS filter's block list and that partners are alerted if it stops being blocked. The value MUST be checked against `dnsFilterDomainSchema` before saving, an invalid one MUST show its message and send nothing, and a valid one MUST be sent lowercased. An empty field MUST clear the domain. Partners MUST NOT be able to edit it: the Devices page lists only the user's own devices.
+The **Edit** dialog (WEB-037) MUST also offer the checkbox "Check the DNS filter on this device", checked unless the device has `dns_filter_disabled` set, and saving MUST send `dns_filter_disabled` when it changed (API-030). Its help text MUST name the account's DNS check domain (WEB-073) and say that partners are notified when the check is turned off (CORE-027). When the account has no DNS check domain, it MUST instead say to set one in Settings, linking there. Partners MUST NOT be able to change it: the Devices page lists only the user's own devices.
 
-> OPEN: partner device rows (WEB-049) do not show the DNS check domain. Partners see it only through the log events (WEB-041).
+> OPEN: partner device rows (WEB-049) do not show the DNS check. Partners see it only through the log events (WEB-041).
 
 ## WEB-038 Logs
 
@@ -460,6 +460,10 @@ The user MUST enter their current password and a new one twice (WEB-021). The fo
 - It MUST keep the user's key pair, so that batches sealed before the change still decrypt afterwards, and this browser MUST stay signed in across a reload.
 - It MUST refuse when the private key does not match the account's public key, and change nothing.
 - On success it MUST clear the fields and say "Your password was changed."
+
+### WEB-073 DNS check domain
+
+Settings MUST let the user set, change or clear their DNS check domain (API-020, CORE-027) in its own form, starting with the current domain, with its own **Save** button that behaves as the Profile one does (WEB-059). Its help text MUST say to add the domain to the DNS filter's block list, that it applies to all the user's devices, and that partners are alerted if it stops being blocked and notified when the domain is cleared or the check is turned off for a device (WEB-072). The value MUST be checked against `dnsFilterDomainSchema` before saving, an invalid one MUST show its message and send nothing, and a valid one MUST be sent lowercased. An empty field MUST send `null`.
 
 ### WEB-062 Local cache
 

@@ -83,8 +83,8 @@ DNS Filter Off entry.
 
 ## DNS Check Removed
 
-The device owner removed the DNS check domain, so the device no longer checks
-its DNS filter.
+The device owner cleared their DNS check domain or turned the check off for this
+device, so the device no longer checks its DNS filter.
 
 ## Developer
 

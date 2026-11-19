@@ -19,6 +19,7 @@ export function serializeUser(user: UserRow, featureFlags: string[]) {
     ...(user.encrypted_priv_key
       ? { encrypted_priv_key: encodeBase64(user.encrypted_priv_key) }
       : {}),
+    dns_filter_domain: user.dns_filter_domain,
     feature_flags: featureFlags,
   };
 }

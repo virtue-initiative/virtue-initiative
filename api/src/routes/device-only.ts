@@ -107,7 +107,7 @@ async function buildDeviceSettings(
     owner: string;
     name: string;
     platform: string;
-    dns_filter_domain: string | null;
+    dns_filter_disabled: number;
   },
 ) {
   const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
@@ -115,10 +115,8 @@ async function buildDeviceSettings(
     return null; // caller returns the existing 500
   }
 
-  const { recipients, ownerFlagOverrides } = await listBatchAccessRecipientsForOwner(
-    c.env.DB,
-    device.owner,
-  );
+  const { recipients, ownerFlagOverrides, ownerDnsFilterDomain } =
+    await listBatchAccessRecipientsForOwner(c.env.DB, device.owner);
   const [hashToken, featureFlags] = await Promise.all([
     generateToken('device', device.id, c.env.JWT_PRIVATE_KEY, HASH_TOKEN_TTL_SECONDS),
     // API-061: a device gets its owner's flags, so all their devices agree.
@@ -129,7 +127,8 @@ async function buildDeviceSettings(
     id: device.id,
     name: device.name,
     platform: device.platform,
-    dns_filter_domain: device.dns_filter_domain,
+    // CORE-027: the owner's domain, unless they turned the check off for this device.
+    dns_filter_domain: device.dns_filter_disabled ? null : ownerDnsFilterDomain,
     wrapping_keys: recipients.map((recipient) => ({
       user_id: recipient.id,
       pub_key: encodeBase64(recipient.pub_key!),
@@ -170,7 +169,7 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
     owner,
     name,
     platform,
-    dns_filter_domain: null,
+    dns_filter_disabled: 0,
   });
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);

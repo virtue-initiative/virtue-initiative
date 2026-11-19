@@ -172,11 +172,12 @@ export async function findUserById(db: D1Database, userId: string) {
     pub_key: ArrayBuffer | null;
     encrypted_priv_key: ArrayBuffer | null;
     feature_flags: string;
+    dns_filter_domain: string | null;
   }>(
     db
       .prepare(
         `SELECT id, email, name, email_verified, email_bounced_at, settings,
-                pub_key, encrypted_priv_key, feature_flags
+                pub_key, encrypted_priv_key, feature_flags, dns_filter_domain
          FROM users
          WHERE id = ?`,
       )
@@ -351,6 +352,7 @@ export async function updateUser(
     settings?: { email_frequency?: string; timezone?: string };
     pub_key?: ArrayBuffer;
     encrypted_priv_key?: ArrayBuffer;
+    dns_filter_domain?: string | null;
   },
 ) {
   const updates: string[] = [];
@@ -410,6 +412,11 @@ export async function updateUser(
   if (fields.encrypted_priv_key !== undefined) {
     updates.push('encrypted_priv_key = ?');
     params.push(fields.encrypted_priv_key);
+  }
+
+  if (fields.dns_filter_domain !== undefined) {
+    updates.push('dns_filter_domain = ?');
+    params.push(fields.dns_filter_domain);
   }
 
   if (updates.length === 0) {
@@ -490,12 +497,12 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
     owner: string;
     name: string;
     platform: string;
-    dns_filter_domain: string | null;
+    dns_filter_disabled: number;
     created_at: number;
   }>(
     db
       .prepare(
-        'SELECT id, owner, name, platform, dns_filter_domain, created_at FROM devices WHERE id = ?',
+        'SELECT id, owner, name, platform, dns_filter_disabled, created_at FROM devices WHERE id = ?',
       )
       .bind(uuidToBytes(deviceId)),
     ['id', 'owner'],
@@ -508,12 +515,12 @@ export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId:
     owner: string;
     name: string;
     platform: string;
-    dns_filter_domain: string | null;
+    dns_filter_disabled: number;
     created_at: number;
   }>(
     db
       .prepare(
-        'SELECT id, owner, name, platform, dns_filter_domain, created_at FROM devices WHERE id = ? AND owner = ?',
+        'SELECT id, owner, name, platform, dns_filter_disabled, created_at FROM devices WHERE id = ? AND owner = ?',
       )
       .bind(uuidToBytes(deviceId), uuidToBytes(ownerId)),
     ['id', 'owner'],
@@ -523,7 +530,7 @@ export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId:
 export async function updateDevice(
   db: D1Database,
   deviceId: string,
-  fields: { name?: string; dns_filter_domain?: string | null },
+  fields: { name?: string; dns_filter_disabled?: boolean },
 ) {
   const updates: string[] = [];
   const params: SqlValue[] = [];
@@ -533,9 +540,9 @@ export async function updateDevice(
     params.push(fields.name);
   }
 
-  if (fields.dns_filter_domain !== undefined) {
-    updates.push('dns_filter_domain = ?');
-    params.push(fields.dns_filter_domain);
+  if (fields.dns_filter_disabled !== undefined) {
+    updates.push('dns_filter_disabled = ?');
+    params.push(fields.dns_filter_disabled ? 1 : 0);
   }
 
   if (updates.length === 0) {
@@ -612,7 +619,7 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
     owner: string;
     name: string;
     platform: string;
-    dns_filter_domain: string | null;
+    dns_filter_disabled: number;
     created_at: number;
     deleted_at: number | null;
   }>(
@@ -621,7 +628,7 @@ export async function listDevicesForOwners(db: D1Database, ownerIds: string[]) {
         // No batches here (API-029): a device's last upload is derived by the web
         // app from the batches /data already sends it, and status comes from the
         // hash server's last_received (hashGetMany in lib/hash-server.ts).
-        `SELECT d.id, d.owner, d.name, d.platform, d.dns_filter_domain, d.created_at, d.deleted_at
+        `SELECT d.id, d.owner, d.name, d.platform, d.dns_filter_disabled, d.created_at, d.deleted_at
          FROM devices d
          WHERE d.owner IN (${placeholders(ownerIds.length)})
          ORDER BY d.created_at DESC`,
@@ -1077,13 +1084,18 @@ export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
 }
 
-// Also returns the owner's flag overrides (API-061), since the owner's row is
-// already being read here for their public key.
+// Also returns the owner's flag overrides (API-061) and DNS check domain (CORE-027),
+// since the owner's row is already being read here for their public key.
 export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {
   const [owner, partners] = await Promise.all([
-    firstWithUuidFields<{ id: string; pub_key: ArrayBuffer | null; feature_flags: string }>(
+    firstWithUuidFields<{
+      id: string;
+      pub_key: ArrayBuffer | null;
+      feature_flags: string;
+      dns_filter_domain: string | null;
+    }>(
       db
-        .prepare('SELECT id, pub_key, feature_flags FROM users WHERE id = ?')
+        .prepare('SELECT id, pub_key, feature_flags, dns_filter_domain FROM users WHERE id = ?')
         .bind(uuidToBytes(ownerId)),
       ['id'],
     ),
@@ -1106,6 +1118,7 @@ export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId:
       ...partners.filter((partner) => partner.pub_key),
     ],
     ownerFlagOverrides: parseFlagOverrides(owner?.feature_flags ?? null),
+    ownerDnsFilterDomain: owner?.dns_filter_domain ?? null,
   };
 }
 

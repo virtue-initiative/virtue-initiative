@@ -20,6 +20,7 @@ export const TEST_USER: User = {
     email_frequency: 'daily',
     timezone: 'UTC',
   },
+  dns_filter_domain: null,
   feature_flags: [],
 };
 
@@ -32,7 +33,7 @@ export const TEST_DEVICES: Device[] = [
     status: 'offline',
     last_hash_at: Date.now() - 30_000,
     pending_count: 0,
-    dns_filter_domain: null,
+    dns_filter_disabled: false,
   },
   {
     id: 'device-2',
@@ -42,7 +43,7 @@ export const TEST_DEVICES: Device[] = [
     status: 'online',
     last_hash_at: Date.now() - 2_000,
     pending_count: 0,
-    dns_filter_domain: null,
+    dns_filter_disabled: false,
   },
 ];
 

@@ -555,7 +555,7 @@ auth.get('/user', authenticateWebSession(), async (c) => {
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
   // API-020: key material is deliberately not accepted here; see POST /user/password.
-  const { email, name, settings } = c.req.valid('json');
+  const { email, name, settings, dns_filter_domain } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -563,7 +563,7 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  await updateUser(c.env.DB, userId, { name, settings });
+  await updateUser(c.env.DB, userId, { name, settings, dns_filter_domain });
 
   const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
   let emailBounced = false;

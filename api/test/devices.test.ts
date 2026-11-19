@@ -9,6 +9,7 @@ import {
   listEmailDeliveries,
   markUserEmailVerified,
   signupAndGetCookie,
+  uploadBatch,
 } from './helpers';
 import { installHashServerMock, seedHashState } from './hash-server-mock';
 
@@ -19,6 +20,25 @@ beforeAll(() => {
 });
 
 beforeEach(clearDB);
+
+/** Sets the account-wide DNS check domain through PATCH /user (API-020). */
+async function setAccountDomain(cookie: string, domain: string | null) {
+  const res = await SELF.fetch(`${BASE}/user`, {
+    method: 'PATCH',
+    headers: authHeaders(cookie),
+    body: JSON.stringify({ dns_filter_domain: domain }),
+  });
+  expect(res.status).toBe(200);
+}
+
+/** The dns_filter_domain a device gets from GET /d/device (API-036). */
+async function settingsDomain(refreshToken: string) {
+  const res = await SELF.fetch(`${BASE}/d/device`, {
+    headers: { Authorization: `Bearer ${refreshToken}` },
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { dns_filter_domain: string | null }).dns_filter_domain;
+}
 
 describe('Main device routes', () => {
   it('lists devices owned by the authenticated user (API-029)', async () => {
@@ -120,105 +140,85 @@ describe('Main device routes', () => {
     expect(res.status).toBe(404);
   });
 
-  it('returns dns_filter_domain as null for a device that has none (API-029)', async () => {
+  it('returns dns_filter_disabled as false for a new device (API-029, API-030)', async () => {
     const { cookie } = await signupAndGetCookie('nodns@example.com');
     await createDeviceForUser('nodns@example.com');
 
     const res = await SELF.fetch(`${BASE}/device`, { headers: authHeaders(cookie) });
 
-    const body = (await res.json()) as Array<{ dns_filter_domain: string | null }>;
-    expect(body[0]).toHaveProperty('dns_filter_domain', null);
+    const body = (await res.json()) as Array<{ dns_filter_disabled: boolean }>;
+    expect(body[0]).toHaveProperty('dns_filter_disabled', false);
   });
 
-  it('sets, changes and clears the DNS filter domain, normalised, across device list and device settings (API-030, API-029, API-036, CORE-027)', async () => {
-    const { cookie } = await signupAndGetCookie('dns@example.com');
-    const device = await createDeviceForUser('dns@example.com', 'password123', 'Desk', 'linux');
+  it('turns the DNS filter check off and on for one device, keeping the other fields (API-030, API-029)', async () => {
+    const { cookie } = await signupAndGetCookie('switch@example.com');
+    const device = await createDeviceForUser('switch@example.com', 'password123', 'Desk', 'linux');
+    const other = await createDeviceForUser('switch@example.com', 'password123', 'Phone', 'ios');
     const patch = (body: unknown) =>
       SELF.fetch(`${BASE}/device/${device.id}`, {
         method: 'PATCH',
         headers: authHeaders(cookie),
         body: JSON.stringify(body),
       });
-    const listed = async () => {
-      const list = (await (
-        await SELF.fetch(`${BASE}/device`, { headers: authHeaders(cookie) })
-      ).json()) as Array<{ id: string; name: string; dns_filter_domain: string | null }>;
-      return list.find((item) => item.id === device.id)!;
-    };
-    const onDevice = async () =>
-      (
-        (await (
-          await SELF.fetch(`${BASE}/d/device`, {
-            headers: { Authorization: `Bearer ${device.refresh_token}` },
-          })
-        ).json()) as { dns_filter_domain: string | null }
-      ).dns_filter_domain;
+    const listed = async () =>
+      new Map(
+        (
+          (await (
+            await SELF.fetch(`${BASE}/device`, { headers: authHeaders(cookie) })
+          ).json()) as Array<{ id: string; name: string; dns_filter_disabled: boolean }>
+        ).map((item) => [item.id, item]),
+      );
 
-    expect((await patch({ dns_filter_domain: '  Blocked.Example.NET ' })).status).toBe(204);
-    expect(await listed()).toMatchObject({
-      name: 'Desk',
-      dns_filter_domain: 'blocked.example.net',
-    });
-    expect(await onDevice()).toBe('blocked.example.net');
-
-    expect((await patch({ dns_filter_domain: 'other.example.org' })).status).toBe(204);
-    expect((await listed()).dns_filter_domain).toBe('other.example.org');
+    expect((await patch({ dns_filter_disabled: true })).status).toBe(204);
+    let list = await listed();
+    expect(list.get(device.id)).toMatchObject({ name: 'Desk', dns_filter_disabled: true });
+    expect(list.get(other.id)).toMatchObject({ dns_filter_disabled: false });
 
     expect((await patch({ name: 'Renamed' })).status).toBe(204);
-    expect(await listed()).toMatchObject({
+    expect((await listed()).get(device.id)).toMatchObject({
       name: 'Renamed',
-      dns_filter_domain: 'other.example.org',
+      dns_filter_disabled: true,
     });
 
-    expect((await patch({ dns_filter_domain: null })).status).toBe(204);
-    expect((await listed()).dns_filter_domain).toBeNull();
-    expect(await onDevice()).toBeNull();
+    expect((await patch({ dns_filter_disabled: false })).status).toBe(204);
+    expect((await listed()).get(device.id)).toMatchObject({ dns_filter_disabled: false });
   });
 
   it.each([
-    ['a scheme', 'https://example.net'],
-    ['a port', 'example.net:8080'],
-    ['a space', 'example .net'],
-    ['a path', 'example.net/path'],
-    ['no dot', 'localhost'],
-    ['an empty string', ''],
-    [
-      'more than 253 characters',
-      `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(63)}.net`,
-    ],
-  ])('rejects a DNS filter domain with %s (API-030)', async (_name, domain) => {
-    const { cookie } = await signupAndGetCookie('baddns@example.com');
-    const device = await createDeviceForUser('baddns@example.com');
+    ['a string', 'yes'],
+    ['a number', 1],
+    ['null', null],
+  ])('rejects dns_filter_disabled given as %s (API-030)', async (_name, value) => {
+    const { cookie } = await signupAndGetCookie('badswitch@example.com');
+    const device = await createDeviceForUser('badswitch@example.com');
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
       headers: authHeaders(cookie),
-      body: JSON.stringify({ dns_filter_domain: domain }),
+      body: JSON.stringify({ dns_filter_disabled: value }),
     });
 
     expect(res.status).toBe(400);
-    const list = (await (
-      await SELF.fetch(`${BASE}/device`, { headers: authHeaders(cookie) })
-    ).json()) as Array<{ dns_filter_domain: string | null }>;
-    expect(list[0]!.dns_filter_domain).toBeNull();
   });
 
-  it('forbids setting the DNS filter domain of a device owned by another user (API-030)', async () => {
-    await signupAndGetCookie('dnsowner@example.com');
+  it('forbids switching the DNS filter check of a device owned by another user (API-030)', async () => {
+    const { cookie: ownerCookie } = await signupAndGetCookie('dnsowner@example.com');
     const { cookie: attackerCookie } = await signupAndGetCookie('dnsattacker@example.com');
     const device = await createDeviceForUser('dnsowner@example.com');
+    await setAccountDomain(ownerCookie, 'blocked.example.net');
 
     const res = await SELF.fetch(`${BASE}/device/${device.id}`, {
       method: 'PATCH',
       headers: authHeaders(attackerCookie),
-      body: JSON.stringify({ dns_filter_domain: 'example.net' }),
+      body: JSON.stringify({ dns_filter_disabled: true }),
     });
 
     expect(res.status).toBe(404);
-    const row = await env.DB.prepare('SELECT dns_filter_domain FROM devices').first<{
-      dns_filter_domain: string | null;
-    }>();
-    expect(row?.dns_filter_domain).toBeNull();
+    const list = (await (
+      await SELF.fetch(`${BASE}/device`, { headers: authHeaders(ownerCookie) })
+    ).json()) as Array<{ dns_filter_disabled: boolean }>;
+    expect(list[0]!.dns_filter_disabled).toBe(false);
+    expect(await settingsDomain(device.refresh_token)).toBe('blocked.example.net');
   });
 
   it('lists owner devices to an accepted partner (API-029)', async () => {
@@ -406,5 +406,80 @@ describe('Main device routes', () => {
         (delivery) => delivery.recipient_email === 'delete-device-unverified-partner@example.com',
       ),
     ).toBe(true);
+  });
+});
+
+describe('DeviceSettings dns_filter_domain', () => {
+  async function batchDomain(device: { id: string; refresh_token: string }, userId: string) {
+    seedHashState(device.id, { hash: '5a'.repeat(32), seq: 1, last_received: 1_700_000_000 });
+    const res = await uploadBatch(
+      device.refresh_token,
+      batchMetadataForm({
+        start_time: 1_000,
+        end_time: 2_000,
+        access_keys: { [userId]: btoa('owner-key') },
+      }),
+    );
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { settings: { dns_filter_domain: string | null } }).settings
+      .dns_filter_domain;
+  }
+
+  it('is null on every device while the account has no domain (API-036, API-038)', async () => {
+    const { userId } = await signupAndGetCookie('none@example.com');
+    const device = await createDeviceForUser('none@example.com');
+
+    expect(await settingsDomain(device.refresh_token)).toBeNull();
+    expect(await batchDomain(device, userId)).toBeNull();
+  });
+
+  it("carries the account's domain to every device, including one added later, and follows changes (API-036, API-038, CORE-027)", async () => {
+    const { cookie, userId } = await signupAndGetCookie('acct@example.com');
+    const first = await createDeviceForUser('acct@example.com', 'password123', 'Desk', 'linux');
+
+    await setAccountDomain(cookie, 'blocked.example.net');
+    const later = await createDeviceForUser('acct@example.com', 'password123', 'Phone', 'ios');
+    expect(await settingsDomain(first.refresh_token)).toBe('blocked.example.net');
+    expect(await settingsDomain(later.refresh_token)).toBe('blocked.example.net');
+    expect(await batchDomain(first, userId)).toBe('blocked.example.net');
+
+    await setAccountDomain(cookie, 'other.example.org');
+    expect(await settingsDomain(first.refresh_token)).toBe('other.example.org');
+    expect(await batchDomain(later, userId)).toBe('other.example.org');
+
+    await setAccountDomain(cookie, null);
+    expect(await settingsDomain(first.refresh_token)).toBeNull();
+    expect(await batchDomain(first, userId)).toBeNull();
+  });
+
+  it('is null for a device with the check turned off, and returns when it is turned back on (API-030, API-036, API-038)', async () => {
+    const { cookie, userId } = await signupAndGetCookie('off@example.com');
+    const work = await createDeviceForUser('off@example.com', 'password123', 'Work', 'windows');
+    const home = await createDeviceForUser('off@example.com', 'password123', 'Home', 'linux');
+    await setAccountDomain(cookie, 'blocked.example.net');
+    const toggle = (disabled: boolean) =>
+      SELF.fetch(`${BASE}/device/${work.id}`, {
+        method: 'PATCH',
+        headers: authHeaders(cookie),
+        body: JSON.stringify({ dns_filter_disabled: disabled }),
+      });
+
+    expect((await toggle(true)).status).toBe(204);
+    expect(await settingsDomain(work.refresh_token)).toBeNull();
+    expect(await batchDomain(work, userId)).toBeNull();
+    expect(await settingsDomain(home.refresh_token)).toBe('blocked.example.net');
+
+    expect((await toggle(false)).status).toBe(204);
+    expect(await settingsDomain(work.refresh_token)).toBe('blocked.example.net');
+    expect(await batchDomain(work, userId)).toBe('blocked.example.net');
+  });
+
+  it("does not take another account's domain (API-036)", async () => {
+    await signupAndGetCookie('mine@example.com');
+    const { cookie: otherCookie } = await signupAndGetCookie('theirs@example.com');
+    const device = await createDeviceForUser('mine@example.com');
+    await setAccountDomain(otherCookie, 'blocked.example.net');
+
+    expect(await settingsDomain(device.refresh_token)).toBeNull();
   });
 });

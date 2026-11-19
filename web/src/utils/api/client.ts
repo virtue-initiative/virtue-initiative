@@ -18,6 +18,7 @@ export interface UserSettings {
   email?: string;
   name?: string;
   settings?: { email_frequency?: User['settings']['email_frequency']; timezone?: string };
+  dns_filter_domain?: string | null;
 }
 
 export interface UpdateSettingsResult {
@@ -329,7 +330,7 @@ export class APIClient {
 
   async updateDevice(
     id: string,
-    patch: { name?: string; dns_filter_domain?: string | null },
+    patch: { name?: string; dns_filter_disabled?: boolean },
   ): Promise<void> {
     await api.patchDevice(id, patch);
     await this.fetchDevices(true);

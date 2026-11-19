@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useSingleFlight } from '../../hooks/usePromise';
 import { useLocation } from 'preact-iso';
-import { Device, describeError, useAPIContext, useDevices } from '../../utils/api';
+import { Device, describeError, useAPIContext, useDevices, useUser } from '../../utils/api';
 import { cacheClient } from '../../utils/cache';
 import { PageHeading } from '../../components/PageHeading';
 import { DeviceStatusBadge } from '../../components/DeviceStatusBadge';
@@ -17,16 +17,16 @@ import {
   DialogActions,
   DialogHeader,
   DialogSecondaryActions,
+  Checkbox,
   Field,
   Input,
   useToast,
 } from '@virtueinitiative/shared-web';
-import { dnsFilterDomainSchema } from '@virtueinitiative/shared-web/types';
 import { formatRelativeTimestamp } from '../../utils/time';
 import { LANDING_URL } from '../../utils/landing-url';
 import './style.css';
 
-type DevicePatch = { name?: string; dns_filter_domain?: string | null };
+type DevicePatch = { name?: string; dns_filter_disabled?: boolean };
 
 const DOWNLOAD_URL = `${LANDING_URL}/download`;
 
@@ -34,6 +34,7 @@ export function Devices() {
   const api = useAPIContext();
   const userId = api?.userId ?? null;
   const { devices, loaded } = useDevices();
+  const accountDomain = useUser()?.dns_filter_domain ?? null;
 
   // The device cache otherwise lives for the whole session, so status and
   // last-upload times would go stale. Refetch on open; cached cards stay up.
@@ -67,6 +68,7 @@ export function Devices() {
             <DeviceCard
               key={device.id}
               device={device}
+              accountDomain={accountDomain}
               lastUpload={lastUploads ? (lastUploads[device.id] ?? null) : undefined}
               onUpdateDevice={updateDevice}
               onRemoveDevice={removeDevice}
@@ -198,11 +200,14 @@ function useLastUploads(userId: string | null, devices: Device[]) {
 
 function DeviceCard({
   device,
+  accountDomain,
   lastUpload,
   onUpdateDevice,
   onRemoveDevice,
 }: {
   device: Device;
+  // The account's DNS check domain (WEB-073), or null when none is set.
+  accountDomain: string | null;
   // undefined while unknown, null when the device has never uploaded.
   lastUpload: number | null | undefined;
   onUpdateDevice: (id: string, patch: DevicePatch) => Promise<void>;
@@ -210,8 +215,7 @@ function DeviceCard({
 }) {
   const { route } = useLocation();
   const [name, setName] = useState(device.name);
-  const [dnsDomain, setDnsDomain] = useState(device.dns_filter_domain ?? '');
-  const [dnsError, setDnsError] = useState<string | undefined>();
+  const [dnsCheck, setDnsCheck] = useState(!device.dns_filter_disabled);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const once = useSingleFlight();
@@ -221,8 +225,7 @@ function DeviceCard({
 
   function openEdit() {
     setName(device.name);
-    setDnsDomain(device.dns_filter_domain ?? '');
-    setDnsError(undefined);
+    setDnsCheck(!device.dns_filter_disabled);
     dialogRef.current?.showModal();
   }
 
@@ -241,22 +244,12 @@ function DeviceCard({
 
   async function handleSave(e: Event) {
     e.preventDefault();
-    // An empty field clears the domain (WEB-072).
-    let nextDomain: string | null = null;
-    if (dnsDomain.trim() !== '') {
-      const parsed = dnsFilterDomainSchema.safeParse(dnsDomain);
-      if (!parsed.success) {
-        setDnsError(parsed.error.issues[0]?.message ?? 'Enter a domain such as example.net');
-        return;
-      }
-      nextDomain = parsed.data;
-    }
-    setDnsError(undefined);
     await once(async () => {
       setSaving(true);
       try {
         const patch: DevicePatch = { name };
-        if (nextDomain !== device.dns_filter_domain) patch.dns_filter_domain = nextDomain;
+        // WEB-072: only send the switch when it changed.
+        if (dnsCheck === device.dns_filter_disabled) patch.dns_filter_disabled = !dnsCheck;
         await onUpdateDevice(device.id, patch);
         dialogRef.current?.close();
       } catch (err) {
@@ -296,8 +289,8 @@ function DeviceCard({
         <dd>{lastUpload === undefined ? '—' : formatRelativeTimestamp(lastUpload)}</dd>
         <dt>Last activity</dt>
         <dd>{formatRelativeTimestamp(device.last_hash_at)}</dd>
-        <dt>DNS check domain</dt>
-        <dd>{device.dns_filter_domain ?? 'Not set'}</dd>
+        <dt>DNS check</dt>
+        <dd>{device.dns_filter_disabled ? 'Off' : accountDomain ? 'On' : 'Not set up'}</dd>
       </dl>
       <CardActions>
         <Button variant="ghost" type="button" onClick={() => route(`/logs?device_id=${device.id}`)}>
@@ -320,26 +313,25 @@ function DeviceCard({
               required
             />
           </Field>
-          <Field
-            label="DNS check domain"
-            id={`device-dns-${device.id}`}
-            helpText="Add this domain to your DNS filter's block list. Virtue alerts your partners if it stops being blocked. Leave it empty to turn the check off."
-            error={dnsError}
-          >
-            <Input
+          <div class="device-dns-check">
+            <Checkbox
               id={`device-dns-${device.id}`}
-              type="text"
-              inputMode="url"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellcheck={false}
-              placeholder="example.net"
-              value={dnsDomain}
-              error={!!dnsError}
-              aria-invalid={dnsError ? true : undefined}
-              onInput={(e) => setDnsDomain((e.target as HTMLInputElement).value)}
+              label="Check the DNS filter on this device"
+              checked={dnsCheck}
+              onChange={(e) => setDnsCheck((e.target as HTMLInputElement).checked)}
             />
-          </Field>
+            {accountDomain ? (
+              <p class="hint-text">
+                This device checks that your DNS check domain, {accountDomain}, stays blocked. Turn
+                it off for a device that uses its own DNS, such as a work laptop. Your partners are
+                notified when you turn it off.
+              </p>
+            ) : (
+              <p class="hint-text">
+                Set a DNS check domain in <a href="/settings">Settings</a> to use this check.
+              </p>
+            )}
+          </div>
           <DialogSecondaryActions>
             <Button
               variant="danger"

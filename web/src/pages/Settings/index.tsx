@@ -14,6 +14,7 @@ import {
   Input,
   Select,
 } from '@virtueinitiative/shared-web';
+import { dnsFilterDomainSchema } from '@virtueinitiative/shared-web/types';
 import { usePromise } from '../../hooks/usePromise';
 import { usePwnedPasswordCount } from '../../hooks/usePwnedPasswordCount';
 import { PasswordField, PwnedPasswordWarning } from '../../components/PasswordField';
@@ -29,6 +30,10 @@ export function Settings() {
   const [settingsStatus, setSettingsStatus] = useState<string | null>(null);
   const [settingsSaving, setSettingsSave] = usePromise();
   const [settingsShowSaved, setSettingsShowSaved] = useState(false);
+  const [dnsDomain, setDnsDomain] = useState('');
+  const [dnsError, setDnsError] = useState<string | undefined>();
+  const [dnsSaving, setDnsSave] = usePromise();
+  const [dnsShowSaved, setDnsShowSaved] = useState(false);
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [emailSaving, setEmailSave] = usePromise();
   const [emailFrequency, setEmailFrequency] =
@@ -52,6 +57,7 @@ export function Settings() {
     setEmail(user.email);
     setName(user.name ?? '');
     setEmailFrequency(user.settings.email_frequency ?? 'daily');
+    setDnsDomain(user.dns_filter_domain ?? '');
   }, [user]);
 
   if (!user) return <p class="hint-text">Loading…</p>;
@@ -63,6 +69,7 @@ export function Settings() {
   const hasEmailChanged = normalizedEmail !== user.email;
   const hasEmailFrequencyChanges = emailFrequency !== user.settings.email_frequency;
   const hasSettingsChanges = hasNameChange || hasEmailFrequencyChanges;
+  const hasDnsDomainChange = dnsDomain.trim().toLowerCase() !== (user.dns_filter_domain ?? '');
 
   const deleteConfirmationMatches =
     deleteConfirmEmail.trim().toLowerCase() === user.email.toLowerCase();
@@ -80,6 +87,30 @@ export function Settings() {
         .then(() => setSettingsShowSaved(true))
         .catch((err: unknown) => {
           setSettingsStatus(describeError(err, 'Failed to save'));
+        }),
+    );
+  }
+
+  // WEB-073: an empty field clears the domain; anything else must be a valid domain.
+  function saveDnsDomain(e: Event) {
+    e.preventDefault();
+    if (!api || !hasDnsDomainChange) return;
+    let next: string | null = null;
+    if (dnsDomain.trim() !== '') {
+      const parsed = dnsFilterDomainSchema.safeParse(dnsDomain);
+      if (!parsed.success) {
+        setDnsError(parsed.error.issues[0]?.message ?? 'Enter a domain such as example.net');
+        return;
+      }
+      next = parsed.data;
+    }
+    setDnsError(undefined);
+    setDnsSave(() =>
+      api
+        .updateSettings({ dns_filter_domain: next })
+        .then(() => setDnsShowSaved(true))
+        .catch((err: unknown) => {
+          setDnsError(describeError(err, 'Failed to save') ?? undefined);
         }),
     );
   }
@@ -272,6 +303,49 @@ export function Settings() {
             </Button>
           </DialogActions>
         </Dialog>
+      </Card>
+
+      <Card class="settings-section">
+        <h2>DNS filter check</h2>
+        <p class="hint-text settings-section-hint">
+          Add a domain to your DNS filter's block list and enter it here. All your devices check
+          that it stays blocked. Virtue alerts your partners if it stops being blocked, and notifies
+          them when you clear the domain or turn the check off for a device.
+        </p>
+        <form class="settings-form" onSubmit={saveDnsDomain}>
+          <Field
+            label="DNS check domain"
+            id="dns-check-domain"
+            helpText="Leave it empty to turn the check off on all your devices."
+            error={dnsError}
+          >
+            <Input
+              id="dns-check-domain"
+              type="text"
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellcheck={false}
+              placeholder="example.net"
+              value={dnsDomain}
+              error={!!dnsError}
+              aria-invalid={dnsError ? true : undefined}
+              onInput={(e) => {
+                setDnsDomain((e.target as HTMLInputElement).value);
+                setDnsError(undefined);
+                setDnsShowSaved(false);
+              }}
+              disabled={dnsSaving}
+            />
+          </Field>
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={!api || dnsSaving || !hasDnsDomainChange}
+          >
+            {dnsSaving ? 'Saving…' : dnsShowSaved ? 'Saved' : 'Save'}
+          </Button>
+        </form>
       </Card>
 
       <Card class="settings-section">

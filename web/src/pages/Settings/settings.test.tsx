@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/preact';
+import { screen, waitFor, within } from '@testing-library/preact';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
@@ -243,5 +243,84 @@ describe('Settings — change password (WEB-061)', () => {
     await fillPasswordForm('wrong-pass-123', 'brand-new-pass-1', 'brand-new-pass-1');
 
     expect(await screen.findByText('Current password is incorrect.')).toBeInTheDocument();
+  });
+});
+
+describe('Settings — DNS check domain (WEB-073)', () => {
+  function capturePatches() {
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.patch(`${BASE}/user`, async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    return bodies;
+  }
+
+  const domainInput = () => screen.findByLabelText('DNS check domain');
+  const saveDomain = () =>
+    within(screen.getByLabelText('DNS check domain').closest('form')!).getByRole('button', {
+      name: /^save$/i,
+    });
+
+  it('starts with the current domain and explains the check', async () => {
+    server.use(
+      http.get(`${BASE}/user`, () =>
+        HttpResponse.json({ ...TEST_USER, dns_filter_domain: 'block.example.net' }),
+      ),
+    );
+    renderWithClient(<Settings />);
+
+    expect(await screen.findByDisplayValue('block.example.net')).toBeInTheDocument();
+    expect(screen.getByText(/add a domain to your dns filter's block list/i)).toBeInTheDocument();
+    expect(screen.getByText(/all your devices check that it stays blocked/i)).toBeInTheDocument();
+    expect(saveDomain()).toBeDisabled();
+  });
+
+  it('saves the domain trimmed and lowercased', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    await user.type(await domainInput(), '  Block.Example.NET ');
+    await user.click(saveDomain());
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ dns_filter_domain: 'block.example.net' });
+  });
+
+  it('shows the validation message and sends nothing for an invalid domain', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    const input = await domainInput();
+    await user.type(input, 'https://example.net/path');
+    await user.click(saveDomain());
+
+    expect(await screen.findByText('Enter a domain such as example.net')).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('sends null when the user clears the domain', async () => {
+    server.use(
+      http.get(`${BASE}/user`, () =>
+        HttpResponse.json({ ...TEST_USER, dns_filter_domain: 'block.example.net' }),
+      ),
+    );
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    const input = await screen.findByDisplayValue('block.example.net');
+    await user.clear(input);
+    await user.click(saveDomain());
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ dns_filter_domain: null });
   });
 });
