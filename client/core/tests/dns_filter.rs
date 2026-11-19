@@ -38,14 +38,37 @@ fn script(scenario: &Scenario, host: &str, answer: Answer) {
     }
 }
 
-/// An authenticated scenario with batches held back (so queued events stay
-/// visible), a working control domain, and `DOMAIN` set as the check domain.
-/// No check has run yet.
+/// An authenticated scenario with a working control domain and `DOMAIN` set
+/// as the check domain. No check has run yet.
+///
+/// The screen is locked, which holds uploads back (CORE-005) even for the
+/// extra-high-risk DNS filter alerts, so the events the daemon queues stay
+/// visible until [`deliver`] unlocks it.
 fn checking_scenario() -> Scenario {
     let mut scenario = held_scenario();
+    scenario.platform.set_locked_or_screensaver(true);
     script(&scenario, CONTROL, RESOLVES);
     scenario.set_dns_filter_domain(Some(DOMAIN));
     scenario
+}
+
+/// Unlocks the screen and ticks at `at_ms`, letting the queued events upload.
+fn deliver(scenario: &mut Scenario, at_ms: i64) {
+    scenario.platform.set_locked_or_screensaver(false);
+    scenario.at_t(at_ms).tick();
+}
+
+/// The DNS filter events that reached the API as partner alert emails
+/// (API-038 `notifications`), as `(type, risk)`.
+fn notified_dns(scenario: &Scenario) -> Vec<(String, f32)> {
+    scenario
+        .api
+        .state()
+        .notify_calls
+        .iter()
+        .filter(|call| call.payload.event_type.starts_with("dns_filter"))
+        .map(|call| (call.payload.event_type.clone(), call.payload.risk))
+        .collect()
 }
 
 /// The DNS filter events waiting in the upload queues, oldest first.
@@ -78,8 +101,8 @@ fn push_screenshot_out(scenario: &mut Scenario) {
 
 // ── The first result ──────────────────────────────────────────────────────────
 
-// CORE-027: a blocked answer (failed, unspecified or loopback only) is filtered and
-// stays quiet on the first check; anything else is unfiltered and alerts.
+// CORE-027, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
+// stays quiet on the first check; anything else is unfiltered and alerts partners at once.
 #[test]
 fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
     let cases: &[(&str, Answer, bool)] = &[
@@ -105,10 +128,21 @@ fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
             assert_eq!(events.len(), 1, "{name}: {events:?}");
             assert_eq!(events[0].kind, "dns_filter_inactive", "{name}");
             assert_eq!(events[0].domain.as_deref(), Some(DOMAIN), "{name}");
-            assert_eq!(events[0].risk, Some(0.8), "{name}: risk 80%");
+            assert_eq!(events[0].risk, Some(0.9), "{name}: risk 90%");
         } else {
             assert!(events.is_empty(), "{name}: {events:?}");
         }
+
+        // Once uploads can go out, the alert is emailed at once, without
+        // waiting for the batch interval.
+        deliver(&mut scenario, T1 + 1_000);
+        assert!(dns_events(&scenario).is_empty(), "{name}: uploaded");
+        let expected = if alerts {
+            vec![("dns_filter_inactive".to_string(), 0.9)]
+        } else {
+            vec![]
+        };
+        assert_eq!(notified_dns(&scenario), expected, "{name}");
     }
 }
 
@@ -256,7 +290,7 @@ fn removing_the_domain_reports_it_and_stops_checking() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0].kind, "dns_filter_check_removed");
     assert_eq!(events[0].domain.as_deref(), Some(DOMAIN));
-    assert_eq!(events[0].risk, Some(0.8), "risk 80%");
+    assert_eq!(events[0].risk, Some(0.9), "risk 90%");
     assert!(scenario.state().dns_filter.domain.is_none(), "state reset");
 
     scenario.at_t(T1 + 2 * HOUR_MS).tick();
@@ -266,6 +300,13 @@ fn removing_the_domain_reports_it_and_stops_checking() {
         "no checks without a domain"
     );
     assert_eq!(dns_events(&scenario).len(), 1, "removal reported once");
+
+    deliver(&mut scenario, T1 + 2 * HOUR_MS + 1_000);
+    assert_eq!(
+        notified_dns(&scenario),
+        [("dns_filter_check_removed".to_string(), 0.9)],
+        "partners are emailed about the removal"
+    );
 }
 
 // CORE-027, CORE-020: a domain that arrives with a settings refresh makes the next
@@ -294,9 +335,15 @@ fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
     assert_eq!(lookups_of(&scenario, DOMAIN), 0, "not checked yet");
     assert_eq!(wakeup(&scenario), T1, "the check is due now");
 
+    // The screen is unlocked here, so the alert goes out in the same tick,
+    // although the batch interval is held back.
     scenario.at_t(T1).tick();
     assert_eq!(lookups_of(&scenario, DOMAIN), 1);
-    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+    assert!(dns_events(&scenario).is_empty(), "uploaded at once");
+    assert_eq!(
+        notified_dns(&scenario),
+        [("dns_filter_inactive".to_string(), 0.9)]
+    );
 }
 
 // ── Authentication and persistence ────────────────────────────────────────────
@@ -329,10 +376,14 @@ fn the_last_result_survives_a_restart() {
     assert_eq!(dns_event_kinds(&scenario1), ["dns_filter_inactive"]);
     let state_dir = scenario1.state_dir_path().to_path_buf();
 
-    let mut scenario2 =
-        Scenario::authenticated_with_state_dir_configured(state_dir, T1 + HOUR_MS, |_, api| {
+    let mut scenario2 = Scenario::authenticated_with_state_dir_configured(
+        state_dir,
+        T1 + HOUR_MS,
+        |platform, api| {
+            platform.set_locked_or_screensaver(true);
             api.state().default_device_settings.dns_filter_domain = Some(DOMAIN.into());
-        });
+        },
+    );
     script(&scenario2, CONTROL, RESOLVES);
     script(&scenario2, DOMAIN, RESOLVES);
     scenario2.at_t(T1 + HOUR_MS).tick();
@@ -373,7 +424,9 @@ fn a_state_file_without_the_dns_filter_key_still_loads() {
     .unwrap();
 
     let mut scenario2 =
-        Scenario::authenticated_with_state_dir_configured(state_dir, T0, |_, api| {
+        Scenario::authenticated_with_state_dir_configured(state_dir, T0, |platform, api| {
+            // Holds the alert back so it stays visible (CORE-005).
+            platform.set_locked_or_screensaver(true);
             api.state().default_device_settings.dns_filter_domain = Some(DOMAIN.into());
         });
     let loaded = scenario2.state();
@@ -384,7 +437,6 @@ fn a_state_file_without_the_dns_filter_key_still_loads() {
     assert!(loaded.dns_filter.domain.is_none());
     assert!(loaded.dns_filter.last_result.is_none());
 
-    hold_batches(&mut scenario2);
     script(&scenario2, CONTROL, RESOLVES);
     script(&scenario2, DOMAIN, RESOLVES);
     scenario2.at_t(T1).tick();

@@ -120,7 +120,7 @@ pub enum UploadKind {
         window_ms: i64,
     },
     /// The check domain resolved normally: the owner's DNS filter is not in
-    /// use on this device. Risk 80%. See CORE-027.
+    /// use on this device. Risk 90%, so partners are emailed at once. See CORE-027.
     DnsFilterInactive {
         domain: String,
     },
@@ -130,7 +130,7 @@ pub enum UploadKind {
         domain: String,
     },
     /// The settings stopped naming a check domain; `domain` is the one that
-    /// was checked. Risk 80%. See CORE-027.
+    /// was checked. Risk 90%. See CORE-027.
     DnsFilterCheckRemoved {
         domain: String,
     },

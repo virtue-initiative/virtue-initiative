@@ -240,9 +240,9 @@ While authenticated and while the settings name a check domain, the daemon MUST 
 
 The daemon MUST persist the last result and MUST send an event only when it changes:
 
-- `dns_filter_inactive` (risk 80%) when the first result for a domain is unfiltered, or when it changes from filtered to unfiltered. A first result of filtered MUST NOT send an event.
+- `dns_filter_inactive` (risk 90%, so partners are emailed at once) when the first result for a domain is unfiltered, or when it changes from filtered to unfiltered. A first result of filtered MUST NOT send an event.
 - `dns_filter_active` (risk 0%) when it changes from unfiltered to filtered.
-- `dns_filter_check_removed` (risk 80%) when fetched settings stop naming a domain. The daemon MUST then forget the last result.
+- `dns_filter_check_removed` (risk 90%) when fetched settings stop naming a domain. The daemon MUST then forget the last result.
 
 When the domain changes to another domain, the daemon MUST forget the last result without sending an event. Each event carries the domain it is about (BATCH-003).
 

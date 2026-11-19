@@ -7,7 +7,7 @@ use std::net::{IpAddr, ToSocketAddrs};
 use serde::{Deserialize, Serialize};
 
 use crate::model::UploadKind;
-use crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT;
+use crate::module::lifecycle::EXTRA_HIGH_RISK;
 use crate::module::upload::{self, UploadState};
 
 /// A domain no DNS filter should block. When it does not resolve, the network
@@ -90,7 +90,7 @@ pub fn plan(
             upload::enqueue(
                 upload,
                 now_ms,
-                HIGH_RISK_LIFECYCLE_ALERT,
+                EXTRA_HIGH_RISK,
                 UploadKind::DnsFilterCheckRemoved { domain: previous },
             );
         }
@@ -154,7 +154,7 @@ pub fn commit(
             },
         )),
         (None | Some(DnsFilterResult::Filtered), DnsFilterResult::Unfiltered) => Some((
-            HIGH_RISK_LIFECYCLE_ALERT,
+            EXTRA_HIGH_RISK,
             UploadKind::DnsFilterInactive {
                 domain: outcome.domain,
             },
