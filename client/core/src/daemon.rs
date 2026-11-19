@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,10 +26,38 @@ use crate::state::{load_state, lock_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
-/// `#[serde(default)]` alone can't absorb; `Daemon::new` logs the version
-/// transition. No real migration step exists yet — every change so far has
-/// been additive/subtractive.
+/// `#[serde(default)]` alone can't absorb, and add the step from the old
+/// version to [`DaemonState::upgrade`] (CORE-016). No step changes any data
+/// yet — every change so far has been additive/subtractive.
 pub const DAEMON_STATE_VERSION: u32 = 1;
+
+/// Loads the state at `path` and runs its upgrade steps (CORE-016). Every
+/// read that may be written back goes through this, so each step's changes
+/// are what gets saved. Logs nothing, because it runs before every write:
+/// `Daemon::new` runs the same steps on its first load and logs them, once
+/// per start.
+fn load_current_state(path: &Path) -> CoreResult<DaemonState> {
+    let mut state: DaemonState = load_state(path)?;
+    state.upgrade();
+    Ok(state)
+}
+
+/// Logs what loading a state saved at `saved_version` does to it.
+fn log_state_upgrade(saved_version: u32) {
+    if saved_version > DAEMON_STATE_VERSION {
+        tracing::warn!(
+            version = saved_version,
+            current = DAEMON_STATE_VERSION,
+            "daemon state was saved by a newer client; not upgrading it"
+        );
+    } else if saved_version < DAEMON_STATE_VERSION {
+        tracing::info!(
+            from = saved_version,
+            to = DAEMON_STATE_VERSION,
+            "daemon state upgraded"
+        );
+    }
+}
 
 /// A caller's request to mutate the daemon's state, serviced only by the
 /// loop thread inside `run_forever`. Each variant (other than `Stop`) carries
@@ -92,6 +120,33 @@ pub struct DaemonState {
     pub last_tick_at_ms: Option<i64>,
 }
 
+impl DaemonState {
+    /// An empty state at the current version: version 0 (nothing saved yet)
+    /// run through the upgrade steps, the same way a missing file is. A reset
+    /// such as a logout starts from this (CORE-016).
+    pub(crate) fn initial() -> Self {
+        let mut state = Self::default();
+        state.upgrade();
+        state
+    }
+
+    /// Runs each upgrade step from `self.version` up to
+    /// [`DAEMON_STATE_VERSION`], in order (CORE-016). Leaves a state saved by
+    /// a newer client alone.
+    fn upgrade(&mut self) {
+        while self.version < DAEMON_STATE_VERSION {
+            match self.version {
+                // 0 → 1 initializes the state and must not change its data:
+                // version 0 means no file, or one saved before versions were
+                // recorded, whose data is already in the version 1 format.
+                0 => {}
+                version => unreachable!("no upgrade step from daemon state version {version}"),
+            }
+            self.version += 1;
+        }
+    }
+}
+
 /// One sequential daemon loop: check lifecycle, maybe take a screenshot,
 /// upload what's queued, pick the next wakeup time, sleep. See
 /// `client/core/SPEC.md`.
@@ -119,14 +174,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// on process startup" requirement).
     pub fn new(config: Config, platform: P, api: A, state_path: PathBuf) -> CoreResult<Self> {
         let mut state: DaemonState = load_state(&state_path)?;
-        if state.version != DAEMON_STATE_VERSION {
-            tracing::info!(
-                from = state.version,
-                to = DAEMON_STATE_VERSION,
-                "daemon state version upgraded"
-            );
-            state.version = DAEMON_STATE_VERSION;
-        }
+        log_state_upgrade(state.version);
+        state.upgrade();
 
         let (request_tx, request_rx) = mpsc::channel();
 
@@ -221,7 +270,13 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.platform.get_time_utc_ms().unwrap_or(0)
     }
 
+    /// Writes `state` with the version its upgrade steps reached (CORE-016).
     fn persist(&self, state: &DaemonState) {
+        debug_assert!(
+            state.version >= DAEMON_STATE_VERSION,
+            "persisting daemon state version {} that skipped its upgrade steps",
+            state.version
+        );
         if let Err(err) = store_state(&self.state_path, state) {
             tracing::error!(error = %err, "daemon: failed to persist state");
         }
@@ -248,7 +303,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
-        let mut working = load_state(&self.state_path).unwrap_or_else(|err| {
+        let mut working = load_current_state(&self.state_path).unwrap_or_else(|err| {
             tracing::warn!(
                 error = %err,
                 "daemon: failed to reload state under lock; falling back to in-memory copy"

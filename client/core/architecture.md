@@ -160,6 +160,17 @@ the same chance" requirement. Two gates then run:
 now, not just `serde_json::Value`); every tick's final locked phase persists
 it back via `state::store_state` (atomic tmp+rename).
 
+`DaemonState.version` records the file's format. Every load that a write
+may follow (`Daemon::new` and each locked re-read) goes through
+`load_current_state`, which runs `DaemonState::upgrade`: one step per
+version, in order, from the saved version up to `DAEMON_STATE_VERSION`.
+Version 0 means nothing saved yet (a missing or unparseable file, or a
+logout's reset via `DaemonState::initial`), and 0 → 1 changes no data,
+because clients before CORE-016's versioning rule saved 0 with data already
+in the version 1 format. A file from a newer client keeps its version and
+runs no steps. A breaking change to the shape bumps `DAEMON_STATE_VERSION`
+and adds its step to `upgrade`.
+
 ### IPC: one file, one channel type (Linux/Mac only)
 
 Windows/Android/iOS need no code here at all: each holds one process-global
