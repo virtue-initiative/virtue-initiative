@@ -220,7 +220,7 @@ Each platform MUST supply the following to the core. A signal that cannot be rea
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
 - Windows MUST read the last System event before boot through the Event Log API (`EvtQuery`) and MUST NOT start a process for it. The value cannot change during a boot, so a successful read MUST be kept for the rest of the run, and a failed read MAY be retried at most once per minute.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
-- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
+- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance. The boot clock (CORE-027) MUST count from boot including time spent suspended: `CLOCK_BOOTTIME` on Linux, `mach_continuous_time` on macOS, interrupt time on Windows and `elapsedRealtime` on Android. iOS does not supply one, and the core uses the system clock in its place.
 
 > OPEN: macOS captures only the main display, while Linux and Windows capture every screen — should macOS capture all displays?
 

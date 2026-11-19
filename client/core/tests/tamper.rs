@@ -506,6 +506,68 @@ fn a_clean_exit_without_a_user_stop_does_not_excuse_the_restart_gap() {
     }
 }
 
+// ── Restarts ─────────────────────────────────────────────────────────────────
+
+// CORE-027: a restart offline with the system clock set back to hide the gap is reported once the server is reached.
+#[test]
+fn a_restart_offline_with_the_clock_set_back_is_reported_once_online() {
+    let first = held_scenario();
+    let restart_ms = wakeup(&first) + 10 * 60_000;
+    let mut second = restart_with(&first, restart_ms, |platform, api| {
+        offline(platform, api);
+        platform.set_system_clock_offset(-3_600_000);
+    });
+    second.tick();
+    reach_server(&mut second);
+    let alerts = alert_messages(&second);
+    assert_eq!(alerts.len(), 1, "{alerts:?}");
+    assert!(alerts[0].contains("behind"), "{alerts:?}");
+}
+
+// CORE-002: time asleep while the daemon was stopped, on the same boot, is still excused as a suspend.
+#[test]
+fn a_restart_after_a_suspend_on_the_same_boot_is_excused() {
+    let first = held_scenario();
+    let awake_ms = first.clock.now_ms();
+    let restart_ms = wakeup(&first) + 3_600_000;
+    let mut second = restart_with(&first, restart_ms, |platform, _| {
+        platform.set_monotonic_clock_override(Some(awake_ms));
+    });
+    second.tick();
+    assert_eq!(missed_alerts(&second), 0);
+}
+
+// CORE-002: no suspend evidence across a reboot, so a reboot is not mistaken for a suspend.
+#[test]
+fn a_reboot_is_not_mistaken_for_a_suspend() {
+    let first = held_scenario();
+    let restart_ms = wakeup(&first) + 5 * 60_000;
+    let mut second = restart_with(&first, restart_ms, |platform, _| {
+        // Booted 8 minutes ago and asleep for nearly all of it. Both clocks
+        // went back since the last tick, and by different amounts, which
+        // must not read as time suspended.
+        platform.set_boot_clock_offset(8 * 60_000 - restart_ms);
+        platform.set_monotonic_clock_override(Some(10_000));
+    });
+    second.tick();
+    assert_eq!(missed_alerts(&second), 1);
+}
+
+// CORE-002: login and logout times are not adjusted for the system clock's offset.
+#[test]
+fn a_login_near_the_system_clock_but_not_the_daemon_clock_does_not_excuse_a_gap() {
+    let mut scenario = held_scenario();
+    let late_tick_ms = wakeup(&scenario) + 3_600_000;
+    // The system clock is set an hour back, and the login was stamped with
+    // it just before the late tick.
+    scenario.platform.set_system_clock_offset(-3_600_000);
+    scenario
+        .platform
+        .set_last_login(Some(late_tick_ms - 3_600_000 - 30_000));
+    scenario.at_t(late_tick_ms).tick();
+    assert_eq!(missed_alerts(&scenario), 1);
+}
+
 // ── Repeated restart detection (CORE-019) ────────────────────────────────────
 
 fn has_repeated_restarts_alert(scenario: &Scenario) -> bool {

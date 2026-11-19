@@ -51,6 +51,16 @@ pub trait LifecycleHooks: Send + Sync + 'static {
         self.get_utc_clock_ms()
     }
 
+    /// A clock that counts from boot, including time spent suspended, and
+    /// that setting the system clock does not move. The daemon's own clock
+    /// is carried forward on it between server responses (CORE-027). Default
+    /// falls back to `get_utc_clock_ms`: on a platform without one, the
+    /// daemon's clock follows the system clock until the next response
+    /// corrects it.
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        self.get_utc_clock_ms()
+    }
+
     /// Start of the current expected-running window (OS session/user login),
     /// as a UTC timestamp. `None` if not yet knowable.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;

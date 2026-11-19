@@ -311,6 +311,7 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 // LifecycleHooks
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
 fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;       // default: falls back to get_utc_clock_ms
+fn get_boot_clock_ms(&self) -> CoreResult<i64>;            // default: falls back to get_utc_clock_ms
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn lifecycle_enabled(&self) -> bool;                        // default: true
@@ -325,8 +326,18 @@ status — running normally. iOS is the only platform that overrides it to
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
 suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
-it never triggers). Screenshot scheduling itself is unaffected and still
-paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+it never triggers). This hook isn't on `ScreenshotHooks`.
+
+The daemon never reads the system clock for a time it records, schedules
+or compares. Every such time comes from its own clock (`src/clock.rs`,
+CORE-027): the server's time from the latest response's `Date` header
+(`ApiTransport::take_server_time_ms`), carried forward on
+`get_boot_clock_ms`, a clock that counts from boot including suspend and
+that setting the system clock doesn't move. Until the first response it
+starts from the system clock, no earlier than the last tick
+(`lifecycle.last_tick_utc_ms`). A
+correction moves every persisted schedule time with it (`shift_times` in
+`daemon.rs`). Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.
