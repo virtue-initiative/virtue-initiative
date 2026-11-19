@@ -34,7 +34,7 @@
     "@testing-library/jest-dom": "^6.10.0",
     "@testing-library/preact": "^3.2.6",
     "@testing-library/user-event": "^14.6.8",
-    "cf": "1.0.0-beta.27",
+    "cf": "1.0.0-rc.2",
     "fake-indexeddb": "^6.2.7",
     "fast-check": "^4.10.2",
     "happy-dom": "^20.14.6",
@@ -43,7 +43,7 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.7",
     "vitest": "^3.2.7",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.165.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-x64": "^4.67.5"

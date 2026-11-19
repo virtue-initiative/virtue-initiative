@@ -44,7 +44,7 @@ export type D1RawResult =
 
 /**
  * Runs `sql` with `cf d1 raw` from `worker`'s directory and returns each statement's rows as
- * objects. `localState` is a state directory (like `api/.wrangler/state`) to use instead of the
+ * objects. `localState` is a state directory (like `api/.cloudflare/state`) to use instead of the
  * remote database; cf has no local `d1 query`, only `d1 raw`.
  */
 export function d1Raw(

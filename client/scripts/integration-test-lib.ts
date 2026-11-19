@@ -218,7 +218,7 @@ const API_DB_ID = await d1DatabaseId('api', 'staging', 'DB');
  */
 function d1QueryJson(apiDir: string, sql: string): Array<Record<string, unknown>[]> {
   for (let attempt = 1; ; attempt++) {
-    const result = d1Raw('api', API_DB_ID, 'staging', sql, join(apiDir, '.wrangler', 'state'));
+    const result = d1Raw('api', API_DB_ID, 'staging', sql, join(apiDir, '.cloudflare', 'state'));
     if (result.ok) {
       process.stderr.write(result.stderr);
       return result.results;

@@ -58,7 +58,7 @@ Response shapes shared with the web are defined as Zod schemas in `shared-web/ty
 ```bash
 # from api/; cf takes the database ID from cloudflare.config.ts, not the binding name
 # local dev (staging's DB ID)
-bun run cf d1 raw f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --local --persist-to .wrangler/state \
+bun run cf d1 raw f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --local \
   --sql "INSERT INTO admins (user_id, created_at) SELECT id, unixepoch() FROM users WHERE email = 'you@example.com'"
 # staging / prod
 bun run cf d1 query f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --sql "..."

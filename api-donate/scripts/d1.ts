@@ -8,7 +8,7 @@ export type Env = 'staging' | 'prod' | 'local';
 const API_DONATE_DIR = fileURLToPath(new URL('..', import.meta.url));
 // The local API (`api/`, through its DONATE_DB binding) is what writes the list in dev, so `local`
 // reads its state rather than this worker's own.
-const LOCAL_STATE_DIR = join(API_DONATE_DIR, '../api/.wrangler/state');
+const LOCAL_STATE_DIR = join(API_DONATE_DIR, '../api/.cloudflare/state');
 const DB_IDS = {
   staging: await d1DatabaseId('api-donate', 'staging', 'DB'),
   prod: await d1DatabaseId('api-donate', 'prod', 'DB'),

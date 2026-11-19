@@ -151,7 +151,7 @@ WebP, which Outlook can't show. A post marked `draft: true` can't be sent. Any o
 works too, with its first `# Heading` as the subject. Previews and sent logs go in `.newsletter/`,
 which is gitignored because the logs list subscribers.
 
-`--env local` reads the local API's D1 (under `api/.wrangler`), which is what the dev API writes to.
+`--env local` reads the local API's D1 (under `api/.cloudflare/state`), which is what the dev API writes to.
 Set `NEWSLETTER_LANDING_URL` and `NEWSLETTER_API_URL` to the ports `launch.sh` printed so the
 unsubscribe links, and a blog post's images, point at them.
 

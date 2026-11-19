@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.lint.json --noEmit",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "db:clean:local": "rm -rf ./.wrangler/state/v3/d1 && rm -rf ./.wrangler/state/v3/r2",
+    "db:clean:local": "rm -rf ./.cloudflare/state/v3/d1 && rm -rf ./.cloudflare/state/v3/r2",
     "db:clean:prod": "node scripts/clean-remote.mjs prod",
     "db:clean:staging": "node scripts/clean-remote.mjs staging",
     "db:migrate:local": "bun ../scripts/d1-migrate.ts DB staging src/schema/migrations --local && bun ../scripts/d1-migrate.ts DONATE_DB staging ../api-donate/src/schema/migrations --local",
@@ -33,14 +33,14 @@
     "@cloudflare/workers-types": "^4.20260702.1",
     "@types/node": "^25.9.9",
     "@types/uuid": "^10.0.0",
-    "cf": "1.0.0-beta.27",
+    "cf": "1.0.0-rc.2",
     "fast-check": "^4.10.2",
     "hono": "^4.13.16",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "3.2.4",
-    "wrangler": "^4.157.0"
+    "wrangler": "^4.165.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1161.0",
