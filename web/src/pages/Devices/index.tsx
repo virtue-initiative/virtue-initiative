@@ -222,6 +222,8 @@ function DeviceCard({
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const dnsOffDialogRef = useRef<HTMLDialogElement>(null);
+  const dnsOffConfirmed = useRef(false);
 
   function openEdit() {
     setName(device.name);
@@ -242,14 +244,35 @@ function DeviceCard({
     deleteDialogRef.current?.close();
   }
 
-  async function handleSave(e: Event) {
+  // WEB-072: turning the check off is confirmed on save, in a second dialog over this one.
+  function handleSave(e: Event) {
     e.preventDefault();
+    if (!dnsCheck && !device.dns_filter_disabled) {
+      dnsOffConfirmed.current = false;
+      dnsOffDialogRef.current?.showModal();
+      return;
+    }
+    return save();
+  }
+
+  function confirmDnsOff() {
+    dnsOffConfirmed.current = true;
+    dnsOffDialogRef.current?.close();
+    return save();
+  }
+
+  // Closing the confirmation any other way (button, Escape, backdrop) keeps the check on.
+  function handleDnsOffClosed() {
+    if (!dnsOffConfirmed.current) setDnsCheck(true);
+  }
+
+  async function save() {
     await once(async () => {
       setSaving(true);
       try {
         const patch: DevicePatch = { name };
         // WEB-072: only send the switch when it changed.
-        if (dnsCheck === device.dns_filter_disabled) patch.dns_filter_disabled = !dnsCheck;
+        if (dnsCheck === !!device.dns_filter_disabled) patch.dns_filter_disabled = !dnsCheck;
         await onUpdateDevice(device.id, patch);
         dialogRef.current?.close();
       } catch (err) {
@@ -351,6 +374,27 @@ function DeviceCard({
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      <Dialog dialogRef={dnsOffDialogRef} onClose={handleDnsOffClosed}>
+        <DialogHeader>Turn off the DNS check on this device?</DialogHeader>
+        <p class="invite-desc">
+          This check is here to protect you. If you turn it off for this device, your partners are
+          notified.
+        </p>
+        <DialogActions>
+          <Button
+            variant="ghost"
+            type="button"
+            autoFocus
+            onClick={() => dnsOffDialogRef.current?.close()}
+          >
+            Keep it on
+          </Button>
+          <Button variant="danger" type="button" onClick={() => void confirmDnsOff()}>
+            Turn off
+          </Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog dialogRef={deleteDialogRef} busy={deleting}>

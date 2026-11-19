@@ -56,6 +56,9 @@ export function Settings() {
   const pwnedCount = usePwnedPasswordCount(newPassword, true);
   const emailChangeDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const dnsOffDialogRef = useRef<HTMLDialogElement>(null);
+  const dnsChangeDialogRef = useRef<HTMLDialogElement>(null);
+  const pendingDnsDomain = useRef('');
 
   useEffect(() => {
     if (!user) return;
@@ -108,6 +111,7 @@ export function Settings() {
   }
 
   // WEB-073: switching on only reveals the field. Nothing is sent until the user saves.
+  // Switching off with a saved domain asks first and leaves the switch on until confirmed.
   function toggleDnsCheck(next: boolean) {
     setDnsOffSaved(false);
     setDnsOffError(null);
@@ -118,8 +122,18 @@ export function Settings() {
       setDnsOn(true);
       return;
     }
+    if (api && user?.dns_filter_domain) {
+      dnsOffDialogRef.current?.showModal();
+      return;
+    }
     setDnsOn(false);
+    setDnsDomain('');
+  }
+
+  function confirmDnsOff() {
+    dnsOffDialogRef.current?.close();
     const saved = user?.dns_filter_domain ?? '';
+    setDnsOn(false);
     setDnsDomain('');
     if (!api || !saved) return;
     setDnsSave(() =>
@@ -135,6 +149,7 @@ export function Settings() {
   }
 
   // WEB-073: the domain must be valid. An empty field is an error, not "off".
+  // Replacing a saved domain asks first, so the user can block the new one before it is checked.
   function saveDnsDomain(e: Event) {
     e.preventDefault();
     if (!api || !hasDnsDomainChange) return;
@@ -144,14 +159,29 @@ export function Settings() {
       return;
     }
     setDnsError(undefined);
+    pendingDnsDomain.current = parsed.data;
+    if (user?.dns_filter_domain) {
+      dnsChangeDialogRef.current?.showModal();
+      return;
+    }
+    sendDnsDomain();
+  }
+
+  function sendDnsDomain() {
+    if (!api) return;
     setDnsSave(() =>
       api
-        .updateSettings({ dns_filter_domain: parsed.data })
+        .updateSettings({ dns_filter_domain: pendingDnsDomain.current })
         .then(() => setDnsShowSaved(true))
         .catch((err: unknown) => {
           setDnsError(describeError(err, 'Failed to save') ?? undefined);
         }),
     );
+  }
+
+  function confirmDnsChange() {
+    dnsChangeDialogRef.current?.close();
+    sendDnsDomain();
   }
 
   function saveEmail(e: Event) {
@@ -395,7 +425,48 @@ export function Settings() {
               {dnsSaving ? 'Saving…' : dnsShowSaved ? 'Saved' : 'Save'}
             </Button>
           </form>
-        )}{' '}
+        )}
+        <Dialog dialogRef={dnsOffDialogRef} class="settings-dialog">
+          <DialogHeader>Turn off the DNS filter check?</DialogHeader>
+          <p class="invite-desc">
+            This check is here to protect you. If you turn it off, your partners are notified. Talk
+            with them first if you can.
+          </p>
+          <DialogActions>
+            <Button
+              variant="ghost"
+              type="button"
+              autoFocus
+              onClick={() => dnsOffDialogRef.current?.close()}
+            >
+              Keep it on
+            </Button>
+            <Button variant="danger" type="button" onClick={confirmDnsOff}>
+              Turn off
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog dialogRef={dnsChangeDialogRef} class="settings-dialog">
+          <DialogHeader>Change the DNS check domain?</DialogHeader>
+          <p class="invite-desc">
+            Add the new domain to your DNS filter's block list first. If it is not blocked, your
+            devices report the filter as off and your partners get an alert.
+          </p>
+          <DialogActions>
+            <Button
+              variant="ghost"
+              type="button"
+              autoFocus
+              onClick={() => dnsChangeDialogRef.current?.close()}
+            >
+              Cancel
+            </Button>
+            <Button variant="primary" type="button" onClick={confirmDnsChange}>
+              Change domain
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Card>
 
       <Card class="settings-section">

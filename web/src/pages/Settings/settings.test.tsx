@@ -360,7 +360,7 @@ describe('Settings — DNS check domain (WEB-073)', () => {
     expect(bodies).toHaveLength(0);
   });
 
-  it('sends null at once and hides the field when switched off with a saved domain', async () => {
+  it('sends null and hides the field when switched off with a saved domain after confirming', async () => {
     withSavedDomain();
     const bodies = capturePatches();
     const user = userEvent.setup();
@@ -368,6 +368,7 @@ describe('Settings — DNS check domain (WEB-073)', () => {
 
     await screen.findByDisplayValue('block.example.net');
     await user.click(await checkSwitch());
+    await user.click(await screen.findByRole('button', { name: 'Turn off' }));
 
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ dns_filter_domain: null });
@@ -384,11 +385,151 @@ describe('Settings — DNS check domain (WEB-073)', () => {
 
     await screen.findByDisplayValue('block.example.net');
     await user.click(await checkSwitch());
+    await user.click(await screen.findByRole('button', { name: 'Turn off' }));
 
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(await checkSwitch()).toBeChecked();
     expect(screen.getByDisplayValue('block.example.net')).toBeInTheDocument();
+  });
+
+  const offTitle = 'Turn off the DNS filter check?';
+  const changeTitle = 'Change the DNS check domain?';
+  const dialogOf = (title: string) =>
+    screen.getByRole('heading', { name: title }).closest('dialog')!;
+  // The browser fires a cancelable `cancel` event on Escape, then closes the dialog.
+  const pressEscape = (dialog: HTMLDialogElement) => {
+    if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();
+  };
+
+  it('asks before switching off with a saved domain, defaults to "Keep it on" and sends nothing yet', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue('block.example.net');
+    expect(screen.queryByRole('heading', { name: offTitle })).not.toBeInTheDocument();
+    await user.click(await checkSwitch());
+
+    expect(await screen.findByRole('heading', { name: offTitle })).toBeInTheDocument();
+    expect(screen.getByText(/talk with them first if you can/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep it on' })).toHaveAttribute('autofocus');
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('keeps the check on and sends nothing on "Keep it on"', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue('block.example.net');
+    await user.click(await checkSwitch());
+    await user.click(await screen.findByRole('button', { name: 'Keep it on' }));
+
+    expect(screen.queryByRole('heading', { name: offTitle })).not.toBeInTheDocument();
+    expect(await checkSwitch()).toBeChecked();
+    expect(screen.getByDisplayValue('block.example.net')).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('keeps the check on and sends nothing when the turn-off question is dismissed with Escape', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue('block.example.net');
+    await user.click(await checkSwitch());
+    await screen.findByRole('heading', { name: offTitle });
+    pressEscape(dialogOf(offTitle));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: offTitle })).not.toBeInTheDocument(),
+    );
+    expect(await checkSwitch()).toBeChecked();
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('asks before sending a domain that replaces the saved one, and sends it on "Change domain"', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    const input = await screen.findByDisplayValue('block.example.net');
+    expect(screen.queryByRole('heading', { name: changeTitle })).not.toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, 'Other.Example.NET');
+    await user.click(saveDomain());
+
+    expect(await screen.findByRole('heading', { name: changeTitle })).toBeInTheDocument();
+    expect(
+      screen.getByText(/add the new domain to your dns filter\'s block list first/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel', hidden: false })).toHaveAttribute(
+      'autofocus',
+    );
+    expect(bodies).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Change domain' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).toEqual({ dns_filter_domain: 'other.example.net' });
+  });
+
+  it('sends nothing and keeps the typed domain when the change is cancelled or dismissed with Escape', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    const input = await screen.findByDisplayValue('block.example.net');
+    await user.clear(input);
+    await user.type(input, 'other.example.net');
+    await user.click(saveDomain());
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('heading', { name: changeTitle })).not.toBeInTheDocument();
+
+    await user.click(saveDomain());
+    await screen.findByRole('heading', { name: changeTitle });
+    pressEscape(dialogOf(changeTitle));
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: changeTitle })).not.toBeInTheDocument(),
+    );
+
+    expect(screen.getByLabelText('DNS check domain')).toHaveValue('other.example.net');
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('shows a validation error before any change question', async () => {
+    withSavedDomain();
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    const input = await screen.findByDisplayValue('block.example.net');
+    await user.clear(input);
+    await user.type(input, 'https://example.net/path');
+    await user.click(saveDomain());
+
+    expect(await screen.findByText(/enter a domain such as example\.net/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: changeTitle })).not.toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+  });
+
+  it('does not ask when the first domain is saved', async () => {
+    const bodies = capturePatches();
+    const user = userEvent.setup();
+    renderWithClient(<Settings />);
+
+    await screen.findByDisplayValue(TEST_USER.name!);
+    await user.click(await checkSwitch());
+    await user.type(await screen.findByLabelText('DNS check domain'), 'block.example.net');
+    await user.click(saveDomain());
+
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(screen.queryByRole('heading', { name: changeTitle })).not.toBeInTheDocument();
   });
 
   it('sends nothing when switched off with no saved domain', async () => {
@@ -403,6 +544,7 @@ describe('Settings — DNS check domain (WEB-073)', () => {
 
     expect(field()).not.toBeInTheDocument();
     expect(await checkSwitch()).not.toBeChecked();
+    expect(screen.queryByRole('heading', { name: offTitle })).not.toBeInTheDocument();
     expect(bodies).toHaveLength(0);
   });
 });
