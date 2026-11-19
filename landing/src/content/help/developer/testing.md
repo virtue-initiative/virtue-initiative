@@ -74,7 +74,7 @@ Install the MSIX and launch from Start.
 
 Install the `.deb` and verify.
 
-1. Run `virtue login` and confirm `virtue status` shows logged in and monitoring active.
+1. Run `virtue login` and confirm `virtue status` shows "Monitoring active".
 2. Confirm screenshots appear in the web app within ~10 minutes.
 3. Suspend and resume the machine; confirm zero-risk suspend and wake logs and that capture resumes automatically.
 4. Reboot the machine; confirm zero-risk shutdown and startup logs and that the systemd user service starts automatically without re-login.

@@ -211,9 +211,18 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
-    /// Forces an immediate screenshot capture, bypassing the normal
-    /// interval-due gate (still honors the locked/screensaver and
-    /// fingerprint-dedup gates), then waits for the resulting batch to reach
+    /// How many seconds Test Screenshot counts down before it captures, so the
+    /// user can bring up the screen they want captured (CLIENT-008).
+    static let testScreenshotDelaySeconds = 10
+
+    static func testScreenshotWaitingMessage(_ seconds: Int) -> String {
+        let unit = seconds == 1 ? "second" : "seconds"
+        return "Taking screenshot in \(seconds) \(unit)…"
+    }
+
+    /// After counting down `testScreenshotDelaySeconds`, forces a screenshot capture,
+    /// bypassing the normal interval-due gate (still honors the
+    /// locked/screensaver and fingerprint-dedup gates), then waits for the resulting batch to reach
     /// the server so the confirmation reflects what actually happened — a
     /// gated capture and an upload still in flight each say so. Shows a
     /// transient message that clears itself after a few seconds, rather than
@@ -223,8 +232,12 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
         isForceCapturing = true
-        forceCaptureMessage = "Screenshot uploading…"
         Task {
+            for left in stride(from: Self.testScreenshotDelaySeconds, to: 0, by: -1) {
+                forceCaptureMessage = Self.testScreenshotWaitingMessage(left)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            forceCaptureMessage = "Screenshot uploading…"
             let result = await Task.detached(priority: .userInitiated) {
                 NativeBridge.forceCapture()
             }.value
@@ -529,18 +542,11 @@ final class MonitoringCoordinator: ObservableObject {
         return "Login failed: \(raw)"
     }
 
-    /// Local time plus a relative age — "when did this last work?" is the
-    /// question every timestamp on the status sheet is really answering.
+    /// Local time plus a relative age (CLIENT-007) — "when did this last
+    /// work?" is the question every timestamp on the status sheet is really
+    /// answering.
     func formatStatusTimestamp(_ timestampMs: Int64?) -> String {
-        guard let timestampMs else { return "<none>" }
-        let date = Date(timeIntervalSince1970: TimeInterval(timestampMs) / 1000)
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .medium
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .short
-        return
-            "\(formatter.string(from: date)) (\(relative.localizedString(for: date, relativeTo: Date())))"
+        StatusTimestamp.full(timestampMs)
     }
 
     /// Where this app's daemon writes its rolling log files — surfaced on the

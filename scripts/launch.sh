@@ -1,38 +1,59 @@
 #!/bin/bash
 # Start all web services (plus the standalone Rust hash server) with
 # interleaved colored logs.
-# Usage: ./scripts/launch.sh [--donate] [domain]
+# Usage: ./scripts/launch.sh [--donate] [--host ADDRESS | domain]
 #   --donate  Also start the donations worker (api-donate) and, if the Stripe
 #             CLI is available, forward Stripe webhooks to it.
+#   --host    Listen on ADDRESS (such as a VPN or LAN address) instead of localhost, so
+#             phones, VMs and other machines can reach the stack. Point a client build at
+#             the "Devices" URL in the banner. The web app proxies /api and /r2 to the API,
+#             and is served over https when VIRTUE_DEV_TLS_CERT and VIRTUE_DEV_TLS_KEY name
+#             a certificate for ADDRESS, since it needs a secure context away from localhost.
 #   domain    Optional. Registers [domain].localhost and app.[domain].localhost
 #             (plus donate.[domain].localhost with --donate) via Caddy reverse
 #             proxy (https), mimicking the production URL structure.
 #             app.[domain].localhost/api is routed through Vite's /api proxy to wrangler.
 #
+# Ports are random unless VIRTUE_API_PORT, VIRTUE_WEB_PORT, VIRTUE_LANDING_PORT,
+# VIRTUE_DONATE_PORT and VIRTUE_HASH_PORT set them, which keeps a client build's
+# API URL working across restarts.
+#
 # Shared configuration (e.g. STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 # PUBLIC_STRIPE_PORTAL_URL) can live in ~/.config/virtue-dev.env so it doesn't
 # have to be copied into each worker's .dev.vars. That file is sourced below,
-# then .env (repo root, per-worktree overrides — see AGENTS.md) is sourced on
+# then .env (repo root, per-worktree overrides — see docs/development.md) is sourced on
 # top of it, and the merged values are passed through to the relevant dev
 # servers.
 
+USAGE="Usage: $0 [--donate] [--host ADDRESS | domain]"
 DOMAIN=""
+HOST=""
 DONATE=0
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --donate) DONATE=1 ;;
+        --host)
+            HOST="${2:-}"
+            [ -n "$HOST" ] || { echo "--host needs an address" >&2; exit 1; }
+            shift
+            ;;
         -h | --help)
-            echo "Usage: $0 [--donate] [domain]"
+            echo "$USAGE"
             exit 0
             ;;
         --*)
-            echo "Unknown option: $arg" >&2
-            echo "Usage: $0 [--donate] [domain]" >&2
+            echo "Unknown option: $1" >&2
+            echo "$USAGE" >&2
             exit 1
             ;;
-        *) DOMAIN="$arg" ;;
+        *) DOMAIN="$1" ;;
     esac
+    shift
 done
+if [ -n "$HOST" ] && [ -n "$DOMAIN" ]; then
+    echo "--host and a domain can't be used together." >&2
+    exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -53,7 +74,7 @@ if [ -f "$ROOT/.env" ]; then
     set +a
 fi
 
-# api/.dev.vars keys that can be centrally overridden (see AGENTS.md); passed
+# api/.dev.vars keys that can be centrally overridden (see docs/development.md); passed
 # as --var so they win over api/.dev.vars without editing that file.
 API_EXTRA_VARS=()
 for _key in JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_NAME API_BASE_PATH EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
@@ -71,6 +92,11 @@ const pick = () => new Promise(r => {
 });
 Promise.all([pick(), pick(), pick(), pick(), pick()]).then(ports => console.log(ports.join(' ')));
 " 2>/dev/null)
+API_PORT="${VIRTUE_API_PORT:-$API_PORT}"
+WEB_PORT="${VIRTUE_WEB_PORT:-$WEB_PORT}"
+LANDING_PORT="${VIRTUE_LANDING_PORT:-$LANDING_PORT}"
+DONATE_PORT="${VIRTUE_DONATE_PORT:-$DONATE_PORT}"
+HASH_PORT="${VIRTUE_HASH_PORT:-$HASH_PORT}"
 
 # The hash server verifies JWTs signed by the API, so it needs the same public
 # key. Pull it straight out of api/.dev.vars (setup.sh's copy of
@@ -109,7 +135,7 @@ run() {
 # both the API and client rely on it for the hash-chain protocol.
 start_hash_server() {
     run "hash" "33" "hash-server" env \
-        HOST=127.0.0.1 \
+        HOST="${HOST:-127.0.0.1}" \
         PORT="$HASH_PORT" \
         RUST_LOG=info \
         "JWT_PUBLIC_KEY=$HASH_SERVER_JWT_PUBLIC_KEY" \
@@ -120,8 +146,10 @@ start_hash_server() {
 # URL the worker should use for CORS and Stripe redirect URLs.
 start_donate() {
     local landing_url="$1"
-    local webhook_url="http://localhost:${DONATE_PORT}/webhook"
+    local webhook_url="http://${HOST:-localhost}:${DONATE_PORT}/webhook"
     local donate_vars=()
+    local listen=()
+    [ -n "$HOST" ] && listen=(--ip "$HOST")
 
     [ -n "$STRIPE_SECRET_KEY" ] && donate_vars+=(--var "STRIPE_SECRET_KEY:${STRIPE_SECRET_KEY}")
 
@@ -142,7 +170,7 @@ start_donate() {
 
     [ -n "$STRIPE_WEBHOOK_SECRET" ] && donate_vars+=(--var "STRIPE_WEBHOOK_SECRET:${STRIPE_WEBHOOK_SECRET}")
 
-    run "donate" "35" "api-donate" bun run dev -- --port "$DONATE_PORT" \
+    run "donate" "35" "api-donate" bun run dev -- "${listen[@]}" --port "$DONATE_PORT" \
         --var "LANDING_URL:${landing_url}" "${donate_vars[@]}"
 }
 
@@ -236,6 +264,44 @@ if [ -n "$DOMAIN" ]; then
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host 127.0.0.1
     run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT" --host 127.0.0.1
+elif [ -n "$HOST" ]; then
+    # The web app proxies /api and /r2 to the API, so it reaches both from its own origin: one
+    # certificate covers them, and the session cookie stays first-party. Devices call the API
+    # directly, over plain http (their networking is in Rust, so no platform https rule applies).
+    WEB_SCHEME=http
+    if [ -n "${VIRTUE_DEV_TLS_CERT:-}" ] && [ -n "${VIRTUE_DEV_TLS_KEY:-}" ]; then
+        WEB_SCHEME=https
+    else
+        echo "Warning: VIRTUE_DEV_TLS_CERT and VIRTUE_DEV_TLS_KEY aren't set, so the web app is served over" >&2
+        echo "http and won't work from another machine, which needs https for Web Crypto." >&2
+    fi
+    WEB_URL="${WEB_SCHEME}://${HOST}:${WEB_PORT}"
+    LANDING_URL="http://${HOST}:${LANDING_PORT}"
+    export VITE_API_URL="${WEB_URL}/api"
+    export VITE_API_PROXY_TARGET="http://${HOST}:${API_PORT}"
+    export VITE_LANDING_URL="$LANDING_URL"
+    export PUBLIC_APP_URL="$WEB_URL"
+    export PUBLIC_API_URL="${WEB_URL}/api"
+    [ "$DONATE" = 1 ] && export PUBLIC_DONATE_API_URL="http://${HOST}:${DONATE_PORT}"
+    printf '\n  Landing : %s\n' "$LANDING_URL"
+    printf '  Web     : %s\n' "$WEB_URL"
+    printf '  API     : %s/api\n' "$WEB_URL"
+    printf '  Devices : http://%s:%s  (VIRTUE_DEFAULT_API_URL for a client build)\n' "$HOST" "$API_PORT"
+    [ "$DONATE" = 1 ] && printf '  Donate  : http://%s:%s\n' "$HOST" "$DONATE_PORT"
+    printf '  Hash    : http://%s:%s\n' "$HOST" "$HASH_PORT"
+    printf '\n'
+
+    start_hash_server
+    run "api"     "31" "api"     bun run dev -- --ip "$HOST" --port "$API_PORT" \
+        --var "APP_URL:${WEB_URL}" \
+        --var "LANDING_URL:${LANDING_URL}" \
+        --var "R2_URL:${WEB_URL}/r2" \
+        --var "DEV_R2_ROUTE:true" \
+        --var "HASH_SERVER_URL:http://${HOST}:${HASH_PORT}" \
+        "${API_EXTRA_VARS[@]}"
+    [ "$DONATE" = 1 ] && start_donate "$LANDING_URL"
+    run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host "$HOST"
+    run "landing" "34" "landing" bun run dev -- --port "$LANDING_PORT" --host "$HOST"
 else
     export VITE_API_URL="http://localhost:${API_PORT}"
     export VITE_API_PROXY_TARGET="http://localhost:${API_PORT}"

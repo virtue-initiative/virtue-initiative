@@ -1,7 +1,7 @@
 name: Spec Check
 
 # Every test cites a SPEC.md section, and uncovered sections only shrink.
-# See TESTING.md.
+# See TESTING.md. Also checks that docs only name files that exist.
 
 on:
   pull_request:
@@ -29,6 +29,9 @@ jobs:
 
       - name: Check spec IDs in tests
         run: bun scripts/spec-check.ts
+
+      - name: Check file references in docs
+        run: bun scripts/doc-check.ts
 
       - name: Check the deploy secrets list against what Workers use
         run: bun scripts/check-deploy-secrets.ts --check-usage

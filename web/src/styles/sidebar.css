@@ -338,3 +338,12 @@ a.sidebar-nav-group-heading {
     display: inline-flex;
   }
 }
+
+/* The drawer backdrop only exists on the narrow layout. */
+@media (min-width: 721px) {
+  .app-drawer-backdrop.sidebar-backdrop,
+  .app-drawer-backdrop.sidebar-backdrop.is-open {
+    display: none;
+    pointer-events: none;
+  }
+}

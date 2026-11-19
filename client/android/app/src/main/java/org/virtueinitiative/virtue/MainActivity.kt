@@ -41,9 +41,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.virtueinitiative.virtue.databinding.ActivityMainBinding
 import java.text.DateFormat
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /**
  * What must outlive the activity. A rotation recreates it while a native call
@@ -94,7 +92,6 @@ class MainActivity : AppCompatActivity() {
     // Transient line in Status Details > Advanced (test screenshot, log file).
     private var detailsMessageView: TextView? = null
     private var testButton: com.google.android.material.button.MaterialButton? = null
-    private var detailsA11y = false
 
     private lateinit var brandView: View
     private val backCallback = object : OnBackPressedCallback(false) {
@@ -190,11 +187,11 @@ class MainActivity : AppCompatActivity() {
 
     // Home follows the monitoring state while it is on screen, so "Waiting for
     // first capture" turns into "Monitoring active" without leaving the app.
+    // Status Details polls too, so its relative ages (CLIENT-007) keep counting.
     private val homePoll = object : Runnable {
         override fun run() {
-            if (screen == Screen.HOME) refreshUi()
-            // The test screenshot button follows Accessibility (CLIENT-008).
-            if (screen == Screen.STATUS_DETAILS && detailsA11y != VirtueAccessibilityService.isConnected()) refreshUi()
+            // Status Details also picks up the test screenshot button following Accessibility (CLIENT-008).
+            if (screen == Screen.HOME || screen == Screen.STATUS_DETAILS) refreshUi()
             binding.root.postDelayed(this, 3000)
         }
     }
@@ -870,9 +867,14 @@ class MainActivity : AppCompatActivity() {
 
         // `optString` renders a JSON null as the literal "null", so absent and
         // null values are both routed through `isNull` first.
-        fun optText(key: String): String =
-            if (json.isNull(key)) "—" else json.optString(key, "").ifBlank { "—" }
-        fun optTime(key: String): String = formatTimestampMs(json.optLong(key, 0))
+        // Absent values read the same on every platform (CLIENT-007): plain
+        // words in the summary rows, `<none>` or `<unknown>` under Advanced.
+        val unknown = getString(R.string.details_unknown)
+        fun optText(key: String, absent: String): String =
+            if (json.isNull(key)) absent else json.optString(key, "").ifBlank { absent }
+        fun optSeconds(key: String): String =
+            if (json.isNull(key)) "<unknown>" else "${json.optLong(key, 0)}s"
+        fun optTime(key: String): String = StatusTimestamp.full(json.optLong(key, 0))
 
         // Summary: dot, headline and one sentence.
         content.addView(LinearLayout(this).apply {
@@ -900,14 +902,14 @@ class MainActivity : AppCompatActivity() {
         val account = mutableListOf<DetailRow>()
         if (loggedIn) {
             account += DetailRow(
-                Tone.GOOD, getString(R.string.details_signed_in), optText("account_email"),
-                getString(R.string.details_device_hint, optText("device_name")),
+                Tone.GOOD, getString(R.string.details_signed_in), optText("account_email", unknown),
+                getString(R.string.details_device_hint, optText("device_name", unknown)),
             )
             val partners = if (json.isNull("partner_count")) null else json.optInt("partner_count", 0)
             account += DetailRow(
                 if ((partners ?: 0) > 0) Tone.GOOD else Tone.WARN,
                 getString(R.string.details_partners),
-                partners?.toString() ?: "—",
+                partners?.toString() ?: unknown,
                 if (partners == 0) getString(R.string.details_partners_hint) else null,
             )
         } else {
@@ -951,7 +953,7 @@ class MainActivity : AppCompatActivity() {
             DetailRow(
                 if (lastShot > 0) Tone.GOOD else if (loggedIn) Tone.WARN else Tone.NEUTRAL,
                 getString(R.string.details_last_screenshot),
-                if (lastShot > 0) formatClock(lastShot) else getString(R.string.details_none),
+                if (lastShot > 0) StatusTimestamp.short(lastShot) else getString(R.string.details_none),
             ),
             DetailRow(null, getString(R.string.details_waiting_upload), (pendingHash + pendingBatch).toString()),
         )))
@@ -962,7 +964,7 @@ class MainActivity : AppCompatActivity() {
         val errorRows = (0 until (recentErrors?.length() ?: 0)).mapNotNull { recentErrors?.optJSONObject(it) }.map { error ->
             error.optLong("at_ms", 0) to DetailRow(
                 null, getString(R.string.details_recent_error), error.optString("message"),
-                "${formatTimestampMs(error.optLong("at_ms", 0))} · ${error.optString("context")}",
+                "${StatusTimestamp.full(error.optLong("at_ms", 0))} · ${error.optString("context")}",
             )
         }
         content.addView(sectionLabel(getString(R.string.details_group_problems)))
@@ -981,7 +983,13 @@ class MainActivity : AppCompatActivity() {
             "static_screen" -> "Screen unchanged since the last upload"
             "locked_or_screensaver" -> "Screen locked or screensaver active"
             "capture_failed" -> "Capture failed"
-            else -> "—"
+            else -> StatusTimestamp.NONE
+        }
+        // The capture loop is Android's daemon (CLIENT-007).
+        val monitorState = when {
+            VirtueAccessibilityService.isEnabled() -> "Running"
+            VirtueAccessibilityService.isPaused() -> "Paused"
+            else -> "Stopped"
         }
         val a11yStatus = when {
             VirtueAccessibilityService.isEnabled() -> "Active"
@@ -989,7 +997,7 @@ class MainActivity : AppCompatActivity() {
             VirtueAccessibilityService.isConnected() -> "Connected (not running)"
             else -> "Not enabled"
         }
-        val hashBaseUrl = if (json.isNull("hash_base_url")) "default" else json.optString("hash_base_url", "").ifBlank { "default" }
+        val hashBaseUrl = optText("hash_base_url", "<default>")
         val logFile = java.io.File(filesDir, "core-data/logs").listFiles()?.maxByOrNull { it.lastModified() }
 
         val advancedBody = LinearLayout(this).apply {
@@ -1000,28 +1008,29 @@ class MainActivity : AppCompatActivity() {
             )
         }
         advancedBody.addView(detailGroup(listOf(
-            DetailRow(null, "Device ID", optText("device_id")),
-            DetailRow(null, "API URL", optText("api_base_url")),
+            DetailRow(null, "Device ID", optText("device_id", StatusTimestamp.NONE)),
+            DetailRow(null, "API URL", optText("api_base_url", "<unknown>")),
             DetailRow(null, "Hash base URL", hashBaseUrl),
-            DetailRow(null, "Capture interval", "${json.optLong("capture_interval_seconds", 0)}s"),
-            DetailRow(null, "Batch window", "${json.optLong("batch_window_seconds", 0)}s"),
+            DetailRow(null, "Capture interval", optSeconds("capture_interval_seconds")),
+            DetailRow(null, "Batch window", optSeconds("batch_window_seconds")),
             DetailRow(null, "Build", BuildConfig.VIRTUE_BUILD_LABEL),
             DetailRow(null, "Accessibility service", a11yStatus),
+            DetailRow(null, "Monitor state", monitorState),
             DetailRow(null, "Waiting for hash", pendingHash.toString()),
             DetailRow(null, "Waiting in batch", pendingBatch.toString()),
             DetailRow(null, "Pending requests", json.optInt("pending_request_count", 0).toString()),
             DetailRow(null, "Last batch upload", optTime("last_batch_at_ms")),
             DetailRow(null, "Last loop", optTime("last_loop_at_ms")),
             DetailRow(null, "Last attempt", optTime("last_screenshot_attempt_at_ms")),
+            DetailRow(null, "Last screenshot", optTime("last_screenshot_at_ms")),
             DetailRow(null, "Last skip reason", skipReason),
-            DetailRow(null, "Log file", logFile?.absolutePath ?: "—"),
+            DetailRow(null, "Log file", logFile?.absolutePath ?: StatusTimestamp.NONE),
         ) + errorRows.ifEmpty {
-            listOf(0L to DetailRow(null, getString(R.string.details_recent_errors), getString(R.string.details_none)))
+            listOf(0L to DetailRow(null, getString(R.string.details_recent_errors), StatusTimestamp.NONE))
         }.map { it.second }))
         advancedBody.addView(tonalButton(getString(R.string.btn_open_log)) { openLogFile(logFile) }.topMargin(12))
         val test = tonalButton(getString(R.string.btn_take_test_screenshot)) { forceCapture() }
         val a11yConnected = VirtueAccessibilityService.isConnected()
-        detailsA11y = a11yConnected
         test.isEnabled = loggedIn && a11yConnected && !Session.capturing
         testButton = test
         advancedBody.addView(test.topMargin(8))
@@ -1086,9 +1095,15 @@ class MainActivity : AppCompatActivity() {
         if (Session.capturing || !VirtueAccessibilityService.isConnected()) return
         Session.capturing = true
         testButton?.isEnabled = false
-        showDetailsMessage(getString(R.string.msg_force_capture_started), clear = false)
         val app = applicationContext
         Session.scope.launch {
+            // CLIENT-008: count down so the user can bring up the screen they want captured.
+            for (left in TEST_SCREENSHOT_DELAY_SECONDS downTo 1) {
+                val waiting = app.resources.getQuantityString(R.plurals.msg_force_capture_waiting, left, left)
+                showDetailsMessage(waiting, clear = false)
+                delay(1_000)
+            }
+            showDetailsMessage(app.getString(R.string.msg_force_capture_started), clear = false)
             // The native call waits for the batch to land, so its message
             // reports what actually happened rather than assuming an upload.
             val raw = withDeadline(FORCE_CAPTURE_DEADLINE_MS) {
@@ -1257,14 +1272,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun formatTimestampMs(ms: Long): String {
-        if (ms <= 0L) return "—"
-        return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(ms))
-    }
-
     private companion object {
         const val FORCE_CAPTURE_DEADLINE_MS = 30_000L
         const val KEY_SCREEN = "screen"
+        const val TEST_SCREENSHOT_DELAY_SECONDS = 10
         const val KEY_ADVANCED_OPEN = "advanced_open"
         const val KEY_EMAIL = "email"
         const val KEY_DEVICE = "device"

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { formatRelativeTimestamp } from '../../utils/time';
 import {
@@ -59,6 +59,16 @@ export function LogsList({
       }
     },
   });
+
+  // onChange doesn't fire on first render or when logs stream in, so report the
+  // first visible event here too (WEB-043). Before layout there are no virtual
+  // rows, and the first event is what is at the top.
+  const firstVisibleIndex = virtualizer.getVirtualItems()[0]?.index ?? 0;
+  const firstVisibleTs = items[firstVisibleIndex]?.ts;
+  useEffect(() => {
+    onVisibleDateChange?.(firstVisibleTs === undefined ? null : formatDayAndTime(firstVisibleTs));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstVisibleTs]);
 
   const selectedIndex = selectedId === null ? -1 : items.findIndex((i) => i.id === selectedId);
 

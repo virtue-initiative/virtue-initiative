@@ -420,3 +420,32 @@ describe('Actions that do not ask for confirmation (WEB-020)', () => {
     expect(document.querySelector('dialog[open]')).toBeNull();
   });
 });
+
+// Two clicks in the same tick land before Preact re-renders and disables the button, so they
+// are dispatched without Testing Library's act(), which would flush that render in between.
+const doubleClick = (el: HTMLElement) => {
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+};
+
+// The account and feature flag deletions are covered by their own pages' tests.
+const DOUBLE_CLICK_ACTIONS = ACTIONS.filter(
+  (action) => action.name !== 'deleting the account' && action.name !== 'deleting a feature flag',
+);
+
+describe.each(DOUBLE_CLICK_ACTIONS)('Double click: $name (WEB-020)', (action) => {
+  it('sends one request when the confirm button is clicked twice in the same tick (WEB-020)', async () => {
+    const session = await action.prepare?.();
+    const { requests, release } = interceptRequest(action, ok);
+    action.render(session instanceof Object ? session : undefined);
+    const user = userEvent.setup();
+    const dialog = await action.open(user);
+    doubleClick(within(dialog).getByRole('button', { name: action.confirm }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    // Give a wrongly started second request time to arrive.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requests).toHaveLength(1);
+    release();
+  });
+});

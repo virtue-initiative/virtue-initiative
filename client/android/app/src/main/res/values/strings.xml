@@ -147,6 +147,7 @@
     <string name="details_recent_error">Recent error</string>
     <string name="details_recent_errors">Recent errors</string>
     <string name="details_none">None</string>
+    <string name="details_unknown">Unknown</string>
     <string name="summary_active">Everything is working. Screenshots are being taken and uploaded.</string>
     <string name="summary_signed_out">Sign in to start monitoring.</string>
     <string name="summary_a11y_off">Turn on Accessibility so Virtue can capture screenshots.</string>
@@ -191,4 +192,8 @@
     <!-- Accessibility service -->
     <string name="accessibility_service_label">Virtue Screen Monitor</string>
     <string name="accessibility_service_description">Virtue uses accessibility permission to capture screenshots for accountability monitoring. No interaction data is collected.</string>
+    <plurals name="msg_force_capture_waiting">
+        <item quantity="one">Taking screenshot in %d second…</item>
+        <item quantity="other">Taking screenshot in %d seconds…</item>
+    </plurals>
 </resources>

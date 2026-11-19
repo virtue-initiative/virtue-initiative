@@ -10,6 +10,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '../Logs/log-icons';
 import {
   buildReport,
   explainAlert,
+  isRealDateString,
   parseDateString,
   reportWindow,
   shiftDateString,
@@ -84,7 +85,7 @@ export function Report({ userId: routeUserId }: { userId?: string }) {
   const today = toDateString(new Date());
   const [period, setPeriod] = useUrlState<ReportPeriod>('period', 'string', 'day');
   const [rawDate, setDate] = useUrlState<string | null>('date', 'string', null);
-  const date = rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) && rawDate <= today ? rawDate : today;
+  const date = rawDate && isRealDateString(rawDate) && rawDate <= today ? rawDate : today;
   const range = reportWindow(period, date);
 
   const [result, setResult] = useState<LogQueryResult>({

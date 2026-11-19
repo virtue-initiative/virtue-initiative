@@ -8,42 +8,16 @@ Platform crates provide only raw screen data and OS hooks. `core` owns
 everything else: the daemon loop, persistence, retrying, hashing, batch
 construction, compression, encryption, and upload semantics.
 
-## Workspace layout
+## Where things are
 
-```
-client/
-  core/
-    architecture.md
-    SPEC.md             — source of truth for the daemon loop's behavior
-    Cargo.toml
-    src/
-      api.rs            — ApiTransport trait + HttpApiClient
-      config.rs         — Config struct (compile-time defaults via env!())
-      crypto.rs         — AES-256-GCM, HPKE key wrap, hash computation
-      daemon.rs         — Daemon<P, A> / DaemonState — the sequential loop itself
-      error.rs          — CoreError / CoreResult
-      ipc.rs            — ClientController + cross-process Unix-socket transport
-                           (Linux/Mac only)
-      model.rs          — Shared structs (ServiceStatus, Screenshot, …)
-      module/
-        auth.rs                  — login()/logout()
-        capture_availability.rs  — failure-window threshold
-        errors.rs                — bounded recent-errors ring (CORE-018)
-        heartbeat.rs             — 24h liveness ping
-        lifecycle.rs             — late-wakeup tamper check + UserStop
-        screenshot.rs            — plan/capture/commit + dedup + redaction
-        status.rs                — pure ServiceStatus assembly
-        upload.rs                — hash/batch queues, backoff, plan/execute/commit
-      platform.rs       — ScreenshotHooks / LifecycleHooks / PlatformHooks traits
-      rng.rs            — RandomSource (screenshot cadence draws)
-      state.rs          — load_state / store_state (event_state.json)
-      testing/          — MockApiClient, TestPlatformHooks, MockClock,
-                           TestRandomSource, Scenario
-  linux/  mac/  windows/  android/  ios/   — platform wrappers (ios has its
-                                              own standalone Cargo workspace,
-                                              not a member of client/'s — see
-                                              below)
-```
+- `src/daemon.rs`: `Daemon<P, A>` and `DaemonState`, the loop itself.
+- `src/module/`: one file per module (see "The modules" below).
+- `src/platform.rs`: the `ScreenshotHooks`, `LifecycleHooks` and `PlatformHooks` traits.
+- `src/api.rs`: the `ApiTransport` trait and `HttpApiClient`.
+- `src/crypto.rs`: AES-256-GCM, HPKE key wrapping and hashing.
+- `src/ipc.rs`: the Unix-socket transport for Linux and macOS.
+- `src/state.rs`: loading and storing `event_state.json`.
+- `src/testing/`: the mocks and the `Scenario` test harness.
 
 ## The daemon loop
 
@@ -93,8 +67,8 @@ daemon.run_forever(); // blocking; call from its own thread
 One flat struct, persisted to `event_state.json` with **the same top-level
 field names as the pre-rewrite per-observer keys** (`auth`, `lifecycle`,
 `screenshot`, `upload`, `capture_availability`, `heartbeat`) so existing
-installs load cleanly and `client/*/src/config.rs::read_auth_state` (which
-reads the `auth` key directly, bypassing the daemon) needs no changes:
+installs load cleanly, and readers that bypass the daemon and read the `auth`
+key directly (`read_auth_state` in `client/mac/src/config.rs`) keep working:
 
 ```rust
 pub struct DaemonState {
@@ -149,7 +123,7 @@ under a lock instead of going through the channel, so the single-threaded
 `Scenario` test harness (which never runs `run_forever` on a background
 thread) can drive the daemon synchronously.
 
-### The 7 modules
+### The modules
 
 | Module                 | Owns                                                         | Notable functions                                                                                                                      |
 | ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -185,6 +159,17 @@ the same chance" requirement. Two gates then run:
 (`state::load_state`, generic over any `Default + DeserializeOwned` type
 now, not just `serde_json::Value`); every tick's final locked phase persists
 it back via `state::store_state` (atomic tmp+rename).
+
+`DaemonState.version` records the file's format. Every load that a write
+may follow (`Daemon::new` and each locked re-read) goes through
+`load_current_state`, which runs `DaemonState::upgrade`: one step per
+version, in order, from the saved version up to `DAEMON_STATE_VERSION`.
+Version 0 means nothing saved yet (a missing or unparseable file, or a
+logout's reset via `DaemonState::initial`), and 0 → 1 changes no data,
+because clients before CORE-016's versioning rule saved 0 with data already
+in the version 1 format. A file from a newer client keeps its version and
+runs no steps. A breaking change to the shape bumps `DAEMON_STATE_VERSION`
+and adds its step to `upgrade`.
 
 ### IPC: one file, one channel type (Linux/Mac only)
 
@@ -260,10 +245,7 @@ the daemon, unchanged from before.
 `virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, HttpApiClient>`
 and stores it in process-global state, same pattern as Android's JNI bridge;
 every other `virtue_ios_native_*` call is a direct method call on that shared
-daemon. `client/ios/rust` is its own standalone Cargo workspace (not a
-`client/Cargo.toml` member — this predates the daemon rewrite), so it isn't
-covered by `cargo check --workspace` from `client/`; it has its own CI job
-(`.github/workflows/client-ios.yml`) that builds it directly.
+daemon.
 
 `IosPlatformHooks::lifecycle_enabled()` returns `false`: the monitoring
 process is a short-lived Safari extension host that the OS can suspend the
@@ -292,7 +274,7 @@ like `DEFAULT_API_BASE_URL`. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
 back to the repo-root `.env` (gitignored; see `.env.example`) and then to
-`~/.config/virtue-dev.env` (see root `AGENTS.md`) for any of those not already
+`~/.config/virtue-dev.env` (see `docs/development.md`) for any of those not already
 set by a real env var — and emits them via `cargo:rustc-env`. `config.rs`
 exposes them as `DEFAULT_API_BASE_URL` (const) and
 `default_capture_interval_seconds()`/`default_batch_window_seconds()`
@@ -329,6 +311,7 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 // LifecycleHooks
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
 fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;       // default: falls back to get_utc_clock_ms
+fn get_boot_clock_ms(&self) -> CoreResult<i64>;            // default: falls back to get_utc_clock_ms
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn lifecycle_enabled(&self) -> bool;                        // default: true
@@ -343,8 +326,18 @@ status — running normally. iOS is the only platform that overrides it to
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
 suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
-it never triggers). Screenshot scheduling itself is unaffected and still
-paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+it never triggers). This hook isn't on `ScreenshotHooks`.
+
+The daemon never reads the system clock for a time it records, schedules
+or compares. Every such time comes from its own clock (`src/clock.rs`,
+CORE-027): the server's time from the latest response's `Date` header
+(`ApiTransport::take_server_time_ms`), carried forward on
+`get_boot_clock_ms`, a clock that counts from boot including suspend and
+that setting the system clock doesn't move. Until the first response it
+starts from the system clock, no earlier than the last tick
+(`lifecycle.last_tick_utc_ms`). A
+correction moves every persisted schedule time with it (`shift_times` in
+`daemon.rs`). Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.

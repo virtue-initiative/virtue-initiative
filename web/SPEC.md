@@ -22,18 +22,18 @@ A signed-in user MUST be able to reach these pages:
 | `/invite-accept?partner_token=…`                             | Invite acceptance (WEB-053)  |
 | `/verify-email?token=…`                                      | Email verification (WEB-033) |
 
-Each page MUST have a heading naming it. `/logs/gallery` and `/logs/:userId/gallery` MUST keep working as aliases of the gallery view, so old links still open. Any other path MUST show the 404 page (WEB-070).
+Each page MUST have a heading naming it, and the browser tab title MUST name it too: "<page> - The Virtue Initiative", for example "Partners - The Virtue Initiative". `/logs/gallery` and `/logs/:userId/gallery` MUST keep working as aliases of the gallery view, so old links still open. Any other path MUST show the 404 page (WEB-070).
 
 Signed-out routing is defined in WEB-005.
 
 ### WEB-003 Sidebar
 
-Every signed-in page MUST show the sidebar. On narrow screens it MUST collapse into a menu that closes after navigating.
+Every signed-in page MUST show the sidebar. On narrow screens it MUST collapse into a menu that closes after navigating, on Escape, and when the window widens to the full sidebar. While that menu is open, the keyboard MUST NOT reach the page behind it and the page MUST NOT scroll.
 
 - **Devices**, **Partners** and **Passwords** links MUST show a count when it is above zero: the user's own devices, accepted partners in both directions, and locked passwords that are not deleted.
 - Clicking **Devices** or **Partners** MUST refresh that page's data (WEB-012), even when already on it.
 - **Reports** MUST list "My report" and one "<name>'s report" per accepted watched person. **Logs** MUST list "My logs" and one "<name>'s logs" per accepted watched person. `<name>` is the person's name, or their email when they have none. The link for the current page MUST be marked active.
-- The account button MUST show the user's name, else their email, else "Account". It MUST open a menu with **Settings**, **Help** (opens the help site in a new tab), **Report an issue** (WEB-064) and **Log out** (WEB-007).
+- The account button MUST show the user's name, else their email, else "Account". It MUST open a menu with **Settings**, **Help** (opens the help site in a new tab), **Report an issue** (WEB-064) and **Log out** (WEB-007). The menu MUST close on Escape, and its items MUST NOT be reachable by keyboard while it is closed. The avatar's initials MUST be whole characters, so a name ending in an emoji never shows half of one.
 - There MUST NOT be a link to Admin (WEB-026).
 
 ## WEB-004 Session and authentication
@@ -46,7 +46,7 @@ A session is opened by logging in (WEB-029), finishing sign-up (WEB-031) or rese
 
 A signed-out user MUST be able to open `/login`, `/signup`, `/forgot-password` and `/verify-email`. Any other path MUST redirect to `/login?to=<path and query>`.
 
-- After logging in or finishing sign-up, the app MUST go to the `to` path when present, and otherwise to `/`.
+- After logging in or finishing sign-up, the app MUST go to the `to` path when present, and otherwise to `/`. It MUST use `to` exactly as the query gives it, and only when it is a path on this site (a single leading `/`); any other `to` MUST be treated as `/`.
 - Switching between **Log in**, **Sign up** and **Forgot your password?** MUST keep `to`. A sign-up request MUST pass `to` to the server so that the emailed link returns there (API-009).
 - A signed-in user who opens `/login`, `/signup` or `/forgot-password` MUST be redirected to `/`.
 
@@ -54,7 +54,7 @@ A signed-out user MUST be able to open `/login`, `/signup`, `/forgot-password` a
 
 ### WEB-006 Expired or invalid session
 
-When any request is answered with HTTP 401 (API-003), the app MUST end the session as if the user had logged out (WEB-007), so the user lands on the login page with `to` set to the page they were on. It MUST do this once, however many requests fail.
+When any request, including the log sync (WEB-040), is answered with HTTP 401 (API-003), the app MUST end the session as if the user had logged out (WEB-007), so the user lands on the login page with `to` set to the page they were on. It MUST do this once, however many requests fail.
 
 > OPEN: the login page does not say why the user was sent there — should it show "Your session is invalid or expired. Please log in again."?
 
@@ -147,13 +147,13 @@ Wherever a device is listed, its status from API-029 MUST be shown as a tag: "On
 
 An action that deletes data or ends a relationship MUST ask for confirmation in a dialog that names what is affected, with **Cancel** and a danger-styled confirm button. This covers deleting a device, removing a partner or pending invite, revealing a locked password for the first time, deleting or permanently deleting a locked password, deleting the account, and deleting a feature flag.
 
-- While the action runs, its buttons MUST be disabled and the confirm button MUST say what is happening (for example "Deleting…").
+- While the action runs, its buttons MUST be disabled and the confirm button MUST say what is happening (for example "Deleting…"). A second click, however quick, MUST NOT run the action again.
 - If it fails, the app MUST show the error and MUST leave everything as it was. The item MUST NOT disappear until the server confirms.
 - Restoring a locked password, clearing the cache and removing a feature flag override MUST NOT ask for confirmation.
 
 ## WEB-021 Forms and new passwords
 
-A submit button MUST be disabled while its form is submitting, and MUST say so ("Saving…", "Sending…", "Please wait…"). Required fields MUST be marked required so the browser blocks an empty submit.
+A submit button MUST be disabled while its form is submitting, and MUST say so ("Saving…", "Sending…", "Please wait…"). A second submit, however quick, MUST NOT send the form again, and a dialog MUST NOT close on Escape while its form is submitting. Required fields MUST be marked required so the browser blocks an empty submit.
 
 Wherever the user chooses a new password (WEB-031, WEB-032, WEB-061):
 
@@ -256,13 +256,11 @@ Each card MUST show the device's name, status tag (WEB-019), platform, **Last up
 
 ## WEB-038 Logs
 
-Logs shows events for one person: the user (`/logs`, "My logs") or a watched person (`/logs/:userId`, "<name>'s logs"). The heading MUST add " — <device name>" when one device is selected, and MUST add the "Deactivated" tag when that device is logged out. While the device and partner lists load on a watched person's page, the heading MUST say "Loading…".
-
-> OPEN: for a `:userId` the user does not watch, the heading shows the first 8 characters of the ID and the page simply finds no logs, whereas Report says the report isn't available — should Logs say the same?
+Logs shows events for one person: the user (`/logs`, "My logs") or a watched person (`/logs/:userId`, "<name>'s logs"). The heading MUST add " — <device name>" when one device is selected, and MUST add the "Deactivated" tag when that device is logged out. While the device and partner lists load on a watched person's page, the heading MUST say "Loading…". For a `:userId` the user does not watch, it MUST say "These logs aren't available. You can only see logs for people you monitor." in place of the filters and logs.
 
 ### WEB-039 Filters
 
-Filters MUST live in the URL, so a link or reload keeps them and the back button undoes them. A filter at its default MUST be left out of the URL.
+Filters MUST live in the URL, so a link or reload keeps them and the back button undoes them. A filter at its default MUST be left out of the URL, and a filter with an unknown value MUST be treated as its default.
 
 - **Date range** (`range`): "Past day" (default), "Past week" or "Past month", always ending today.
 - **Device** (`device_id`): "All devices" or one of the person's devices. A `device_id` that is not one of their devices MUST be dropped once the lists load.
@@ -335,7 +333,7 @@ The report summarises flagged activity for one person over one day or week: the 
 ### WEB-046 Period and date
 
 - **Daily** (default) covers one local calendar day. **Weekly** covers the seven days ending on the chosen date. Both live in the URL (`period`, `date`).
-- The date MUST default to today. A missing, malformed or future date MUST be treated as today.
+- The date MUST default to today. A missing, malformed, nonexistent (such as `2026-02-30`) or future date MUST be treated as today.
 - Previous and next buttons MUST move by a day or a week. **Next** MUST be disabled on the current period. The date button MUST open a date picker that cannot go past today.
 - The heading MUST read "<Month Dayth, Year> activity report" or "Activity report for the week of <Month Dayth, Year>".
 - For the current period the report MUST note that it is incomplete, with a link to the previous period's report.

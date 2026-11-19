@@ -98,6 +98,8 @@ impl Scenario {
         if let Some(ref s) = settings {
             api.state().default_device_settings = s.clone();
         }
+        // Like a real server's `Date` header (CORE-027).
+        api.serve_time(clock.clone(), 0);
         let api_handle = api.clone();
         let rng = TestRandomSource::new();
         configure(&platform, &api_handle);
@@ -162,7 +164,7 @@ impl Scenario {
     /// Run one tick at the current clock time, single-threaded (no
     /// `run_forever` loop thread involved).
     pub fn tick(&mut self) -> &mut Self {
-        self.daemon.tick_once_for_test(self.clock.now_ms());
+        self.daemon.tick_once_for_test();
         self
     }
 

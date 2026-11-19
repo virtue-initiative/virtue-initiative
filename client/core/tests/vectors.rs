@@ -980,7 +980,7 @@ fn password_cases() -> Vec<Value> {
             "correct horse battery staple",
             b"user@example.com".to_vec(),
             (65536, 3, 1),
-            "The cost the repo CLAUDE.md names. The salt is an opaque byte string (API-015); here it happens to be a lowercase email.",
+            "The cost the repo AGENTS.md names. The salt is an opaque byte string (API-015); here it happens to be a lowercase email.",
         ),
         (
             "non_ascii_password_cost_65536_3",

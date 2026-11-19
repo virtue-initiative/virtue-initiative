@@ -39,6 +39,6 @@ The build looks for each variable in this order and uses the first one it finds:
 - Rebuild the client after changing a value. The new value takes effect on the
   next build, not on a running app.
 - Android emulators should use `http://10.0.2.2:8787`, not `http://localhost:8787`.
-- On Linux, `virtue status` prints the values the build used.
+- On Linux, `virtue status --advanced` prints the values the build used.
 - When switching between prod and local APIs, rebuild, then log out and log back
   in.

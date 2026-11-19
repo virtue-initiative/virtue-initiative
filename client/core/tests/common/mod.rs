@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use virtue_core::DaemonState;
 use virtue_core::crypto::encode_batch_event;
-use virtue_core::testing::Scenario;
+use virtue_core::testing::{MockApiClient, Scenario, TestPlatformHooks};
 use virtue_core::{Upload, UploadKind, load_state};
 
 /// The time the first tick of most scenarios runs at. Large enough that
@@ -30,6 +30,7 @@ struct WireEvent {
 #[derive(Deserialize)]
 struct WireData {
     title: Option<String>,
+    message: Option<String>,
 }
 
 /// An event waiting in the upload queues, reduced to what tests assert on.
@@ -37,6 +38,7 @@ struct WireData {
 pub struct QueuedEvent {
     pub kind: String,
     pub title: Option<String>,
+    pub message: Option<String>,
 }
 
 /// Every event still waiting in `state`'s upload queues, oldest first: the ones
@@ -56,9 +58,11 @@ pub fn queued_events_in(state: &DaemonState) -> Vec<QueuedEvent> {
 
 fn decode(bytes: &[u8]) -> QueuedEvent {
     let event: WireEvent = rmp_serde::from_slice(bytes).expect("decode queued event");
+    let (title, message) = event.data.map_or((None, None), |d| (d.title, d.message));
     QueuedEvent {
         kind: event.kind,
-        title: event.data.and_then(|d| d.title),
+        title,
+        message,
     }
 }
 
@@ -145,4 +149,43 @@ pub fn eventually(mut check: impl FnMut() -> bool) -> bool {
 pub fn persisted(scenario: &Scenario) -> DaemonState {
     load_state::<DaemonState>(&scenario.state_dir_path().join("event_state.json"))
         .expect("read the state file")
+}
+
+/// Restarts the daemon from `previous`'s state directory at `now_ms`, with
+/// `configure` run on the platform and API before it starts, and batches
+/// held back. `previous` must stay alive: dropping a `Scenario` deletes its
+/// state directory.
+pub fn restart_with(
+    previous: &Scenario,
+    now_ms: i64,
+    configure: impl FnOnce(&TestPlatformHooks, &MockApiClient),
+) -> Scenario {
+    let mut next = Scenario::authenticated_with_state_dir_configured(
+        previous.state_dir_path().to_path_buf(),
+        now_ms,
+        configure,
+    );
+    hold_batches(&mut next);
+    next
+}
+
+/// A `restart_with` configuration: the server can't be reached.
+pub fn offline(_: &TestPlatformHooks, api: &MockApiClient) {
+    api.serve_no_time();
+}
+
+/// Lets the server be reached again and runs a tick that talks to it.
+pub fn reach_server(scenario: &mut Scenario) {
+    scenario.api.serve_time(scenario.clock.clone(), 0);
+    scenario.queue_upload(dev("reach the server"));
+    scenario.tick();
+}
+
+/// The messages of the `alert` events waiting in the upload queues.
+pub fn alert_messages(scenario: &Scenario) -> Vec<String> {
+    queued_events(scenario)
+        .into_iter()
+        .filter(|e| e.kind == "alert")
+        .filter_map(|e| e.message)
+        .collect()
 }

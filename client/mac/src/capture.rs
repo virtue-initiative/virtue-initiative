@@ -360,6 +360,7 @@ struct MachTimebaseInfo {
 
 unsafe extern "C" {
     fn mach_absolute_time() -> u64;
+    fn mach_continuous_time() -> u64;
     fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
 }
 
@@ -384,6 +385,14 @@ impl LifecycleHooks for MacPlatformHooks {
         // SAFETY: `mach_absolute_time` takes no arguments and has no
         // preconditions.
         mach_ticks_to_ms(unsafe { mach_absolute_time() })
+    }
+
+    /// Time since boot, in milliseconds, INCLUDING time spent suspended. The
+    /// daemon's own clock runs on it (CORE-027).
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        // SAFETY: `mach_continuous_time` takes no arguments and has no
+        // preconditions.
+        mach_ticks_to_ms(unsafe { mach_continuous_time() })
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
