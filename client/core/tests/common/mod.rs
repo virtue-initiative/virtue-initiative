@@ -24,19 +24,23 @@ pub const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 struct WireEvent {
     #[serde(rename = "type")]
     kind: String,
+    risk: Option<f32>,
     data: Option<WireData>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct WireData {
     title: Option<String>,
+    domain: Option<String>,
 }
 
 /// An event waiting in the upload queues, reduced to what tests assert on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueuedEvent {
     pub kind: String,
+    pub risk: Option<f32>,
     pub title: Option<String>,
+    pub domain: Option<String>,
 }
 
 /// Every event still waiting in `state`'s upload queues, oldest first: the ones
@@ -56,9 +60,12 @@ pub fn queued_events_in(state: &DaemonState) -> Vec<QueuedEvent> {
 
 fn decode(bytes: &[u8]) -> QueuedEvent {
     let event: WireEvent = rmp_serde::from_slice(bytes).expect("decode queued event");
+    let data = event.data.unwrap_or_default();
     QueuedEvent {
         kind: event.kind,
-        title: event.data.and_then(|d| d.title),
+        risk: event.risk,
+        title: data.title,
+        domain: data.domain,
     }
 }
 

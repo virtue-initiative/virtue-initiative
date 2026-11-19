@@ -75,6 +75,7 @@ mod tests {
                 .collect(),
             hash_base_url: Some("https://hash.example.org".into()),
             feature_flags: Vec::new(),
+            dns_filter_domain: None,
         }
     }
 

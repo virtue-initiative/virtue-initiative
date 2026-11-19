@@ -21,7 +21,7 @@ See `../../AGENTS.md` (repo root) for the exact wire formats and constraints.
 - **No locking inside a tick.** `run_phases` works on an owned clone of the state. Network I/O happens in the `execute_*` steps, which can't touch state; they hand results back for the `commit_*` steps.
 - **Keep `PlatformHooks` minimal.** A new hook needs a reason no platform-independent code can provide. `PlatformHooks` is a blanket impl over `ScreenshotHooks + LifecycleHooks`; platforms implement those two.
 - **The daemon must not depend on `ipc`.** `src/ipc.rs` exists only on Linux and macOS and gates itself with an inner `#![cfg]`, so the daemon stays free of per-OS code.
-- **`event_state.json` must keep loading.** Its top-level keys (`auth`, `lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`) are what existing installs have on disk, and every module state is `#[serde(default)]`. A breaking change needs a migration on `DaemonState.version` (CORE-016, CORE-017).
+- **`event_state.json` must keep loading.** Its top-level keys (`auth`, `lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`, `dns_filter`, `errors`) are what existing installs have on disk, and every module state is `#[serde(default)]`. A breaking change needs a migration on `DaemonState.version` (CORE-016, CORE-017).
 - **Config is compile-time.** `src/config.rs` reads values `build.rs` bakes in with `env!()`. Don't add a runtime config file (CLIENT-001).
 
 ## Testing

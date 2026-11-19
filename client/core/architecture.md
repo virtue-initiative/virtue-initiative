@@ -39,7 +39,10 @@ run_forever loop:
     lifecycle::tick, screenshot::plan                              // phase 1, 2a
     screenshot::capture_and_process                                // phase 2b
     screenshot::commit, capture_availability::tick,
-      heartbeat::tick, upload::plan_hash_retries                   // phase 2c, 3, 4a
+      heartbeat::tick                                              // phase 2c, 3
+    dns_filter::plan, dns_filter::execute (DNS lookups),
+      dns_filter::commit                                           // CORE-027
+    upload::plan_hash_retries                                      // phase 4a
     upload::execute_hash_retries (network)                         // phase 5a
     upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
     upload::execute_batch (network)                                // phase 5b
@@ -67,7 +70,8 @@ daemon.run_forever(); // blocking; call from its own thread
 One flat struct, persisted to `event_state.json` with **the same top-level
 field names as the pre-rewrite per-observer keys** (`auth`, `lifecycle`,
 `screenshot`, `upload`, `capture_availability`, `heartbeat`) so existing
-installs load cleanly, and readers that bypass the daemon and read the `auth`
+installs load cleanly, later keys such as `dns_filter` default when absent,
+and readers that bypass the daemon and read the `auth`
 key directly (`read_auth_state` in `client/mac/src/config.rs`) keep working:
 
 ```rust
@@ -79,6 +83,7 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    pub dns_filter: DnsFilterState,
     pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
@@ -125,16 +130,17 @@ thread) can drive the daemon synchronously.
 
 ### The modules
 
-| Module                 | Owns                                                         | Notable functions                                                                                                                      |
-| ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                  |
-| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                           |
-| `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
-| `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
-| `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                             |
-| `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                               |
-| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                   |
-| `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                   |
+| Module                 | Owns                                                         | Notable functions                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                                                           |
+| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                                                                    |
+| `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                                                                   |
+| `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()`                                          |
+| `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                                                                      |
+| `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                                                                        |
+| `dns_filter`           | `DnsFilterState`                                             | `plan()`/`execute()`/`commit()`, `next_check_at_ms()` — CORE-027; lookups go through the injectable `DnsResolver` (`SystemDnsResolver` by default, `Daemon::with_dns_resolver`) |
+| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                                                            |
+| `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                                                            |
 
 ### Screenshot dedup (two gates) + random cadence
 

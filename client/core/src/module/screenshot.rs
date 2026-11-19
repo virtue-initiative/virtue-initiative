@@ -462,6 +462,7 @@ mod tests {
             }],
             hash_base_url: None,
             feature_flags: Vec::new(),
+            dns_filter_domain: None,
         });
         upload
     }

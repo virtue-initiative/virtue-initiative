@@ -32,6 +32,7 @@ pub use model::{
     DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, StatusError,
     StatusSkipReason, UploadKind,
 };
+pub use module::dns_filter::{DnsResolver, SystemDnsResolver};
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
 pub use rng::{OsRandomSource, RandomSource};

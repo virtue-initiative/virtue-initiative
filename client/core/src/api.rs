@@ -134,6 +134,8 @@ struct DeviceSettingsResponse {
     hash_token: String,
     #[serde(default)]
     feature_flags: Vec<String>,
+    #[serde(default)]
+    dns_filter_domain: Option<String>,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -152,6 +154,11 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 .collect(),
             hash_base_url: response.hash_base_url,
             feature_flags: response.feature_flags,
+            // CORE-027: a blank domain means no check.
+            dns_filter_domain: response
+                .dns_filter_domain
+                .map(|domain| domain.trim().to_string())
+                .filter(|domain| !domain.is_empty()),
         }
     }
 }
@@ -747,5 +754,30 @@ mod tests {
         let settings = DeviceSettings::from(with);
         assert!(settings.has_feature_flag("beta"));
         assert!(!settings.has_feature_flag("other"));
+    }
+
+    // CORE-027: the check domain is read from the settings; a blank one means no check.
+    #[test]
+    fn device_settings_dns_filter_domain_is_trimmed_and_blank_means_none() {
+        let cases = [
+            (r#""#, None),
+            (r#","dns_filter_domain":null"#, None),
+            (r#","dns_filter_domain":"  ""#, None),
+            (
+                r#","dns_filter_domain":"blocked.example""#,
+                Some("blocked.example"),
+            ),
+            (
+                r#","dns_filter_domain":" blocked.example ""#,
+                Some("blocked.example"),
+            ),
+        ];
+        for (field, expected) in cases {
+            let json =
+                format!(r#"{{"id":"d","name":"n","platform":"linux","hash_token":"t"{field}}}"#);
+            let response: DeviceSettingsResponse = serde_json::from_str(&json).unwrap();
+            let settings = DeviceSettings::from(response);
+            assert_eq!(settings.dns_filter_domain.as_deref(), expected, "{json}");
+        }
     }
 }

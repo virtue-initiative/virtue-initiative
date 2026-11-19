@@ -8,10 +8,12 @@ use crate::config::Config;
 use crate::daemon::{Daemon, DaemonState};
 use crate::error::CoreResult;
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
+use crate::module::dns_filter::DnsResolver;
 use crate::module::upload::Upload;
 use crate::rng::RandomSource;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
+use crate::testing::dns::FakeDnsResolver;
 use crate::testing::platform::TestPlatformHooks;
 use crate::testing::rng::TestRandomSource;
 
@@ -27,6 +29,9 @@ pub struct Scenario {
     pub state_dir: PathBuf,
     pub platform: TestPlatformHooks,
     pub rng: TestRandomSource,
+    /// Scripted DNS answers for the DNS filter check (CORE-027). Every host
+    /// fails to resolve until a test scripts it.
+    pub dns: FakeDnsResolver,
 }
 
 impl Scenario {
@@ -56,6 +61,7 @@ impl Scenario {
             }],
             hash_base_url: None,
             feature_flags: Vec::new(),
+            dns_filter_domain: None,
         };
         Self::build(Some(auth), Some(settings))
     }
@@ -100,12 +106,14 @@ impl Scenario {
         }
         let api_handle = api.clone();
         let rng = TestRandomSource::new();
+        let dns = FakeDnsResolver::new();
         configure(&platform, &api_handle);
 
         let state_path = state_dir.join("event_state.json");
         let daemon = Daemon::new(config, platform.clone(), api, state_path)
             .expect("scenario daemon must construct")
-            .with_rng(Arc::new(rng.clone()) as Arc<dyn RandomSource>);
+            .with_rng(Arc::new(rng.clone()) as Arc<dyn RandomSource>)
+            .with_dns_resolver(Arc::new(dns.clone()) as Arc<dyn DnsResolver>);
 
         Self {
             daemon,
@@ -114,6 +122,7 @@ impl Scenario {
             state_dir,
             platform,
             rng,
+            dns,
         }
     }
 
@@ -224,6 +233,20 @@ impl Scenario {
     /// seed a scenario precondition.
     pub fn with_state_mut<R>(&mut self, f: impl FnOnce(&mut DaemonState) -> R) -> R {
         self.daemon.with_state_mut(f)
+    }
+
+    /// Set the device's DNS filter check domain (CORE-027), both in the
+    /// settings the daemon holds now and in the ones the mock API returns
+    /// from later settings refreshes, so a batch upload doesn't undo it.
+    pub fn set_dns_filter_domain(&mut self, domain: Option<&str>) -> &mut Self {
+        let domain = domain.map(str::to_string);
+        self.api.state().default_device_settings.dns_filter_domain = domain.clone();
+        self.daemon.with_state_mut(|s| {
+            if let Some(settings) = s.upload.settings.as_mut() {
+                settings.dns_filter_domain = domain;
+            }
+        });
+        self
     }
 
     // --- state-file readers ---
