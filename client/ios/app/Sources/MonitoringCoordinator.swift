@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import StoreKit
 import UIKit
 import VirtueKit
 
@@ -176,6 +177,7 @@ final class MonitoringCoordinator: ObservableObject {
         let dataDirPath = dataDir.path
 
         Task { @MainActor in
+            let appTransactionID = await Self.appTransactionID() ?? ""
             let error = await Task.detached(priority: .userInitiated) { () -> String? in
                 if let initError = NativeBridge.ensureInitialized(
                     configDir: configDirPath,
@@ -184,7 +186,11 @@ final class MonitoringCoordinator: ObservableObject {
                     return initError
                 }
                 return NativeBridge.login(
-                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+                    email: trimmedEmail,
+                    password: pw,
+                    deviceName: resolvedDeviceName,
+                    appTransactionID: appTransactionID
+                )
             }.value
             isSigningIn = false
             if let error {
@@ -203,6 +209,18 @@ final class MonitoringCoordinator: ObservableObject {
             refreshSafariStatus()
             statusMessage = "Signed in. Enable Virtue Safari extension in Safari settings."
         }
+    }
+
+    /// The App Store download this install came from, registered with the
+    /// device so a parent withdrawing consent signs it out (API-068). Sent for
+    /// every account, so it says nothing about the person's age.
+    private static func appTransactionID() async -> String? {
+        guard let result = try? await AppTransaction.shared,
+            case .verified(let transaction) = result
+        else {
+            return nil
+        }
+        return transaction.appTransactionID
     }
 
     func logout() {

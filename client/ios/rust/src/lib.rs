@@ -251,14 +251,22 @@ pub extern "C" fn virtue_ios_native_login(
     email: *const c_char,
     password: *const c_char,
     device_name: *const c_char,
+    app_transaction_id: *const c_char,
 ) -> *mut c_char {
     let result = (|| -> Result<()> {
         let email = c_string_or_empty(email);
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
+        // Empty when the App Store has none to give (e.g. iOS before 18.4).
+        let app_transaction_id = c_string_or_empty(app_transaction_id);
         let core = core()?;
         core.daemon
-            .login(&email, &password, Some(&device_name))
+            .login_with_app_transaction_id(
+                &email,
+                &password,
+                Some(&device_name),
+                Some(app_transaction_id.trim()).filter(|id| !id.is_empty()),
+            )
             .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })();

@@ -19,6 +19,7 @@ pub fn login<A: ApiTransport>(
     email: &str,
     password: &str,
     device_name_override: Option<&str>,
+    app_transaction_id: Option<&str>,
     now_ms: i64,
 ) -> CoreResult<String> {
     let resolved_name = device_name_override
@@ -26,7 +27,13 @@ pub fn login<A: ApiTransport>(
         .filter(|name| !name.is_empty())
         .unwrap_or(device_name);
 
-    let registered = api.register_device(email, password, resolved_name, platform_name)?;
+    let registered = api.register_device(
+        email,
+        password,
+        resolved_name,
+        platform_name,
+        app_transaction_id,
+    )?;
 
     flush_pending_batch(&mut state.upload, api, now_ms);
     logout(state, api);
@@ -69,7 +76,7 @@ mod tests {
     use crate::testing::MockApiClient;
 
     fn login_as(state: &mut DaemonState, api: &MockApiClient, email: &str) -> CoreResult<String> {
-        login(state, api, "d", "p", email, "secret", None, 1_000)
+        login(state, api, "d", "p", email, "secret", None, None, 1_000)
     }
 
     // CORE-008: login.
@@ -119,9 +126,34 @@ mod tests {
             "alice@example.org",
             "secret",
             Some("  My Laptop  "),
+            None,
             1_000,
         );
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
+    }
+
+    // CORE-008: login.
+    #[test]
+    fn login_registers_app_transaction_id_when_present() {
+        let mut state = DaemonState::default();
+        let api = MockApiClient::new();
+        let _ = login(
+            &mut state,
+            &api,
+            "d",
+            "p",
+            "alice@example.org",
+            "secret",
+            None,
+            Some("2000000123456789"),
+            1_000,
+        );
+        assert_eq!(
+            api.state().register_device_calls[0]
+                .app_transaction_id
+                .as_deref(),
+            Some("2000000123456789")
+        );
     }
 
     // CORE-008: login.
