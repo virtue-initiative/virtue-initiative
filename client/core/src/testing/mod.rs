@@ -55,6 +55,7 @@ mod tests {
         let inspector = api.clone();
 
         api.register_device(
+            None,
             "alice@example.org",
             "secret",
             "test-device",
@@ -80,11 +81,11 @@ mod tests {
             screenshot_count: 0,
             notifications: Vec::new(),
         };
-        let response = api.upload_batch("tok", &batch).unwrap();
+        let response = api.upload_batch(None, "tok", &batch).unwrap();
         assert_eq!(response.id, "canned-batch");
         assert_eq!(inspector.state().batch_uploads.len(), 1);
 
-        let second = api.upload_batch("tok", &batch).unwrap();
+        let second = api.upload_batch(None, "tok", &batch).unwrap();
         assert_eq!(second.id, "mock-batch-1");
     }
 

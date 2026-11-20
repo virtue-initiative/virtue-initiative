@@ -8,7 +8,7 @@ Each platform app MUST run the shared core daemon (CORE-001) and supply only wha
 
 All monitoring policy (capture cadence CORE-003, content detection CORE-004, uploads CORE-005, tamper detection CORE-002, status CORE-010) MUST come from the core. A platform MUST NOT reimplement it.
 
-The API URL, capture interval and batch window are fixed at build time on every platform. No platform has a configuration file the user edits.
+The default API URL, capture interval and batch window are fixed at build time on every platform. No platform has a configuration file the user edits. The only server setting a user can change is the server they sign in to (CLIENT-033).
 
 ## CLIENT-002 Where monitoring runs and stores state
 
@@ -41,6 +41,7 @@ The sign-in form MUST take an email, a password and an optional device name, and
 - Email and password MUST both be present before any request is made. Messages: macOS and iOS "Email is required" / "Password is required"; Windows "Email is required." / "Password is required."; Android "Enter your email and password."
 - A blank device name MUST be replaced by the platform default: the hostname (Linux falls back to `linux-device`, macOS to `mac-device`), the Windows machine name, "Manufacturer Model" on Android (the model alone when it already starts with the manufacturer), or the iOS device name.
 - On success the app MUST clear the password field, remember the account email locally (to prefill Report an Issue, CLIENT-016) and refresh its status.
+- The form MUST offer a server choice (CLIENT-033).
 - The form MUST offer a sign-up link to `https://app.virtueinitiative.org/signup` and, once signed in, a link to `https://app.virtueinitiative.org/partners` with the text: Add partners on the Virtue website. Open the Partners page and select "Invite partner".
 - Sign-in needs a running daemon loop (CORE-007). Linux and macOS MUST fail with "failed to connect to daemon (is it running?)" when the daemon is unreachable; Windows with "monitoring is not running". Android MUST show the Accessibility guide instead of attempting sign-in while the service is disconnected, and MUST restart a paused loop before signing in.
 - Linux `virtue login` MUST mask the typed password with `*`, abort on Ctrl+C or Ctrl+D, prompt `Device name [<hostname>]:` unless `--device-name` is given, and skip the email prompt when `--email` is given. On success it MUST print the capture probe result (CLIENT-020), the device id, the partners instruction and the monitoring summary, plus a warning when the probe failed.
@@ -207,13 +208,13 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 
 Each platform MUST supply the following to the core. A signal that cannot be read MUST fail safe: lock state reads as unlocked (falling back to the change check), and login/logout times read as unavailable.
 
-| Platform | Capture                                                    | Locked or screensaver                                                  | Last login                           | Last logout                                                                 |
-| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
-| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
-| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
+| Platform | Capture                                                    | Locked or screensaver                                                                          | Last login                           | Last logout                                                                 |
+| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive`                         | logind session start                 | last journal entry of the previous boot                                     |
+| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running                                   | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
 | Windows  | every monitor as one image                                 | screensaver running, the session's WTS flags say locked, or the input desktop cannot be opened | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
-| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
-| iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
+| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                                         | device boot time                     | unavailable                                                                 |
+| iOS      | visible Safari tab                                         | (not used)                                                                                     | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
@@ -236,7 +237,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 | Command                                                                      | Behavior                                                                                             |
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `virtue login [--email E] [--device-name N]`                                 | CLIENT-004                                                                                           |
+| `virtue login [--email E] [--device-name N] [--server URL]`                  | CLIENT-004, CLIENT-033                                                                               |
 | `virtue logout [--yes]`                                                      | CLIENT-005; prints "Logged out. Monitoring is disabled on this device until you run `virtue login`." |
 | `virtue status [--full] [--advanced] [--json]`                               | CLIENT-006, CLIENT-007                                                                               |
 | `virtue daemon`                                                              | runs the daemon and tray (used by systemd)                                                           |
@@ -370,3 +371,14 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - A failed Pause or Resume MUST show its error on Home. Signing out MUST return to Home only after it finishes.
 - Instead of the partners link text in CLIENT-004, iOS Home MUST offer the partners button above only while active.
 - After a successful Report an Issue (CLIENT-016), iOS MUST show "Thanks, your report was sent to the Virtue Initiative team." with a comma in place of the dash. The setup wizard MUST keep following the first unfinished step as it changes and MUST NOT go back to step 1 (signing in). Changing step MUST scroll Home back to the top.
+
+## CLIENT-033 Choosing a server
+
+The sign-in form MUST let the user choose a server: "Virtue Initiative", the build's default, selected unless the user chose otherwise, or "Self-hosted", which shows a "Server address" field. The address MUST be passed to CORE-008 as `server`; the default passes none. An empty address MUST fail before any request with "Server address is required" (Windows and Android add a period). A failure to resolve the address (CORE-028) MUST show the core's message after the platform's usual sign-in failure prefix ("Login failed: " on macOS, "Sign in failed. " on Windows and Android), never the "check your email and password" message, because the email and password were never sent.
+
+- The server MUST be chosen only while signed out, as part of signing in. A signed-in app MUST NOT offer a way to change it other than signing out (CLIENT-005), so moving a device to another server deactivates it and may alert partners like any sign-out.
+- An app with a remembered sign-in email (CLIENT-002) SHOULD also remember the last choice and self-hosted address, and offer them at the next sign-in.
+- While "Self-hosted" is selected, the sign-up link (CLIENT-004) MUST be hidden, since accounts on that server are made on its own website.
+- When the status has a `web_app_url` (CORE-010), every link into the web app (the partners link, CLIENT-004 and CLIENT-032) MUST use it in place of `https://app.virtueinitiative.org`. A report sent with Report an Issue (CLIENT-016) MUST go to the server the device is signed in to.
+- Status Details shows the server as the API URL (CLIENT-007).
+- Linux: `virtue login --server <url>` signs in to a self-hosted server; without `--server` it uses the default. There is no prompt for the server.

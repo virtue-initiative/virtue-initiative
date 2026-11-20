@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         }
     };
 
-    match client.login(&args.email, &args.password, Some(&args.device_name)) {
+    match client.login(&args.email, &args.password, Some(&args.device_name), None) {
         Ok(device_id) => {
             println!("ci-login: logged in, device_id={device_id}");
             ExitCode::SUCCESS

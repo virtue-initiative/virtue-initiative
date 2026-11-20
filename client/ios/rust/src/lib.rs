@@ -246,19 +246,23 @@ pub extern "C" fn virtue_ios_native_init(
     into_c_result(result)
 }
 
+/// `server` is a self-hosted server address, or null for the default server
+/// (CLIENT-033).
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_login(
     email: *const c_char,
     password: *const c_char,
     device_name: *const c_char,
+    server: *const c_char,
 ) -> *mut c_char {
     let result = (|| -> Result<()> {
         let email = c_string_or_empty(email);
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
+        let server = Some(c_string_or_empty(server)).filter(|s| !s.trim().is_empty());
         let core = core()?;
         core.daemon
-            .login(&email, &password, Some(&device_name))
+            .login(&email, &password, Some(&device_name), server.as_deref())
             .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })();
@@ -335,9 +339,7 @@ pub extern "C" fn virtue_ios_native_report_issue(
             (!contact_email.trim().is_empty()).then(|| contact_email.trim().to_string());
         let platform_details = c_string_or_empty(platform_details);
 
-        let bearer_token = read_auth_state(&core.state_dir)
-            .device_credentials
-            .map(|creds| creds.refresh_token);
+        let credentials = read_auth_state(&core.state_dir).device_credentials;
 
         let logs = include_logs
             .then(|| virtue_core::logging::recent_logs(&core.state_dir.join("logs")))
@@ -346,7 +348,7 @@ pub extern "C" fn virtue_ios_native_report_issue(
         let config = build_core_config(&core.state_dir);
         let api = HttpApiClient::new(&config)?;
         api.report_issue(
-            bearer_token.as_deref(),
+            credentials.as_ref(),
             &BugReportRequest {
                 message: &message,
                 contact_email: contact_email.as_deref(),

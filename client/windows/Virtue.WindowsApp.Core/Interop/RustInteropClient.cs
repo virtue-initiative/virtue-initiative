@@ -51,9 +51,9 @@ public sealed class RustInteropClient : IRustInteropClient
     public MonitorStatusPayload GetMonitorStatus() =>
         ReadJsonPayload<MonitorStatusPayload>(NativeMethods.virtue_windows_get_monitor_status_json());
 
-    public void Login(string email, string password, string? deviceName = null)
+    public void Login(string email, string password, string? deviceName = null, string? server = null)
     {
-        var payload = RustInteropJson.Serialize(new LoginRequest(email, password, deviceName));
+        var payload = RustInteropJson.Serialize(new LoginRequest(email, password, deviceName, server));
         var error = NativeMethods.virtue_windows_login(payload);
         ThrowIfError(error);
     }

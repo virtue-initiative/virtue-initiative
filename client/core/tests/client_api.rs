@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use virtue_core::testing::Scenario;
-use virtue_core::{CoreError, DaemonState};
+use virtue_core::{ChosenServer, CoreError, DaemonState};
 
 // ── CORE-007: how the methods behave ─────────────────────────────────────────
 
@@ -141,7 +141,7 @@ fn login_revokes_the_existing_session_registers_a_device_and_enables_capture() {
 
         let device_id = scenario
             .daemon
-            .login("me@example.org", "secret", Some("   "))
+            .login("me@example.org", "secret", Some("   "), None)
             .expect("login succeeds");
         assert_eq!(device_id, "mock-device");
 
@@ -329,7 +329,7 @@ fn a_failed_login_keeps_the_existing_session() {
     std::thread::scope(|scope| {
         let handle = scope.spawn(|| scenario.daemon.run_forever());
 
-        let result = scenario.daemon.login("me@example.org", "wrong", None);
+        let result = scenario.daemon.login("me@example.org", "wrong", None, None);
         assert!(result.is_err());
 
         scenario.daemon.request_stop();
@@ -374,6 +374,123 @@ fn a_failed_login_keeps_capture_and_the_account() {
     assert!(state.screenshot.enabled);
     assert_eq!(state.auth.account_email, account_email);
     assert!(scenario.daemon.status().is_authenticated);
+}
+
+// ── CORE-028: choosing a server ──────────────────────────────────────────────
+
+fn chosen_server() -> ChosenServer {
+    ChosenServer {
+        api_base_url: "https://virtue.example.org/api".into(),
+        web_app_url: Some("https://virtue.example.org".into()),
+    }
+}
+
+// CORE-028, CORE-010: a session on a chosen server sends everything there and its status names it.
+#[test]
+fn a_session_on_a_chosen_server_sends_everything_there() {
+    let mut scenario = Scenario::new();
+    scenario.api.program_resolve_server(Ok(chosen_server()));
+    scenario
+        .login_to_server("me@example.org", "secret", "virtue.example.org")
+        .expect("login succeeds");
+
+    let status = scenario.status();
+    assert_eq!(status.api_base_url, "https://virtue.example.org/api");
+    assert_eq!(
+        status.web_app_url.as_deref(),
+        Some("https://virtue.example.org")
+    );
+
+    scenario.queue_upload(dev("on my server"));
+    scenario.at_t(T0).flush_batch_now().tick();
+
+    let api = scenario.api.state();
+    assert_eq!(api.resolve_server_calls, vec!["virtue.example.org"]);
+    assert!(
+        api.api_base_urls
+            .iter()
+            .any(|(call, _)| *call == "upload_batch"),
+        "a batch went out: {:?}",
+        api.api_base_urls
+    );
+    for (call, url) in &api.api_base_urls {
+        assert_eq!(
+            url.as_deref(),
+            Some("https://virtue.example.org/api"),
+            "{call} went to the chosen server"
+        );
+    }
+}
+
+// CORE-028: the chosen server outlasts a daemon restart.
+#[test]
+fn a_chosen_server_survives_a_restart() {
+    let mut scenario = Scenario::new();
+    scenario.api.program_resolve_server(Ok(chosen_server()));
+    scenario
+        .login_to_server("me@example.org", "secret", "virtue.example.org")
+        .expect("login succeeds");
+
+    let mut next = restart_with(&scenario, T0, |_, _| {});
+    assert_eq!(next.status().api_base_url, "https://virtue.example.org/api");
+    next.at_t(T0).tick();
+    let api = next.api.state();
+    assert!(
+        !api.api_base_urls.is_empty(),
+        "the restarted daemon talked to the API"
+    );
+    assert!(
+        api.api_base_urls
+            .iter()
+            .all(|(_, url)| url.as_deref() == Some("https://virtue.example.org/api")),
+        "{:?}",
+        api.api_base_urls
+    );
+}
+
+// CORE-009, CORE-028: logout revokes on the chosen server, then the device is back on the default.
+#[test]
+fn logout_returns_the_device_to_the_default_server() {
+    let mut scenario = Scenario::new();
+    let default_url = scenario.status().api_base_url;
+    scenario.api.program_resolve_server(Ok(chosen_server()));
+    scenario
+        .login_to_server("me@example.org", "secret", "virtue.example.org")
+        .expect("login succeeds");
+
+    scenario.logout().expect("logout succeeds");
+
+    assert_eq!(
+        scenario.api.state().api_base_urls.last(),
+        Some(&("logout", Some("https://virtue.example.org/api".to_string())))
+    );
+    let status = scenario.status();
+    assert_eq!(status.api_base_url, default_url);
+    assert_eq!(status.web_app_url, None);
+}
+
+// CORE-008, CORE-028: a login to a server that does not resolve keeps the current session.
+#[test]
+fn a_login_to_a_server_that_does_not_resolve_keeps_the_current_session() {
+    let mut scenario = Scenario::authenticated();
+    scenario.api.program_resolve_server(Err(CoreError::Remote(
+        "No Virtue server found at https://nowhere.example.org.".into(),
+    )));
+
+    let err = scenario
+        .login_to_server("me@example.org", "secret", "nowhere.example.org")
+        .unwrap_err();
+
+    assert_eq!(
+        err.to_string(),
+        "No Virtue server found at https://nowhere.example.org."
+    );
+    let api = scenario.api.state();
+    assert!(api.register_device_calls.is_empty());
+    assert!(api.logout_calls.is_empty());
+    drop(api);
+    assert!(scenario.status().is_authenticated);
+    assert_eq!(scenario.status().web_app_url, None);
 }
 
 // CORE-009: logout revokes the session best-effort, clears the credentials and disables capture.

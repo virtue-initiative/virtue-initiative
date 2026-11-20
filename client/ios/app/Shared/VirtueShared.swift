@@ -29,6 +29,9 @@ enum VirtueShared {
 
     static let monitoringEnabledKey = "VIRTUE_MONITORING_ENABLED"
     static let accountEmailKey = "VIRTUE_ACCOUNT_EMAIL"
+    /// The self-hosted server last signed in to, absent for the default
+    /// server. Kept across sign-out to prefill the next sign-in (CLIENT-033).
+    static let serverAddressKey = "VIRTUE_SERVER_ADDRESS"
     static let safariCaptureStateCodeKey = "VIRTUE_SAFARI_CAPTURE_STATE_CODE"
     static let safariPauseStopIssuedKey = "VIRTUE_SAFARI_PAUSE_STOP_ISSUED"
 

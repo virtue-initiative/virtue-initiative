@@ -238,11 +238,12 @@ MUST NOT require authentication. MUST return this shape:
   "name": "Virtue Initiative API",
   "version": "1.0.0",
   "commit": "51e8a2690a19adcfdbd62494cc8b2b83f24c560b",
-  "status": "ok"
+  "status": "ok",
+  "app_url": "https://app.virtueinitiative.org"
 }
 ```
 
-The version SHOULD match the version of the codebase.
+The version SHOULD match the version of the codebase. `app_url` MUST be the web app URL this server's emails link to, so a client signed in to a self-hosted server can link to the right website (CORE-028).
 
 The same payload MUST also be served at `/api`.
 

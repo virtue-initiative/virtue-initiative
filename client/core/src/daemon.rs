@@ -70,6 +70,7 @@ enum DaemonRequest {
         email: String,
         password: String,
         device_name: Option<String>,
+        server: Option<String>,
         reply: mpsc::Sender<CoreResult<String>>,
     },
     Logout {
@@ -250,14 +251,16 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     fn refresh_settings_on_startup(&self) {
-        let refresh_token = {
+        let creds = {
             let guard = self.state.lock().expect("daemon state lock poisoned");
             match guard.auth.device_credentials.as_ref() {
-                Some(creds) => creds.refresh_token.clone(),
+                Some(creds) => creds.clone(),
                 None => return,
             }
         };
-        let result = self.api.get_device_settings(&refresh_token);
+        let result = self
+            .api
+            .get_device_settings(creds.api_base_url(), &creds.refresh_token);
         // Nothing is recorded on the clock yet, so nothing moves with it
         // (CORE-027).
         if let Some(server_ms) = self.api.take_server_time_ms() {
@@ -390,6 +393,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         email: &str,
         password: &str,
         device_name_override: Option<&str>,
+        server: Option<&str>,
         now_ms: i64,
     ) -> CoreResult<String> {
         auth::login(
@@ -400,6 +404,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             email,
             password,
             device_name_override,
+            server,
             now_ms,
         )
     }
@@ -500,16 +505,20 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .map_err(|_| CoreError::InvalidState("daemon loop unresponsive"))
     }
 
+    /// `server` is a server address the user chose (CORE-028), or `None` for
+    /// the build's default.
     pub fn login(
         &self,
         email: &str,
         password: &str,
         device_name: Option<&str>,
+        server: Option<&str>,
     ) -> CoreResult<String> {
         self.call(|reply| DaemonRequest::Login {
             email: email.to_string(),
             password: password.to_string(),
             device_name: device_name.map(str::to_string),
+            server: server.map(str::to_string),
             reply,
         })?
     }
@@ -605,10 +614,11 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         email: &str,
         password: &str,
         device_name: Option<&str>,
+        server: Option<&str>,
     ) -> CoreResult<String> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        let result = self.apply_login(&mut guard, email, password, device_name, now_ms);
+        let result = self.apply_login(&mut guard, email, password, device_name, server, now_ms);
         self.persist(&guard);
         result
     }
@@ -720,6 +730,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                         email,
                         password,
                         device_name,
+                        server,
                         reply,
                     } => {
                         let result = self.apply_login(
@@ -727,6 +738,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             &email,
                             &password,
                             device_name.as_deref(),
+                            server.as_deref(),
                             now_ms,
                         );
                         fires.push(Box::new(move || {
@@ -1181,7 +1193,7 @@ mod tests {
                 // loop. Its result doesn't matter here, only that it isn't
                 // held up waiting out `REQUEST_TIMEOUT`.
                 let started = Instant::now();
-                let _ = daemon.login("user@example.com", "password", None);
+                let _ = daemon.login("user@example.com", "password", None, None);
                 assert!(
                     started.elapsed() < Duration::from_secs(5),
                     "round {round}: login was delayed by the loop start"

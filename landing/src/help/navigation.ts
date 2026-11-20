@@ -76,6 +76,10 @@ export const helpSidebar: HelpNavItem[] = [
         href: '/help/developer/overrides',
       },
       {
+        label: 'Your own server',
+        href: '/help/developer/self-hosting',
+      },
+      {
         label: 'Security and encryption',
         href: '/help/developer/security',
       },
