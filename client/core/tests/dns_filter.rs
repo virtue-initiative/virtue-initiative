@@ -1,4 +1,4 @@
-//! DNS filter check (CORE-027), driven through the `Scenario` DSL with
+//! DNS filter check (CORE-028), driven through the `Scenario` DSL with
 //! scripted DNS answers.
 //!
 //! Run with:
@@ -104,7 +104,7 @@ fn push_screenshot_out(scenario: &mut Scenario) {
 
 // ── The first result ──────────────────────────────────────────────────────────
 
-// CORE-027, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
+// CORE-028, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
 // stays quiet on the first check; anything else is unfiltered and alerts partners at once.
 #[test]
 fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
@@ -151,7 +151,7 @@ fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
 
 // ── Transitions ───────────────────────────────────────────────────────────────
 
-// CORE-027: events are sent only when the result changes.
+// CORE-028: events are sent only when the result changes.
 #[test]
 fn hourly_checks_report_only_changes_of_the_result() {
     let mut scenario = checking_scenario();
@@ -176,50 +176,53 @@ fn hourly_checks_report_only_changes_of_the_result() {
     assert!(events.iter().all(|e| e.domain.as_deref() == Some(DOMAIN)));
 }
 
-// CORE-027, CORE-020: the next check comes after a random delay of 1 to 60
-// minutes, drawn anew each time, and is a wakeup.
+// CORE-028, CORE-020: each check draws a new delay, exponential with a mean
+// of 20 minutes and clamped to 1 to 60 minutes, and the next check is a wakeup.
 #[test]
-fn the_domain_is_checked_again_after_a_random_delay() {
+fn each_check_draws_a_new_random_delay() {
     let mut scenario = checking_scenario();
     script(&scenario, DOMAIN, BLOCKED);
-    scenario.at_t(T1).tick();
+    // (uniform draw, expected delay): the clamp at both ends, the mean, and a
+    // draw in between.
+    let draws = [
+        (0.0, MINUTE_MS),
+        (1.0 - (-1.0f64).exp(), 20 * MINUTE_MS),
+        (0.999, HOUR_MS),
+        (0.5, (-(0.5f64).ln() * 20.0 * MINUTE_MS as f64) as i64),
+    ];
 
-    let mut last_check = T1;
-    let mut delays = Vec::new();
-    for checks in 2..=20 {
-        push_screenshot_out(&mut scenario);
-        let next = scenario.state().dns_filter.next_check_at_ms;
-        assert!(wakeup(&scenario) <= next, "the next check is a wakeup");
-        let delay = next - last_check;
-        assert!(
-            (MINUTE_MS..=HOUR_MS).contains(&delay),
-            "delay {delay} ms is outside 1 to 60 minutes"
+    let mut check_at = T1;
+    for (checks, (u, expected)) in (1..).zip(draws) {
+        scenario.rng.set_default(u);
+        scenario.at_t(check_at).tick();
+        assert_eq!(
+            lookups_of(&scenario, DOMAIN),
+            checks,
+            "checked at the drawn time"
         );
+        push_screenshot_out(&mut scenario);
+
+        let next = scenario.state().dns_filter.next_check_at_ms;
+        assert!(
+            (next - check_at - expected).abs() <= 1,
+            "u = {u}: expected a delay of {expected} ms, got {} ms",
+            next - check_at
+        );
+        assert!(wakeup(&scenario) <= next, "the next check is a wakeup");
 
         scenario.at_t(next - 1).tick();
         assert_eq!(
             lookups_of(&scenario, DOMAIN),
-            checks - 1,
+            checks,
             "not due before the drawn delay"
         );
-        scenario.at_t(next).tick();
-        assert_eq!(
-            lookups_of(&scenario, DOMAIN),
-            checks,
-            "due at the drawn delay"
-        );
-
-        delays.push(delay);
-        last_check = next;
+        check_at = next;
     }
-    delays.sort_unstable();
-    delays.dedup();
-    assert!(delays.len() > 10, "delays barely vary: {delays:?}");
 }
 
 // ── Unknown results ───────────────────────────────────────────────────────────
 
-// CORE-027, CORE-020: when the control domain is blocked the result is unknown:
+// CORE-028, CORE-020: when the control domain is blocked the result is unknown:
 // no event, the last result is kept, and the check is retried after 10 minutes.
 #[test]
 fn a_blocked_control_domain_sends_nothing_and_retries_after_10_minutes() {
@@ -272,7 +275,7 @@ fn a_blocked_control_domain_sends_nothing_and_retries_after_10_minutes() {
 
 // ── Changing or removing the domain ───────────────────────────────────────────
 
-// CORE-027: a changed domain is checked right away and its first result counts
+// CORE-028: a changed domain is checked right away and its first result counts
 // as a first result, with no event for the change itself.
 #[test]
 fn a_changed_domain_is_checked_promptly_and_starts_fresh() {
@@ -299,7 +302,7 @@ fn a_changed_domain_is_checked_promptly_and_starts_fresh() {
     );
 }
 
-// CORE-027: removing the domain reports the domain that was checked, and stops checking.
+// CORE-028: removing the domain reports the domain that was checked, and stops checking.
 #[test]
 fn removing_the_domain_reports_it_and_stops_checking() {
     let mut scenario = checking_scenario();
@@ -333,7 +336,7 @@ fn removing_the_domain_reports_it_and_stops_checking() {
     );
 }
 
-// CORE-027, CORE-020: a domain that arrives with a settings refresh makes the next
+// CORE-028, CORE-020: a domain that arrives with a settings refresh makes the next
 // wakeup immediate, so it is checked right away rather than at the next timer.
 #[test]
 fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
@@ -372,7 +375,7 @@ fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
 
 // ── Authentication and persistence ────────────────────────────────────────────
 
-// CORE-027, CORE-009: nothing is checked once logged out.
+// CORE-028, CORE-009: nothing is checked once logged out.
 #[test]
 fn nothing_is_checked_while_logged_out() {
     let mut scenario = checking_scenario();
@@ -390,7 +393,7 @@ fn nothing_is_checked_while_logged_out() {
     assert!(dns_events(&scenario).is_empty());
 }
 
-// CORE-027, CORE-016: the last result survives a restart, so an unchanged result
+// CORE-028, CORE-016: the last result survives a restart, so an unchanged result
 // is not reported again.
 #[test]
 fn the_last_result_survives_a_restart() {
@@ -425,7 +428,7 @@ fn the_last_result_survives_a_restart() {
     drop(scenario1);
 }
 
-// CORE-016, CORE-027: a state file written before the DNS filter check existed
+// CORE-016, CORE-028: a state file written before the DNS filter check existed
 // still loads, and the check starts from no result.
 #[test]
 fn a_state_file_without_the_dns_filter_key_still_loads() {

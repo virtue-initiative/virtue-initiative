@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use rand_core::{OsRng, TryRngCore};
@@ -154,7 +155,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 .collect(),
             hash_base_url: response.hash_base_url,
             feature_flags: response.feature_flags,
-            // CORE-027: a blank domain means no check.
+            // CORE-028: a blank domain means no check.
             dns_filter_domain: response
                 .dns_filter_domain
                 .map(|domain| domain.trim().to_string())
@@ -189,6 +190,13 @@ pub trait ApiTransport: Send + Sync {
         seq: u32,
         content_hash: &[u8; 32],
     ) -> CoreResult<()>;
+    /// The server's time now, from the `Date` header of the latest response
+    /// plus the time since it arrived, or `None` when no response has carried
+    /// one since the last call. Each response's time is returned once, so a
+    /// stale one is never mistaken for a fresh one. See CORE-027.
+    fn take_server_time_ms(&self) -> Option<i64> {
+        None
+    }
 }
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -197,6 +205,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct HttpApiClient {
     base_url: String,
     agent: Agent,
+    /// The latest response's `Date`, and when it arrived (CORE-027).
+    server_time: Arc<Mutex<Option<(i64, Instant)>>>,
 }
 
 impl HttpApiClient {
@@ -227,6 +237,7 @@ impl HttpApiClient {
         Ok(Self {
             base_url: config.api_base_url.trim_end_matches('/').to_string(),
             agent,
+            server_time: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -408,6 +419,11 @@ impl ApiTransport for HttpApiClient {
             .send(&body)?;
         self.expect_success(response)
     }
+
+    fn take_server_time_ms(&self) -> Option<i64> {
+        let (date_ms, arrived) = self.server_time.lock().ok()?.take()?;
+        Some(date_ms + arrived.elapsed().as_millis() as i64)
+    }
 }
 
 impl HttpApiClient {
@@ -458,6 +474,7 @@ impl HttpApiClient {
     }
 
     fn ensure_success(&self, response: Response<ureq::Body>) -> CoreResult<Response<ureq::Body>> {
+        self.note_server_time(&response);
         let status = response.status();
         if status.is_success() {
             return Ok(response);
@@ -472,6 +489,67 @@ impl HttpApiClient {
             message,
         })
     }
+}
+
+impl HttpApiClient {
+    /// Keeps the response's `Date` for `take_server_time_ms`. An error status
+    /// still carries the server's time, so every response counts.
+    fn note_server_time(&self, response: &Response<ureq::Body>) {
+        let date_ms = response
+            .headers()
+            .get("date")
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_http_date_ms);
+        if let (Some(date_ms), Ok(mut server_time)) = (date_ms, self.server_time.lock()) {
+            // `Date` is truncated to the second, so on average the server's
+            // clock was half a second further on.
+            *server_time = Some((date_ms + 500, Instant::now()));
+        }
+    }
+}
+
+/// Parses an HTTP `Date` (IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`, the
+/// only form a server may send) into milliseconds since the epoch.
+fn parse_http_date_ms(value: &str) -> Option<i64> {
+    let mut parts = value.split_whitespace();
+    let _weekday = parts.next()?;
+    let day: i64 = parts.next()?.parse().ok()?;
+    let month = match parts.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let year: i64 = parts.next()?.parse().ok()?;
+    let mut time = parts
+        .next()?
+        .split(':')
+        .map(|part| part.parse::<i64>().ok());
+    let (hour, minute, second) = (time.next()??, time.next()??, time.next()??);
+    if parts.next()? != "GMT" || time.next().is_some() {
+        return None;
+    }
+    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
+    Some(seconds * 1_000)
+}
+
+/// Days from 1970-01-01 to the given proleptic Gregorian date.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// Builds the `multipart/form-data` body `POST /d/batch` expects: the encrypted
@@ -591,6 +669,38 @@ struct ApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // CORE-027: the server's time is read from the `Date` header.
+    #[test]
+    fn http_date_is_parsed_to_epoch_ms() {
+        assert_eq!(
+            parse_http_date_ms("Sun, 06 Nov 1994 08:49:37 GMT"),
+            Some(784_111_777_000)
+        );
+        assert_eq!(
+            parse_http_date_ms("Mon, 16 Nov 2026 14:58:43 GMT"),
+            Some(1_794_841_123_000)
+        );
+        assert_eq!(
+            parse_http_date_ms("Thu, 29 Feb 2024 00:00:00 GMT"),
+            Some(1_709_164_800_000)
+        );
+    }
+
+    // CORE-027: a malformed `Date` is ignored rather than misread.
+    #[test]
+    fn malformed_http_date_is_ignored() {
+        for value in [
+            "",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+            "Sun, 06 Nov 1994 08:49:37 PST",
+            "Sun, 06 Foo 1994 08:49:37 GMT",
+            "Sun, 06 Nov 1994 08:49 GMT",
+        ] {
+            assert_eq!(parse_http_date_ms(value), None, "{value:?}");
+        }
+    }
 
     // API-038: the batch upload request body.
     #[test]
@@ -756,7 +866,7 @@ mod tests {
         assert!(!settings.has_feature_flag("other"));
     }
 
-    // CORE-027: the check domain is read from the settings; a blank one means no check.
+    // CORE-028: the check domain is read from the settings; a blank one means no check.
     #[test]
     fn device_settings_dns_filter_domain_is_trimmed_and_blank_means_none() {
         let cases = [

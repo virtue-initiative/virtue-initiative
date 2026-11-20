@@ -63,11 +63,14 @@ pub struct LifecycleState {
     /// checked, or alerted on — so the gap the stop itself caused is never
     /// mistaken for tampering. See CORE-002.
     pub monitoring_stopped: bool,
-    /// Real UTC time and suspend-safe-clock (`LifecycleHooks::get_monotonic_clock_ms`)
-    /// reading, both captured at the end of the previous `tick()` call — the
-    /// baseline `tick()` diffs against to compute suspend evidence. `None`
-    /// before the first tick. See CORE-002.
+    /// The daemon's time, and the boot-clock and suspend-safe-clock
+    /// (`LifecycleHooks::get_boot_clock_ms`, `get_monotonic_clock_ms`)
+    /// readings, all captured at the previous `tick()` call. `tick()` diffs
+    /// the two clocks against them for suspend evidence (CORE-002), and a
+    /// restart starts the daemon's clock no earlier than the time (CORE-027).
+    /// `None` before the first tick.
     pub last_tick_utc_ms: Option<i64>,
+    pub last_tick_boot_ms: Option<i64>,
     pub last_tick_suspend_safe_ms: Option<i64>,
     /// UTC timestamps of recent daemon (re)starts, oldest first, pruned to
     /// RESTART_WINDOW_MS. See CORE-019.
@@ -115,13 +118,13 @@ pub fn tick(
 ) {
     // Captured unconditionally (even on an early return below) so the next
     // call always has a fresh baseline to diff suspend evidence against.
-    let previous_utc_ms = state.last_tick_utc_ms;
+    let previous_boot_ms = state.last_tick_boot_ms;
     let previous_suspend_safe_ms = state.last_tick_suspend_safe_ms;
+    let current_boot_ms = hooks.get_boot_clock_ms().ok();
     let current_suspend_safe_ms = hooks.get_monotonic_clock_ms().ok();
     state.last_tick_utc_ms = Some(now_ms);
-    if let Some(current) = current_suspend_safe_ms {
-        state.last_tick_suspend_safe_ms = Some(current);
-    }
+    state.last_tick_boot_ms = current_boot_ms;
+    state.last_tick_suspend_safe_ms = current_suspend_safe_ms;
 
     if expected_wakeup_at_ms == 0 || state.monitoring_stopped {
         return;
@@ -160,22 +163,27 @@ pub fn tick(
         _ => None,
     };
 
-    // Suspend evidence (CORE-002): the shortfall between real-time elapsed
+    // Suspend evidence (CORE-002): the shortfall between boot-clock elapsed
     // and suspend-safe-clock elapsed since the previous tick reveals how long
-    // the system was suspended over that span. Unlike the two signals above,
+    // the system was suspended over that span. Neither clock is moved by
+    // setting the system clock, and either going back means a reboot, which
+    // leaves nothing to compare. Unlike the two signals above,
     // this one can only ever support an excuse — it's left `None` (never
     // `Some(false)`) whenever it doesn't clearly explain the gap, so it can
     // never block a login/logout-supported excuse the way a contradicting
     // signal does.
     let suspend_evidence = match (
-        previous_utc_ms,
+        previous_boot_ms,
+        current_boot_ms,
         previous_suspend_safe_ms,
         current_suspend_safe_ms,
     ) {
-        (Some(prev_utc), Some(prev_suspend_safe), Some(current)) => {
-            let utc_elapsed_ms = now_ms - prev_utc;
-            let suspend_safe_elapsed_ms = current - prev_suspend_safe;
-            let suspended_ms = (utc_elapsed_ms - suspend_safe_elapsed_ms).max(0);
+        (Some(prev_boot), Some(boot), Some(prev_suspend_safe), Some(suspend_safe))
+            if boot >= prev_boot && suspend_safe >= prev_suspend_safe =>
+        {
+            let boot_elapsed_ms = boot - prev_boot;
+            let suspend_safe_elapsed_ms = suspend_safe - prev_suspend_safe;
+            let suspended_ms = (boot_elapsed_ms - suspend_safe_elapsed_ms).max(0);
             let explains_gap = suspended_ms + SUSPEND_EVIDENCE_SLACK_MS >= diff_ms;
             (suspended_ms >= SUSPEND_EVIDENCE_MIN_MS && explains_gap).then_some(true)
         }

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::api::{ApiTransport, DeviceState, RegisteredDevice, UploadedBatchResponse};
 use crate::error::CoreResult;
 use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, NotifyPayload};
+use crate::testing::clock::MockClock;
 
 /// Mock `ApiTransport` impl that records every call and serves either a
 /// programmed canned response or a sensible default success.
@@ -49,6 +50,19 @@ pub struct MockApiState {
     pub default_hash_token: String,
     pub default_device_settings: DeviceSettings,
     batch_id_counter: u64,
+    /// When set, every successful call answers with the server's time:
+    /// the clock's reading plus the offset. See `serve_time`.
+    server_clock: Option<(MockClock, i64)>,
+    /// The server's time from the latest successful call, until taken.
+    pending_server_time_ms: Option<i64>,
+}
+
+impl MockApiState {
+    fn note_response(&mut self) {
+        if let Some((clock, offset_ms)) = &self.server_clock {
+            self.pending_server_time_ms = Some(clock.now_ms() + offset_ms);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +127,8 @@ impl Default for MockApiState {
                 dns_filter_domain: None,
             },
             batch_id_counter: 0,
+            server_clock: None,
+            pending_server_time_ms: None,
         }
     }
 }
@@ -149,6 +165,21 @@ impl MockApiClient {
     pub fn program_hash(&self, response: CoreResult<()>) {
         self.state().hash_responses.push_back(response);
     }
+
+    /// From now on, every successful call reports the server's time as
+    /// `clock`'s reading plus `offset_ms`, as a real response's `Date` header
+    /// does (CORE-027). Off by default; `Scenario` turns it on.
+    pub fn serve_time(&self, clock: MockClock, offset_ms: i64) {
+        self.state().server_clock = Some((clock, offset_ms));
+    }
+
+    /// From now on, calls report no server time, as when the server can't
+    /// be reached.
+    pub fn serve_no_time(&self) {
+        let mut state = self.state();
+        state.server_clock = None;
+        state.pending_server_time_ms = None;
+    }
 }
 
 impl Default for MockApiClient {
@@ -182,7 +213,7 @@ impl ApiTransport for MockApiClient {
             name: name.to_string(),
             platform: platform.to_string(),
         });
-        if let Some(canned) = state.register_device_responses.pop_front() {
+        let response = if let Some(canned) = state.register_device_responses.pop_front() {
             canned
         } else {
             Ok(RegisteredDevice {
@@ -193,7 +224,11 @@ impl ApiTransport for MockApiClient {
                 settings: state.default_device_settings.clone(),
                 hash_token: state.default_hash_token.clone(),
             })
+        };
+        if response.is_ok() {
+            state.note_response();
         }
+        response
     }
 
     fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
@@ -201,14 +236,18 @@ impl ApiTransport for MockApiClient {
         state
             .get_device_settings_calls
             .push(device_refresh_token.to_string());
-        if let Some(canned) = state.get_device_settings_responses.pop_front() {
+        let response = if let Some(canned) = state.get_device_settings_responses.pop_front() {
             canned
         } else {
             Ok(DeviceState {
                 settings: state.default_device_settings.clone(),
                 hash_token: state.default_hash_token.clone(),
             })
+        };
+        if response.is_ok() {
+            state.note_response();
         }
+        response
     }
 
     fn upload_batch(
@@ -234,6 +273,7 @@ impl ApiTransport for MockApiClient {
         // Notify only counts once the batch actually lands (mirrors what the
         // real server does: notifications are processed after the batch commits).
         if response.is_ok() {
+            state.note_response();
             for payload in &batch.notifications {
                 state.notify_calls.push(NotifyCall {
                     device_refresh_token: device_refresh_token.to_string(),
@@ -260,10 +300,14 @@ impl ApiTransport for MockApiClient {
             seq,
             content_hash: *content_hash,
         });
-        if let Some(canned) = state.hash_responses.pop_front() {
-            canned
-        } else {
-            Ok(())
+        let response = state.hash_responses.pop_front().unwrap_or(Ok(()));
+        if response.is_ok() {
+            state.note_response();
         }
+        response
+    }
+
+    fn take_server_time_ms(&self) -> Option<i64> {
+        self.state().pending_server_time_ms.take()
     }
 }

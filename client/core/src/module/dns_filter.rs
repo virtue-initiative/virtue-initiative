@@ -1,4 +1,4 @@
-//! DNS filter check (CORE-027): resolves the owner's check domain through the
+//! DNS filter check (CORE-028): resolves the owner's check domain through the
 //! OS resolver and reports when their DNS filter stops blocking it. Report
 //! only; nothing here blocks or changes DNS traffic.
 
@@ -9,32 +9,25 @@ use serde::{Deserialize, Serialize};
 use crate::model::UploadKind;
 use crate::module::lifecycle::EXTRA_HIGH_RISK;
 use crate::module::upload::{self, UploadState};
+use crate::rng::RandomSource;
 
 /// A domain no DNS filter should block. When it does not resolve, the network
 /// is down or broken, and the check domain's answer says nothing.
 pub const CONTROL_DOMAIN: &str = "example.com";
-/// Mean, shortest and longest delay between checks (CORE-027).
+/// Mean, shortest and longest delay between checks (CORE-028).
 const CHECK_DELAY_MEAN_MS: f64 = 20.0 * 60.0 * 1_000.0;
 pub(crate) const CHECK_DELAY_MIN_MS: i64 = 60 * 1_000;
 pub(crate) const CHECK_DELAY_MAX_MS: i64 = 60 * 60 * 1_000;
 pub(crate) const UNKNOWN_RETRY_MS: i64 = 10 * 60 * 1_000;
 
 /// The delay until the next check for a uniform draw `u` in `[0, 1)`
-/// (CORE-027): exponentially distributed, so the chance of a check in the
+/// (CORE-028): exponentially distributed, so the chance of a check in the
 /// next minute does not depend on how long ago the last one was, then
 /// clamped so checks are neither back to back nor more than an hour apart.
 pub(crate) fn check_delay_ms(u: f64) -> i64 {
     let u = u.clamp(0.0, 1.0 - f64::EPSILON);
     let delay = -(1.0 - u).ln() * CHECK_DELAY_MEAN_MS;
     (delay as i64).clamp(CHECK_DELAY_MIN_MS, CHECK_DELAY_MAX_MS)
-}
-
-/// A uniform draw in `[0, 1)` from the OS RNG, so earlier delays do not
-/// predict later ones.
-fn uniform_draw() -> f64 {
-    use rand_core::{OsRng, TryRngCore};
-    let bits = OsRng.try_next_u64().expect("OS RNG unavailable") >> 11;
-    bits as f64 / (1u64 << 53) as f64
 }
 
 /// Resolves a host name to its addresses. Injectable so tests can script
@@ -159,6 +152,7 @@ pub fn commit(
     upload: &mut UploadState,
     outcome: DnsCheckOutcome,
     now_ms: i64,
+    rng: &dyn RandomSource,
 ) {
     if state.domain.as_deref() != Some(outcome.domain.as_str()) {
         return;
@@ -186,7 +180,7 @@ pub fn commit(
         upload::enqueue(upload, now_ms, risk, kind);
     }
     state.last_result = Some(result);
-    state.next_check_at_ms = now_ms + check_delay_ms(uniform_draw());
+    state.next_check_at_ms = now_ms + check_delay_ms(rng.uniform());
 }
 
 /// When a check can next make progress (CORE-020): now when the settings'
@@ -205,10 +199,11 @@ pub fn next_check_at_ms(state: &DnsFilterState, upload: &UploadState) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rng::OsRandomSource;
 
     const MINUTE_MS: i64 = 60 * 1_000;
 
-    // CORE-027: the delay is exponential with a mean of 20 minutes, clamped
+    // CORE-028: the delay is exponential with a mean of 20 minutes, clamped
     // to between 1 and 60 minutes.
     #[test]
     fn the_check_delay_is_exponential_and_clamped() {
@@ -230,11 +225,13 @@ mod tests {
         }
     }
 
-    // CORE-027: each delay is drawn anew, so delays differ between checks and
+    // CORE-028: each delay is drawn anew, so delays differ between checks and
     // stay within the clamp.
     #[test]
     fn each_check_delay_is_drawn_anew() {
-        let delays: Vec<i64> = (0..200).map(|_| check_delay_ms(uniform_draw())).collect();
+        let delays: Vec<i64> = (0..200)
+            .map(|_| check_delay_ms(OsRandomSource.uniform()))
+            .collect();
         assert!(
             delays
                 .iter()

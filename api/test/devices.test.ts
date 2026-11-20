@@ -433,7 +433,7 @@ describe('DeviceSettings dns_filter_domain', () => {
     expect(await batchDomain(device, userId)).toBeNull();
   });
 
-  it("carries the account's domain to every device, including one added later, and follows changes (API-036, API-038, CORE-027)", async () => {
+  it("carries the account's domain to every device, including one added later, and follows changes (API-036, API-038, CORE-028)", async () => {
     const { cookie, userId } = await signupAndGetCookie('acct@example.com');
     const first = await createDeviceForUser('acct@example.com', 'password123', 'Desk', 'linux');
 

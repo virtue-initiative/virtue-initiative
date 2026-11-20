@@ -127,7 +127,7 @@ async function buildDeviceSettings(
     id: device.id,
     name: device.name,
     platform: device.platform,
-    // CORE-027: the owner's domain, unless they turned the check off for this device.
+    // CORE-028: the owner's domain, unless they turned the check off for this device.
     dns_filter_domain: device.dns_filter_disabled ? null : ownerDnsFilterDomain,
     wrapping_keys: recipients.map((recipient) => ({
       user_id: recipient.id,

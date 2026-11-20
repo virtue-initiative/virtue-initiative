@@ -308,10 +308,22 @@ public partial class App : Application
         _mainWindow?.ShowReportIssue();
     }
 
+    private bool _trayCaptureRunning;
+
     private async Task ForceCaptureAsync()
     {
+        // CLIENT-008: no second request while one is running.
+        if (_trayCaptureRunning)
+        {
+            return;
+        }
+
+        _trayCaptureRunning = true;
         try
         {
+            // CLIENT-008: wait so the user can bring up the screen they want captured.
+            _trayController?.ShowBalloonTip("Virtue", SessionViewModel.TestScreenshotWaitingMessage((int)SessionViewModel.TestScreenshotDelay.TotalSeconds));
+            await Task.Delay(SessionViewModel.TestScreenshotDelay);
             // Returns once the batch has landed (or the wait gave up), so the
             // balloon reports what happened instead of assuming success.
             var result = await Task.Run(() => new RustInteropClient().ForceScreenshotAndUpload());
@@ -321,6 +333,10 @@ public partial class App : Application
         {
             LogStartup($"Force capture failed: {ex}");
             _trayController?.ShowBalloonTip("Virtue", $"Test screenshot failed: {ex.Message}");
+        }
+        finally
+        {
+            _trayCaptureRunning = false;
         }
     }
 

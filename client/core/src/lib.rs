@@ -1,5 +1,6 @@
 pub mod api;
 pub mod build_info;
+mod clock;
 pub mod config;
 pub mod crypto;
 pub mod daemon;

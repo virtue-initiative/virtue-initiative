@@ -442,20 +442,13 @@ impl LifecycleHooks for LinuxPlatformHooks {
     // only `lifecycle::tick`'s suspend evidence (CORE-002); screenshot
     // scheduling is unaffected.
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {
-        let mut ts = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        // SAFETY: `ts` is a valid, owned out-param that does not outlive this
-        // call; `clock_gettime` has no other preconditions.
-        let rc = unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
-        if rc != 0 {
-            return Err(CoreError::CommandFailed(format!(
-                "clock_gettime(CLOCK_MONOTONIC) failed: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
+        read_clock_ms(libc::CLOCK_MONOTONIC, "CLOCK_MONOTONIC")
+    }
+
+    // `CLOCK_BOOTTIME` includes time spent suspended, and setting the system
+    // clock doesn't move it. The daemon's own clock runs on it (CORE-027).
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        read_clock_ms(libc::CLOCK_BOOTTIME, "CLOCK_BOOTTIME")
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
@@ -479,6 +472,23 @@ impl LifecycleHooks for LinuxPlatformHooks {
         let json = String::from_utf8_lossy(&output.stdout);
         Ok(parse_last_shutdown_ms(&json))
     }
+}
+
+fn read_clock_ms(clock: libc::clockid_t, name: &str) -> CoreResult<i64> {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `ts` is a valid, owned out-param that does not outlive this
+    // call; `clock_gettime` has no other preconditions.
+    let rc = unsafe { libc::clock_gettime(clock, &mut ts) };
+    if rc != 0 {
+        return Err(CoreError::CommandFailed(format!(
+            "clock_gettime({name}) failed: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(ts.tv_sec * 1000 + ts.tv_nsec / 1_000_000)
 }
 
 #[cfg(test)]
@@ -551,6 +561,16 @@ mod tests {
             .get_monotonic_clock_ms()
             .expect("clock should not fail");
         assert!(second >= first);
+    }
+
+    #[test]
+    fn platform_hooks_get_boot_clock_ms_counts_at_least_the_monotonic_clock() {
+        let hooks = LinuxPlatformHooks::new();
+        let monotonic = hooks
+            .get_monotonic_clock_ms()
+            .expect("clock should not fail");
+        let boot = hooks.get_boot_clock_ms().expect("clock should not fail");
+        assert!(boot >= monotonic);
     }
 
     #[test]

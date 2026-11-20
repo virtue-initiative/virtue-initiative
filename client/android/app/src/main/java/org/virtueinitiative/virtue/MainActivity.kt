@@ -1084,9 +1084,15 @@ class MainActivity : AppCompatActivity() {
         if (Session.capturing) return
         Session.capturing = true
         testButton?.isEnabled = false
-        showDetailsMessage(getString(R.string.msg_force_capture_started), clear = false)
         val app = applicationContext
         Session.scope.launch {
+            // CLIENT-008: count down so the user can bring up the screen they want captured.
+            for (left in TEST_SCREENSHOT_DELAY_SECONDS downTo 1) {
+                val waiting = app.resources.getQuantityString(R.plurals.msg_force_capture_waiting, left, left)
+                showDetailsMessage(waiting, clear = false)
+                delay(1_000)
+            }
+            showDetailsMessage(app.getString(R.string.msg_force_capture_started), clear = false)
             // The native call waits for the batch to land, so its message
             // reports what actually happened rather than assuming an upload.
             val raw = withContext(Dispatchers.IO) {
@@ -1257,6 +1263,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val KEY_SCREEN = "screen"
+        const val TEST_SCREENSHOT_DELAY_SECONDS = 10
         const val KEY_ADVANCED_OPEN = "advanced_open"
         const val KEY_EMAIL = "email"
         const val KEY_DEVICE = "device"

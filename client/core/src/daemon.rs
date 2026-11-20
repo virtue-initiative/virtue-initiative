@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -6,10 +6,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiTransport;
+use crate::clock::{self, DaemonClock};
 use crate::config::Config;
 use crate::error::{CoreError, CoreResult};
 use crate::logging::log_warning;
-use crate::model::{AuthState, ServiceStatus};
+use crate::model::{AuthState, ServiceStatus, UploadKind};
 use crate::module::auth;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
 use crate::module::dns_filter::{self, DnsFilterState, DnsResolver, SystemDnsResolver};
@@ -27,10 +28,38 @@ use crate::state::{load_state, lock_state, store_state};
 use virtue_text_detection::ScreenshotOCR;
 
 /// Bump whenever `DaemonState`'s shape needs a breaking change that
-/// `#[serde(default)]` alone can't absorb; `Daemon::new` logs the version
-/// transition. No real migration step exists yet — every change so far has
-/// been additive/subtractive.
+/// `#[serde(default)]` alone can't absorb, and add the step from the old
+/// version to [`DaemonState::upgrade`] (CORE-016). No step changes any data
+/// yet — every change so far has been additive/subtractive.
 pub const DAEMON_STATE_VERSION: u32 = 1;
+
+/// Loads the state at `path` and runs its upgrade steps (CORE-016). Every
+/// read that may be written back goes through this, so each step's changes
+/// are what gets saved. Logs nothing, because it runs before every write:
+/// `Daemon::new` runs the same steps on its first load and logs them, once
+/// per start.
+fn load_current_state(path: &Path) -> CoreResult<DaemonState> {
+    let mut state: DaemonState = load_state(path)?;
+    state.upgrade();
+    Ok(state)
+}
+
+/// Logs what loading a state saved at `saved_version` does to it.
+fn log_state_upgrade(saved_version: u32) {
+    if saved_version > DAEMON_STATE_VERSION {
+        tracing::warn!(
+            version = saved_version,
+            current = DAEMON_STATE_VERSION,
+            "daemon state was saved by a newer client; not upgrading it"
+        );
+    } else if saved_version < DAEMON_STATE_VERSION {
+        tracing::info!(
+            from = saved_version,
+            to = DAEMON_STATE_VERSION,
+            "daemon state upgraded"
+        );
+    }
+}
 
 /// A caller's request to mutate the daemon's state, serviced only by the
 /// loop thread inside `run_forever`. Each variant (other than `Stop`) carries
@@ -96,6 +125,33 @@ pub struct DaemonState {
     pub last_tick_at_ms: Option<i64>,
 }
 
+impl DaemonState {
+    /// An empty state at the current version: version 0 (nothing saved yet)
+    /// run through the upgrade steps, the same way a missing file is. A reset
+    /// such as a logout starts from this (CORE-016).
+    pub(crate) fn initial() -> Self {
+        let mut state = Self::default();
+        state.upgrade();
+        state
+    }
+
+    /// Runs each upgrade step from `self.version` up to
+    /// [`DAEMON_STATE_VERSION`], in order (CORE-016). Leaves a state saved by
+    /// a newer client alone.
+    fn upgrade(&mut self) {
+        while self.version < DAEMON_STATE_VERSION {
+            match self.version {
+                // 0 → 1 initializes the state and must not change its data:
+                // version 0 means no file, or one saved before versions were
+                // recorded, whose data is already in the version 1 format.
+                0 => {}
+                version => unreachable!("no upgrade step from daemon state version {version}"),
+            }
+            self.version += 1;
+        }
+    }
+}
+
 /// One sequential daemon loop: check lifecycle, maybe take a screenshot,
 /// upload what's queued, pick the next wakeup time, sleep. See
 /// `client/core/SPEC.md`.
@@ -116,6 +172,9 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
     dns: Arc<dyn DnsResolver>,
+    /// Every time the daemon records, schedules or compares comes from here,
+    /// not the system clock. See CORE-027.
+    clock: Mutex<DaemonClock>,
 }
 
 impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
@@ -124,16 +183,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// on process startup" requirement).
     pub fn new(config: Config, platform: P, api: A, state_path: PathBuf) -> CoreResult<Self> {
         let mut state: DaemonState = load_state(&state_path)?;
-        if state.version != DAEMON_STATE_VERSION {
-            tracing::info!(
-                from = state.version,
-                to = DAEMON_STATE_VERSION,
-                "daemon state version upgraded"
-            );
-            state.version = DAEMON_STATE_VERSION;
-        }
+        log_state_upgrade(state.version);
+        state.upgrade();
 
         let (request_tx, request_rx) = mpsc::channel();
+        let clock = DaemonClock::start(
+            platform.get_time_utc_ms().unwrap_or(0),
+            boot_clock_ms(&platform),
+            state.lifecycle.last_tick_utc_ms,
+        );
 
         let daemon = Self {
             state: Arc::new(Mutex::new(state)),
@@ -147,7 +205,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
             dns: Arc::new(SystemDnsResolver),
+            clock: Mutex::new(clock),
         };
+
+        // First, so the clock is set from the server before anything is
+        // recorded, when the server can be reached (CORE-027).
+        daemon.refresh_settings_on_startup();
 
         // Every fresh `Daemon` instance is a new monitoring session: if the
         // previous session ended via `note_user_stop`, resume normally
@@ -165,7 +228,6 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             });
         }
 
-        daemon.refresh_settings_on_startup();
         Ok(daemon)
     }
 
@@ -179,7 +241,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// Swap in a different [`DnsResolver`] for the DNS filter check
-    /// (CORE-027) — used by the test [`Scenario`] harness to script answers.
+    /// (CORE-028) — used by the test [`Scenario`] harness to script answers.
     ///
     /// [`Scenario`]: crate::testing::Scenario
     pub fn with_dns_resolver(mut self, dns: Arc<dyn DnsResolver>) -> Self {
@@ -210,8 +272,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 None => return,
             }
         };
+        let result = self.api.get_device_settings(&refresh_token);
+        // Nothing is recorded on the clock yet, so nothing moves with it
+        // (CORE-027).
+        if let Some(server_ms) = self.api.take_server_time_ms() {
+            self.lock_clock()
+                .sync(server_ms, boot_clock_ms(&self.platform));
+        }
         let now_ms = self.now_ms();
-        match self.api.get_device_settings(&refresh_token) {
+        match result {
             Ok(result) => {
                 self.with_locked_state(|working| {
                     working.upload.settings = Some(result.settings);
@@ -233,10 +302,48 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     fn now_ms(&self) -> i64 {
-        self.platform.get_time_utc_ms().unwrap_or(0)
+        self.lock_clock().now_ms(boot_clock_ms(&self.platform))
     }
 
+    fn lock_clock(&self) -> std::sync::MutexGuard<'_, DaemonClock> {
+        self.clock.lock().expect("daemon clock lock poisoned")
+    }
+
+    /// Sets the clock from the latest server response, if one came since the
+    /// last call. A correction moves every persisted time later work is
+    /// scheduled or measured from with it, and is reported when it's big.
+    /// See CORE-027.
+    fn sync_clock(&self, state: &mut DaemonState) {
+        let Some(server_ms) = self.api.take_server_time_ms() else {
+            return;
+        };
+        let correction_ms = self
+            .lock_clock()
+            .sync(server_ms, boot_clock_ms(&self.platform));
+        if correction_ms == 0 {
+            return;
+        }
+        tracing::warn!(correction_ms, "daemon clock corrected from the server");
+        shift_times(state, correction_ms);
+        if correction_ms.abs() > clock::CORRECTION_ALERT_MS && self.platform.lifecycle_enabled() {
+            upload::enqueue(
+                &mut state.upload,
+                self.now_ms(),
+                lifecycle::HIGH_RISK_LIFECYCLE_ALERT,
+                UploadKind::Alert {
+                    message: clock::correction_message(correction_ms),
+                },
+            );
+        }
+    }
+
+    /// Writes `state` with the version its upgrade steps reached (CORE-016).
     fn persist(&self, state: &DaemonState) {
+        debug_assert!(
+            state.version >= DAEMON_STATE_VERSION,
+            "persisting daemon state version {} that skipped its upgrade steps",
+            state.version
+        );
         if let Err(err) = store_state(&self.state_path, state) {
             tracing::error!(error = %err, "daemon: failed to persist state");
         }
@@ -263,7 +370,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             }
         };
 
-        let mut working = load_state(&self.state_path).unwrap_or_else(|err| {
+        let mut working = load_current_state(&self.state_path).unwrap_or_else(|err| {
             tracing::warn!(
                 error = %err,
                 "daemon: failed to reload state under lock; falling back to in-memory copy"
@@ -573,7 +680,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// the real loop's per-tick body (clone, run phases, write back +
     /// persist) without needing a `run_forever` thread.
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn tick_once_for_test(&self, now_ms: i64) {
+    pub(crate) fn tick_once_for_test(&self) {
+        let now_ms = self.now_ms();
         let mut working = self
             .state
             .lock()
@@ -583,6 +691,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         if should_logout {
             self.apply_rejected_device_logout(&mut working);
         }
+        // Read afresh, as `run_tick` does.
+        let now_ms = self.now_ms();
         working.next_wakeup_at_ms = self.compute_next_wakeup(&working, now_ms, screen_active);
         working.last_tick_at_ms = Some(now_ms);
         *self.state.lock().expect("daemon state lock poisoned") = working.clone();
@@ -693,6 +803,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
+            // Read afresh: a tick that uploads can run for a while, and its
+            // uploads may have corrected the clock (CORE-027).
+            let now_ms = self.now_ms();
             working.next_wakeup_at_ms = self.compute_next_wakeup(working, now_ms, screen_active);
             working.last_tick_at_ms = Some(now_ms);
         });
@@ -921,6 +1034,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                 &mut working.upload,
                 outcome,
                 now_ms,
+                self.rng.as_ref(),
             );
         }
 
@@ -946,12 +1060,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             })
             .unwrap_or(false);
 
+        // Last, after the uploads that brought the server's time.
+        self.sync_clock(working);
+
         (screen_active, should_logout)
     }
 
     /// Picks the next wakeup time (CORE-020): the earliest of the next
     /// scheduled screenshot draw, the next heartbeat, the next DNS filter
-    /// check (CORE-027), and the next time
+    /// check (CORE-028), and the next time
     /// pending hash/batch uploads can make progress — never earlier than
     /// `now_ms`. Uploads held by the screen-lock gate (or missing
     /// credentials/settings) contribute nothing, since no timer clears
@@ -975,6 +1092,46 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         .fold(screenshot, i64::min)
         .max(now_ms)
     }
+}
+
+/// The platform's boot clock, or the system clock if it can't be read.
+fn boot_clock_ms(platform: &impl PlatformHooks) -> i64 {
+    platform
+        .get_boot_clock_ms()
+        .or_else(|_| platform.get_time_utc_ms())
+        .unwrap_or(0)
+}
+
+/// Moves every persisted time that later work is scheduled or measured from
+/// by `delta_ms`, along with a correction of the daemon's clock, so the
+/// correction neither holds that work off nor brings it forward. Recorded
+/// events, and times kept only to show on the status page, keep their
+/// times. 0 means "never" here and stays 0. See CORE-027.
+fn shift_times(state: &mut DaemonState, delta_ms: i64) {
+    let shift = |ms: &mut i64| {
+        if *ms != 0 {
+            *ms += delta_ms;
+        }
+    };
+    shift(&mut state.next_wakeup_at_ms);
+    state.last_tick_at_ms.as_mut().map(shift);
+    state.screenshot.next_screenshot_at_ms.as_mut().map(shift);
+    state.upload.last_batch_at_ms.as_mut().map(shift);
+    shift(&mut state.upload.hash_backoff.next_attempt_at_ms);
+    shift(&mut state.upload.batch_backoff.next_attempt_at_ms);
+    if let Some((_, fetched_at_ms)) = state.upload.hash_token_cache.as_mut() {
+        shift(fetched_at_ms);
+    }
+    shift(&mut state.heartbeat.last_heartbeat_ms);
+    state
+        .capture_availability
+        .recent_failures_ms
+        .iter_mut()
+        .for_each(shift);
+    let lifecycle = &mut state.lifecycle;
+    lifecycle.last_tick_utc_ms.as_mut().map(shift);
+    lifecycle.restart_times.iter_mut().for_each(shift);
+    lifecycle.last_restart_alert_at_ms.as_mut().map(shift);
 }
 
 /// Mirrors a failed capture into the status page's recent-errors ring

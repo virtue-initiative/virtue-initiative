@@ -1084,7 +1084,7 @@ export async function deletePartnerById(db: D1Database, partnerId: string) {
   return db.prepare('DELETE FROM partners WHERE id = ?').bind(uuidToBytes(partnerId)).run();
 }
 
-// Also returns the owner's flag overrides (API-061) and DNS check domain (CORE-027),
+// Also returns the owner's flag overrides (API-061) and DNS check domain (CORE-028),
 // since the owner's row is already being read here for their public key.
 export async function listBatchAccessRecipientsForOwner(db: D1Database, ownerId: string) {
   const [owner, partners] = await Promise.all([

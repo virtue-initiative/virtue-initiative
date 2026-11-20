@@ -229,6 +229,12 @@ impl LifecycleHooks for AndroidPlatformHooks {
         self.uptime_millis_ms()
     }
 
+    /// `elapsedRealtime` includes deep sleep. The daemon's own clock runs on
+    /// it (CORE-027).
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        self.elapsed_realtime_ms()
+    }
+
     // Android has no OS "login" concept; the expected-running window is modeled
     // as "whenever the device is powered on", so login = device boot time.
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

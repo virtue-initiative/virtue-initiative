@@ -559,6 +559,12 @@ impl LifecycleHooks for WindowsPlatformHooks {
         read_monotonic_clock_ms()
     }
 
+    // `QueryInterruptTime` includes time spent suspended. The daemon's own
+    // clock runs on it (CORE-027).
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        read_boot_clock_ms()
+    }
+
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {
         read_last_login_utc_ms()
     }

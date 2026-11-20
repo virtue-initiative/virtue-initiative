@@ -29,7 +29,7 @@ pub struct Scenario {
     pub state_dir: PathBuf,
     pub platform: TestPlatformHooks,
     pub rng: TestRandomSource,
-    /// Scripted DNS answers for the DNS filter check (CORE-027). Every host
+    /// Scripted DNS answers for the DNS filter check (CORE-028). Every host
     /// fails to resolve until a test scripts it.
     pub dns: FakeDnsResolver,
 }
@@ -104,6 +104,8 @@ impl Scenario {
         if let Some(ref s) = settings {
             api.state().default_device_settings = s.clone();
         }
+        // Like a real server's `Date` header (CORE-027).
+        api.serve_time(clock.clone(), 0);
         let api_handle = api.clone();
         let rng = TestRandomSource::new();
         let dns = FakeDnsResolver::new();
@@ -171,7 +173,7 @@ impl Scenario {
     /// Run one tick at the current clock time, single-threaded (no
     /// `run_forever` loop thread involved).
     pub fn tick(&mut self) -> &mut Self {
-        self.daemon.tick_once_for_test(self.clock.now_ms());
+        self.daemon.tick_once_for_test();
         self
     }
 
@@ -235,7 +237,7 @@ impl Scenario {
         self.daemon.with_state_mut(f)
     }
 
-    /// Set the device's DNS filter check domain (CORE-027), both in the
+    /// Set the device's DNS filter check domain (CORE-028), both in the
     /// settings the daemon holds now and in the ones the mock API returns
     /// from later settings refreshes, so a batch upload doesn't undo it.
     pub fn set_dns_filter_domain(&mut self, domain: Option<&str>) -> &mut Self {

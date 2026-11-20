@@ -41,7 +41,7 @@ run_forever loop:
     screenshot::commit, capture_availability::tick,
       heartbeat::tick                                              // phase 2c, 3
     dns_filter::plan, dns_filter::execute (DNS lookups),
-      dns_filter::commit                                           // CORE-027
+      dns_filter::commit                                           // CORE-028
     upload::plan_hash_retries                                      // phase 4a
     upload::execute_hash_retries (network)                         // phase 5a
     upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
@@ -138,7 +138,7 @@ thread) can drive the daemon synchronously.
 | `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()`                                          |
 | `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                                                                      |
 | `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                                                                        |
-| `dns_filter`           | `DnsFilterState`                                             | `plan()`/`execute()`/`commit()`, `next_check_at_ms()` — CORE-027; lookups go through the injectable `DnsResolver` (`SystemDnsResolver` by default, `Daemon::with_dns_resolver`) |
+| `dns_filter`           | `DnsFilterState`                                             | `plan()`/`execute()`/`commit()`, `next_check_at_ms()` — CORE-028; lookups go through the injectable `DnsResolver` (`SystemDnsResolver` by default, `Daemon::with_dns_resolver`) |
 | `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                                                            |
 | `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                                                            |
 
@@ -165,6 +165,17 @@ the same chance" requirement. Two gates then run:
 (`state::load_state`, generic over any `Default + DeserializeOwned` type
 now, not just `serde_json::Value`); every tick's final locked phase persists
 it back via `state::store_state` (atomic tmp+rename).
+
+`DaemonState.version` records the file's format. Every load that a write
+may follow (`Daemon::new` and each locked re-read) goes through
+`load_current_state`, which runs `DaemonState::upgrade`: one step per
+version, in order, from the saved version up to `DAEMON_STATE_VERSION`.
+Version 0 means nothing saved yet (a missing or unparseable file, or a
+logout's reset via `DaemonState::initial`), and 0 → 1 changes no data,
+because clients before CORE-016's versioning rule saved 0 with data already
+in the version 1 format. A file from a newer client keeps its version and
+runs no steps. A breaking change to the shape bumps `DAEMON_STATE_VERSION`
+and adds its step to `upgrade`.
 
 ### IPC: one file, one channel type (Linux/Mac only)
 
@@ -306,6 +317,7 @@ fn is_locked_or_screensaver(&self) -> CoreResult<bool>;   // default: Ok(false)
 // LifecycleHooks
 fn get_utc_clock_ms(&self) -> CoreResult<i64>;             // default: SystemTime::now()
 fn get_monotonic_clock_ms(&self) -> CoreResult<i64>;       // default: falls back to get_utc_clock_ms
+fn get_boot_clock_ms(&self) -> CoreResult<i64>;            // default: falls back to get_utc_clock_ms
 fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn get_last_logout_utc_ms(&self) -> CoreResult<Option<i64>>;
 fn lifecycle_enabled(&self) -> bool;                        // default: true
@@ -320,8 +332,18 @@ status — running normally. iOS is the only platform that overrides it to
 `get_monotonic_clock_ms` (a clock that doesn't advance while the system is
 suspended) feeds only `lifecycle::tick`'s suspend evidence (CORE-002) — a third excuse, alongside login/logout evidence, that can only ever
 _add_ an excuse (its default falls back to `get_utc_clock_ms`, under which
-it never triggers). Screenshot scheduling itself is unaffected and still
-paces off the wall clock; this hook isn't on `ScreenshotHooks`. Mac
+it never triggers). This hook isn't on `ScreenshotHooks`.
+
+The daemon never reads the system clock for a time it records, schedules
+or compares. Every such time comes from its own clock (`src/clock.rs`,
+CORE-027): the server's time from the latest response's `Date` header
+(`ApiTransport::take_server_time_ms`), carried forward on
+`get_boot_clock_ms`, a clock that counts from boot including suspend and
+that setting the system clock doesn't move. Until the first response it
+starts from the system clock, no earlier than the last tick
+(`lifecycle.last_tick_utc_ms`). A
+correction moves every persisted schedule time with it (`shift_times` in
+`daemon.rs`). Mac
 separately listens for IOKit wake notifications (`mac/src/power.rs`) for a
 local post-wake batch flush — not through this trait, and unrelated to the
 suspend evidence above.
