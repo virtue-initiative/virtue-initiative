@@ -13,7 +13,7 @@ These files implement the client side of cross-component contracts shared with t
 - `src/crypto.rs` — AES-256-GCM encryption, HPKE key wrapping, content hash computation
 - `src/module/upload/batch.rs` — msgpack + gzip batch payload construction
 
-See `../../AGENTS.md` (repo root) for the exact wire formats and constraints.
+See `../../docs/contracts.md` for the exact wire formats and constraints.
 
 ## Rules that are easy to break
 

@@ -120,7 +120,7 @@ Windows still builds entirely in the VM, through `remote-windows-build.sh`. `tra
 
 ## Deployment workflows
 
-Pushes to `main` and `staging` deploy everything, from three workflows: `deploy.yml` (`web`, `api`, `api-donate`), `deploy-landing.yml` (`landing`) and `deploy-hash-server.yml` (the hash server, see `hash-server/README.md`). The client apps are released from their own `client-*.yml` workflows (see each platform's `RELEASING.md`). `api-donate` has no separate release: a push to `staging` deploys it to production too.
+[`releasing.md`](releasing.md) explains what each branch deploys and how a release goes out. Pushes to `main` and `staging` deploy everything, from three workflows: `deploy.yml` (`web`, `api`, `api-donate`), `deploy-landing.yml` (`landing`) and `deploy-hash-server.yml` (the hash server, see `hash-server/README.md`). The client apps are released from their own `client-*.yml` workflows (see each platform's `RELEASING.md`). `api-donate` has no separate release: a push to `staging` deploys it to production too.
 
 If you need to mirror deployment locally:
 
