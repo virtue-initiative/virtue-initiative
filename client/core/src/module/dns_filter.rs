@@ -13,8 +13,29 @@ use crate::module::upload::{self, UploadState};
 /// A domain no DNS filter should block. When it does not resolve, the network
 /// is down or broken, and the check domain's answer says nothing.
 pub const CONTROL_DOMAIN: &str = "example.com";
-pub(crate) const CHECK_INTERVAL_MS: i64 = 60 * 60 * 1_000;
+/// Mean, shortest and longest delay between checks (CORE-027).
+const CHECK_DELAY_MEAN_MS: f64 = 20.0 * 60.0 * 1_000.0;
+pub(crate) const CHECK_DELAY_MIN_MS: i64 = 60 * 1_000;
+pub(crate) const CHECK_DELAY_MAX_MS: i64 = 60 * 60 * 1_000;
 pub(crate) const UNKNOWN_RETRY_MS: i64 = 10 * 60 * 1_000;
+
+/// The delay until the next check for a uniform draw `u` in `[0, 1)`
+/// (CORE-027): exponentially distributed, so the chance of a check in the
+/// next minute does not depend on how long ago the last one was, then
+/// clamped so checks are neither back to back nor more than an hour apart.
+pub(crate) fn check_delay_ms(u: f64) -> i64 {
+    let u = u.clamp(0.0, 1.0 - f64::EPSILON);
+    let delay = -(1.0 - u).ln() * CHECK_DELAY_MEAN_MS;
+    (delay as i64).clamp(CHECK_DELAY_MIN_MS, CHECK_DELAY_MAX_MS)
+}
+
+/// A uniform draw in `[0, 1)` from the OS RNG, so earlier delays do not
+/// predict later ones.
+fn uniform_draw() -> f64 {
+    use rand_core::{OsRng, TryRngCore};
+    let bits = OsRng.try_next_u64().expect("OS RNG unavailable") >> 11;
+    bits as f64 / (1u64 << 53) as f64
+}
 
 /// Resolves a host name to its addresses. Injectable so tests can script
 /// answers; production uses [`SystemDnsResolver`].
@@ -165,7 +186,7 @@ pub fn commit(
         upload::enqueue(upload, now_ms, risk, kind);
     }
     state.last_result = Some(result);
-    state.next_check_at_ms = now_ms + CHECK_INTERVAL_MS;
+    state.next_check_at_ms = now_ms + check_delay_ms(uniform_draw());
 }
 
 /// When a check can next make progress (CORE-020): now when the settings'
@@ -179,4 +200,58 @@ pub fn next_check_at_ms(state: &DnsFilterState, upload: &UploadState) -> Option<
     }
     state.domain.as_ref()?;
     Some(state.next_check_at_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINUTE_MS: i64 = 60 * 1_000;
+
+    // CORE-027: the delay is exponential with a mean of 20 minutes, clamped
+    // to between 1 and 60 minutes.
+    #[test]
+    fn the_check_delay_is_exponential_and_clamped() {
+        let cases: [(f64, i64); 6] = [
+            (0.0, MINUTE_MS),
+            // 1 - e^(-1/20) is the draw at which the delay reaches 1 minute.
+            (0.03, MINUTE_MS),
+            (1.0 - (-1.0f64).exp(), 20 * MINUTE_MS),
+            (1.0 - (-2.0f64).exp(), 40 * MINUTE_MS),
+            (0.99, 60 * MINUTE_MS),
+            (1.0, 60 * MINUTE_MS),
+        ];
+        for (u, expected) in cases {
+            let delay = check_delay_ms(u);
+            assert!(
+                (delay - expected).abs() <= 1,
+                "u = {u}: expected {expected} ms, got {delay} ms"
+            );
+        }
+    }
+
+    // CORE-027: each delay is drawn anew, so delays differ between checks and
+    // stay within the clamp.
+    #[test]
+    fn each_check_delay_is_drawn_anew() {
+        let delays: Vec<i64> = (0..200).map(|_| check_delay_ms(uniform_draw())).collect();
+        assert!(
+            delays
+                .iter()
+                .all(|d| (CHECK_DELAY_MIN_MS..=CHECK_DELAY_MAX_MS).contains(d))
+        );
+        let mut distinct = delays.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert!(
+            distinct.len() > 100,
+            "only {} distinct delays",
+            distinct.len()
+        );
+        let mean_min = delays.iter().sum::<i64>() as f64 / delays.len() as f64 / MINUTE_MS as f64;
+        assert!(
+            (12.0..=28.0).contains(&mean_min),
+            "mean delay {mean_min:.1} minutes is far from 20"
+        );
+    }
 }

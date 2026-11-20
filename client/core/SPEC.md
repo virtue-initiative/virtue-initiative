@@ -233,7 +233,7 @@ false (see CORE-002).
 
 The device settings MAY name a check domain (`dns_filter_domain`) that the owner blocks in their DNS filter. A domain that is empty after trimming whitespace MUST be treated as absent. The daemon MUST only report on the filter and MUST NOT block or change any DNS traffic.
 
-While authenticated and while the settings name a check domain, the daemon MUST check it as soon as it first appears or changes, then every 60 minutes. A check MUST resolve the control domain `example.com` and then the check domain through the operating system's resolver. An answer counts as blocked when the lookup fails or returns only unspecified (`0.0.0.0`, `::`) or loopback addresses.
+While authenticated and while the settings name a check domain, the daemon MUST check it as soon as it first appears or changes, then again after a delay drawn anew at random for each check. The delay MUST follow an exponential distribution with a mean of 20 minutes, clamped to between 1 and 60 minutes, so that the time since the last check does not tell when the next one comes. The random source MUST NOT be predictable from earlier delays. A check MUST resolve the control domain `example.com` and then the check domain through the operating system's resolver. An answer counts as blocked when the lookup fails or returns only unspecified (`0.0.0.0`, `::`) or loopback addresses.
 
 - If the control domain is blocked, the result is unknown: the daemon MUST NOT send an event, MUST keep the last result, and MUST check again after 10 minutes.
 - Otherwise the result is filtered when the check domain is blocked, and unfiltered when it is not.

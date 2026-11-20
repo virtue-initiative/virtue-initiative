@@ -14,7 +14,10 @@ const CONTROL: &str = "example.com";
 const DOMAIN: &str = "blocked.example";
 const OTHER_DOMAIN: &str = "other.example";
 const PUBLIC_IP: &str = "192.0.2.10";
-const HOUR_MS: i64 = 60 * 60 * 1_000;
+const MINUTE_MS: i64 = 60 * 1_000;
+/// The longest delay between checks, so a tick this long after a check always
+/// finds the next one due.
+const HOUR_MS: i64 = 60 * MINUTE_MS;
 const RETRY_MS: i64 = 10 * 60 * 1_000;
 /// The time of the first check in [`checking_scenario`].
 const T1: i64 = T0 + 1_000;
@@ -173,24 +176,45 @@ fn hourly_checks_report_only_changes_of_the_result() {
     assert!(events.iter().all(|e| e.domain.as_deref() == Some(DOMAIN)));
 }
 
-// CORE-027, CORE-020: checks run every 60 minutes, and the next check is a wakeup.
+// CORE-027, CORE-020: the next check comes after a random delay of 1 to 60
+// minutes, drawn anew each time, and is a wakeup.
 #[test]
-fn the_domain_is_checked_again_after_60_minutes() {
+fn the_domain_is_checked_again_after_a_random_delay() {
     let mut scenario = checking_scenario();
     script(&scenario, DOMAIN, BLOCKED);
     scenario.at_t(T1).tick();
-    push_screenshot_out(&mut scenario);
 
-    scenario.at_t(T1 + HOUR_MS - 1).tick();
-    assert_eq!(
-        lookups_of(&scenario, DOMAIN),
-        1,
-        "not due before 60 minutes"
-    );
-    assert_eq!(wakeup(&scenario), T1 + HOUR_MS);
+    let mut last_check = T1;
+    let mut delays = Vec::new();
+    for checks in 2..=20 {
+        push_screenshot_out(&mut scenario);
+        let next = scenario.state().dns_filter.next_check_at_ms;
+        assert!(wakeup(&scenario) <= next, "the next check is a wakeup");
+        let delay = next - last_check;
+        assert!(
+            (MINUTE_MS..=HOUR_MS).contains(&delay),
+            "delay {delay} ms is outside 1 to 60 minutes"
+        );
 
-    scenario.at_t(T1 + HOUR_MS).tick();
-    assert_eq!(lookups_of(&scenario, DOMAIN), 2, "due after 60 minutes");
+        scenario.at_t(next - 1).tick();
+        assert_eq!(
+            lookups_of(&scenario, DOMAIN),
+            checks - 1,
+            "not due before the drawn delay"
+        );
+        scenario.at_t(next).tick();
+        assert_eq!(
+            lookups_of(&scenario, DOMAIN),
+            checks,
+            "due at the drawn delay"
+        );
+
+        delays.push(delay);
+        last_check = next;
+    }
+    delays.sort_unstable();
+    delays.dedup();
+    assert!(delays.len() > 10, "delays barely vary: {delays:?}");
 }
 
 // ── Unknown results ───────────────────────────────────────────────────────────
