@@ -15,6 +15,7 @@ import {
   listAcceptedNotificationTargetsForUser,
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
+  setDeviceAppVersion,
 } from '../lib/db';
 import { encodeAccessKeys } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
@@ -77,6 +78,14 @@ const uploadBatchSchema = z.object({
     .refine((file) => file.size > 0, { message: 'File is empty' })
     .refine((file) => file.size <= 100 * 1024 * 1024, { message: 'File exceeds 100MB limit' }),
 });
+
+// API-035: the client's version from X-Virtue-Version (API-068), or null when
+// it is missing or not a plausible version string.
+const CLIENT_VERSION_PATTERN = /^[0-9A-Za-z.+-]{1,32}$/;
+function clientVersion(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  const version = c.req.header('X-Virtue-Version')?.trim();
+  return version && CLIENT_VERSION_PATTERN.test(version) ? version : null;
+}
 
 async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
@@ -162,7 +171,7 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
 
   await fillNewsletterLocation(c.env, result.user.email, requestLocation(c.req.raw));
 
-  await createDevice(c.env.DB, { id, owner, name, platform });
+  await createDevice(c.env.DB, { id, owner, name, platform, app_version: clientVersion(c) });
   const refreshToken = await createDeviceSession(c, id);
 
   const settings = await buildDeviceSettings(c, { id, owner, name, platform });
@@ -183,6 +192,13 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
 
   if (!device) {
     return c.json({ error: 'Not found' }, 404);
+  }
+
+  // API-036: a client fetches its settings when it starts, so an update shows
+  // up here. Only a change is written.
+  const version = clientVersion(c);
+  if (version && version !== device.app_version) {
+    await setDeviceAppVersion(c.env.DB, device.id, version);
   }
 
   const settings = await buildDeviceSettings(c, device);

@@ -67,6 +67,18 @@ export const ADMIN_QUERY_PRESETS: Record<string, AdminQueryPreset> = {
           GROUP BY bucket
           ORDER BY users DESC`,
   },
+  devices_by_version: {
+    label: 'Devices by version',
+    description:
+      'Live devices per platform and the client version each last reported (API-036), newest version first.',
+    sql: `SELECT platform,
+                 COALESCE(app_version, 'unknown') AS app_version,
+                 COUNT(*) AS devices
+          FROM devices
+          WHERE deleted_at IS NULL
+          GROUP BY platform, app_version
+          ORDER BY platform, app_version DESC`,
+  },
   devices_by_platform: {
     label: 'Devices by platform',
     description: 'Live devices per platform, with how many uploaded in the last 7 days.',
