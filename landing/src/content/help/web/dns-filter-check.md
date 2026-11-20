@@ -1,0 +1,68 @@
+---
+sidebar_position: 7
+---
+
+# DNS filter check
+
+If you use a DNS filter such as NextDNS, Virtue can check that it stays on. You
+add a domain to your filter's block list and enter the same domain in Virtue.
+Your devices then look it up every hour. If the filter stops blocking it, your
+partners get an alert.
+
+Virtue only reports what it finds. It never blocks or changes your DNS traffic.
+
+The steps below use NextDNS as an example. Other DNS filters work the same way
+as long as they let you block a single domain.
+
+## Check that your device uses the filter
+
+Set up your DNS filter on every device you want checked. In NextDNS, open the
+**Setup** tab on that device. It shows **All good!** when the device uses your
+profile.
+
+![the NextDNS Setup tab showing All good](./nextdns-setup-all-good.png)
+
+## Block a check domain
+
+Pick a domain you never need, such as `example.net`. In NextDNS, open the
+**Denylist** tab, type the domain into **Add a domain…** and press Enter. Make
+sure the switch next to it is on.
+
+![the NextDNS Denylist with example.net switched on](./nextdns-denylist-enabled.png)
+
+## Turn on the check in Virtue
+
+1. Open **Settings** and find **DNS filter check**.
+2. Turn on **Check my DNS filter**.
+3. Enter the domain in **DNS check domain** and click **Save**.
+
+The domain applies to all your devices. Each device checks it as soon as it
+picks up the new setting, then once an hour.
+
+## What your partners see
+
+- **DNS Filter Off** appears in your logs when a device can look up the domain
+  normally. Your partners get an email right away.
+- **DNS Filter On** appears when the domain is blocked again. No email is sent.
+- Your partners get an email right away when you turn the check off, change the
+  domain, or turn the check off for one device.
+
+A device that is offline reports nothing. It checks again 10 minutes later.
+
+See [Log types](/help/web/log-types) for every log entry.
+
+## Turn the check off for one device
+
+Some devices use their own DNS, such as a work laptop. Open **Devices**, click
+**Edit** on that device and turn off **Check the DNS filter on this device**.
+Your partners are notified.
+
+## Test the alert
+
+Tell your partner before you test. In NextDNS, turn off the switch next to your
+check domain on the **Denylist** tab.
+
+![the NextDNS Denylist with example.net switched off](./nextdns-denylist-disabled.png)
+
+Within an hour, your device logs **DNS Filter Off** and your partners get an
+email. Turn the switch back on when you are done.

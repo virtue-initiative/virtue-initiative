@@ -76,6 +76,8 @@ The device looked up its DNS check domain and got a normal answer, so the DNS
 filter is not blocking it. The filter may be turned off or bypassed, or the
 domain may have been removed from its block list.
 
+See [DNS filter check](/help/web/dns-filter-check) for how the check works.
+
 ## DNS Filter On
 
 The device's DNS filter blocks the DNS check domain again after an earlier
