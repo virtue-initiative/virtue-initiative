@@ -4,7 +4,11 @@ import { http, HttpResponse } from 'msw';
 import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
-import { TEST_ANALYTICS_SNAPSHOT, TEST_FEATURE_FLAG } from '../../mocks/fixtures';
+import {
+  TEST_ANALYTICS_SNAPSHOT,
+  TEST_ANNOUNCEMENT,
+  TEST_FEATURE_FLAG,
+} from '../../mocks/fixtures';
 import { renderWithClient } from '../../test-utils';
 import { Admin } from './index';
 
@@ -347,6 +351,90 @@ describe('Admin', () => {
     await waitFor(() => {
       expect(deleted).toBe(TEST_FEATURE_FLAG.key);
       expect(screen.getByText(/no feature flags yet/i)).toBeInTheDocument();
+    });
+  });
+
+  it('lists announcements with their level, platforms and version rule (WEB-072)', async () => {
+    renderWithClient(<Admin />);
+
+    expect(await screen.findByText(TEST_ANNOUNCEMENT.message)).toBeInTheDocument();
+    expect(screen.getByText('Urgent')).toBeInTheDocument();
+    expect(screen.getByText('Windows, macOS')).toBeInTheDocument();
+    expect(screen.getByText('Versions below 0.2.0')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: TEST_ANNOUNCEMENT.url! })).toHaveAttribute(
+      'href',
+      TEST_ANNOUNCEMENT.url,
+    );
+  });
+
+  it('says so when there are no announcements (WEB-072)', async () => {
+    server.use(http.get(`${BASE}/admin/announcements`, () => HttpResponse.json([])));
+    renderWithClient(<Admin />);
+
+    expect(await screen.findByText('No announcements. Devices show nothing.')).toBeInTheDocument();
+  });
+
+  it('creates an announcement for chosen platforms (WEB-072)', async () => {
+    let body: unknown;
+    server.use(
+      http.post(`${BASE}/admin/announcements`, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({
+          ...TEST_ANNOUNCEMENT,
+          id: '00000000-0000-4000-8000-00000000a002',
+          message: 'Please update',
+          url: null,
+          level: 'warning',
+          platforms: ['android'],
+          below_version: '0.2.0',
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await user.type(await screen.findByLabelText('Message'), '  Please update  ');
+    await user.selectOptions(screen.getByLabelText('Level'), 'warning');
+    await user.type(screen.getByLabelText('Show only below version'), '0.2.0');
+    await user.click(screen.getByLabelText('All platforms'));
+    const create = screen.getByRole('button', { name: /create announcement/i });
+    expect(create).toBeDisabled();
+    await user.click(screen.getByLabelText('Android'));
+    await user.click(create);
+
+    await waitFor(() => {
+      expect(body).toEqual({
+        message: 'Please update',
+        url: null,
+        level: 'warning',
+        platforms: ['android'],
+        below_version: '0.2.0',
+      });
+      expect(screen.getByText('Please update')).toBeInTheDocument();
+    });
+  });
+
+  it('deletes an announcement after confirming (WEB-072, WEB-020)', async () => {
+    let deleted: unknown;
+    server.use(
+      http.delete(`${BASE}/admin/announcements/:id`, ({ params }) => {
+        deleted = params.id;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<Admin />);
+
+    await screen.findByText(TEST_ANNOUNCEMENT.message);
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(deleted).toBeUndefined();
+    await user.click(screen.getByRole('button', { name: /^delete announcement$/i }));
+
+    await waitFor(() => {
+      expect(deleted).toBe(TEST_ANNOUNCEMENT.id);
+      expect(screen.getByText('No announcements. Devices show nothing.')).toBeInTheDocument();
     });
   });
 });

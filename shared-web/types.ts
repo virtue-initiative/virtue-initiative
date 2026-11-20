@@ -410,3 +410,43 @@ export const setFeatureFlagOverrideSchema = z.object({
   enabled: z.boolean().nullable(),
 });
 export type SetFeatureFlagOverridePayload = z.infer<typeof setFeatureFlagOverrideSchema>;
+
+// ── Announcements (api/SPEC.md API-068) ──────────────────────────────────────
+
+export const announcementLevelSchema = z.enum(['info', 'warning', 'urgent']);
+export type AnnouncementLevel = z.infer<typeof announcementLevelSchema>;
+
+export const announcementPlatforms = ['linux', 'macos', 'windows', 'android', 'ios'] as const;
+export type AnnouncementPlatform = (typeof announcementPlatforms)[number];
+
+export const announcementSchema = z.object({
+  id: z.string(),
+  message: z.string(),
+  url: z.string().nullable(),
+  level: announcementLevelSchema,
+  platforms: z.array(z.string()).nullable(),
+  below_version: z.string().nullable(),
+  created_at: z.number(),
+});
+export type Announcement = z.infer<typeof announcementSchema>;
+
+// What a device is sent in DeviceSettings.announcement.
+export type DeviceAnnouncement = Pick<Announcement, 'message' | 'url' | 'level'>;
+
+export const ANNOUNCEMENT_MESSAGE_MAX_LENGTH = 280;
+
+export const createAnnouncementSchema = z.object({
+  message: z.string().trim().min(1).max(ANNOUNCEMENT_MESSAGE_MAX_LENGTH),
+  url: z
+    .url({ protocol: /^https$/ })
+    .nullable()
+    .optional(),
+  level: announcementLevelSchema,
+  platforms: z.array(z.enum(announcementPlatforms)).min(1).nullable().optional(),
+  below_version: z
+    .string()
+    .regex(/^\d+(\.\d+)*$/)
+    .nullable()
+    .optional(),
+});
+export type CreateAnnouncementPayload = z.infer<typeof createAnnouncementSchema>;

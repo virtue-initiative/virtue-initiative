@@ -283,6 +283,12 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _monitorStatus, value);
     }
 
+    /// <summary>
+    /// The announcement the main window shows below its actions, only while
+    /// signed in (CLIENT-033).
+    /// </summary>
+    public AnnouncementPayload? Announcement => LoggedIn ? MonitorStatus?.Announcement : null;
+
     public string MonitorStateDisplay => MonitorState.Replace('_', ' ');
 
     public string TrayTooltip =>

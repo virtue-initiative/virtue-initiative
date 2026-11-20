@@ -9,7 +9,7 @@ mod common;
 use common::*;
 use virtue_core::CoreError;
 use virtue_core::api::{DeviceState, UploadedBatchResponse};
-use virtue_core::model::{BatchRecipient, DeviceSettings};
+use virtue_core::model::{AnnouncementLevel, BatchRecipient, DeviceAnnouncement, DeviceSettings};
 use virtue_core::testing::Scenario;
 
 /// An authenticated scenario with the next screenshot far away, so the only
@@ -410,6 +410,7 @@ fn settings_with(flags: &[&str], recipients: usize) -> DeviceSettings {
             .collect(),
         hash_base_url: None,
         feature_flags: flags.iter().map(|f| f.to_string()).collect(),
+        announcement: None,
     }
 }
 
@@ -433,6 +434,31 @@ fn settings_and_feature_flags_are_fetched_on_startup_and_saved() {
         assert!(settings.has_feature_flag("beta"), "{name}");
         assert!(!settings.has_feature_flag("other"), "{name}");
     }
+}
+
+// CORE-005, CORE-010: the announcement in the device settings is saved and shown in status.
+#[test]
+fn the_announcement_is_saved_from_settings_and_shown_in_status() {
+    let announcement = DeviceAnnouncement {
+        message: "Update by hand".into(),
+        url: Some("https://virtueinitiative.org/download".into()),
+        level: AnnouncementLevel::Urgent,
+    };
+    let first = Scenario::authenticated();
+    let expected = announcement.clone();
+    let mut second = Scenario::authenticated_with_state_dir_configured(
+        first.state_dir_path().to_path_buf(),
+        T0,
+        move |_, api| api.state().default_device_settings.announcement = Some(expected.clone()),
+    );
+    assert_eq!(second.status().announcement, Some(announcement.clone()));
+    assert_eq!(
+        persisted(&second)
+            .upload
+            .settings
+            .and_then(|s| s.announcement),
+        Some(announcement)
+    );
 }
 
 // CORE-005: device settings are refreshed on batch upload and saved.

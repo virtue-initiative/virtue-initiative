@@ -2,6 +2,7 @@ import type {
   AnalyticsSnapshot,
   Device,
   FeatureFlag,
+  Announcement,
   LockedPassword,
   User,
   WatcherPartner,
@@ -90,4 +91,14 @@ export const TEST_FEATURE_FLAG: FeatureFlag = {
   overrides: [{ user_id: 'user-2', email: 'tester@example.com', enabled: true }],
   created_at: 1_700_000_000_000,
   updated_at: 1_700_000_000_000,
+};
+
+export const TEST_ANNOUNCEMENT: Announcement = {
+  id: '00000000-0000-4000-8000-00000000a001',
+  message: 'Version 0.2.0 is out. Update by hand to keep monitoring.',
+  url: 'https://virtueinitiative.org/download',
+  level: 'urgent',
+  platforms: ['windows', 'macos'],
+  below_version: '0.2.0',
+  created_at: 1_700_000_000_000,
 };

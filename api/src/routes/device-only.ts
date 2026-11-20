@@ -22,6 +22,7 @@ import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
+import { announcementForDevice } from '../lib/announcements';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
@@ -97,8 +98,8 @@ async function createDeviceSession(
 
 /**
  * Builds the DeviceSettings embedded in POST /d/device, GET /d/device, and POST /d/batch
- * responses — the one canonical place a device's wrapping keys and a fresh hash-server
- * token (DeviceSettings.hash_token) are assembled.
+ * responses — the one canonical place a device's wrapping keys, a fresh hash-server
+ * token (DeviceSettings.hash_token) and its announcement are assembled.
  */
 async function buildDeviceSettings(
   c: Context<{ Bindings: Env; Variables: Variables }>,
@@ -113,10 +114,15 @@ async function buildDeviceSettings(
     c.env.DB,
     device.owner,
   );
-  const [hashToken, featureFlags] = await Promise.all([
+  const [hashToken, featureFlags, announcement] = await Promise.all([
     generateToken('device', device.id, c.env.JWT_PRIVATE_KEY, HASH_TOKEN_TTL_SECONDS),
     // API-061: a device gets its owner's flags, so all their devices agree.
     enabledFeatureFlags(c.env.DB, device.owner, ownerFlagOverrides),
+    // API-068: the device's version comes from the request, not the database.
+    announcementForDevice(c.env.DB, {
+      platform: device.platform,
+      version: c.req.header('X-Virtue-Version'),
+    }),
   ]);
 
   return {
@@ -130,6 +136,7 @@ async function buildDeviceSettings(
     hash_base_url: hashBaseUrl,
     hash_token: hashToken,
     feature_flags: featureFlags,
+    announcement,
   };
 }
 
