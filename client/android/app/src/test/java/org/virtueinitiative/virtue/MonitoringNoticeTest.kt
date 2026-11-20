@@ -21,6 +21,14 @@ class MonitoringNoticeTest {
         assertTrue(off.opensAccessibilitySettings)
     }
 
+    // CLIENT-030: a notification Android dropped while notifications were off is posted again once they are allowed.
+    @Test
+    fun noticeIsPostedAgainOnceAllowed() {
+        assertTrue(MonitoringNotice.needsRepost(notificationsEnabled = true, showing = false))
+        assertFalse(MonitoringNotice.needsRepost(notificationsEnabled = true, showing = true))
+        assertFalse(MonitoringNotice.needsRepost(notificationsEnabled = false, showing = false))
+    }
+
     // CLIENT-030: only a setting that no longer lists the service counts as turned off.
     @Test
     fun settingListMatchesShortAndFullNames() {

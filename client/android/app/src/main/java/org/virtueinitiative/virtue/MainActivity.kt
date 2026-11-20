@@ -215,6 +215,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The user may be back from allowing notifications (CLIENT-030).
+        ScreenshotService.repostNotificationIfMissing()
         refreshUi()
         // Re-check after short delay in case the accessibility service just connected
         binding.root.postDelayed({ refreshUi() }, 600)

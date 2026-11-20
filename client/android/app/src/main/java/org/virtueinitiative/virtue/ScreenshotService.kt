@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ import kotlinx.coroutines.cancel
 // Screen capture is performed by VirtueAccessibilityService.takeScreenshot().
 class ScreenshotService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var foreground = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,6 +38,7 @@ class ScreenshotService : Service() {
         // go without the notification until the next start attempt.
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
+            foreground = true
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Foreground service start refused", e)
             stopSelf()
@@ -54,6 +57,8 @@ class ScreenshotService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // KeepAliveWorker's start lands here when the service already runs.
+        repostIfMissing()
         return START_STICKY
     }
 
@@ -89,6 +94,15 @@ class ScreenshotService : Service() {
     /** Re-posts the notification for the current Accessibility state (CLIENT-030). */
     fun updateNotification() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+    }
+
+    /** Posts the notification again if Android dropped it while notifications were off (CLIENT-030). */
+    fun repostIfMissing() {
+        if (!foreground) return
+        val showing = getSystemService(NotificationManager::class.java)
+            .activeNotifications.any { it.id == NOTIFICATION_ID }
+        val enabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
+        if (MonitoringNotice.needsRepost(enabled, showing)) updateNotification()
     }
 
     private fun createNotificationChannel() {
@@ -127,6 +141,11 @@ class ScreenshotService : Service() {
         /** Follows the Accessibility service connecting or disconnecting. A no-op when the service is not running. */
         fun refreshNotification() {
             runCatching { instance?.updateNotification() }
+        }
+
+        /** For the app coming back to the front, where the user may just have allowed notifications. */
+        fun repostNotificationIfMissing() {
+            runCatching { instance?.repostIfMissing() }
         }
 
         fun start(context: Context): String? {
