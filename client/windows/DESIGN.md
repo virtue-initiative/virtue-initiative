@@ -27,23 +27,32 @@ The app registers a per-user Scheduled Task, `VirtueResidentWatchdog`, at startu
 it relaunches the app if it isn't running, which covers crashes and hangs. The app's
 single-instance redirect turns each relaunch into a no-op while it is already running.
 
-For a packaged install the task is a hidden PowerShell script, hosted by `conhost.exe --headless`
-so no console flashes (CLIENT-014). While `Get-AppxPackage` finds the package, it launches
-`Virtue.WindowsApp.exe` from the package's `InstallLocation`. Once the package is gone (checked
-again after 20 seconds, so an update swap doesn't count), it deletes `%ProgramData%\Virtue` and
-unregisters itself, since an MSIX uninstall runs no app code. Tray Exit re-registers the task
-cleanup-only, so a deliberate exit stays exited but a later uninstall still removes the device
-state. An unpackaged or dev run gets a plain task that launches its own exe, and Exit deletes it.
+The task runs the app's exe directly and nothing else. An MSIX uninstall runs no app code, so the
+task is the one thing that outlives the package, and it cleans itself up by expiring (CLIENT-014,
+CLIENT-028): its trigger ends a day after registration and `DeleteExpiredTaskAfter` has Task
+Scheduler delete it then. The app registers it again at every launch and every 6 hours while it
+runs, so it never expires while Virtue is in use. After an uninstall it fails quietly (the exe is
+gone) for up to a day and then disappears. Tray Exit deletes it.
+
+The device state needs no cleanup, because it lives in the package's own `LocalState\Virtue`,
+which Windows deletes at uninstall (CLIENT-002). See [Files on a running machine](README.md#files-on-a-running-machine).
+
+- **No script.** For a while (#885, never released) the task was a hidden PowerShell script under
+  `conhost.exe --headless` that deleted `%ProgramData%\Virtue` and unregistered itself after an
+  uninstall. Bitdefender quarantined the task and then blocked the script as malware (#920): a
+  hidden console, inline PowerShell, file deletion and self-removal are the shape of malware
+  persistence. Moving the state into the package removed the need for any of it.
 
 - **Every minute** is Task Scheduler's floor for a repeating trigger (`Repetition/Interval` is
   `minInclusive="PT1M"`, and `schtasks.exe` rejects less). The core's late-wakeup threshold
   (CORE-002) is 2 minutes partly so a normal relaunch doesn't raise a tamper alert.
-- **The script looks up the install location on every run**, rather than registering
-  `Environment.ProcessPath`. An MSIX app's process path contains its version, so after a Store
-  update the old path no longer exists and every run failed with `0x80070002`. It doesn't use the
-  app execution alias (`virtue-initiative.exe`) either, since the user can switch that off in
-  Settings > Apps > App execution aliases. `explorer.exe shell:AppsFolder\...` is also
-  version-independent but drops the command-line arguments the quiet relaunch needs.
+- **It launches the app execution alias** (`virtue-initiative.exe`, see `AppLaunchPath`) rather
+  than `Environment.ProcessPath`. An MSIX app's process path contains its version, so after a
+  Store update the old path no longer exists and every run fails with `0x80070002`.
+  `explorer.exe shell:AppsFolder\...` is also version-independent but drops the command-line
+  arguments the quiet relaunch needs. If the user switches the alias off (Settings > Apps > App
+  execution aliases), the task falls back to the process path, which works until the next update
+  and is repaired at the next launch.
 - **Not `RegisterApplicationRestart`.** Windows' restart API registers fine for MSIX apps and
   Windows Error Reporting sees the crash, but nothing is relaunched.
 
@@ -178,12 +187,12 @@ throughout. If the one shot fires while the swap is still in flight, the launch 
 shot is spent; the watchdog still picks the app up within a minute, exactly as before this
 existed. Every failure degrades to that. The task is cancelled on the paths where it would
 otherwise fire into a running app: at startup (`RegisterWatchdog()`), on tray Exit alongside
-`RestartWatchdog.StopRelaunching()`, and in `ClearStagedUpdateAfterFailedInstall()`. It is also
+`RestartWatchdog.Unregister()`, and in `ClearStagedUpdateAfterFailedInstall()`. It is also
 re-armed before the interactive install retry, since the first shot has very likely already
 fired while the consent dialog was up.
 
 Pressing the notice's button also sets `RelaunchWindowFlag`
-(`%PROGRAMDATA%\Virtue\show-window-on-next-launch`, unit-tested) and flips the card to
+(`show-window-on-next-launch` in the app's folder, unit-tested) and flips the card to
 "Installing the update. Virtue will close and restart itself within a minute." with the button
 disabled. The flag is consumed by the next launch, which then shows the main window instead of
 coming back quietly into the tray: the user asked for a restart, so the process vanishing with
@@ -220,8 +229,8 @@ rebuilds all of it through `OnUpdateStaged`.
 ### Testing an update without publishing one
 
 Reaching any of the above normally requires publishing a newer package to a Store flight, so
-there is a developer-only shortcut. Write a file at
-`%PROGRAMDATA%\Virtue\debug-stage-update` — `DebugUpdateSentinel`
+there is a developer-only shortcut. Write a file named `debug-stage-update` in the app's folder
+(see [Files on a running machine](README.md#files-on-a-running-machine)) — `DebugUpdateSentinel`
 (`Virtue.WindowsApp.Core/Interop/DebugUpdateSentinel.cs`, unit-tested) — and within ~5 seconds
 the poll slice consumes it (reading, then deleting it) and raises the _same_ `UpdateStaged`
 event a real download would, so the countdown, the window-closed auto-restart and the button all
@@ -236,12 +245,12 @@ update, just with the normal cap.
 
 ```powershell
 # Window open: notice card with a 2-minute countdown, then a forced restart.
-echo 2m > C:\ProgramData\Virtue\debug-stage-update
+echo 2m > (Join-Path (Resolve-Path "$env:LOCALAPPDATA\Packages\VirtueInitiative.*\LocalState\Virtue") debug-stage-update)
 ```
 
 ### Reading the update log
 
-`%PROGRAMDATA%\Virtue\ui-startup.log` is the only observability channel on a Store install, so
+`ui-startup.log` in the app's folder is the only observability channel on a Store install, so
 the whole check lifecycle is logged there — including the zero-updates case, which used to be
 silent and made "checked, nothing available" indistinguishable from "never checked". A healthy
 auto-update reads roughly:
@@ -280,6 +289,6 @@ being the missing-owner-window one above).
 device build gets screenshots to the API. `virtue_windows` has no daemon process or CLI to
 drive, so a small `virtue-windows-ci-runner` binary makes the same calls the app makes
 (initialize, start monitoring, sign in) against the library, then waits long enough for the
-background thread to capture, hash and upload before exiting. It runs with `PROGRAMDATA` pointed
-at a temp directory, so it doesn't touch a real install. GitHub's Windows runners have an
+background thread to capture, hash and upload before exiting. It runs unpackaged with
+`PROGRAMDATA` pointed at a temp directory, so it doesn't touch a real install. GitHub's Windows runners have an
 interactive desktop, so GDI capture takes a real screenshot.
