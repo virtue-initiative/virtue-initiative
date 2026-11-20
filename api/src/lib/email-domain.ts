@@ -30,6 +30,7 @@ export const emailKinds = [
   'device_logout',
   'tamper_alert',
   'locked_password_accessed',
+  'dns_filter_check_changed',
   'daily_digest',
   'weekly_digest',
   'account_exists_notice',

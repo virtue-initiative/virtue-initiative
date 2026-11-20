@@ -119,6 +119,21 @@ pub enum UploadKind {
         count: u32,
         window_ms: i64,
     },
+    /// The check domain resolved normally: the owner's DNS filter is not in
+    /// use on this device. Risk 90%, so partners are emailed at once. See CORE-028.
+    DnsFilterInactive {
+        domain: String,
+    },
+    /// The check domain is blocked again after a `DnsFilterInactive`.
+    /// Risk 0%. See CORE-028.
+    DnsFilterActive {
+        domain: String,
+    },
+    /// The settings stopped naming a check domain; `domain` is the one that
+    /// was checked. Risk 90%. See CORE-028.
+    DnsFilterCheckRemoved {
+        domain: String,
+    },
 }
 
 /// One image found on a screenshot and how it scored (BATCH-003).
@@ -183,6 +198,15 @@ impl std::fmt::Debug for UploadKind {
                     f,
                     "RepeatedRestarts {{ count: {count:?}, window_ms: {window_ms:?} }}"
                 )
+            }
+            UploadKind::DnsFilterInactive { domain } => {
+                write!(f, "DnsFilterInactive {{ domain: {domain:?} }}")
+            }
+            UploadKind::DnsFilterActive { domain } => {
+                write!(f, "DnsFilterActive {{ domain: {domain:?} }}")
+            }
+            UploadKind::DnsFilterCheckRemoved { domain } => {
+                write!(f, "DnsFilterCheckRemoved {{ domain: {domain:?} }}")
             }
         }
     }
@@ -294,6 +318,10 @@ pub struct DeviceSettings {
     /// not listed is off, as is every flag before settings are first fetched.
     #[serde(default)]
     pub feature_flags: Vec<String>,
+    /// The domain the owner blocks in their DNS filter, checked by CORE-028.
+    /// `None` turns the check off.
+    #[serde(default)]
+    pub dns_filter_domain: Option<String>,
 }
 
 impl DeviceSettings {
@@ -444,6 +472,37 @@ mod tests {
                 "data": { "utc_ms": 2_000 }
             })
         );
+    }
+
+    // BATCH-003, CORE-028: the DNS filter events carry the domain they are about.
+    #[test]
+    fn dns_filter_events_serialize_to_tagged_shape() {
+        let cases = [
+            (
+                UploadKind::DnsFilterInactive {
+                    domain: "blocked.example".into(),
+                },
+                "dns_filter_inactive",
+            ),
+            (
+                UploadKind::DnsFilterActive {
+                    domain: "blocked.example".into(),
+                },
+                "dns_filter_active",
+            ),
+            (
+                UploadKind::DnsFilterCheckRemoved {
+                    domain: "blocked.example".into(),
+                },
+                "dns_filter_check_removed",
+            ),
+        ];
+        for (upload, kind) in cases {
+            assert_eq!(
+                serde_json::to_value(upload).unwrap(),
+                json!({ "type": kind, "data": { "domain": "blocked.example" } })
+            );
+        }
     }
 
     // BATCH-003: event type and data encoding.

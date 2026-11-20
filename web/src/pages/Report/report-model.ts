@@ -112,6 +112,10 @@ export function buildReport(logs: FeedLog[], window: ReportWindow): Report {
   return report;
 }
 
+function dnsDomainLabel(data: Record<string, unknown>): string {
+  return typeof data.domain === 'string' && data.domain ? ` ${data.domain}` : '';
+}
+
 function minutesLabel(ms: number): string {
   const minutes = Math.max(1, Math.round(ms / 60_000));
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
@@ -155,6 +159,10 @@ export function explainAlert(
       return 'Scheduled screenshots were taken late or not at all while the device was awake. The monitoring app may have been stopped, killed or frozen, or the device may have been too busy to run it on time.';
     case 'capture_failed':
       return 'The device failed to take several screenshots in a row. This often follows a permissions or settings change.';
+    case 'dns_filter_inactive':
+      return `The device resolved its DNS check domain${dnsDomainLabel(data)} normally, so its DNS filter is not blocking it. The filter may be turned off or bypassed.`;
+    case 'dns_filter_check_removed':
+      return `The DNS check domain${dnsDomainLabel(data)} was removed from this device, so its DNS filter is no longer checked.`;
     case 'alert':
       return typeof data.message === 'string' && data.message
         ? data.message

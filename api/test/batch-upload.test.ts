@@ -510,6 +510,7 @@ describe('POST /d/batch response (API-038)', () => {
       platform: 'linux',
       hash_base_url: 'https://example.com',
       feature_flags: expect.any(Array),
+      dns_filter_domain: null,
     });
     expect(body.settings.wrapping_keys.map((key) => key.user_id)).toEqual([userId]);
     expect(body.settings.wrapping_keys[0]!.pub_key).toEqual(expect.any(String));

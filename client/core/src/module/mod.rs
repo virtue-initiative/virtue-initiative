@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod capture_availability;
+pub mod dns_filter;
 pub mod errors;
 pub mod heartbeat;
 pub mod lifecycle;

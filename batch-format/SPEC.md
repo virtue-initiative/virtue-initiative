@@ -47,20 +47,23 @@ The encoded bytes of an event are what the hash chain covers (BATCH-006). The pr
 
 Known types and their `data` fields:
 
-| `type`               | `data`                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| `screenshot`         | `image`: bytes, `content_type`: string, `skin_detection`?: float, `nsfw_detection`?: float |
-| `screenshot_skipped` | `reason`: `"static_screen"` or `"locked_or_screensaver"`                                   |
-| `screenshot_missed`  | none                                                                                       |
-| `capture_failed`     | none                                                                                       |
-| `heartbeat`          | none                                                                                       |
-| `user_stop`          | none                                                                                       |
-| `user_start`         | none                                                                                       |
-| `system_login`       | `utc_ms`: integer                                                                          |
-| `system_logout`      | `utc_ms`: integer                                                                          |
-| `repeated_restarts`  | `count`: integer, `window_ms`: integer                                                     |
-| `alert`              | `message`: string                                                                          |
-| `dev`                | `title`: string, `details`: string or nil                                                  |
+| `type`                     | `data`                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| `screenshot`               | `image`: bytes, `content_type`: string, `skin_detection`?: float, `nsfw_detection`?: float |
+| `screenshot_skipped`       | `reason`: `"static_screen"` or `"locked_or_screensaver"`                                   |
+| `screenshot_missed`        | none                                                                                       |
+| `capture_failed`           | none                                                                                       |
+| `heartbeat`                | none                                                                                       |
+| `user_stop`                | none                                                                                       |
+| `user_start`               | none                                                                                       |
+| `system_login`             | `utc_ms`: integer                                                                          |
+| `system_logout`            | `utc_ms`: integer                                                                          |
+| `repeated_restarts`        | `count`: integer, `window_ms`: integer                                                     |
+| `dns_filter_inactive`      | `domain`: string                                                                           |
+| `dns_filter_active`        | `domain`: string                                                                           |
+| `dns_filter_check_removed` | `domain`: string                                                                           |
+| `alert`                    | `message`: string                                                                          |
+| `dev`                      | `title`: string, `details`: string or nil                                                  |
 
 A `screenshot` event scored per image (CORE-004) MAY also carry `model_runs`: integer, how many times the NSFW model ran, and `images`: an array with one map per image found on the screen, which is empty when none was found. Each map has these keys:
 

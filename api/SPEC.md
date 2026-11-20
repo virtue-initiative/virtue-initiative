@@ -46,11 +46,14 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "name": "Name" | undefined,
   "pub_key": Base64 | undefined,
   "encrypted_priv_key": Base64 | undefined,
+  "dns_filter_domain": "example.net" | null,
   "feature_flags": ["flag_key", ...]
 }
 ```
 
 `feature_flags` lists the keys of the flags enabled for this user (see API-061).
+
+`dns_filter_domain` is the domain the user blocks in their DNS filter, or `null` until they set one (API-020). It applies to all the user's devices (see DeviceSettings).
 
 **Device**
 
@@ -60,6 +63,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "owner": UUID,
   "name": "My Laptop",
   "platform": "linux",
+  "dns_filter_disabled": false,
   "last_hash_at": DateTime | null,
   "pending_count": Number,
   "status": "online" | "offline" | "logged_out"
@@ -110,6 +114,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   "id": UUID,
   "name": "My Laptop",
   "platform": "linux",
+  "dns_filter_domain": "example.net" | null,
   "wrapping_keys": [
     {
       "user_id": UUID,
@@ -123,6 +128,8 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 ```
 
 `feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+
+`dns_filter_domain` is the owner's `dns_filter_domain` (see User), which the device uses for the check in CORE-028. It MUST be `null` when the owner has none or the device has `dns_filter_disabled` set (API-030), and MUST reflect the current values of both each time settings are returned.
 
 **FeatureFlag**
 
@@ -509,9 +516,14 @@ The client MUST provide a request in this shape.
   "settings": {
     "email_frequency": "none" | "alerts-only" | "daily" | "weekly" | undefined,
     "timezone": "America/New_York" | undefined
-  } | undefined
+  } | undefined,
+  "dns_filter_domain": "example.net" | null | undefined
 }
 ```
+
+`dns_filter_domain` names the domain the user blocks in their DNS filter, which all their devices resolve to check that the filter is in use (CORE-028). The server MUST trim and lowercase it, and MUST respond **HTTP 400** and change nothing unless it is a plain domain name of at most 253 characters with at least one dot and no scheme, port, path or whitespace. `null` MUST clear it.
+
+If the request clears a set `dns_filter_domain` or replaces it with a different one, the server MUST immediately email every accepted watcher, naming the previous domain and any new one, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`). Setting a domain where none was set, or sending the current one again, MUST NOT email. A failure to send MUST NOT fail the request. The alert does not wait for a device to pick up its settings (CORE-028), so turning the check off and back on between two device checks is still reported.
 
 If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
@@ -763,7 +775,7 @@ The server SHOULD fetch the count from the hash server and the last updated from
 
 The server MUST report `status` as `logged_out` for a logged-out device, `online` when `last_hash_at` is within the last 2 hours, and `offline` otherwise, including when the hash server cannot be reached. The server SHOULD NOT read batches to build this response. A client that needs a device's last upload SHOULD derive it from the batches returned by `GET /data` (API-033).
 
-The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view.
+The server SHOULD return **HTTP 200** plus a list of all the devices that a user can view. Each device MUST include its `dns_filter_disabled` (see API-030).
 
 ```js
 Device[]
@@ -775,9 +787,14 @@ The client MUST be authenticated with a **Web Token** and send
 
 ```js
 {
-  "name": "New Device Name"
+  "name": "New Device Name" | undefined,
+  "dns_filter_disabled": true | false | undefined
 }
 ```
+
+At least one field MUST be present. `dns_filter_disabled: true` turns the DNS filter check (CORE-028) off for this device only, for example a work laptop with its own DNS; `false` turns it back on. It MUST be `false` for a new device.
+
+If the request turns `dns_filter_disabled` from `false` to `true` while the owner has a `dns_filter_domain` (API-020), the server MUST immediately email every accepted watcher, naming the device, with the same delivery as the API-020 alert. Turning it back to `false`, or sending the current value again, MUST NOT email.
 
 The server MUST respond **HTTP 404** if the device does not exist or is not owned by the user.
 

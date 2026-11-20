@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   pub_key BLOB,
   encrypted_priv_key BLOB,
   feature_flags TEXT NOT NULL DEFAULT '{}',
+  dns_filter_domain TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS devices (
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
+  dns_filter_disabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
   FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE

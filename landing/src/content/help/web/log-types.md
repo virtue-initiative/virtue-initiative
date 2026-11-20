@@ -70,6 +70,24 @@ within 30 minutes). This usually points to a configuration or permissions
 problem with screen capture. See the [installation guide](/download) for your
 platform.
 
+## DNS Filter Off
+
+The device looked up its DNS check domain and got a normal answer, so the DNS
+filter is not blocking it. The filter may be turned off or bypassed, or the
+domain may have been removed from its block list.
+
+See [DNS filter check](/help/web/dns-filter-check) for how the check works.
+
+## DNS Filter On
+
+The device's DNS filter blocks the DNS check domain again after an earlier
+DNS Filter Off entry.
+
+## DNS Check Removed
+
+The device owner cleared their DNS check domain or turned the check off for this
+device, so the device no longer checks its DNS filter.
+
 ## Developer
 
 A developer or diagnostic log entry. These are produced by developer tooling and

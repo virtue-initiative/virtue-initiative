@@ -308,7 +308,7 @@ export const api = {
 
   getDevices: () => req<Device[]>('/device'),
 
-  patchDevice: (id: string, patch: { name?: string }) =>
+  patchDevice: (id: string, patch: { name?: string; dns_filter_disabled?: boolean }) =>
     req<void>(`/device/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),

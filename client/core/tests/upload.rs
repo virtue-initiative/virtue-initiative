@@ -410,6 +410,7 @@ fn settings_with(flags: &[&str], recipients: usize) -> DeviceSettings {
             .collect(),
         hash_base_url: None,
         feature_flags: flags.iter().map(|f| f.to_string()).collect(),
+        dns_filter_domain: None,
     }
 }
 

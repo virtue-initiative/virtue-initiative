@@ -262,6 +262,7 @@ describe('Validation (API-004)', () => {
     ['PATCH /user', 'unknown email_frequency', { settings: { email_frequency: 'hourly' } }, true],
     ['PATCH /user', 'timezone is not a zone', { settings: { timezone: 'Mars/Base' } }, true],
     ['PATCH /user', 'settings is not an object', { settings: 'weekly' }, true],
+    ['PATCH /user', 'dns_filter_domain is not a string', { dns_filter_domain: 5 }, true],
     ...Object.keys(passwordFields).map(
       (key) =>
         [
@@ -553,6 +554,7 @@ describe('GET /user (API-019)', () => {
       name: 'Una User',
       pub_key: await publicKeyFor(EMAIL),
       encrypted_priv_key: privateKeyFor(EMAIL),
+      dns_filter_domain: null,
       feature_flags: [],
     });
   });
@@ -629,6 +631,53 @@ describe('PATCH /user (API-020)', () => {
     expect((await getUser(cookie)).body).toMatchObject({
       name: 'Before',
       settings: { email_frequency: 'weekly' },
+    });
+  });
+
+  it('sets, changes and clears the DNS check domain, trimmed and lowercased (API-020, API-019)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL, 'password123', 'Una');
+    const domain = async () => (await getUser(cookie)).body.dns_filter_domain;
+
+    const set = await patch(cookie, { dns_filter_domain: '  Blocked.Example.NET ' });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(await domain()).toBe('blocked.example.net');
+
+    expect((await patch(cookie, { dns_filter_domain: 'other.example.org' })).status).toBe(200);
+    expect(await domain()).toBe('other.example.org');
+
+    expect((await patch(cookie, { name: 'Renamed' })).status).toBe(200);
+    expect((await getUser(cookie)).body).toMatchObject({
+      name: 'Renamed',
+      dns_filter_domain: 'other.example.org',
+    });
+
+    expect((await patch(cookie, { dns_filter_domain: null })).status).toBe(200);
+    expect(await domain()).toBeNull();
+  });
+
+  it.each([
+    ['a scheme', 'https://example.net'],
+    ['a port', 'example.net:8080'],
+    ['a space', 'example .net'],
+    ['a path', 'example.net/path'],
+    ['no dot', 'localhost'],
+    ['an empty string', ''],
+    ['only spaces', '   '],
+    [
+      'more than 253 characters',
+      `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(63)}.net`,
+    ],
+  ])('rejects a DNS check domain with %s and changes nothing (API-020)', async (_name, value) => {
+    const { cookie } = await signupAndGetCookie(EMAIL, 'password123', 'Before');
+    await patch(cookie, { dns_filter_domain: 'kept.example.net' });
+
+    const res = await patch(cookie, { name: 'After', dns_filter_domain: value });
+
+    expect(res.status).toBe(400);
+    expect((await getUser(cookie)).body).toMatchObject({
+      name: 'Before',
+      dns_filter_domain: 'kept.example.net',
     });
   });
 

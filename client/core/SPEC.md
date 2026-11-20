@@ -25,7 +25,7 @@ loop(persisted state):
 
 ## CORE-020 Wakeup scheduling
 
-The wakeup time picked at the end of a tick MUST be the earliest time at which scheduled work can make progress: the next screenshot draw, the next heartbeat, the pending batch becoming eligible to upload (its batch interval elapsing, or immediately when it is otherwise ready to send, e.g. a forced flush), or a hash/batch retry backoff expiring. Pending work that is held by a condition no timer can clear (e.g. uploads held while the screen is locked, or no device credentials or settings) MUST NOT pull the wakeup time earlier; it waits for the next wakeup or client request instead.
+The wakeup time picked at the end of a tick MUST be the earliest time at which scheduled work can make progress: the next screenshot draw, the next heartbeat, the pending batch becoming eligible to upload (its batch interval elapsing, or immediately when it is otherwise ready to send, e.g. a forced flush), a hash/batch retry backoff expiring, or the next DNS filter check (CORE-028). Pending work that is held by a condition no timer can clear (e.g. uploads held while the screen is locked, or no device credentials or settings) MUST NOT pull the wakeup time earlier; it waits for the next wakeup or client request instead.
 
 The loop MUST NOT run a tick before the wakeup time unless a client request was applied. It MAY wake before the wakeup time (e.g. to bound how far a platform timer can drift across a system suspend), but MUST then go back to waiting without running a tick.
 
@@ -240,6 +240,23 @@ most one per 30 minutes. The restart-timestamps array MUST be cleared once
 the threshold is reached, alert sent or not. The event SHOULD be called
 "repeated_restarts". This check MUST be skipped where `lifecycle_enabled` is
 false (see CORE-002).
+
+## CORE-028 DNS filter check
+
+The device settings MAY name a check domain (`dns_filter_domain`) that the owner blocks in their DNS filter. A domain that is empty after trimming whitespace MUST be treated as absent. The daemon MUST only report on the filter and MUST NOT block or change any DNS traffic.
+
+While authenticated and while the settings name a check domain, the daemon MUST check it as soon as it first appears or changes, then again after a delay drawn anew at random for each check. The delay MUST follow an exponential distribution with a mean of 20 minutes, clamped to between 1 and 60 minutes, so that the time since the last check does not tell when the next one comes. The random source MUST NOT be predictable from earlier delays. A check MUST resolve the control domain `example.com` and then the check domain through the operating system's resolver. An answer counts as blocked when the lookup fails or returns only unspecified (`0.0.0.0`, `::`) or loopback addresses.
+
+- If the control domain is blocked, the result is unknown: the daemon MUST NOT send an event, MUST keep the last result, and MUST check again after 10 minutes.
+- Otherwise the result is filtered when the check domain is blocked, and unfiltered when it is not.
+
+The daemon MUST persist the last result and MUST send an event only when it changes:
+
+- `dns_filter_inactive` (risk 90%, so partners are emailed at once) when the first result for a domain is unfiltered, or when it changes from filtered to unfiltered. A first result of filtered MUST NOT send an event.
+- `dns_filter_active` (risk 0%) when it changes from unfiltered to filtered.
+- `dns_filter_check_removed` (risk 90%) when fetched settings stop naming a domain. The daemon MUST then forget the last result.
+
+When the domain changes to another domain, the daemon MUST forget the last result without sending an event. Each event carries the domain it is about (BATCH-003).
 
 ## CORE-023 Logging
 
