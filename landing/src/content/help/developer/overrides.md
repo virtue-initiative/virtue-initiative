@@ -1,9 +1,10 @@
 # Developer overrides
 
-The API URL, capture interval, and batch window are compile-time settings. They
-are baked into the client when it is built, so there is no config file or
-in-app override. To change them for development, set the variables below and
-rebuild the client.
+The default API URL, capture interval, and batch window are compile-time
+settings. They are baked into the client when it is built, so there is no
+config file or in-app override. To change them for development, set the
+variables below and rebuild the client. Users can still sign in to another
+server at runtime; see [Connecting the apps to your own server](/help/developer/self-hosting).
 
 ## Settings
 

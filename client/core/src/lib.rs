@@ -30,7 +30,7 @@ pub use model::{
     AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use model::{
-    DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, StatusError,
+    ChosenServer, DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, StatusError,
     StatusSkipReason, UploadKind,
 };
 pub use module::upload::Upload;

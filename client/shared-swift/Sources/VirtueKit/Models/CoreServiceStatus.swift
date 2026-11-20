@@ -60,6 +60,9 @@ public struct CoreServiceStatus: Decodable {
     public let lastBatchAtMs: Int64?
     public let recentErrors: [CoreStatusError]?
     public let apiBaseUrl: String?
+    /// The self-hosted server's web app, when the device is signed in to one
+    /// that named it (CORE-028).
+    public let webAppUrl: String?
     public let hashBaseUrl: String?
     public let captureIntervalSeconds: Int64?
     public let batchWindowSeconds: Int64?
@@ -81,6 +84,7 @@ public struct CoreServiceStatus: Decodable {
         case lastBatchAtMs = "last_batch_at_ms"
         case recentErrors = "recent_errors"
         case apiBaseUrl = "api_base_url"
+        case webAppUrl = "web_app_url"
         case hashBaseUrl = "hash_base_url"
         case captureIntervalSeconds = "capture_interval_seconds"
         case batchWindowSeconds = "batch_window_seconds"
@@ -91,5 +95,34 @@ public struct CoreServiceStatus: Decodable {
             return nil
         }
         return try? JSONDecoder().decode(CoreServiceStatus.self, from: data)
+    }
+}
+
+/// Which server the sign-in form signs in to (CLIENT-033).
+public enum ServerChoice: String, Hashable, CaseIterable {
+    case virtueInitiative
+    case selfHosted
+
+    public var label: String {
+        switch self {
+        case .virtueInitiative: return "Virtue Initiative"
+        case .selfHosted: return "Self-hosted"
+        }
+    }
+}
+
+/// Links into the web app (CLIENT-033): the default server's, or the web app
+/// a self-hosted server named.
+public enum WebAppLink {
+    public static let defaultBase = "https://app.virtueinitiative.org"
+
+    /// `path` (e.g. "/partners") on the web app for `status`.
+    public static func url(_ path: String, status: CoreServiceStatus?) -> URL {
+        url(path, webAppUrl: status?.webAppUrl)
+    }
+
+    public static func url(_ path: String, webAppUrl: String?) -> URL {
+        let base = webAppUrl.flatMap { $0.isEmpty ? nil : $0 } ?? defaultBase
+        return URL(string: base + path) ?? URL(string: defaultBase + path)!
     }
 }

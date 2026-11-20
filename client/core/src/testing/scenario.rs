@@ -42,6 +42,7 @@ impl Scenario {
             device_credentials: Some(DeviceCredentials {
                 device_id: "scenario-device".into(),
                 refresh_token: "scenario-device-refresh".into(),
+                server: None,
             }),
             account_email: Some("scenario@example.org".into()),
         };
@@ -181,7 +182,17 @@ impl Scenario {
         password: &str,
         device_name: Option<&str>,
     ) -> CoreResult<String> {
-        self.daemon.test_login(email, password, device_name)
+        self.daemon.test_login(email, password, device_name, None)
+    }
+
+    /// Logs in to a server the user chose (CORE-028).
+    pub fn login_to_server(
+        &mut self,
+        email: &str,
+        password: &str,
+        server: &str,
+    ) -> CoreResult<String> {
+        self.daemon.test_login(email, password, None, Some(server))
     }
 
     pub fn logout(&mut self) -> CoreResult<()> {

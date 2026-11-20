@@ -69,6 +69,8 @@ app.get('/', (c) =>
     version: '1.0.0',
     commit: c.env.COMMIT_SHA ?? 'unknown',
     status: 'ok',
+    // API-007: lets a client signed in to a self-hosted server link to its website.
+    app_url: c.env.APP_URL,
   }),
 );
 
