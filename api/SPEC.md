@@ -834,7 +834,7 @@ The client MUST send
 }
 ```
 
-`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-066).
+`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-068).
 
 The server MUST validate the login (see `POST /login`) and create a long lived refresh token. For an unverified account it MUST behave as `POST /login` does, including the verification email and the `email_bounced` response, and MUST NOT register a device. Like `POST /login`, it SHOULD fill in a missing newsletter location.
 
@@ -984,7 +984,7 @@ The server MUST NOT send any email to an address that has a permanent bounce. If
 
 The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
 
-### API-066 `POST /app-store/notifications`
+### API-068 `POST /app-store/notifications`
 
 The server MUST accept App Store Server Notifications V2, which Apple sends as
 

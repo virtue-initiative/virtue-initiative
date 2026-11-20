@@ -212,7 +212,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     /// The App Store download this install came from, registered with the
-    /// device so a parent withdrawing consent signs it out (API-066). Sent for
+    /// device so a parent withdrawing consent signs it out (API-068). Sent for
     /// every account, so it says nothing about the person's age.
     private static func appTransactionID() async -> String? {
         guard let result = try? await AppTransaction.shared,

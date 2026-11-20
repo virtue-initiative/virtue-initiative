@@ -150,7 +150,7 @@ enum NativeBridge {
     }
 
     /// `appTransactionID` lets the API sign this device out when a parent
-    /// withdraws App Store consent (API-066). Empty when there isn't one.
+    /// withdraws App Store consent (API-068). Empty when there isn't one.
     static func login(email: String, password: String, deviceName: String, appTransactionID: String)
         -> String?
     {
