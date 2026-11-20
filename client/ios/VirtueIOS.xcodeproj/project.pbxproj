@@ -404,8 +404,8 @@
 					"@executable_path/Frameworks",
 				);
 				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust -framework Vision";
-				"OTHER_LDFLAGS[sdk=iphoneos26*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
-				"OTHER_LDFLAGS[sdk=iphonesimulator26*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
+				"OTHER_LDFLAGS[sdk=iphoneos2*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
+				"OTHER_LDFLAGS[sdk=iphonesimulator2*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
 				PRODUCT_NAME = VirtueIOS;
 				PROVISIONING_PROFILE_SPECIFIER = "Virtue iOS App Store";
@@ -452,8 +452,8 @@
 					"@executable_path/Frameworks",
 				);
 				OTHER_LDFLAGS = "$(inherited) -lvirtue_ios_rust -framework Vision";
-				"OTHER_LDFLAGS[sdk=iphoneos26*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
-				"OTHER_LDFLAGS[sdk=iphonesimulator26*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
+				"OTHER_LDFLAGS[sdk=iphoneos2*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
+				"OTHER_LDFLAGS[sdk=iphonesimulator2*]" = "$(inherited) -lvirtue_ios_rust -framework Vision -weak_framework DeclaredAgeRange -weak_framework PermissionKit";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(VIRTUE_APP_BUNDLE_ID)";
 				PRODUCT_NAME = VirtueIOS;
 				SDKROOT = iphoneos;

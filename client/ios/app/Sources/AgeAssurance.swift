@@ -1,6 +1,7 @@
 import StoreKit
 import SwiftUI
 import UIKit
+import VirtueKit
 
 #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
     import DeclaredAgeRange
@@ -13,7 +14,7 @@ import UIKit
 /// age range Apple shares, turn away anyone under the Terms of Use minimum,
 /// and get fresh consent when a significant change ships. Apple stops the app
 /// from launching when a parent withdraws consent, and the API signs out the
-/// device (API-066).
+/// device (API-068).
 ///
 /// The age range is never stored or sent anywhere, since the law only allows
 /// it to be used for this check.
@@ -285,7 +286,7 @@ struct AgeGateView: View {
                     Button(retryLabel) {
                         Task { await ageAssurance.check() }
                     }
-                    .buttonStyle(VirtueButtonStyle(prominent: true))
+                    .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                 }
             }
         }

@@ -1,4 +1,4 @@
--- API-035/API-066: the App Store app transaction ID an iOS device registered
+-- API-035/API-068: the App Store app transaction ID an iOS device registered
 -- with, so a RESCIND_CONSENT notification can find that download's devices.
 ALTER TABLE devices ADD COLUMN app_transaction_id TEXT;
 

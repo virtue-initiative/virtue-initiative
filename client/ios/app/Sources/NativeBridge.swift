@@ -152,7 +152,7 @@ enum NativeBridge {
 
     /// `server` is a self-hosted server address, or nil for the default
     /// server (CLIENT-034). `appTransactionID` lets the API sign this device
-    /// out when a parent withdraws App Store consent (API-066). Empty when
+    /// out when a parent withdraws App Store consent (API-068). Empty when
     /// there isn't one.
     static func login(
         email: String, password: String, deviceName: String, server: String?,

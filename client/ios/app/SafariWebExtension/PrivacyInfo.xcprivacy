@@ -23,7 +23,9 @@
 			</array>
 		</dict>
 		<!-- virtue-core reads modified times of its own log files to pick the
-		     ones a bug report attaches (client/core/src/logging.rs). -->
+		     ones a bug report attaches (client/core/src/logging.rs), and
+		     SafariWebExtensionHandler reads the modified time of the frame file
+		     it keeps in the App Group container. -->
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
