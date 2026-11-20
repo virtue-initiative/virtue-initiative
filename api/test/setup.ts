@@ -128,6 +128,16 @@ CREATE TABLE IF NOT EXISTS analytics_snapshots (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS announcements (
+  id BLOB PRIMARY KEY,
+  message TEXT NOT NULL,
+  url TEXT,
+  level TEXT NOT NULL CHECK (level IN ('info', 'warning', 'urgent')),
+  platforms TEXT,
+  below_version TEXT,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS feature_flags (
   key TEXT PRIMARY KEY,
   rollout_percent INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percent BETWEEN 0 AND 100),

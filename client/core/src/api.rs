@@ -12,7 +12,9 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
+use crate::model::{
+    BatchUpload, DeviceAnnouncement, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload,
+};
 
 /// The whole codebase shares one version, tracked in `version.properties` (this crate's
 /// grandparent directory). This is that version's `/vX`/`/vX.Y` URL-prefix form
@@ -20,6 +22,11 @@ use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, N
 /// for both the main API and the standalone hash server. Kept in sync by
 /// `scripts/update-version.sh`, which is the only thing that should ever edit this line.
 const API_VERSION: &str = "v0.1";
+
+/// Sent as `X-Virtue-Version` on every request, so the server can choose an
+/// announcement for this version (API-068, CORE-005). The crate version is the
+/// `VERSION` in `version.properties`, kept in sync by the same script.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
@@ -135,6 +142,8 @@ struct DeviceSettingsResponse {
     hash_token: String,
     #[serde(default)]
     feature_flags: Vec<String>,
+    #[serde(default)]
+    announcement: Option<DeviceAnnouncement>,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -153,6 +162,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 .collect(),
             hash_base_url: response.hash_base_url,
             feature_flags: response.feature_flags,
+            announcement: response.announcement,
         }
     }
 }
@@ -426,7 +436,10 @@ impl HttpApiClient {
         path: &str,
         bearer_token: Option<&str>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        let builder = self.agent.get(self.url(base_override, path));
+        let builder = self
+            .agent
+            .get(self.url(base_override, path))
+            .header("X-Virtue-Version", APP_VERSION);
         match bearer_token {
             Some(token) => builder.header("Authorization", format!("Bearer {token}")),
             None => builder,
@@ -439,7 +452,10 @@ impl HttpApiClient {
         path: &str,
         bearer_token: Option<&str>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-        let builder = self.agent.post(self.url(base_override, path));
+        let builder = self
+            .agent
+            .post(self.url(base_override, path))
+            .header("X-Virtue-Version", APP_VERSION);
         match bearer_token {
             Some(token) => builder.header("Authorization", format!("Bearer {token}")),
             None => builder,
@@ -857,5 +873,82 @@ mod tests {
         let settings = DeviceSettings::from(with);
         assert!(settings.has_feature_flag("beta"));
         assert!(!settings.has_feature_flag("other"));
+    }
+
+    // CORE-005, API-068: the announcement is saved with the settings, and a
+    // level this build doesn't know reads as info rather than failing them.
+    #[test]
+    fn device_settings_carry_the_announcement() {
+        use crate::model::AnnouncementLevel;
+
+        let parse = |extra: &str| {
+            let json =
+                format!(r#"{{"id":"d","name":"n","platform":"linux","hash_token":"t"{extra}}}"#);
+            DeviceSettings::from(serde_json::from_str::<DeviceSettingsResponse>(&json).unwrap())
+        };
+
+        assert_eq!(parse("").announcement, None);
+        assert_eq!(parse(r#","announcement":null"#).announcement, None);
+        assert_eq!(
+            parse(r#","announcement":{"message":"Update","url":"https://x.org","level":"urgent"}"#)
+                .announcement,
+            Some(DeviceAnnouncement {
+                message: "Update".into(),
+                url: Some("https://x.org".into()),
+                level: AnnouncementLevel::Urgent,
+            })
+        );
+        let future = parse(r#","announcement":{"message":"Hi","url":null,"level":"sparkly"}"#);
+        assert_eq!(future.announcement.unwrap().level, AnnouncementLevel::Info);
+    }
+
+    // CORE-005: every API request carries the app version.
+    #[test]
+    fn requests_send_the_app_version_header() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
+            let body = r#"{"id":"d","name":"n","platform":"linux","hash_token":"t"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8_lossy(&request).to_lowercase()
+        });
+
+        let config = Config::new(
+            format!("http://127.0.0.1:{port}"),
+            "test-device",
+            "linux",
+            std::path::PathBuf::from("/tmp/virtue-api-version-test"),
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+        );
+        HttpApiClient::new(&config)
+            .unwrap()
+            .get_device_settings("dst_token")
+            .unwrap();
+
+        let request = server.join().unwrap();
+        assert!(
+            request.contains(&format!("\r\nx-virtue-version: {APP_VERSION}\r\n")),
+            "{request}"
+        );
+        assert_eq!(APP_VERSION, env!("CARGO_PKG_VERSION"));
     }
 }

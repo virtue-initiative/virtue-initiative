@@ -37,6 +37,8 @@ import type {
   FeatureFlag,
   UpsertFeatureFlagPayload,
   SetFeatureFlagOverridePayload,
+  Announcement,
+  CreateAnnouncementPayload,
 } from '@virtueinitiative/shared-web/types';
 export type {
   EmailFrequency,
@@ -74,6 +76,8 @@ export type {
   FeatureFlag,
   UpsertFeatureFlagPayload,
   SetFeatureFlagOverridePayload,
+  Announcement,
+  CreateAnnouncementPayload,
 };
 
 const BASE =
@@ -397,6 +401,15 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
+
+  // api/SPEC.md API-069 to API-071.
+  getAdminAnnouncements: () => req<Announcement[]>('/admin/announcements'),
+
+  createAdminAnnouncement: (payload: CreateAnnouncementPayload) =>
+    req<Announcement>('/admin/announcements', { method: 'POST', body: JSON.stringify(payload) }),
+
+  deleteAdminAnnouncement: (id: string) =>
+    req<void>(`/admin/announcements/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   getData: (params?: { since?: number }) => {
     const qs = new URLSearchParams();

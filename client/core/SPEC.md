@@ -104,6 +104,8 @@ A batch MUST hold every event hashed since the last batch, in the order they wer
 
 The daemon MUST save `feature_flags` from the device settings with the rest of the settings, and MUST treat every flag as off until settings have been fetched (see /api/SPEC.md API-061).
 
+The daemon MUST send its version, from `client/version.properties`, in the `X-Virtue-Version` header of every API request, and MUST save `announcement` from the device settings with the rest of the settings (API-068).
+
 The hash server token returned with the device settings is valid for 2 hours (see /api/SPEC.md API-002). The daemon SHOULD keep using it until shortly before it expires, and MUST NOT refresh it on a schedule shorter than the batch interval. If the hash server rejects the token as unauthorized, the daemon MUST fetch a new one before its next hash upload.
 
 ## CORE-006 Other events
@@ -144,7 +146,8 @@ status() -> {
   last_loop_at_ms, last_screenshot_attempt_at_ms, last_screenshot_at_ms,
   last_skip_reason, last_batch_at_ms,
   recent_errors,
-  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds
+  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds,
+  announcement
 }
 ```
 
@@ -159,6 +162,7 @@ MUST return, without blocking on the loop:
 - `last_batch_at_ms` — when a batch last uploaded successfully.
 - `recent_errors` — see CORE-018.
 - `api_base_url`, `hash_base_url`, `capture_interval_seconds`, `batch_window_seconds` — the effective configuration this build is running with, for the diagnostics/advanced section of a client's status page.
+- `announcement` — the `DeviceAnnouncement` from the last device settings fetched (API-068), for the client to show (CLIENT-033). MUST be absent when those settings had none or have never been fetched.
 
 Every field except `is_running` MUST be derivable from persisted state plus the compile-time configuration, so a client whose daemon process is not running can compute the same status from `state_path` alone and report only `is_running: false`.
 

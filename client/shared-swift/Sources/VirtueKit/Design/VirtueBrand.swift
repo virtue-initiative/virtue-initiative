@@ -33,6 +33,12 @@ public enum VirtueBrand {
     public static let good = Color(red: 47.0 / 255.0, green: 125.0 / 255.0, blue: 79.0 / 255.0)
     public static let bad = Color(red: 192.0 / 255.0, green: 57.0 / 255.0, blue: 43.0 / 255.0)
     public static let warn = ochre
+    /// Announcement backgrounds (CLIENT-033), the same on every platform. Both
+    /// keep white text above 4.5:1 contrast.
+    public static let announcementWarning = Color(
+        red: 194.0 / 255.0, green: 65.0 / 255.0, blue: 12.0 / 255.0)
+    public static let announcementUrgent = Color(
+        red: 185.0 / 255.0, green: 28.0 / 255.0, blue: 28.0 / 255.0)
 }
 
 /// Spacing scale matching `shared-web/tokens.css` (`--space-1` … `--space-6`).
