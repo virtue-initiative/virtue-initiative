@@ -72,7 +72,10 @@ sure the switch next to it is on.
 3. Enter the domain in **DNS check domain** and click **Save**.
 
 The domain applies to all your devices. Each device checks it as soon as it
-picks up the new setting, then once an hour.
+picks up the new setting. After that, each device waits a random time before
+the next check: 20 minutes on average, never less than 1 minute and never more
+than 60. Because the time changes after every check, there is no safe window to
+plan around.
 
 ## What your partners see
 
