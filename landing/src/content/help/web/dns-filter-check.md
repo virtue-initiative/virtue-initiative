@@ -11,10 +11,45 @@ partners get an alert.
 
 Virtue only reports what it finds. It never blocks or changes your DNS traffic.
 
-The steps below use NextDNS as an example. Other DNS filters work the same way
-as long as they let you block a single domain.
+## Why use a DNS filter
+
+A DNS filter is a first layer of protection for you and the people you love. It
+stops most pornographic sites from loading before you see them. It does not
+catch everything, but it blocks a large part. It is a preventive measure, and it
+helps you avoid temptation in the first place.
+
+## Choose a DNS filter
+
+You can use a hosted service or run one yourself.
+
+- [NextDNS](https://nextdns.io) is a hosted service. Its **Setup** tab has a
+  guide for every kind of device.
+- [AdGuard Home](https://adguard.com/en/adguard-home/overview.html) and
+  [Pi-hole](https://pi-hole.net) run on your own server or home network.
+
+### Recommended settings in NextDNS
+
+Open the **Parental Control** tab and turn on these settings:
+
+- **Porn** under **Categories** blocks known pornographic sites.
+- **SafeSearch** hides explicit results in search engines.
+- **YouTube Restricted Mode** hides mature videos on YouTube.
+- **Block Bypass Methods** blocks VPNs, proxies and other ways around the
+  filter.
+
+The blocklists on the **Privacy** tab block ads and trackers, not adult content.
+
+### Recommended lists for AdGuard Home and Pi-hole
+
+Add a list that blocks adult content, such as the NSFW list from
+[HaGeZi](https://github.com/hagezi/dns-blocklists) or from
+[OISD](https://oisd.nl). The community maintains both lists and updates them
+regularly.
 
 ## Check that your device uses the filter
+
+The steps below use NextDNS as an example. Other DNS filters work the same way
+as long as they let you block a single domain.
 
 Set up your DNS filter on every device you want checked. In NextDNS, open the
 **Setup** tab on that device. It shows **All good!** when the device uses your
