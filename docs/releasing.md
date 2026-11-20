@@ -1,7 +1,7 @@
 # Releasing
 
 This page explains how a change gets from a merged PR to the servers and to people's devices, for
-every part of the system at once. In one sentence, everything merges into `staging`, which deploys
+every part of the system at once. Everything merges into `staging`, which deploys
 the servers' staging copies and publishes test builds of the apps, and a release is a PR from
 `staging` into `main`, which deploys production and publishes the stable apps. The signing,
 store and pipeline details for each app are in its own `RELEASING.md` (`client/mac/`,
@@ -9,8 +9,8 @@ store and pipeline details for each app are in its own `RELEASING.md` (`client/m
 
 ## What each branch does
 
-A push to `staging` or `main` deploys or publishes everything that changed, with no further step.
-That makes merging the release action, so it helps to know exactly what each merge sets off:
+A push to `staging` or `main` deploys or publishes everything that changed, with no further step,
+so merging is the release action. Each merge sets off this:
 
 | Part          | A push to `staging`                                              | A push to `main`                                           |
 | ------------- | ---------------------------------------------------------------- | ---------------------------------------------------------- |
@@ -20,13 +20,13 @@ That makes merging the release action, so it helps to know exactly what each mer
 | `hash-server` | `staging-virtue-hash` (`deploy-hash-server.yml`, HASH-018)       | `virtue-hash`                                              |
 | Client apps   | Dev builds, tagged `<VERSION>-dev`, that talk to the staging API | Stable builds, tagged `<VERSION>`, that talk to production |
 
-The two bold cells are the ones that surprise people. A change to `api-donate/` or to the help
-pages is live in production as soon as it lands on `staging`, without waiting for a release.
+Watch the two bold cells: a change to `api-donate/` or to the help pages goes live in production
+as soon as it lands on `staging`.
 
 Every app build gets its channel from the branch (`virtue_release_channel` in
 `client/scripts/version.sh`), and `client/core/build.rs` uses the same channel to bake in which
-API the app talks to. So a tester's dev build never touches production data, and each platform
-keeps the two kinds of build apart in its own way:
+API the app talks to, so dev builds use staging data. Each platform keeps the two kinds of build
+apart in its own way:
 
 - **Linux:** both are `.deb` files on GitHub Releases, dev builds as prereleases. A dev install
   updates to the newest prerelease, and a stable install to the newest full release
@@ -51,10 +51,10 @@ two dev builds of the same version can still be told apart.
 
 ## A release, step by step
 
-We track each release in a GitHub issue titled "Release x.y.z". The issue is a checklist of what
-has to be done for the release, not a list of everything shipping in it, so a PR goes on it only
-when it needs something done at release time: a secret to set, a migration to run, or something
-to test by hand. (Most PRs need none of those, and stay off it.) A release then goes like this:
+We track each release in a GitHub issue titled "Release x.y.z". The issue is a checklist of the
+work the release needs, so a PR goes on it when it needs something done at release time: a secret
+to set, a migration to run, or something to test by hand. (Most PRs need none of those.) The
+release PR is where everything shipping gets listed. A release goes like this:
 
 1. **Bump the version** on `staging`, as above.
 2. **Do what `staging` needs as each PR lands.** Merging to `staging` deploys there, so a new
@@ -70,18 +70,17 @@ to test by hand. (Most PRs need none of those, and stay off it.) A release then 
 6. **Merge, then check.** Watch the deploys and the apps' release jobs, try whatever the issue says
    to try on production, and keep an eye on the logs for errors for a while.
 7. **Publish the release notes.** They are a post in `landing/src/content/blog/`, written by a
-   person rather than generated, like all of the site's copy.
+   person like all of the site's copy.
 
 The migration step is the one most likely to hurt if it is missed. Because the migration runs
 first, there is a stretch where the new schema serves the old code, so a migration has to work
-with the code that is already running. Adding a table, or a column with a default, does. Renaming
-or dropping one does not, and is safer split over two releases: one that stops using it, and a
-later one that removes it.
+with the code that is already running. Adding a table, or a column with a default, is safe.
+Renaming or dropping one breaks the running code, so split it over two releases: one that stops
+using it, and a later one that removes it.
 
 ## When something goes wrong
 
-Nothing in the repo automates undoing a release, so it helps to know what can be undone by hand.
-The Workers can be put back by deploying a known-good commit with `bun run deploy:prod` from the
+Undoing a release is a manual job. The Workers can be put back by deploying a known-good commit with `bun run deploy:prod` from the
 Worker's folder (see "Deployment workflows" in [`development.md`](development.md)), as long as the
 database still suits that code. A migration cannot be undone automatically, which is one more
 reason to keep each one additive. App builds cannot be pulled back once people have installed
