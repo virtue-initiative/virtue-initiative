@@ -6,8 +6,8 @@ sidebar_position: 7
 
 If you use a DNS filter such as NextDNS, Virtue can check that it stays on. You
 add a domain to your filter's block list and enter the same domain in Virtue.
-Your devices then look it up every hour. If the filter stops blocking it, your
-partners get an alert.
+Your devices then look it up at random times, at least once an hour. If the
+filter stops blocking it, your partners get an alert.
 
 Virtue only reports what it finds. It never blocks or changes your DNS traffic.
 
