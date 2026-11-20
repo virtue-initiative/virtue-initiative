@@ -523,6 +523,8 @@ The client MUST provide a request in this shape.
 
 `dns_filter_domain` names the domain the user blocks in their DNS filter, which all their devices resolve to check that the filter is in use (CORE-027). The server MUST trim and lowercase it, and MUST respond **HTTP 400** and change nothing unless it is a plain domain name of at most 253 characters with at least one dot and no scheme, port, path or whitespace. `null` MUST clear it.
 
+If the request clears a set `dns_filter_domain` or replaces it with a different one, the server MUST immediately email every accepted watcher, naming the previous domain and any new one, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`). Setting a domain where none was set, or sending the current one again, MUST NOT email. A failure to send MUST NOT fail the request. The alert does not wait for a device to pick up its settings (CORE-027), so turning the check off and back on between two device checks is still reported.
+
 If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
 The server MUST NOT change `pub_key` or `encrypted_priv_key` through this endpoint, since a web session alone is not proof of the password (see API-050).
@@ -791,6 +793,8 @@ The client MUST be authenticated with a **Web Token** and send
 ```
 
 At least one field MUST be present. `dns_filter_disabled: true` turns the DNS filter check (CORE-027) off for this device only, for example a work laptop with its own DNS; `false` turns it back on. It MUST be `false` for a new device.
+
+If the request turns `dns_filter_disabled` from `false` to `true` while the owner has a `dns_filter_domain` (API-020), the server MUST immediately email every accepted watcher, naming the device, with the same delivery as the API-020 alert. Turning it back to `false`, or sending the current value again, MUST NOT email.
 
 The server MUST respond **HTTP 404** if the device does not exist or is not owned by the user.
 

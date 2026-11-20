@@ -511,7 +511,8 @@ export function Settings() {
           <DialogHeader>Change the DNS check domain?</DialogHeader>
           <p class="invite-desc">
             Add the new domain to your DNS filter's block list first. If it is not blocked, your
-            devices report the filter as off and your partners get an alert.
+            devices report the filter as off and your partners get an alert. Your partners are
+            notified of the change.
           </p>
           <DialogActions>
             <Button

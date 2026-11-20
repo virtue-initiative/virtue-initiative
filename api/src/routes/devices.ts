@@ -11,6 +11,7 @@ import {
   updateDevice,
 } from '../lib/db';
 import { batchObject } from '../lib/batch-url';
+import { notifyWatchersAboutDnsFilterCheck } from '../lib/dns-filter-alerts';
 import { hashGetMany } from '../lib/hash-server';
 import { sendEmail } from '../lib/email';
 import { renderDeviceDeletedTemplate } from '../lib/email/templates';
@@ -79,6 +80,19 @@ devices.patch(
 
     const { name, dns_filter_disabled } = c.req.valid('json');
     await updateDevice(c.env.DB, deviceId, { name, dns_filter_disabled });
+
+    // API-030: turning the check off for a device alerts partners at once, but only
+    // while there is an account domain, since otherwise nothing was being checked.
+    if (dns_filter_disabled === true && device.dns_filter_disabled !== 1) {
+      const owner = await findUserById(c.env.DB, c.get('sub'));
+      if (owner?.dns_filter_domain) {
+        await notifyWatchersAboutDnsFilterCheck(c.env.DB, c.env, owner.id, {
+          kind: 'device_off',
+          domain: owner.dns_filter_domain,
+          deviceName: name ?? device.name,
+        });
+      }
+    }
 
     return c.body(null, 204);
   },

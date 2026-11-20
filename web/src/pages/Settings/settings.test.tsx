@@ -468,6 +468,7 @@ describe('Settings — DNS check domain (WEB-073)', () => {
     expect(
       screen.getByText(/add the new domain to your dns filter\'s block list first/i),
     ).toBeInTheDocument();
+    expect(screen.getByText(/your partners are notified of the change/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel', hidden: false })).toHaveAttribute(
       'autofocus',
     );

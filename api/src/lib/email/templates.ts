@@ -675,6 +675,53 @@ export function renderLockedPasswordAccessedTemplate(input: {
   };
 }
 
+export type DnsFilterCheckChange =
+  | { kind: 'cleared'; domain: string }
+  | { kind: 'changed'; domain: string; newDomain: string }
+  | { kind: 'device_off'; domain: string; deviceName: string };
+
+// API-020, API-030: sent the moment the owner weakens their DNS filter check, so a
+// quick off-and-on between two device checks still reaches the partner.
+export function renderDnsFilterCheckChangedTemplate(input: {
+  ownerName?: string | null;
+  ownerEmail: string;
+  change: DnsFilterCheckChange;
+  appName: string;
+  appUrl: string;
+}) {
+  const appName = normalizeAppName(input.appName);
+  const owner = input.ownerName?.trim() || input.ownerEmail;
+  const { change } = input;
+  const line =
+    change.kind === 'cleared'
+      ? `${owner} turned off the DNS filter check for "${change.domain}". ${appName} no longer checks whether their DNS filter is active.`
+      : change.kind === 'changed'
+        ? `${owner} changed the DNS filter check domain from "${change.domain}" to "${change.newDomain}".`
+        : `${owner} turned off the DNS filter check on the device "${change.deviceName}". ${appName} no longer checks whether the DNS filter is active there.`;
+  const followup = 'If this was not expected, you should ask them about it.';
+  const footer = withFooter({
+    appName,
+    appUrl: input.appUrl,
+    headline: 'DNS filter check changed',
+    textLines: [line, followup, '', ENCOURAGEMENT_NOTE, '', `Review the account: ${input.appUrl}`],
+    htmlSections: [
+      paragraph(line),
+      paragraph(followup),
+      paragraph(ENCOURAGEMENT_NOTE),
+      actionButton(input.appUrl, 'Review account'),
+    ],
+  });
+
+  return {
+    subject:
+      change.kind === 'changed'
+        ? `${owner} changed the DNS filter check`
+        : `${owner} turned off the DNS filter check`,
+    text: footer.text,
+    html: footer.html,
+  };
+}
+
 type StatTone = 'danger' | 'warning';
 
 // A row of equal tiles, each a big number over a label. A toned tile is tinted

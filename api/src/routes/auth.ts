@@ -27,6 +27,7 @@ import {
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
 } from '../lib/email/templates';
+import { notifyWatchersAboutDnsFilterCheck } from '../lib/dns-filter-alerts';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
@@ -564,6 +565,19 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
   }
 
   await updateUser(c.env.DB, userId, { name, settings, dns_filter_domain });
+
+  // API-020: clearing or replacing the check domain alerts partners at once.
+  const previousDomain = user.dns_filter_domain;
+  if (dns_filter_domain !== undefined && previousDomain && dns_filter_domain !== previousDomain) {
+    await notifyWatchersAboutDnsFilterCheck(
+      c.env.DB,
+      c.env,
+      userId,
+      dns_filter_domain === null
+        ? { kind: 'cleared', domain: previousDomain }
+        : { kind: 'changed', domain: previousDomain, newDomain: dns_filter_domain },
+    );
+  }
 
   const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
   let emailBounced = false;
