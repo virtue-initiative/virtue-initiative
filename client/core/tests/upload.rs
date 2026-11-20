@@ -209,6 +209,61 @@ fn a_batch_that_cannot_be_built_backs_off_like_a_failed_upload() {
     assert_eq!(scenario.api.state().batch_uploads.len(), 1);
 }
 
+// ── A batch whose response was lost ──────────────────────────────────────────
+
+// CORE-005: a sent batch that failed is retried with the same upload_id and events, and holds hashing until it lands.
+#[test]
+fn a_failed_batch_is_retried_as_it_was_and_nothing_more_is_hashed_until_it_lands() {
+    let mut scenario = quiet_scenario();
+    // As when the server stored the batch but the response timed out.
+    scenario.api.program_batch(Err(down()));
+    scenario.queue_upload(dev("first")).flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert_eq!(scenario.api.state().hash_uploads.len(), 1);
+    let first = scenario.api.state().batch_uploads[0].batch.clone();
+    assert!(!first.retry);
+    assert_eq!(first.total_count, 1);
+
+    // An event queued meanwhile waits, though the hash backoff has long ended.
+    scenario.queue_upload(dev("second"));
+    let retry_at = scenario.state().upload.batch_backoff.next_attempt_at_ms;
+    assert_eq!(scenario.state().next_wakeup_at_ms, retry_at);
+    scenario.at_t(retry_at - 1).tick();
+    assert_eq!(scenario.api.state().hash_uploads.len(), 1);
+    assert_eq!(scenario.state().upload.pending_hash_events.len(), 1);
+
+    scenario.at_t(retry_at).tick();
+    let retried = scenario.api.state().batch_uploads[1].batch.clone();
+    assert_eq!(retried.upload_id, first.upload_id);
+    assert!(retried.retry);
+    assert_eq!(retried.total_count, 1);
+    assert_eq!(scenario.api.state().hash_uploads.len(), 1);
+
+    // Once it lands, hashing resumes and the next batch is a new one.
+    scenario.flush_batch_now().tick();
+    let api = scenario.api.state();
+    assert_eq!(api.hash_uploads.len(), 2);
+    let next = &api.batch_uploads[2].batch;
+    assert_ne!(next.upload_id, first.upload_id);
+    assert!(!next.retry);
+    assert_eq!(next.total_count, 1);
+}
+
+// CORE-005: a batch that was never sent, because it could not be built, does not hold hashing.
+#[test]
+fn a_batch_that_cannot_be_built_does_not_hold_hashing() {
+    let mut scenario = quiet_scenario();
+    scenario.with_state_mut(|s| {
+        s.upload.settings.as_mut().unwrap().wrapping_keys[0].pub_key_base64 = "not base64!".into();
+    });
+    scenario.queue_upload(dev("first")).flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert!(scenario.api.state().batch_uploads.is_empty());
+
+    scenario.queue_upload(dev("second")).tick();
+    assert_eq!(scenario.api.state().hash_uploads.len(), 2);
+}
+
 // ── The screen lock gate ─────────────────────────────────────────────────────
 
 // CORE-005: a batch is not uploaded while locked unless forced by a heartbeat or flush_batch_now.
@@ -352,8 +407,9 @@ fn batch_event_counts_use_the_rounded_percentage_bands() {
 #[test]
 fn hashing_stops_at_200_waiting_events_until_their_batch_uploads() {
     let mut scenario = quiet_scenario();
-    // A full batch is sent at once, so make its first upload fail to keep the
-    // 200 events waiting while the rest are queued behind them.
+    // Only a full batch is sent, at once, so make its first upload fail to keep
+    // the 200 events waiting while the rest are queued behind them.
+    hold_batches(&mut scenario);
     scenario.api.program_batch(Err(down()));
     for i in 0..250 {
         scenario.queue_upload(dev(&format!("event {i:03}")));

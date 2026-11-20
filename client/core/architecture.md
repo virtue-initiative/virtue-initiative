@@ -409,6 +409,14 @@ I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 A batch always takes every hashed event (BATCH-006), so `plan_hash_retries`
 stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
 and resumes after that batch lands.
+Each batch gets a fresh `upload_id` (API-038). A batch that was sent and
+failed is kept in `UploadState.unconfirmed_batch`, because the server may have
+stored it and reset the hash chain with only the response lost. Until an
+attempt lands, `plan_batch` resends the same events under the same
+`upload_id` with `retry` set, so a stored batch is returned rather than stored
+twice, and hashing stops so that no event is hashed into a chain the server
+may already have reset (CORE-005). A batch that could not be built was never
+sent, so it does not count.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
 backoffs to "ready now" — bypassing the cooldown for one attempt, matching

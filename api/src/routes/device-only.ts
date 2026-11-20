@@ -10,6 +10,7 @@ import {
   createDevice,
   createSessionRecord,
   deleteDeviceSessionsByDeviceId,
+  findBatchByUploadId,
   findDeviceById,
   findUserById,
   listAcceptedNotificationTargetsForUser,
@@ -21,7 +22,7 @@ import { batchObject } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset } from '../lib/hash-server';
-import { decodeHex, encodeBase64 } from '../lib/encoding';
+import { decodeHex, encodeBase64, storedHashHex } from '../lib/encoding';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
@@ -62,6 +63,8 @@ const eventCountsSchema = z.object({
 });
 
 const batchMetadataSchema = z.object({
+  upload_id: z.uuid().optional(),
+  retry: z.boolean().optional().default(false),
   start_time: z.number().int().nonnegative(),
   end_time: z.number().int().nonnegative(),
   access_keys: z.record(z.uuid(), z.base64()),
@@ -302,7 +305,38 @@ deviceOnly.post(
     }
 
     const { metadata, file } = c.req.valid('form');
-    const { start_time, end_time, access_keys, event_counts, notifications } = metadata;
+    const { upload_id, retry, start_time, end_time, access_keys, event_counts, notifications } =
+      metadata;
+
+    // API-038: a retry of a batch that was stored, but whose response the device never
+    // got, answers with the stored batch instead of storing it a second time. The device
+    // hashes nothing while it retries (CORE-005), so resetting the hash state again is
+    // safe, and covers an earlier attempt that stopped between the insert and the reset.
+    if (retry && upload_id) {
+      const existing = await findBatchByUploadId(c.env.DB, {
+        user_id: device.owner,
+        device_id: device.id,
+        upload_id,
+      });
+      if (existing) {
+        await hashReset(c.env, device.id);
+        const settings = await buildDeviceSettings(c, device);
+        if (!settings) {
+          return c.json({ error: 'Hash server not configured' }, 500);
+        }
+        return c.json(
+          {
+            id: existing.id,
+            start_time: existing.start_time,
+            end_time: existing.end_time,
+            end_hash: storedHashHex(existing.end_hash),
+            url: batchObject(c.env, existing).url,
+            settings,
+          },
+          200,
+        );
+      }
+    }
 
     const createdAt = Date.now();
     // API-038: the times come from the device clock, and a batch is uploaded after the
@@ -344,6 +378,7 @@ deviceOnly.post(
       high_risk_count: event_counts.high,
       medium_risk_count: event_counts.medium,
       created_at: createdAt,
+      upload_id,
     });
     if (inserted.meta.changes === 0) {
       // The device was deleted while this upload was in flight.

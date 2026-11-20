@@ -100,6 +100,8 @@ An event with a risk of 90% or more, rounded to a whole percent, MUST force the 
 
 A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
 
+Each batch MUST get a new `upload_id` (API-038). An upload that was sent and failed may still have been stored, with only its response lost, so until an attempt at that batch succeeds the daemon MUST retry it with the same `upload_id` and events and with `retry` set, and MUST NOT upload more hashes. Otherwise the server could store the batch twice, and the retry would not match the hash chain the server reset when it stored the first attempt.
+
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 
 The daemon MUST save `feature_flags` from the device settings with the rest of the settings, and MUST treat every flag as off until settings have been fetched (see /api/SPEC.md API-061).

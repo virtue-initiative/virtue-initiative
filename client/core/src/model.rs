@@ -233,6 +233,14 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUpload {
+    /// The client's id for this batch, kept across every attempt to upload it
+    /// (API-038). Set by `plan_batch`, not the builder.
+    #[serde(default)]
+    pub upload_id: String,
+    /// Set when an earlier attempt at this batch was sent and failed, so the
+    /// server may already have stored it (CORE-005).
+    #[serde(default)]
+    pub retry: bool,
     pub start_time_ms: i64,
     pub end_time_ms: i64,
     #[serde(with = "serde_bytes")]

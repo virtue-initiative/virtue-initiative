@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS batches (
   high_risk_count INTEGER NOT NULL DEFAULT 0,
   medium_risk_count INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
+  upload_id BLOB,
   PRIMARY KEY (user_id, created_at, id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) WITHOUT ROWID;

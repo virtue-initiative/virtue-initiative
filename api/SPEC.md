@@ -873,6 +873,8 @@ The client MUST send a multipart form request:
 - `metadata`: JSON
   - ```js
     {
+      "upload_id": UUID | undefined,
+      "retry": boolean | undefined,
       "start_time": DateTime,
       "end_time": DateTime,
       "access_keys`: {
@@ -900,6 +902,8 @@ The client MUST send a multipart form request:
 The server MUST upload the file to object storage and store the metadata in the database.
 
 The server MUST take `end_hash` from the hash server's current hash for the device (see `hash-server/SPEC.md`). If that is not 64 hexadecimal characters, the server MUST respond **HTTP 502** and MUST NOT store the batch. After storing the batch the server MUST reset the device's hash state. If the device no longer exists when the batch is stored, the server MUST NOT keep the batch or its object, and MUST respond **HTTP 404**.
+
+The client SHOULD send `upload_id`, a UUID it chooses for each batch and keeps for every attempt to upload that batch, and SHOULD set `retry` to `true` on an attempt that follows one whose response it did not get. When `retry` is `true` and the device already has a batch stored with that `upload_id`, the earlier attempt was stored and only its response was lost. In that case the server MUST NOT store the upload again and MUST NOT send its `notifications`. It MUST reset the device's hash state, in case the earlier attempt was stored but did not reach the reset, and MUST respond as below with the stored batch. The client does not hash new events while a batch is unconfirmed (CORE-005), so the reset drops nothing. The server SHOULD NOT look a batch up by `upload_id` when `retry` is not `true`, because the lookup reads the owner's stored batches.
 
 For each entry in `notifications`, the server MUST immediately email a tamper alert to every accepted watcher of the device's owner, whatever the entry's `risk`. The alert names the device and uses the entry's `title` and `details`; `title` defaults to `Device reported <type>.` with underscores in the type replaced by spaces. The server MUST NOT send the alert to a watcher whose `email_frequency` is `none` or whose email is unverified. `risk` is required on every entry. A failure to send an alert MUST NOT fail the upload.
 

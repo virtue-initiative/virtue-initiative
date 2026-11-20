@@ -347,6 +347,8 @@ impl ApiTransport for HttpApiClient {
 
         #[derive(Serialize)]
         struct BatchMetadata<'a> {
+            upload_id: &'a str,
+            retry: bool,
             start_time: i64,
             end_time: i64,
             access_keys: std::collections::BTreeMap<&'a str, &'a str>,
@@ -361,6 +363,8 @@ impl ApiTransport for HttpApiClient {
         }
 
         let metadata = serde_json::to_string(&BatchMetadata {
+            upload_id: &batch.upload_id,
+            retry: batch.retry,
             start_time: batch.start_time_ms,
             end_time: batch.end_time_ms,
             access_keys: batch

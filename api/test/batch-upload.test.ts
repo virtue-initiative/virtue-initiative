@@ -1,11 +1,15 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, fetchMock, SELF } from 'cloudflare:test';
 import {
+  acceptPartnerInvite,
   authHeaders,
   BASE,
   batchMetadataForm,
   clearDB,
   createDeviceForUser,
+  invitePartner,
+  listEmailDeliveries,
+  markUserEmailVerified,
   signupAndGetCookie,
   uploadBatch,
 } from './helpers';
@@ -113,6 +117,8 @@ describe('POST /d/batch metadata validation (API-038)', () => {
     ['event_counts missing', without('event_counts')],
     ['event_counts is a number', withField('event_counts', 3)],
     ...(countCases as Array<[string, (m: Metadata) => unknown]>),
+    ['upload_id is not a UUID', withField('upload_id', 'batch-1')],
+    ['retry is a string', withField('retry', 'true')],
     ['notifications is not an array', withField('notifications', 'tamper')],
     ['a notification has no risk', withField('notifications', [{ ts: 1, type: 'system_event' }])],
     [
@@ -552,5 +558,118 @@ describe('POST /d/batch response (API-038)', () => {
     expect(second.end_hash).toBe('0'.repeat(64));
     expect(second.id).not.toBe(first.id);
     expect(second.url).not.toBe(first.url);
+  });
+});
+
+describe('POST /d/batch retries of a batch whose response was lost (API-038)', () => {
+  const UPLOAD_ID = '00000000-0000-4000-8000-0000000000a1';
+  type Uploaded = {
+    id: string;
+    start_time: number;
+    end_time: number;
+    end_hash: string;
+    url: string;
+  };
+
+  const attempt = (
+    device: { refresh_token: string },
+    userId: string,
+    options: { retry?: boolean; upload_id?: string; bytes?: number[]; notifications?: unknown[] },
+  ) =>
+    uploadBatch(
+      device.refresh_token,
+      batchMetadataForm({
+        upload_id: options.upload_id ?? UPLOAD_ID,
+        retry: options.retry,
+        start_time: 1_000,
+        end_time: 2_000,
+        access_keys: { [userId]: b64('k') },
+        notifications: options.notifications,
+        file: new File([new Uint8Array(options.bytes ?? [1, 2, 3])], 'batch.enc'),
+      }),
+    );
+
+  it('answers a retry of a stored batch with that batch, and stores nothing new (API-038)', async () => {
+    const { userId, device } = await setup();
+    const first = (await (await attempt(device, userId, { bytes: [1, 1, 1] })).json()) as Uploaded;
+
+    const res = await attempt(device, userId, { retry: true, bytes: [2, 2, 2] });
+
+    expect(res.status).toBe(200);
+    const retried = (await res.json()) as Uploaded & { settings: { hash_token: string } };
+    expect(retried).toMatchObject(first);
+    expect(retried.settings.hash_token).toEqual(expect.any(String));
+    expect(await storedBatchCount()).toBe(1);
+    expect(await storedObjectCount()).toBe(1);
+    // The stored object is still the first attempt's, which the stored access_keys open.
+    const object = await SELF.fetch(first.url);
+    expect(new Uint8Array(await object.arrayBuffer())).toEqual(new Uint8Array([1, 1, 1]));
+  });
+
+  it('resets the hash state on a retry of a stored batch, in case the first attempt stopped before its reset (API-038)', async () => {
+    const { userId, device } = await setup();
+    await attempt(device, userId, {});
+    // As if the first attempt stored the batch and then stopped before the reset.
+    seedHashState(device.id, { hash: '5a'.repeat(32), seq: 3, last_received: 1_700_000_000 });
+
+    const res = await attempt(device, userId, { retry: true });
+
+    expect(res.status).toBe(200);
+    expect(getHashState(device.id)).toMatchObject({ hash: '0'.repeat(64), seq: 0 });
+  });
+
+  it('does not send the notifications again on a retry of a stored batch (API-038)', async () => {
+    const { cookie, userId, device } = await setup();
+    const watcher = await signupAndGetCookie('watcher@example.com');
+    await markUserEmailVerified(watcher.userId);
+    const invite = await invitePartner(cookie, 'watcher@example.com');
+    expect((await acceptPartnerInvite(watcher.cookie, invite.token)).status).toBe(200);
+    const notifications = [{ ts: 1_500, type: 'system_event', risk: 0.9 }];
+    const alerts = async () =>
+      (await listEmailDeliveries()).filter((delivery) => delivery.kind === 'tamper_alert').length;
+
+    await attempt(device, userId, { notifications });
+    expect(await alerts()).toBe(1);
+    const res = await attempt(device, userId, { retry: true, notifications });
+
+    expect(res.status).toBe(200);
+    expect(await alerts()).toBe(1);
+  });
+
+  it.each([
+    ['a retry whose earlier attempt was never stored', { retry: true, upload_id: UPLOAD_ID }],
+    ['an upload_id already stored, when retry is not set', { retry: false, upload_id: UPLOAD_ID }],
+  ])('stores %s as a new batch (API-038)', async (_name, second) => {
+    const { userId, device } = await setup();
+    const stored = second.retry
+      ? null
+      : ((await (await attempt(device, userId, {})).json()) as Uploaded);
+    seedHashState(device.id, { hash: '6b'.repeat(32), seq: 2, last_received: 1_700_000_000 });
+
+    const res = await attempt(device, userId, second);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Uploaded;
+    expect(body.end_hash).toBe('6b'.repeat(32));
+    expect(body.id).not.toBe(stored?.id);
+    expect(await storedBatchCount()).toBe(stored ? 2 : 1);
+    expect(getHashState(device.id)).toMatchObject({ hash: '0'.repeat(64), seq: 0 });
+  });
+
+  it('stores a retry as a new batch when only another device has a batch with that upload_id (API-038)', async () => {
+    const { userId, device } = await setup();
+    const other = await createDeviceForUser(
+      'uploader@example.com',
+      'password123',
+      'Phone',
+      'android',
+    );
+    const first = (await (await attempt(device, userId, {})).json()) as Uploaded;
+
+    const res = await attempt(other, userId, { retry: true });
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Uploaded).id).not.toBe(first.id);
+    expect(await storedBatchCount()).toBe(2);
   });
 });

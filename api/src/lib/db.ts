@@ -631,6 +631,7 @@ export async function createBatch(
     high_risk_count?: number;
     medium_risk_count?: number;
     created_at: number;
+    upload_id?: string;
   },
 ) {
   const deviceIdBytes = uuidToBytes(input.device_id);
@@ -640,9 +641,9 @@ export async function createBatch(
       // exists itself; otherwise a device deleted mid-upload would leave an orphan row.
       `INSERT INTO batches (
          id, user_id, device_id, start_time, end_time, end_hash, access_keys,
-         version, high_risk_count, medium_risk_count, created_at
+         version, high_risk_count, medium_risk_count, created_at, upload_id
        )
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?)`,
     )
     .bind(
@@ -657,9 +658,39 @@ export async function createBatch(
       input.high_risk_count ?? 0,
       input.medium_risk_count ?? 0,
       input.created_at,
+      input.upload_id ? uuidToBytes(input.upload_id) : null,
       deviceIdBytes,
     )
     .run();
+}
+
+/**
+ * The device's batch stored under the client's `upload_id` (API-038), if any. Only a
+ * retry looks here: with no index on upload_id it reads the owner's whole primary key
+ * range.
+ */
+export async function findBatchByUploadId(
+  db: D1Database,
+  input: { user_id: string; device_id: string; upload_id: string },
+) {
+  return firstWithUuidFields<{
+    id: string;
+    user_id: string;
+    start_time: number;
+    end_time: number;
+    end_hash: unknown;
+    version: string;
+  }>(
+    db
+      .prepare(
+        `SELECT id, user_id, start_time, end_time, end_hash, version
+         FROM batches
+         WHERE user_id = ? AND device_id = ? AND upload_id = ?
+         LIMIT 1`,
+      )
+      .bind(uuidToBytes(input.user_id), uuidToBytes(input.device_id), uuidToBytes(input.upload_id)),
+    ['id', 'user_id'],
+  );
 }
 
 export async function listBatches(db: D1Database, ownerIds: string[], filters: { since?: number }) {
