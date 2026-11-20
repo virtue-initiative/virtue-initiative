@@ -37,6 +37,46 @@ public enum CoreSkipReason: String, Decodable {
     }
 }
 
+/// How prominently an announcement is shown — `virtue_core::AnnouncementLevel`
+/// (CLIENT-033). A level from a newer core reads as `info`.
+public enum CoreAnnouncementLevel: String, Decodable {
+    case info
+    case warning
+    case urgent
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = CoreAnnouncementLevel(rawValue: raw) ?? .info
+    }
+}
+
+/// A message for the person using this device — `virtue_core::DeviceAnnouncement`
+/// (API-068).
+public struct CoreAnnouncement: Decodable, Equatable {
+    public let message: String
+    public let url: String?
+    public let level: CoreAnnouncementLevel
+
+    public init(message: String, url: String?, level: CoreAnnouncementLevel) {
+        self.message = message
+        self.url = url
+        self.level = level
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case url
+        case level
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        message = try container.decode(String.self, forKey: .message)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        level = try container.decodeIfPresent(CoreAnnouncementLevel.self, forKey: .level) ?? .info
+    }
+}
+
 /// Mirrors `virtue_core::ServiceStatus`, the JSON payload returned by
 /// `virtue_*_native_get_status_json()` on both platforms. This is the shared
 /// status-page contract — see `client/core/SPEC.md` CORE-010.
@@ -63,6 +103,7 @@ public struct CoreServiceStatus: Decodable {
     public let hashBaseUrl: String?
     public let captureIntervalSeconds: Int64?
     public let batchWindowSeconds: Int64?
+    public let announcement: CoreAnnouncement?
 
     private enum CodingKeys: String, CodingKey {
         case isAuthenticated = "is_authenticated"
@@ -84,6 +125,7 @@ public struct CoreServiceStatus: Decodable {
         case hashBaseUrl = "hash_base_url"
         case captureIntervalSeconds = "capture_interval_seconds"
         case batchWindowSeconds = "batch_window_seconds"
+        case announcement
     }
 
     public static func decode(fromJson json: String) -> CoreServiceStatus? {

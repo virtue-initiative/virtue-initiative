@@ -32,5 +32,8 @@
     <color name="good">#2F7D4F</color>
     <color name="ochre">#A67F3D</color>
     <color name="bad">#C0392B</color>
+    <!-- Announcement backgrounds (CLIENT-033), the same on every platform. -->
+    <color name="announcement_warning">#C2410C</color>
+    <color name="announcement_urgent">#B91C1C</color>
     <color name="logo">#163026</color>
 </resources>

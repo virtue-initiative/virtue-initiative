@@ -30,6 +30,7 @@ import {
 import { formatRelativeTimestamp } from '../../utils/time';
 import { csvFilename, downloadCsv, toCsv } from './csv';
 import { Trends } from './Trends';
+import { AnnouncementsSection } from './Announcements';
 import { FeatureFlagsSection } from './FeatureFlags';
 import './style.css';
 
@@ -124,6 +125,8 @@ export function Admin() {
       </section>
 
       <FeatureFlagsSection />
+
+      <AnnouncementsSection />
 
       <QuerySection />
     </div>

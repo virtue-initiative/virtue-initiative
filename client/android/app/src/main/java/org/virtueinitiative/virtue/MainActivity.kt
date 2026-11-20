@@ -2,6 +2,8 @@ package org.virtueinitiative.virtue
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Paint
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +14,7 @@ import android.text.SpannableString
 import android.text.Spannable
 import android.text.format.DateUtils
 import android.text.style.ForegroundColorSpan
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -465,6 +468,45 @@ class MainActivity : AppCompatActivity() {
                 filledButton(getString(R.string.btn_resume_monitoring)) { toggleMonitoring() }.topMargin(28)
             )
         }
+
+        // CLIENT-033: below the main actions, while signed in.
+        Announcement.fromStatus(json)?.let { content.addView(announcementView(it).topMargin(20)) }
+    }
+
+    // CLIENT-033: info reads as a small link (or muted text without one);
+    // warning and urgent sit on an orange or red background. With a url,
+    // tapping it opens the url.
+    private fun announcementView(announcement: Announcement): TextView {
+        val open = announcement.url?.let { url ->
+            { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        }
+        val view = when {
+            announcement.prominent -> text(announcement.message, 15f, android.R.color.white, bold = true).apply {
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(8).toFloat()
+                    setColor(
+                        color(
+                            if (announcement.level == Announcement.Level.URGENT) R.color.announcement_urgent
+                            else R.color.announcement_warning
+                        )
+                    )
+                }
+                if (open != null) {
+                    paintFlags = paintFlags or Paint.UNDERLINE_TEXT_FLAG
+                    isClickable = true
+                    isFocusable = true
+                    setOnClickListener { open() }
+                }
+            }
+            open != null -> linkText(announcement.message, onClick = open).apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                paintFlags = paintFlags or Paint.UNDERLINE_TEXT_FLAG
+            }
+            else -> text(announcement.message, 14f, R.color.ink_3)
+        }
+        if (!announcement.prominent) view.gravity = Gravity.CENTER
+        return view
     }
 
     // ---- Sign in ----------------------------------------------------------

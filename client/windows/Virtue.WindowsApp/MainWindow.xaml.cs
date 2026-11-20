@@ -61,6 +61,9 @@ public sealed partial class MainWindow : Window
     private static readonly SolidColorBrush NeutralBrush = HexBrush("#A8A290");
     private static readonly SolidColorBrush OnAccentBrush = new(Colors.White);
     private static readonly SolidColorBrush ToastBrush = HexBrush("#1B1A16");
+    // Announcement backgrounds (CLIENT-033), the same on every platform.
+    private static readonly SolidColorBrush AnnouncementWarningBrush = HexBrush("#C2410C");
+    private static readonly SolidColorBrush AnnouncementUrgentBrush = HexBrush("#B91C1C");
 
     private enum Screen
     {
@@ -128,6 +131,8 @@ public sealed partial class MainWindow : Window
     private readonly Button _reportFromHomeButton = CreatePrimaryButton("Report an Issue");
     private readonly Button _stopButton = CreateSecondaryButton("Stop Monitoring");
     private readonly InfoBar _homeError = CreateErrorBar();
+    private readonly Border _announcementHost = new();
+    private AnnouncementPayload? _shownAnnouncement;
     private readonly InfoBar _signInError = CreateErrorBar();
     private readonly TextBox _emailTextBox = new();
     private readonly PasswordBox _passwordBox = new();
@@ -551,6 +556,12 @@ public sealed partial class MainWindow : Window
             actions.Children.Add(button);
         }
         _statusPanel.Children.Add(actions);
+
+        // CLIENT-033: below the main actions.
+        _announcementHost.Width = 280;
+        _announcementHost.Margin = new Thickness(0, 6, 0, 0);
+        _announcementHost.Visibility = Visibility.Collapsed;
+        _statusPanel.Children.Add(_announcementHost);
 
         _homeError.Margin = new Thickness(0, 6, 0, 0);
         _homeError.Width = 320;
@@ -976,6 +987,16 @@ public sealed partial class MainWindow : Window
         _partnersButton.Visibility = VisibleIf(signedIn && !needsAttention);
         _reportFromHomeButton.Visibility = VisibleIf(signedIn && needsAttention);
         _stopButton.Visibility = VisibleIf(signedIn);
+
+        // Rebuilt only when it changes, since button colors are fixed once its
+        // template is applied.
+        var announcement = signedIn ? ViewModel.Announcement : null;
+        if (announcement != _shownAnnouncement)
+        {
+            _shownAnnouncement = announcement;
+            _announcementHost.Child = announcement is null ? null : CreateAnnouncement(announcement);
+        }
+        _announcementHost.Visibility = VisibleIf(announcement is not null);
 
         var busy = ViewModel.IsBusy;
         // While an action runs others are ignored (CLIENT-027).
@@ -1749,6 +1770,72 @@ public sealed partial class MainWindow : Window
         link.Resources["HyperlinkButtonBackgroundPointerOver"] = new SolidColorBrush(Colors.Transparent);
         link.Resources["HyperlinkButtonBackgroundPressed"] = new SolidColorBrush(Colors.Transparent);
         return link;
+    }
+
+    // CLIENT-033: info reads as a small link (or muted text without one);
+    // warning and urgent sit on an orange or red background. With a url,
+    // clicking it opens the url.
+    private static UIElement CreateAnnouncement(AnnouncementPayload announcement)
+    {
+        var prominent = announcement.Level is "warning" or "urgent";
+        Uri? url = Uri.TryCreate(announcement.Url, UriKind.Absolute, out var parsed) ? parsed : null;
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        var background = announcement.Level switch
+        {
+            "urgent" => AnnouncementUrgentBrush,
+            "warning" => AnnouncementWarningBrush,
+            _ => transparent,
+        };
+        var foreground = prominent ? OnAccentBrush : url is null ? TextMutedBrush : LinkBrush;
+        var padding = prominent ? new Thickness(14, 10, 14, 10) : new Thickness(0, 4, 0, 4);
+        var text = new TextBlock
+        {
+            Text = announcement.Message,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = prominent ? TextAlignment.Left : TextAlignment.Center,
+            FontSize = prominent ? 14 : 12,
+            FontWeight = prominent ? FontWeights.Medium : FontWeights.Normal,
+            Foreground = foreground,
+            TextDecorations = url is null
+                ? Windows.UI.Text.TextDecorations.None
+                : Windows.UI.Text.TextDecorations.Underline,
+        };
+
+        if (url is null)
+        {
+            return new Border
+            {
+                Child = text,
+                Background = background,
+                CornerRadius = new CornerRadius(6),
+                Padding = padding,
+            };
+        }
+
+        var button = new Button
+        {
+            Content = text,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = prominent ? HorizontalAlignment.Left : HorizontalAlignment.Center,
+            Padding = padding,
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(0),
+            Background = background,
+        };
+        var r = button.Resources;
+        r["ButtonBackground"] = background;
+        r["ButtonBackgroundPointerOver"] = background;
+        r["ButtonBackgroundPressed"] = background;
+        r["ButtonForeground"] = foreground;
+        r["ButtonForegroundPointerOver"] = foreground;
+        r["ButtonForegroundPressed"] = foreground;
+        r["ButtonBorderBrush"] = transparent;
+        r["ButtonBorderBrushPointerOver"] = transparent;
+        r["ButtonBorderBrushPressed"] = transparent;
+        AutomationProperties.SetName(button, announcement.Message);
+        ToolTipService.SetToolTip(button, url.AbsoluteUri);
+        button.Click += (_, _) => OpenInBrowser(url.AbsoluteUri);
+        return button;
     }
 
     private static InfoBar CreateErrorBar() =>
