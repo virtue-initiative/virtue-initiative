@@ -174,6 +174,8 @@ pub trait ApiTransport: Send + Sync {
     /// Resolves a server address the user typed into a Virtue API (CORE-028).
     fn resolve_server(&self, address: &str) -> CoreResult<ChosenServer>;
     fn logout(&self, api_base_url: Option<&str>, device_refresh_token: &str) -> CoreResult<()>;
+    /// `app_transaction_id` is the App Store app transaction ID, which only
+    /// an App Store client has (API-035).
     fn register_device(
         &self,
         api_base_url: Option<&str>,
@@ -181,6 +183,7 @@ pub trait ApiTransport: Send + Sync {
         password: &str,
         name: &str,
         platform: &str,
+        app_transaction_id: Option<&str>,
     ) -> CoreResult<RegisteredDevice>;
     fn get_device_settings(
         &self,
@@ -308,6 +311,7 @@ impl ApiTransport for HttpApiClient {
         password: &str,
         name: &str,
         platform: &str,
+        app_transaction_id: Option<&str>,
     ) -> CoreResult<RegisteredDevice> {
         #[derive(Deserialize)]
         struct LoginMaterialResponse {
@@ -321,6 +325,8 @@ impl ApiTransport for HttpApiClient {
             password_auth: String,
             name: &'a str,
             platform: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            app_transaction_id: Option<&'a str>,
         }
 
         #[derive(Deserialize)]
@@ -345,6 +351,7 @@ impl ApiTransport for HttpApiClient {
                     password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
                     name,
                     platform,
+                    app_transaction_id,
                 })?,
         )?;
 

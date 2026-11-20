@@ -71,6 +71,7 @@ enum DaemonRequest {
         password: String,
         device_name: Option<String>,
         server: Option<String>,
+        app_transaction_id: Option<String>,
         reply: mpsc::Sender<CoreResult<String>>,
     },
     Logout {
@@ -394,6 +395,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         password: &str,
         device_name_override: Option<&str>,
         server: Option<&str>,
+        app_transaction_id: Option<&str>,
         now_ms: i64,
     ) -> CoreResult<String> {
         auth::login(
@@ -405,6 +407,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             password,
             device_name_override,
             server,
+            app_transaction_id,
             now_ms,
         )
     }
@@ -514,11 +517,25 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         device_name: Option<&str>,
         server: Option<&str>,
     ) -> CoreResult<String> {
+        self.login_with_app_transaction_id(email, password, device_name, server, None)
+    }
+
+    /// `login` for an App Store client, which also registers its App Store
+    /// app transaction ID with the device (CORE-008).
+    pub fn login_with_app_transaction_id(
+        &self,
+        email: &str,
+        password: &str,
+        device_name: Option<&str>,
+        server: Option<&str>,
+        app_transaction_id: Option<&str>,
+    ) -> CoreResult<String> {
         self.call(|reply| DaemonRequest::Login {
             email: email.to_string(),
             password: password.to_string(),
             device_name: device_name.map(str::to_string),
             server: server.map(str::to_string),
+            app_transaction_id: app_transaction_id.map(str::to_string),
             reply,
         })?
     }
@@ -618,7 +635,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     ) -> CoreResult<String> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        let result = self.apply_login(&mut guard, email, password, device_name, server, now_ms);
+        let result =
+            self.apply_login(&mut guard, email, password, device_name, server, None, now_ms);
         self.persist(&guard);
         result
     }
@@ -731,6 +749,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                         password,
                         device_name,
                         server,
+                        app_transaction_id,
                         reply,
                     } => {
                         let result = self.apply_login(
@@ -739,6 +758,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             &password,
                             device_name.as_deref(),
                             server.as_deref(),
+                            app_transaction_id.as_deref(),
                             now_ms,
                         );
                         fires.push(Box::new(move || {

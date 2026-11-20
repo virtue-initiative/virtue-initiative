@@ -20,6 +20,7 @@ pub fn login<A: ApiTransport>(
     password: &str,
     device_name_override: Option<&str>,
     server: Option<&str>,
+    app_transaction_id: Option<&str>,
     now_ms: i64,
 ) -> CoreResult<String> {
     let resolved_name = device_name_override
@@ -32,8 +33,14 @@ pub fn login<A: ApiTransport>(
         .map(|address| api.resolve_server(address))
         .transpose()?;
     let api_base_url = server.as_ref().map(|s| s.api_base_url.as_str());
-    let mut registered =
-        api.register_device(api_base_url, email, password, resolved_name, platform_name)?;
+    let mut registered = api.register_device(
+        api_base_url,
+        email,
+        password,
+        resolved_name,
+        platform_name,
+        app_transaction_id,
+    )?;
     registered.credentials.server = server;
 
     flush_pending_batch(&mut state.upload, api, now_ms);
@@ -131,6 +138,30 @@ mod tests {
             1_000,
         );
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
+    }
+
+    // CORE-008: login.
+    #[test]
+    fn login_registers_app_transaction_id_when_present() {
+        let mut state = DaemonState::default();
+        let api = MockApiClient::new();
+        let _ = login(
+            &mut state,
+            &api,
+            "d",
+            "p",
+            "alice@example.org",
+            "secret",
+            None,
+            Some("2000000123456789"),
+            1_000,
+        );
+        assert_eq!(
+            api.state().register_device_calls[0]
+                .app_transaction_id
+                .as_deref(),
+            Some("2000000123456789")
+        );
     }
 
     // CORE-008: login.

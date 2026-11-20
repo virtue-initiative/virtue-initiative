@@ -483,12 +483,13 @@ export async function createDevice(
     name: string;
     platform: string;
     app_version: string | null;
+    app_transaction_id?: string | null;
   },
 ) {
   return db
     .prepare(
-      `INSERT INTO devices (id, owner, name, platform, app_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO devices (id, owner, name, platform, app_version, app_transaction_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uuidToBytes(input.id),
@@ -496,9 +497,24 @@ export async function createDevice(
       input.name,
       input.platform,
       input.app_version,
+      input.app_transaction_id ?? null,
       Date.now(),
     )
     .run();
+}
+
+/** API-066: the devices still signed in from one App Store download. */
+export async function listLiveDeviceIdsByAppTransactionId(
+  db: D1Database,
+  appTransactionId: string,
+) {
+  const rows = await allWithUuidFields<{ id: string }>(
+    db
+      .prepare('SELECT id FROM devices WHERE app_transaction_id = ? AND deleted_at IS NULL')
+      .bind(appTransactionId),
+    ['id'],
+  );
+  return rows.map((row) => row.id);
 }
 
 export async function findDeviceById(db: D1Database, deviceId: string) {
