@@ -9,13 +9,14 @@ are in `SPEC.md`; this page explains how they fit together. Implementation:
 
 The core schedules every wakeup, so it knows when it should next be running. Each tick compares
 the actual time to the time it was scheduled for and appends the difference to an array of the
-last 10 wakeups (`LifecycleState.late_wakeups`). A gap is excused, not recorded, when:
+last 10 wakeups (`LifecycleState.late_wakeups`). A gap is excused, and left out of the array,
+when:
 
 - the wakeup is within 2 minutes of a system login, or was scheduled within 2 minutes of a
   system logout, and neither of those two signals contradicts the other;
 - a suspend accounts for essentially the whole gap. The core detects a suspend by comparing the
-  boot clock, which counts time suspended, with a clock that doesn't. Suspend evidence can only
-  add an excuse, never block one;
+  boot clock, which counts time suspended, with a clock that doesn't. Suspend evidence can
+  excuse a gap by itself, and it never blocks a login or logout excuse;
 - monitoring was stopped from the app (see below).
 
 An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires when a single entry

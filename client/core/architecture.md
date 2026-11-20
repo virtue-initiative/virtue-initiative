@@ -56,8 +56,8 @@ hold a `Daemon` for the same state file. Everywhere else it is uncontended.
 
 Each module is a plain `struct FooState` (`#[derive(Serialize, Deserialize,
 Default, Clone)]`, `#[serde(default)]`) plus free functions operating on it.
-There is no module trait and no event dispatch: a module that needs to enqueue
-work calls `upload::enqueue(&mut upload_state, now_ms, risk, kind)` directly.
+Modules call each other's functions directly: a module that needs to enqueue
+work calls `upload::enqueue(&mut upload_state, now_ms, risk, kind)`.
 
 ```rust
 let daemon = Daemon::new(config, platform, api, state_path)?;
@@ -284,8 +284,8 @@ check is disabled.
 - `screenshot_interval` — mean of the random exponential draw (CORE-003); builds default to 300 s
 - `batch_interval` — how long events wait for a batch upload; builds default to 3600 s
 
-There is no runtime override: the API URL, capture interval and batch window
-are baked in at **compile time** via `env!()`. `client/core/build.rs` reads
+The API URL, capture interval and batch window are baked in at **compile
+time** via `env!()`. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
 back to the repo-root `.env` (gitignored; see `.env.example`) and then to
