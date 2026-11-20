@@ -102,6 +102,11 @@ public static class UpdateRelaunchTask
     ///
     /// <c>StartBoundary</c> is written as a local time with no UTC offset, which is how Task
     /// Scheduler interprets a bare <c>xs:dateTime</c> and how the measured probe ran.
+    ///
+    /// <c>ExecutionTimeLimit</c> is <c>PT0S</c> (none), as for <see cref="RestartWatchdog"/>: the
+    /// process this task starts is the relaunched app itself, and Task Scheduler stops a task's
+    /// process at its limit. The <c>PT5M</c> this had before killed the app five minutes after
+    /// every update.
     /// </summary>
     public static string BuildTaskXml(string exePath, string arguments, DateTime startAt, TimeSpan triggerWindow)
     {
@@ -137,7 +142,7 @@ public static class UpdateRelaunchTask
                 <Enabled>true</Enabled>
                 <Hidden>true</Hidden>
                 <AllowHardTerminate>true</AllowHardTerminate>
-                <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
                 <DeleteExpiredTaskAfter>PT30S</DeleteExpiredTaskAfter>
                 <Priority>7</Priority>
               </Settings>
