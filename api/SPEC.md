@@ -862,6 +862,8 @@ The server MUST validate the login (see `POST /login`) and create a long lived r
 
 It should also return the device settings (see `GET /d/device`)
 
+The server MUST store the client's version from the `X-Virtue-Version` header (API-068) on the new device, or none when the header is absent or not a valid version (1 to 32 letters, digits, `.`, `+` or `-`).
+
 On success, it must return **HTTP 200** with
 
 ```js
@@ -880,6 +882,8 @@ The server SHOULD create a fresh JWT hash server token (see the hash server spec
 ```js
 DeviceSettings;
 ```
+
+A client fetches its settings first thing whenever it starts (CORE-005), so this is where a version change after an update shows up. The server MUST store the client's version, validated as in API-035, on the device when it differs from the stored one, and MUST NOT write to the device when it is the same or the header is absent or invalid. `POST /d/batch` MUST NOT change the stored version.
 
 ### API-037 `POST /d/logout`
 
