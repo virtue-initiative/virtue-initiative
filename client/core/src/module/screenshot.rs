@@ -451,6 +451,7 @@ mod tests {
         upload.device_credentials = Some(DeviceCredentials {
             device_id: "d".into(),
             refresh_token: "r".into(),
+            server: None,
         });
         upload.settings = Some(DeviceSettings {
             device_id: "d".into(),

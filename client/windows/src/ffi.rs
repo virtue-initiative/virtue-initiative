@@ -125,6 +125,7 @@ struct SessionStatusPayload {
     logged_in: bool,
     device_id: Option<String>,
     email: Option<String>,
+    remembered_server: Option<String>,
     build_label: String,
 }
 
@@ -134,6 +135,7 @@ impl From<SessionStatus> for SessionStatusPayload {
             logged_in: value.logged_in,
             device_id: value.device_id,
             email: value.email,
+            remembered_server: value.remembered_server,
             build_label: virtue_core::BUILD_LABEL.to_string(),
         }
     }
@@ -170,6 +172,7 @@ struct MonitorStatusPayload {
     last_batch_at_ms: Option<i64>,
     recent_errors: Vec<StatusErrorPayload>,
     api_base_url: Option<String>,
+    web_app_url: Option<String>,
     hash_base_url: Option<String>,
     capture_interval_seconds: Option<u64>,
     batch_window_seconds: Option<u64>,
@@ -232,6 +235,7 @@ impl From<MonitorStatusSnapshot> for MonitorStatusPayload {
                 })
                 .unwrap_or_default(),
             api_base_url: core.as_ref().map(|s| s.api_base_url.clone()),
+            web_app_url: core.as_ref().and_then(|s| s.web_app_url.clone()),
             hash_base_url: core.as_ref().and_then(|s| s.hash_base_url.clone()),
             capture_interval_seconds: core.as_ref().map(|s| s.capture_interval_seconds),
             batch_window_seconds: core.as_ref().map(|s| s.batch_window_seconds),
@@ -249,6 +253,8 @@ struct LoginRequest {
     email: String,
     password: String,
     device_name: Option<String>,
+    /// A self-hosted server address, or absent for the default (CLIENT-033).
+    server: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -296,8 +302,14 @@ pub extern "C" fn virtue_windows_login(request_json: *const c_char) -> *mut c_ch
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(default_device_name);
 
+        let server = request.server.filter(|value| !value.trim().is_empty());
         let manager = with_session_manager()?;
-        manager.login_blocking(&request.email, &request.password, &device_name)?;
+        manager.login_blocking(
+            &request.email,
+            &request.password,
+            &device_name,
+            server.as_deref(),
+        )?;
         Ok(())
     })())
 }
@@ -331,10 +343,7 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
         // running (or hasn't finished starting up yet).
         let state: virtue_core::DaemonState =
             virtue_core::load_state(&paths.state_dir.join("event_state.json")).unwrap_or_default();
-        let bearer_token = state
-            .auth
-            .device_credentials
-            .map(|creds| creds.refresh_token);
+        let bearer_token = state.auth.device_credentials;
 
         let platform_details = windows_platform_details();
         let logs = request
@@ -345,7 +354,7 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
         let config = build_core_config(&paths);
         let api = virtue_core::api::HttpApiClient::new(&config)?;
         api.report_issue(
-            bearer_token.as_deref(),
+            bearer_token.as_ref(),
             &virtue_core::api::BugReportRequest {
                 message: &message,
                 contact_email: request.contact_email.as_deref(),
@@ -685,6 +694,7 @@ mod tests {
             "lastBatchAtMs",
             "recentErrors",
             "apiBaseUrl",
+            "webAppUrl",
             "hashBaseUrl",
             "captureIntervalSeconds",
             "batchWindowSeconds",

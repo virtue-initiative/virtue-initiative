@@ -12,7 +12,8 @@ private func virtue_ios_native_init(
 private func virtue_ios_native_login(
     _ email: UnsafePointer<CChar>?,
     _ password: UnsafePointer<CChar>?,
-    _ deviceName: UnsafePointer<CChar>?
+    _ deviceName: UnsafePointer<CChar>?,
+    _ server: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -148,14 +149,22 @@ enum NativeBridge {
         }
     }
 
-    static func login(email: String, password: String, deviceName: String) -> String? {
+    /// `server` is a self-hosted server address, or nil for the default
+    /// server (CLIENT-033).
+    static func login(email: String, password: String, deviceName: String, server: String?)
+        -> String?
+    {
         withDaemonLoop {
             callReturningError {
                 email.withCString { emailCString in
                     password.withCString { passwordCString in
                         deviceName.withCString { deviceNameCString in
-                            virtue_ios_native_login(
-                                emailCString, passwordCString, deviceNameCString)
+                            // An empty address means the default server.
+                            (server ?? "").withCString { serverCString in
+                                virtue_ios_native_login(
+                                    emailCString, passwordCString, deviceNameCString,
+                                    serverCString)
+                            }
                         }
                     }
                 }

@@ -28,6 +28,11 @@
     <string name="btn_sign_in">Sign In</string>
     <string name="btn_signing_in">Signing In…</string>
     <string name="btn_sign_up">Don\'t have an account? Sign up</string>
+    <string name="server_label">Server</string>
+    <string name="server_virtue_initiative">Virtue Initiative</string>
+    <string name="server_self_hosted">Self-hosted</string>
+    <string name="server_address_hint">Server address</string>
+    <string name="msg_server_required">Server address is required.</string>
     <string name="btn_sign_out">Sign Out</string>
     <string name="btn_status_details">Status Details</string>
     <string name="btn_pause_monitoring">Pause Monitoring</string>

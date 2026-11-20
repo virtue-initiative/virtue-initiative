@@ -14,6 +14,8 @@ pub struct SessionStatus {
     pub logged_in: bool,
     pub device_id: Option<String>,
     pub email: Option<String>,
+    /// The self-hosted server last signed in to, to prefill sign-in (CLIENT-033).
+    pub remembered_server: Option<String>,
 }
 
 impl SessionManager {
@@ -37,17 +39,25 @@ impl SessionManager {
                 .as_ref()
                 .and_then(|s| s.account_email.clone())
                 .or(state.email),
+            remembered_server: state.server,
         })
     }
 
-    pub fn login_blocking(&self, email: &str, password: &str, device_name: &str) -> Result<String> {
-        let device_id = resident_monitor::app_login(email, password, device_name)
+    pub fn login_blocking(
+        &self,
+        email: &str,
+        password: &str,
+        device_name: &str,
+        server: Option<&str>,
+    ) -> Result<String> {
+        let device_id = resident_monitor::app_login(email, password, device_name, server)
             .map_err(|err| anyhow::anyhow!(login_error_message(&err)))?;
 
         save_state(
             &self.paths.ui_state_file,
             &ClientState {
                 email: Some(email.to_string()),
+                server: server.map(str::to_string),
             },
         )?;
 
@@ -56,7 +66,15 @@ impl SessionManager {
 
     pub fn logout_blocking(&self) -> Result<()> {
         resident_monitor::app_logout().context("logout failed")?;
-        save_state(&self.paths.ui_state_file, &ClientState { email: None })?;
+        // The server stays remembered for the next sign-in (CLIENT-033).
+        let remembered = load_state(&self.paths.ui_state_file).unwrap_or_default();
+        save_state(
+            &self.paths.ui_state_file,
+            &ClientState {
+                email: None,
+                ..remembered
+            },
+        )?;
         Ok(())
     }
 }

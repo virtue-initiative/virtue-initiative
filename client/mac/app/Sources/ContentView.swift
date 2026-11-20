@@ -353,7 +353,7 @@ private struct SignInForm: View {
     @State private var isPasswordVisible = false
     @FocusState private var focused: Field?
 
-    private enum Field { case email, password, deviceName }
+    private enum Field { case email, password, deviceName, server }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -406,20 +406,39 @@ private struct SignInForm: View {
             .focused($focused, equals: .deviceName)
             .modifier(InputStyle(isFocused: focused == .deviceName))
 
+            // CLIENT-033: the server is chosen here and nowhere else, so it
+            // can only change by signing out first.
+            Picker("Server", selection: $coordinator.serverChoice) {
+                ForEach(ServerChoice.allCases, id: \.self) { choice in
+                    Text(choice.label).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .font(.system(size: 13))
+            .foregroundStyle(VirtueBrand.textMuted)
+            if coordinator.serverChoice == .selfHosted {
+                TextField("Server address", text: $coordinator.serverAddress)
+                    .focused($focused, equals: .server)
+                    .modifier(InputStyle(isFocused: focused == .server))
+            }
+
             Button(coordinator.isSigningIn ? "Logging In…" : "Log In", action: coordinator.login)
                 .buttonStyle(VirtueButtonStyle(prominent: true, large: true))
                 .keyboardShortcut(.defaultAction)
                 .disabled(coordinator.isSigningIn)
                 .padding(.top, 4)
 
-            Link(
-                "Don't have an account? Sign up",
-                destination: URL(string: "https://app.virtueinitiative.org/signup")!
-            )
-            .font(.system(size: 13))
-            .foregroundStyle(VirtueBrand.link)
-            .pointingHandCursor()
-            .frame(maxWidth: .infinity)
+            // A self-hosted server's accounts are made on its own website.
+            if coordinator.serverChoice == .virtueInitiative {
+                Link(
+                    "Don't have an account? Sign up",
+                    destination: WebAppLink.url("/signup", webAppUrl: nil)
+                )
+                .font(.system(size: 13))
+                .foregroundStyle(VirtueBrand.link)
+                .pointingHandCursor()
+                .frame(maxWidth: .infinity)
+            }
 
             // A daemon that failed to start would fail the login too, so say
             // why up front (CLIENT-024).
@@ -469,8 +488,9 @@ private struct StatusFocus: View {
     let onStop: () -> Void
     @Environment(\.openURL) private var openURL
 
-    /// Partners are managed in the web app, not from this client.
-    private let partnersURL = URL(string: "https://app.virtueinitiative.org/partners")!
+    /// Partners are managed in the web app, not from this client. A
+    /// self-hosted server names its own (CLIENT-033).
+    private var partnersURL: URL { WebAppLink.url("/partners", status: coordinator.coreStatus) }
 
     private var state: HomeState { coordinator.homeState }
 

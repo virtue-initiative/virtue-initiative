@@ -22,7 +22,7 @@ See `../../docs/contracts.md` for the exact wire formats and constraints.
 - **Keep `PlatformHooks` minimal.** A new hook needs a reason no platform-independent code can provide. `PlatformHooks` is a blanket impl over `ScreenshotHooks + LifecycleHooks`; platforms implement those two.
 - **The daemon must not depend on `ipc`.** `src/ipc.rs` exists only on Linux and macOS and gates itself with an inner `#![cfg]`, so the daemon stays free of per-OS code.
 - **`event_state.json` must keep loading.** Its top-level keys (`auth`, `lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`) are what existing installs have on disk, and every module state is `#[serde(default)]`. A breaking change bumps `DaemonState.version` and adds its step to `DaemonState::upgrade`, which every load that a write may follow runs first (CORE-016, CORE-017).
-- **Config is compile-time.** `src/config.rs` reads values `build.rs` bakes in with `env!()`. Don't add a runtime config file (CLIENT-001).
+- **Config is compile-time.** `src/config.rs` reads values `build.rs` bakes in with `env!()`. Don't add a runtime config file (CLIENT-001). The server chosen at login (CORE-028) is the one exception, and it belongs to the session: it is stored in `DeviceCredentials.server`, so pass `creds.api_base_url()` to every `ApiTransport` call that uses those credentials.
 
 ## Testing
 

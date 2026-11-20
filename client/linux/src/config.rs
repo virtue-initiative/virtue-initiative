@@ -208,6 +208,7 @@ mod tests {
             device_credentials: Some(DeviceCredentials {
                 device_id: "dev-123".to_string(),
                 refresh_token: "refresh-abc".to_string(),
+                server: None,
             }),
             account_email: Some("alice@example.org".to_string()),
         };

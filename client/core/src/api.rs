@@ -12,7 +12,9 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
+use crate::model::{
+    BatchUpload, ChosenServer, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload,
+};
 
 /// The whole codebase shares one version, tracked in `version.properties` (this crate's
 /// grandparent directory). This is that version's `/vX`/`/vX.Y` URL-prefix form
@@ -157,18 +159,28 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
     }
 }
 
+/// Every call that talks to the main API takes `api_base_url`: the session's
+/// chosen server (CORE-028), or `None` for the build's default.
 pub trait ApiTransport: Send + Sync {
-    fn logout(&self, device_refresh_token: &str) -> CoreResult<()>;
+    /// Resolves a server address the user typed into a Virtue API (CORE-028).
+    fn resolve_server(&self, address: &str) -> CoreResult<ChosenServer>;
+    fn logout(&self, api_base_url: Option<&str>, device_refresh_token: &str) -> CoreResult<()>;
     fn register_device(
         &self,
+        api_base_url: Option<&str>,
         email: &str,
         password: &str,
         name: &str,
         platform: &str,
     ) -> CoreResult<RegisteredDevice>;
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState>;
+    fn get_device_settings(
+        &self,
+        api_base_url: Option<&str>,
+        device_refresh_token: &str,
+    ) -> CoreResult<DeviceState>;
     fn upload_batch(
         &self,
+        api_base_url: Option<&str>,
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse>;
@@ -234,20 +246,23 @@ impl HttpApiClient {
         })
     }
 
-    /// `bearer_token` is the device's refresh token if this device is logged in, or
-    /// `None` to submit anonymously; `log_file` is an optional attachment, e.g. recent
-    /// client logs (the server accepts both — API-042).
+    /// `credentials` are this device's if it is logged in, so the report is
+    /// attributed to it and goes to its server (CLIENT-033), or `None` to submit
+    /// anonymously to the build's default server; `log_file` is an optional
+    /// attachment, e.g. recent client logs (the server accepts both — API-042).
     pub fn report_issue(
         &self,
-        bearer_token: Option<&str>,
+        credentials: Option<&DeviceCredentials>,
         request: &BugReportRequest,
         log_file: Option<&[u8]>,
     ) -> CoreResult<()> {
+        let api_base_url = credentials.and_then(DeviceCredentials::api_base_url);
+        let bearer_token = credentials.map(|c| c.refresh_token.as_str());
         let metadata = serde_json::to_string(request)?;
         let boundary = multipart_boundary();
         let body = encode_bug_report_multipart(&boundary, &metadata, log_file);
         let response = self
-            .post(None, "/bug-report", bearer_token)
+            .post(api_base_url, "/bug-report", bearer_token)
             .content_type(format!("multipart/form-data; boundary={boundary}"))
             .send(&body)?;
         self.expect_success(response)
@@ -255,15 +270,31 @@ impl HttpApiClient {
 }
 
 impl ApiTransport for HttpApiClient {
-    fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
+    fn resolve_server(&self, address: &str) -> CoreResult<ChosenServer> {
+        let url = normalize_server_address(address)?;
+        for candidate in server_candidates(&url) {
+            if let Some(web_app_url) = self.probe_health(&candidate) {
+                return Ok(ChosenServer {
+                    api_base_url: candidate,
+                    web_app_url,
+                });
+            }
+        }
+        Err(CoreError::Remote(format!(
+            "No Virtue server found at {url}."
+        )))
+    }
+
+    fn logout(&self, api_base_url: Option<&str>, device_refresh_token: &str) -> CoreResult<()> {
         let response = self
-            .post(None, "/d/logout", Some(device_refresh_token))
+            .post(api_base_url, "/d/logout", Some(device_refresh_token))
             .send_empty()?;
         self.expect_success(response)
     }
 
     fn register_device(
         &self,
+        api_base_url: Option<&str>,
         email: &str,
         password: &str,
         name: &str,
@@ -290,7 +321,7 @@ impl ApiTransport for HttpApiClient {
         }
 
         let material: LoginMaterialResponse = self.expect_json(
-            self.get(None, "/user/login-material", None)
+            self.get(api_base_url, "/user/login-material", None)
                 .query("email", email)
                 .call()?,
         )?;
@@ -299,7 +330,7 @@ impl ApiTransport for HttpApiClient {
         let password_auth = derive_password_auth(password, &password_salt, &material.params)?;
 
         let response: RegisterDeviceResponse = self.expect_json(
-            self.post(None, "/d/device", None)
+            self.post(api_base_url, "/d/device", None)
                 .send_json(RegisterDeviceRequest {
                     email,
                     password_auth: base64::engine::general_purpose::STANDARD.encode(password_auth),
@@ -314,15 +345,21 @@ impl ApiTransport for HttpApiClient {
             credentials: DeviceCredentials {
                 device_id: settings.device_id.clone(),
                 refresh_token: response.token,
+                // The caller decides which server the session belongs to.
+                server: None,
             },
             settings,
             hash_token,
         })
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
+    fn get_device_settings(
+        &self,
+        api_base_url: Option<&str>,
+        device_refresh_token: &str,
+    ) -> CoreResult<DeviceState> {
         let response: DeviceSettingsResponse = self.expect_json(
-            self.get(None, "/d/device", Some(device_refresh_token))
+            self.get(api_base_url, "/d/device", Some(device_refresh_token))
                 .call()?,
         )?;
         let hash_token = response.hash_token.clone();
@@ -334,6 +371,7 @@ impl ApiTransport for HttpApiClient {
 
     fn upload_batch(
         &self,
+        api_base_url: Option<&str>,
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
@@ -380,7 +418,7 @@ impl ApiTransport for HttpApiClient {
         let boundary = multipart_boundary();
         let body = encode_multipart(&boundary, &batch.bytes, &metadata);
         let response: UploadBatchResponse = self.expect_json(
-            self.post(None, "/d/batch", Some(device_refresh_token))
+            self.post(api_base_url, "/d/batch", Some(device_refresh_token))
                 .content_type(format!("multipart/form-data; boundary={boundary}"))
                 .send(&body)?,
         )?;
@@ -485,6 +523,31 @@ impl HttpApiClient {
 }
 
 impl HttpApiClient {
+    /// Asks `api_base_url` for the health payload (API-007). `Some` when it is
+    /// a Virtue API, holding the web app URL it named, if any.
+    fn probe_health(&self, api_base_url: &str) -> Option<Option<String>> {
+        #[derive(Deserialize)]
+        struct Health {
+            name: Option<String>,
+            app_url: Option<String>,
+        }
+        let response = self.get(Some(api_base_url), "/", None).call().ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let mut response = response;
+        let health: Health = response.body_mut().read_json().ok()?;
+        if health.name.as_deref() != Some(VIRTUE_API_NAME) {
+            return None;
+        }
+        Some(
+            health
+                .app_url
+                .map(|url| url.trim().trim_end_matches('/').to_string())
+                .filter(|url| !url.is_empty()),
+        )
+    }
+
     /// Keeps the response's `Date` for `take_server_time_ms`. An error status
     /// still carries the server's time, so every response counts.
     fn note_server_time(&self, response: &Response<ureq::Body>) {
@@ -499,6 +562,52 @@ impl HttpApiClient {
             *server_time = Some((date_ms + 500, Instant::now()));
         }
     }
+}
+
+/// The `name` a Virtue API's health payload carries (API-007).
+const VIRTUE_API_NAME: &str = "Virtue Initiative API";
+
+/// Turns a server address the user typed into a URL to try (CORE-028):
+/// trimmed, `https://` assumed, and plain `http` only for this machine.
+pub fn normalize_server_address(address: &str) -> CoreResult<String> {
+    let trimmed = address.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(CoreError::Remote("Server address is required".to_string()));
+    }
+    let url = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    let lower = url.to_ascii_lowercase();
+    let allowed = lower.starts_with("https://")
+        || (lower.starts_with("http://") && is_loopback(&lower["http://".len()..]));
+    if !allowed {
+        return Err(CoreError::Remote(
+            "The server address must start with https://.".to_string(),
+        ));
+    }
+    Ok(url)
+}
+
+/// True when the authority at the start of `rest` names this machine.
+fn is_loopback(rest: &str) -> bool {
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+/// Where a Virtue API might live under `url`: the URL itself, then its
+/// `/api` path, which is where a web app that also serves the API puts it.
+fn server_candidates(url: &str) -> Vec<String> {
+    let mut candidates = vec![url.to_string()];
+    if !url.to_ascii_lowercase().ends_with("/api") {
+        candidates.push(format!("{url}/api"));
+    }
+    candidates
 }
 
 /// Parses an HTTP `Date` (IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`, the
@@ -857,5 +966,149 @@ mod tests {
         let settings = DeviceSettings::from(with);
         assert!(settings.has_feature_flag("beta"));
         assert!(!settings.has_feature_flag("other"));
+    }
+
+    /// A one-thread HTTP server on 127.0.0.1 that answers the health route
+    /// with `health` under `prefix` (e.g. `""` or `"/api"`) and 404 elsewhere.
+    /// Returns its `http://127.0.0.1:<port>` URL.
+    fn serve_health(prefix: &'static str, health: &'static str) -> String {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request_line = String::new();
+                let _ = reader.read_line(&mut request_line);
+                let mut header = String::new();
+                while reader.read_line(&mut header).is_ok_and(|n| n > 2) {
+                    header.clear();
+                }
+                let path = request_line.split_whitespace().nth(1).unwrap_or("");
+                let (status, body) = if path == format!("{prefix}/{API_VERSION}/") {
+                    ("200 OK", health)
+                } else {
+                    ("404 Not Found", r#"{"error":"Not found"}"#)
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        url
+    }
+
+    fn client() -> HttpApiClient {
+        let config = Config::new(
+            "https://default.example.org",
+            "d",
+            "p",
+            std::env::temp_dir(),
+            Duration::from_secs(60),
+            Duration::from_secs(60),
+        );
+        HttpApiClient::new(&config).unwrap()
+    }
+
+    const HEALTH: &str =
+        r#"{"name":"Virtue Initiative API","status":"ok","app_url":"https://app.example.org/"}"#;
+
+    // CORE-028: a server is accepted when its health payload names a Virtue API.
+    #[test]
+    fn resolve_server_accepts_a_virtue_api_and_keeps_its_web_app() {
+        let url = serve_health("", HEALTH);
+        let server = client().resolve_server(&format!("  {url}/ ")).unwrap();
+        assert_eq!(server.api_base_url, url);
+        assert_eq!(
+            server.web_app_url.as_deref(),
+            Some("https://app.example.org")
+        );
+    }
+
+    // CORE-028: the `/api` path is tried when the address itself is not the API.
+    #[test]
+    fn resolve_server_finds_the_api_under_its_api_path() {
+        let url = serve_health("/api", HEALTH);
+        let server = client().resolve_server(&url).unwrap();
+        assert_eq!(server.api_base_url, format!("{url}/api"));
+    }
+
+    // CORE-028: a server without a web app URL is still accepted.
+    #[test]
+    fn resolve_server_accepts_a_server_that_names_no_web_app() {
+        let url = serve_health("", r#"{"name":"Virtue Initiative API","status":"ok"}"#);
+        let server = client().resolve_server(&url).unwrap();
+        assert_eq!(server.web_app_url, None);
+    }
+
+    // CORE-028: something that is not a Virtue API is refused.
+    #[test]
+    fn resolve_server_refuses_a_server_that_is_not_virtue() {
+        let url = serve_health("", r#"{"name":"Something Else","status":"ok"}"#);
+        let err = client().resolve_server(&url).unwrap_err();
+        assert_eq!(err.to_string(), format!("No Virtue server found at {url}."));
+    }
+
+    // CORE-028: an unreachable server is refused with the same message.
+    #[test]
+    fn resolve_server_refuses_an_unreachable_server() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let err = client().resolve_server(&url).unwrap_err();
+        assert_eq!(err.to_string(), format!("No Virtue server found at {url}."));
+    }
+
+    // CORE-028: addresses are trimmed and `https://` is assumed.
+    #[test]
+    fn server_address_is_normalized() {
+        assert_eq!(
+            normalize_server_address("  virtue.example.org/ ").unwrap(),
+            "https://virtue.example.org"
+        );
+        assert_eq!(
+            normalize_server_address("https://virtue.example.org/api//").unwrap(),
+            "https://virtue.example.org/api"
+        );
+    }
+
+    // CORE-028: plain `http` is allowed only for this machine.
+    #[test]
+    fn server_address_must_use_https_unless_loopback() {
+        for ok in [
+            "http://localhost:8787",
+            "http://127.0.0.1",
+            "http://[::1]:8787/api",
+            "HTTPS://virtue.example.org",
+        ] {
+            assert!(normalize_server_address(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://virtue.example.org",
+            "http://localhost.example.org",
+            "ftp://virtue.example.org",
+        ] {
+            assert_eq!(
+                normalize_server_address(bad).unwrap_err().to_string(),
+                "The server address must start with https://.",
+                "{bad}"
+            );
+        }
+    }
+
+    // CORE-028: the address itself is tried before its `/api` path.
+    #[test]
+    fn server_candidates_try_the_api_path_second() {
+        assert_eq!(
+            server_candidates("https://x.org"),
+            vec!["https://x.org".to_string(), "https://x.org/api".to_string()]
+        );
+        assert_eq!(
+            server_candidates("https://x.org/api"),
+            vec!["https://x.org/api".to_string()]
+        );
     }
 }

@@ -66,8 +66,10 @@ no effect under `launch.sh` (they'd only apply if you ran `bun run dev` directly
 
 ### Build-time client settings
 
-The client's API URL, capture interval and batch window are baked in when it is built, so there
-is no config file or in-app override. Set them through the layers above and rebuild the client:
+The client's default API URL, capture interval and batch window are baked in when it is built, so
+there is no config file or in-app override. Set them through the layers above and rebuild the
+client. Users can still sign in to another server at runtime (see
+[Connecting the apps to your own server](https://virtueinitiative.org/help/self-hosting)):
 
 | Variable                                  | Default                                                         | Minimum |
 | ----------------------------------------- | --------------------------------------------------------------- | ------- |

@@ -213,10 +213,17 @@ pub fn note_login_state(logged_in: bool) {
     });
 }
 
-pub fn app_login(email: &str, password: &str, device_name: &str) -> Result<String> {
+/// `server` is a self-hosted server address, or `None` for the default
+/// server (CLIENT-033).
+pub fn app_login(
+    email: &str,
+    password: &str,
+    device_name: &str,
+    server: Option<&str>,
+) -> Result<String> {
     let daemon = current_daemon().ok_or_else(|| anyhow::anyhow!("monitoring is not running"))?;
     let device_id = daemon
-        .login(email, password, Some(device_name))
+        .login(email, password, Some(device_name), server)
         .map_err(anyhow::Error::from)?;
     note_login_state(true);
     Ok(device_id)
