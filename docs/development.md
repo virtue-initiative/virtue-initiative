@@ -46,8 +46,7 @@ Both are sourced by:
 - `client/android/scripts/env.sh` — sources them as an override layer for the Android dev
   scripts (`build.sh`, `install.sh`, etc.), beneath its own built-in defaults.
 - `client/core/build.rs` — reads them (repo-root `.env` first) to fill in whichever of the
-  `VIRTUE_DEFAULT_*` compile-time keys below aren't already set by a real env var, replacing
-  the old `client/.env`-only mechanism.
+  `VIRTUE_DEFAULT_*` compile-time keys below aren't already set by a real env var.
 
 Recognized keys:
 

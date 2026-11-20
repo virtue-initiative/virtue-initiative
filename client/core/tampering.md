@@ -1,48 +1,58 @@
-# Tampering Detection
+# Tamper detection
 
-**This document previously described a richer boot-vs-monotonic-clock
-suspend/reboot model (`GapTracker`, three separate gap buckets
-`UnexpectedGap`/`UnexpectedStart`/`UnexpectedStop`, `SuspendDetected`/
-`SystemLogin`/`SystemLogout` log rows, per-bucket sliding-window budgets and
-cooldowns). That model was retired in the single-sequential-daemon-loop
-rewrite as a deliberate simplification, not replaced feature-for-feature —
-see the rewrite plan's "Lifecycle model simplification" note. It no longer
-reflects the code.**
+How the core notices that monitoring was interrupted, and what it can't notice. The exact rules
+are in `SPEC.md`; this page explains how they fit together. Implementation:
+`client/core/src/module/lifecycle.rs`, `client/core/src/module/capture_availability.rs` and
+`client/core/src/clock.rs`.
 
-The current, much simpler model is specified in CORE-002 (the daemon
-loop spec, kept minimal by design):
+## Late wakeups (CORE-002)
 
-- Each tick compares the actual wakeup time to the wakeup time it was
-  scheduled for. The difference is appended to a last-10 array
-  (`LifecycleState.late_wakeups`), unless the wakeup is within 2 minutes of
-  a system login, was scheduled within 2 minutes of a system logout, or a
-  suspend (detected via divergence between the boot clock, which counts
-  suspend, and a clock that doesn't) accounts for essentially the whole gap —
-  in any of these cases it's excused, not recorded. Unlike the login/logout
-  pair, suspend evidence can only ever add an excuse, never block one.
-- An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
-  whenever a single entry exceeds 2 minutes, or the sum of the array's
-  non-negative entries exceeds 5 minutes.
-- `UserStop` (`EXTRA_HIGH_RISK`, immediate) is driven directly by an explicit
-  user action (`Daemon::note_user_stop`, reached via `UserStopRequested`
-  over IPC) and was preserved unchanged through the rewrite. It also excuses
-  the very next tick's late-wakeup check (see CORE-002) — deliberately
-  scoped to this exact call, not to a plain clean shutdown, since every
-  platform's signal handler also cleanly exits on a bare kill signal.
+The core schedules every wakeup, so it knows when it should next be running. Each tick compares
+the actual time to the time it was scheduled for and appends the difference to an array of the
+last 10 wakeups (`LifecycleState.late_wakeups`). A gap is excused, not recorded, when:
 
-Implementation: `client/core/src/module/lifecycle.rs`.
+- the wakeup is within 2 minutes of a system login, or was scheduled within 2 minutes of a
+  system logout, and neither of those two signals contradicts the other;
+- a suspend accounts for essentially the whole gap. The core detects a suspend by comparing the
+  boot clock, which counts time suspended, with a clock that doesn't. Suspend evidence can only
+  add an excuse, never block one;
+- monitoring was stopped from the app (see below).
 
-## Known limits (accepted under the current threat model)
+An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires when a single entry
+exceeds 2 minutes, or when the non-negative entries add up to more than 5 minutes. The array is
+cleared after each alert.
 
-- **Quit-and-never-restart** produces no next tick, so it's invisible to
-  this model locally. Caught only by heartbeat silence — a partner noticing
-  logs stop arriving.
-- **Client-stored state is trusted.** Not defending against local tampering
-  yet; that's a separate follow-up.
-- The simplified model still doesn't distinguish _why_ a non-excused wakeup
-  was late (crash vs. late boot vs. force-kill-before-logout) the way the
-  retired model's three separate buckets did — a suspend is now excused
-  (see above), but every other cause of lateness is measured the same way,
-  as a single undifferentiated gap against the schedule. This remains an
-  intentional trade of detection nuance for a much smaller,
-  easier-to-reason-about implementation.
+## Other signals
+
+- **Stopping monitoring from the app** (`Daemon::note_user_stop`, reached over IPC as
+  `NoteUserStop` on Linux and macOS) sends a `UserStop` event at `EXTRA_HIGH_RISK` straight away
+  (CORE-011). It also excuses the next session's first late-wakeup check, so restarting isn't
+  reported a second time. A plain kill or termination signal gets no such excuse.
+- **Repeated restarts** (CORE-019): 20 daemon restarts within 10 minutes send a
+  `repeated_restarts` event, at most once every 30 minutes. This catches a daemon that is killed
+  and restarted faster than the late-wakeup check can see.
+- **Capture failures** (CORE-006): five failed screenshots within 30 minutes send a
+  `capture_failed` event at 80% risk, which is what a revoked screen-recording permission
+  looks like.
+- **Clock changes** (CORE-027): the core keeps its own clock from the server's `Date` header,
+  carried forward on the boot clock, so setting the system clock changes nothing it records.
+  When a server response shows the core's clock was more than 5 minutes off, it sends an
+  `alert` event saying by how much. That is what catches a restart hidden by setting the clock
+  back.
+
+iOS turns off the late-wakeup, restart and clock checks (`lifecycle_enabled()` is `false`). Its
+monitoring runs in a Safari extension that the OS suspends without notice, so every gap looks
+the same and none of them means tampering. Stopping from the app and capture failures are
+still reported there.
+
+## Known limits
+
+These are accepted under the current threat model (see the non-goals in `docs/overview.md`):
+
+- **Quitting and never restarting** produces no next tick, so the core can't report it. Partners
+  see it as a device that stops sending logs: it shows as offline, and their digest names it.
+- **Uninstalling** sends nothing, for the same reason.
+- **Client-stored state is trusted.** Someone who edits `event_state.json` can hide a gap. The
+  core makes no attempt to detect that.
+- **A late wakeup has no cause attached.** Apart from the excuses above, a crash, a slow boot and
+  a force-kill before logout all look the same: a gap against the schedule.
