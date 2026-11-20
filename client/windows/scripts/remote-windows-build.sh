@@ -210,12 +210,15 @@ if [[ $SKIP_SYNC -eq 0 ]]; then
       dev_env="${VIRTUE_DEV_ENV:-$HOME/.config/virtue-dev.env}"
       [[ -f "$dev_env" ]] && cat "$dev_env"
     } >"$TMP_DIR/env/.env"
+    # Other builds' output stays out. It's no use here, and one written while tar reads it fails the
+    # copy: Android's native libraries in jniLibs are rewritten by every Android build.
     tar -C "$REPO_ROOT" \
       --exclude='client/target' \
       --exclude='client/**/target' \
       --exclude='client/windows/dist' \
       --exclude='client/android/.gradle' \
       --exclude='client/android/**/build' \
+      --exclude='client/android/app/src/main/jniLibs' \
       --exclude='client/target-docker' \
       --exclude='client/.docker-cargo-home' \
       -czf "$ARCHIVE_PATH" \
