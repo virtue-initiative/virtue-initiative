@@ -41,7 +41,7 @@ Notes:
 
 - `bun run test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
 - Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
-- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
+- Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per Worker (`bunx wrangler secret put ... --name staging-donate|donate`, since `cf` can't set a single secret yet).
 
 ### Web app
 

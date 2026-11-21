@@ -1,12 +1,17 @@
 import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { writeWranglerConfig } from '../scripts/cf-config';
 import { TEST_JWT_PRIVATE_KEY, TEST_JWT_PUBLIC_KEY } from './test/jwt-test-keys';
+
+// The pool reads bindings from a Wrangler config file, so it gets staging's from
+// cloudflare.config.ts through one generated in .cloudflare/.
+const configPath = await writeWranglerConfig('api', 'staging');
 
 export default defineWorkersConfig({
   test: {
     setupFiles: ['./test/setup.ts'],
     poolOptions: {
       workers: {
-        wrangler: { configPath: './wrangler.json', environment: 'staging' },
+        wrangler: { configPath },
         miniflare: {
           bindings: {
             JWT_PRIVATE_KEY: TEST_JWT_PRIVATE_KEY,

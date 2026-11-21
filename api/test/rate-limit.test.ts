@@ -16,7 +16,7 @@ describe('Per-device rate limiting (API-034)', () => {
     );
     const headers = { Authorization: `Bearer ${device.refresh_token}` };
 
-    // wrangler.json's staging RATE_LIMITER is configured for 60 requests/60s.
+    // cloudflare.config.ts's staging RATE_LIMITER is configured for 60 requests/60s.
     //
     // Miniflare's local RATE_LIMITER simulator is a plain fixed-window counter
     // keyed by `Math.floor(Date.now() / periodMs)` against the real wall clock
