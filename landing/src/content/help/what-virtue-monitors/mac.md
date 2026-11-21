@@ -1,4 +1,10 @@
-# What Virtue monitors on Mac
+---
+title: 'What Virtue monitors on Mac'
+description: 'Everything the Virtue app on Mac captures and sends.'
+navTitle: 'Mac'
+topic: monitoring
+order: 3
+---
 
 This page lists everything the Virtue app on Mac captures and sends.
 
@@ -14,7 +20,7 @@ Other displays are not captured yet. Virtue only captures the display macOS trea
 
 - Before a screenshot leaves this Mac, Virtue blacks out any text it finds, then shrinks and blurs the image.
 - Virtue rates each screenshot for explicit content on this Mac. See [concern scores](/help/web/concern-scores).
-- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/developer/security).
+- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/security).
 
 ## Other reports
 

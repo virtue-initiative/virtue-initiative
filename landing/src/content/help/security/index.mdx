@@ -1,6 +1,12 @@
-import SecurityFlow from './security-flow.svg?raw';
+---
+title: 'Cryptography and security'
+description: 'The full security model: how passwords, keys and screenshots are encrypted.'
+navTitle: 'Security details'
+topic: account
+order: 5
+---
 
-# Cryptography and security
+import SecurityFlow from './security-flow.svg?raw';
 
 Last Updated: 2026-10-20
 
@@ -290,7 +296,7 @@ export async function unwrapBatchKey(privateKey: CryptoKey, encryptedKey: Buffer
 
 The server stores `SHA-256(password_auth)` instead of the raw client-derived bytes.
 
-Source: [`api/src/lib/password.ts:L35-L38`](https://github.com/virtue-initiative/virtue-initiative/blob/main/api/src/lib/password.ts#L35-L38)
+Source: [`api/src/lib/password.ts:L66-L69`](https://github.com/virtue-initiative/virtue-initiative/blob/main/api/src/lib/password.ts#L66-L69)
 
 ```ts
 export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
@@ -303,7 +309,7 @@ export async function hashPasswordAuth(passwordAuth: ArrayBuffer | Uint8Array) {
 
 The Rust client matches the browser flow with Argon2id and HKDF-SHA256("auth").
 
-Source: [`client/core/src/crypto.rs:L80-L103`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L80-L103)
+Source: [`client/core/src/crypto.rs:L80-L108`](https://github.com/virtue-initiative/virtue-initiative/blob/main/client/core/src/crypto.rs#L80-L108)
 
 ```rs
 pub fn derive_password_auth(
@@ -311,6 +317,11 @@ pub fn derive_password_auth(
     password_salt: &[u8],
     params: &HashParams,
 ) -> CoreResult<[u8; 32]> {
+    // BATCH-008: the web app's argon2id can't derive this, so no account can have it.
+    if password.is_empty() {
+        return Err(CoreError::InvalidState("password must not be empty"));
+    }
+
     let argon_params = Params::new(
         params.memory_cost_kib,
         params.time_cost,

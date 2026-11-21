@@ -1,8 +1,9 @@
 ---
-sidebar_position: 2
+title: 'Log types'
+description: 'What each entry in your log feed means, and which ones are alerts.'
+topic: activity
+order: 1
 ---
-
-# Log types
 
 Every entry in your log feed has a **type** and a matching icon. Most entries are
 routine activity (screenshots, sign-ins). A few are **alerts** that flag an

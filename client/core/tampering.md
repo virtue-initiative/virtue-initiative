@@ -41,6 +41,22 @@ cleared after each alert.
   `alert` event saying by how much. That is what catches a restart hidden by setting the clock
   back.
 
+The lifecycle events and their risk:
+
+| Event               | Risk                                        | When                                                   |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------ |
+| `system_login`      | 0.0 (informational)                         | The last known system login time changed.              |
+| `system_logout`     | 0.0 (informational)                         | The last known system logout time changed.             |
+| `screenshot_missed` | `HIGH_RISK_LIFECYCLE_ALERT` (0.8, batched)  | Late wakeups crossed the thresholds above.             |
+| `repeated_restarts` | `HIGH_RISK_LIFECYCLE_ALERT` (0.8, batched)  | More than 20 starts within 10 minutes (30 min repeat). |
+| `user_stop`         | `EXTRA_HIGH_RISK` (0.9, immediate, emailed) | The user stopped monitoring from the app.              |
+| `user_start`        | 0.0 (informational)                         | The user resumed monitoring.                           |
+
+`HIGH_RISK_LIFECYCLE_ALERT` sits just below `EXTRA_HIGH_RISK` on purpose: the upload module sends
+anything at or above `EXTRA_HIGH_RISK` straight away and emails it, so alerts that aren't urgent
+ride the normal batch. Login and logout times come from `LifecycleHooks`
+(`client/core/src/platform.rs`), implemented per platform; Android has no logout time.
+
 iOS turns off the late-wakeup, restart and clock checks (`lifecycle_enabled()` is `false`). Its
 monitoring runs in a Safari extension that the OS suspends without notice, so every gap looks
 the same and none of them means tampering. Stopping from the app and capture failures are

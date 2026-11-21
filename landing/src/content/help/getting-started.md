@@ -1,8 +1,9 @@
 ---
-sidebar_position: 1
+title: 'Getting started'
+description: 'Create an account, install Virtue and invite a partner.'
+topic: getting-started
+order: 1
 ---
-
-# Getting started
 
 To get set up, all you have to do is:
 

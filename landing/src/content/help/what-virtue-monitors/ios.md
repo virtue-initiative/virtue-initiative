@@ -1,4 +1,10 @@
-# What Virtue monitors on iPhone and iPad
+---
+title: 'What Virtue monitors on iPhone and iPad'
+description: 'Everything the Virtue app on iPhone and iPad captures and sends.'
+navTitle: 'iPhone and iPad'
+topic: monitoring
+order: 6
+---
 
 This page lists everything the Virtue app on iPhone and iPad captures and sends.
 
@@ -17,7 +23,7 @@ browsers off your device.
 
 - Before a screenshot leaves your device, Virtue blacks out any text it finds, then shrinks and blurs the image.
 - Virtue rates each screenshot for explicit content on your device. See [concern scores](/help/web/concern-scores).
-- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/developer/security).
+- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/security).
 - The address and title of the current page appear in Status Details on your device. They are never uploaded.
 
 ## Other reports
