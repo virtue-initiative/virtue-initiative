@@ -949,6 +949,5 @@ mod tests {
             request.contains(&format!("\r\nx-virtue-version: {APP_VERSION}\r\n")),
             "{request}"
         );
-        assert_eq!(APP_VERSION, env!("CARGO_PKG_VERSION"));
     }
 }

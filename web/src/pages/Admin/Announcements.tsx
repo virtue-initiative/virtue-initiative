@@ -23,6 +23,7 @@ import { Announcement } from '../../utils/api/api';
 import { api, describeError } from '../../utils/api';
 import { usePromise } from '../../hooks/usePromise';
 import { formatRelativeTimestamp } from '../../utils/time';
+import { isForbidden } from './forbidden';
 
 const LEVEL_LABELS: Record<AnnouncementLevel, string> = {
   info: 'Info',
@@ -42,15 +43,6 @@ const PLATFORM_LABELS: Record<AnnouncementPlatform, string> = {
 
 // Mirrors createAnnouncementSchema's below_version; the API rejects anything else.
 const VERSION_PATTERN = '\\d+(\\.\\d+)*';
-
-function isForbidden(err: unknown) {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'status' in err &&
-    (err as { status?: unknown }).status === 403
-  );
-}
 
 function platformsLabel(platforms: string[] | null) {
   if (platforms === null) return 'All platforms';
