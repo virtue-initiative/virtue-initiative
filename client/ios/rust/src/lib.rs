@@ -10,9 +10,10 @@ use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use virtue_core::api::{BugReportRequest, HttpApiClient};
+use virtue_core::module::status;
 use virtue_core::{
-    AuthState, Config, CoreError, CoreResult, Daemon, DeviceSettings, LifecycleHooks, Screenshot,
-    ScreenshotHooks,
+    load_state, AuthState, Config, CoreError, CoreResult, Daemon, DaemonState, DeviceSettings,
+    LifecycleHooks, Screenshot, ScreenshotHooks,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -363,12 +364,18 @@ pub extern "C" fn virtue_ios_native_report_issue(
 }
 
 /// Returns a JSON-serialized `ServiceStatus` (caller frees with
-/// `virtue_ios_free_string`), or null on failure.
+/// `virtue_ios_free_string`), or null on failure. Built from the state file,
+/// not this process's daemon: the Safari extension's daemon runs in another
+/// process, and only the file carries what it saves, such as the settings
+/// and announcement from its last upload (CLIENT-032, CLIENT-033).
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
     let json = (|| -> Result<String> {
         let core = core()?;
-        Ok(serde_json::to_string(&core.daemon.status())?)
+        let state: DaemonState = load_state(&core.state_dir.join("event_state.json"))?;
+        let running = core.daemon_running.lock().map(|r| *r).unwrap_or(false);
+        let status = status::build(&state, &build_core_config(&core.state_dir), running);
+        Ok(serde_json::to_string(&status)?)
     })();
 
     match json {
@@ -601,6 +608,44 @@ mod tests {
         init_logging(&dir);
 
         assert!(LOG_GUARD.get().is_some(), "logging should be initialized");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // CLIENT-032, CLIENT-033: status comes from the state file, so what the
+    // Safari extension's daemon saves there, such as a new announcement,
+    // shows without restarting the app.
+    #[test]
+    fn status_reads_what_another_process_saved() {
+        let dir =
+            std::env::temp_dir().join(format!("virtue-ios-status-test-{}", std::process::id()));
+        let dir_c = CString::new(dir.to_string_lossy().into_owned()).unwrap();
+        assert!(virtue_ios_native_init(dir_c.as_ptr(), dir_c.as_ptr()).is_null());
+
+        // As the extension does: a settings refresh saved to the shared file.
+        let state_path = dir.join("event_state.json");
+        let mut state: DaemonState = load_state(&state_path).unwrap();
+        state.upload.settings = Some(DeviceSettings {
+            device_id: "d".into(),
+            name: "iPhone".into(),
+            platform: "ios".into(),
+            wrapping_keys: Vec::new(),
+            hash_base_url: None,
+            feature_flags: Vec::new(),
+            announcement: Some(virtue_core::DeviceAnnouncement {
+                message: "Update by hand".into(),
+                url: None,
+                level: virtue_core::AnnouncementLevel::Urgent,
+            }),
+        });
+        virtue_core::store_state(&state_path, &state).unwrap();
+
+        let json = virtue_ios_native_get_status_json();
+        assert!(!json.is_null());
+        let status: serde_json::Value =
+            serde_json::from_str(&unsafe { CString::from_raw(json) }.into_string().unwrap())
+                .unwrap();
+        assert_eq!(status["announcement"]["message"], "Update by hand");
 
         std::fs::remove_dir_all(&dir).ok();
     }
