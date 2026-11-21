@@ -1,24 +1,12 @@
 import { listAnnouncements } from './db';
-import type { Announcement, DeviceAnnouncement } from '../../../shared-web/types';
+import { tableCache } from './table-cache';
+import type { DeviceAnnouncement } from '../../../shared-web/types';
 
 // API-068: the table may be cached for up to 60 seconds. It's read on every
 // device settings response, so without this each would cost one more query.
-const CACHE_TTL_MS = 60_000;
-let cached: { announcements: Announcement[]; expiresAt: number } | null = null;
+const announcementCache = tableCache(listAnnouncements);
 
-async function loadAnnouncements(db: D1Database, now: number) {
-  if (cached && cached.expiresAt > now) {
-    return cached.announcements;
-  }
-  const announcements = await listAnnouncements(db);
-  cached = { announcements, expiresAt: now + CACHE_TTL_MS };
-  return announcements;
-}
-
-// Called after an admin route changes an announcement, so this isolate sees it at once.
-export function clearAnnouncementCache() {
-  cached = null;
-}
+export const clearAnnouncementCache = announcementCache.clear;
 
 // API-068: dot-separated whole numbers, ignoring everything from the first
 // character that is neither a digit nor a dot. Null when there is no leading
@@ -50,7 +38,7 @@ export async function announcementForDevice(
   device: { platform: string; version: string | null | undefined },
   now = Date.now(),
 ): Promise<DeviceAnnouncement | null> {
-  const announcements = await loadAnnouncements(db, now);
+  const announcements = await announcementCache.get(db, now);
   const match = announcements.find(
     (a) =>
       (a.platforms === null || a.platforms.includes(device.platform)) &&

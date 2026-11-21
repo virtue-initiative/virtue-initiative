@@ -32,6 +32,7 @@ import { csvFilename, downloadCsv, toCsv } from './csv';
 import { Trends } from './Trends';
 import { AnnouncementsSection } from './Announcements';
 import { FeatureFlagsSection } from './FeatureFlags';
+import { isForbidden } from './forbidden';
 import './style.css';
 
 const HISTORY_DAYS = 90;
@@ -130,15 +131,6 @@ export function Admin() {
 
       <QuerySection />
     </div>
-  );
-}
-
-function isForbidden(err: unknown) {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'status' in err &&
-    (err as { status?: unknown }).status === 403
   );
 }
 

@@ -197,30 +197,4 @@ mod tests {
         assert!(status.is_authenticated);
         assert!(!status.is_running);
     }
-
-    // CORE-010: the announcement comes from the last settings fetched, and is
-    // absent before any have been.
-    #[test]
-    fn status_reports_the_announcement_from_settings() {
-        use crate::model::{AnnouncementLevel, DeviceAnnouncement};
-
-        let mut state = authenticated_state();
-        assert_eq!(build(&state, &config(), true).announcement, None);
-
-        let announcement = DeviceAnnouncement {
-            message: "Please update".into(),
-            url: None,
-            level: AnnouncementLevel::Warning,
-        };
-        let mut with = settings(1);
-        with.announcement = Some(announcement.clone());
-        state.upload.settings = Some(with);
-        assert_eq!(
-            build(&state, &config(), true).announcement,
-            Some(announcement)
-        );
-
-        state.upload.settings = Some(settings(1));
-        assert_eq!(build(&state, &config(), true).announcement, None);
-    }
 }

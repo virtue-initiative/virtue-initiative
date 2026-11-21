@@ -56,25 +56,6 @@ public struct CoreAnnouncement: Decodable, Equatable {
     public let message: String
     public let url: String?
     public let level: CoreAnnouncementLevel
-
-    public init(message: String, url: String?, level: CoreAnnouncementLevel) {
-        self.message = message
-        self.url = url
-        self.level = level
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case message
-        case url
-        case level
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        message = try container.decode(String.self, forKey: .message)
-        url = try container.decodeIfPresent(String.self, forKey: .url)
-        level = try container.decodeIfPresent(CoreAnnouncementLevel.self, forKey: .level) ?? .info
-    }
 }
 
 /// Mirrors `virtue_core::ServiceStatus`, the JSON payload returned by
