@@ -520,7 +520,7 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
 }
 
 // API-036: callers write only when the version changed, so a settings fetch
-// usually costs no write.
+// or batch upload usually costs no write.
 export async function setDeviceAppVersion(db: D1Database, deviceId: string, appVersion: string) {
   await db
     .prepare('UPDATE devices SET app_version = ? WHERE id = ?')
