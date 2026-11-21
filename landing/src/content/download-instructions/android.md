@@ -13,7 +13,7 @@ Virtue is not in the Play Store yet, so you install it from a downloaded file. T
    ![The "Install unknown apps" screen for Chrome, with "Allow from this source" highlighted](/images/android-setup/install-allow-source.webp)
 7. Tap **Install**, then tap **Open**.
    ![Android asking "Do you want to install this app?", with "Install" highlighted](/images/android-setup/install-confirm.webp)
-8. Tap **Allow** when Virtue asks to run in the background and to send notifications.
+8. Tap **Allow** when Virtue asks to run in the background and to send notifications. You need to allow notifications before you can sign in.
 9. Turn on Accessibility for Virtue using the steps below. The app shows the same steps with screenshots for your phone.
 
 <div class="android-guide" data-android-guide>

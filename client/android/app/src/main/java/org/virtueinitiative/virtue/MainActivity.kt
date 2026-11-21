@@ -102,7 +102,8 @@ class MainActivity : AppCompatActivity() {
     // prompts never stack.
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { requestBatteryExemption() }
+    ) { if (askBatteryNext) requestBatteryExemption() }
+    private var askBatteryNext = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -409,7 +410,12 @@ class MainActivity : AppCompatActivity() {
         // shows the permissions, so nothing else pays for asking Android.
         val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
         val permissions = state == State.A11Y_OFF && AccessibilitySetupGuide.permissionsGranted(this)
-        val key = "${state.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        val focus = HomeFocus.of(
+            accessibilityConnected = state != State.A11Y_OFF,
+            signedIn = signedIn(json),
+            notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled(),
+        )
+        val key = "${state.name}/${focus.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
         if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
@@ -425,8 +431,8 @@ class MainActivity : AppCompatActivity() {
             content.addView(install.topMargin(8))
         }
 
-        when (state) {
-            State.A11Y_OFF -> {
+        when (focus) {
+            HomeFocus.SETUP_GUIDE -> {
                 val guide = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -436,9 +442,19 @@ class MainActivity : AppCompatActivity() {
                 content.addView(guide)
                 AccessibilitySetupGuide.renderGuide(this, guide, ::handleGuideAction)
             }
-            State.SIGNED_OUT -> renderSignIn(content)
-            else -> renderStatusFocus(content, state, json)
+            HomeFocus.ALLOW_NOTIFICATIONS -> renderAllowNotifications(content)
+            HomeFocus.SIGN_IN -> renderSignIn(content)
+            HomeFocus.STATUS -> renderStatusFocus(content, state, json)
         }
+    }
+
+    /** Signed out with notifications off: sign-in waits for them (CLIENT-030). */
+    private fun renderAllowNotifications(content: LinearLayout) {
+        content.addView(text(getString(R.string.allow_notifications_title), 26f, bold = true).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
+        }.topMargin(24))
+        content.addView(text(getString(R.string.allow_notifications_body), 16f, R.color.ink_3).topMargin(8))
+        content.addView(filledButton(getString(R.string.btn_allow_notifications)) { requestNotifications() }.topMargin(28))
     }
 
     private fun renderStatusFocus(content: LinearLayout, state: State, json: JSONObject) {
@@ -762,25 +778,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The guide's "Request Permissions" button (CLIENT-030). Neither is needed to
-     * capture. Each tap moves on to whatever is still missing, so it never does
+     * The guide's "Request Permissions" button (CLIENT-030). Notifications must be
+     * allowed before sign-in; the battery exemption is optional. Each tap moves on to whatever is still missing, so it never does
      * nothing while the button is enabled.
      */
     private fun requestPermissions() {
         val notificationsOn = NotificationManagerCompat.from(this).areNotificationsEnabled()
         when {
-            !notificationsOn && canPromptForNotifications() -> {
-                getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).edit()
-                    .putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            !notificationsOn && canPromptForNotifications() -> promptForNotifications(askBattery = true)
             !batteryExempt() -> requestBatteryExemption()
-            !notificationsOn -> runCatching {
-                startActivity(
-                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                )
-            }
+            !notificationsOn -> openNotificationSettings()
+        }
+    }
+
+    /** Home's "Allow Notifications" button: the prompt, or the app's notification settings once Android won't show it. */
+    private fun requestNotifications() {
+        if (canPromptForNotifications()) {
+            promptForNotifications(askBattery = false)
+        } else {
+            openNotificationSettings()
+        }
+    }
+
+    private fun promptForNotifications(askBattery: Boolean) {
+        getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).edit()
+            .putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
+        askBatteryNext = askBattery
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun openNotificationSettings() {
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            )
         }
     }
 
