@@ -5,9 +5,7 @@ import { verifyPasswordAuth } from './password';
 type User = NonNullable<Awaited<ReturnType<typeof findUserByEmail>>>;
 
 export type VerifyCredentialsResult =
-  | { status: 'ok'; user: User }
-  | { status: 'invalid' }
-  | { status: 'unverified'; user: User };
+  { status: 'ok'; user: User } | { status: 'invalid' } | { status: 'unverified'; user: User };
 
 function decodePasswordAuth(value: string): ArrayBuffer | null {
   let decoded: ArrayBuffer;

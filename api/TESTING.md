@@ -13,7 +13,7 @@ bun run test:watch  # re-run on file changes
 ## Setup
 
 Tests run inside the Workers runtime through `@cloudflare/vitest-pool-workers`
-(`vitest.config.ts`), using the `staging` environment from `wrangler.json`. D1 and R2
+(`vitest.config.ts`), using the `staging` environment from `cloudflare.config.ts`. D1 and R2
 are real local bindings. `test/setup.ts` creates the schema. Test-only
 bindings (JWT keys, Turnstile secret, SNS topics) are set in `vitest.config.ts`.
 

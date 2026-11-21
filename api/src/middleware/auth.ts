@@ -5,8 +5,8 @@ import { findSessionByRefreshTokenHash } from '../lib/db';
 import { assertTokenPurpose, hashOpaqueToken } from '../lib/tokens';
 
 export function authenticateWebSession() {
-  return async function webSessionMiddleware(
-    c: Context<{ Bindings: Env; Variables: Variables }>,
+  return async function webSessionMiddleware<P extends string>(
+    c: Context<{ Bindings: Env; Variables: Variables }, P>,
     next: Next,
   ) {
     const cookieToken = getCookie(c, 'refresh_token');
@@ -37,8 +37,8 @@ export function authenticateWebSession() {
 }
 
 export function authenticateDeviceSession() {
-  return async function deviceSessionMiddleware(
-    c: Context<{ Bindings: Env; Variables: Variables }>,
+  return async function deviceSessionMiddleware<P extends string>(
+    c: Context<{ Bindings: Env; Variables: Variables }, P>,
     next: Next,
   ) {
     const authHeader = c.req.header('Authorization');

@@ -3,8 +3,8 @@ import { Env, Variables } from '../types/bindings';
 
 /** Must run after an auth middleware that calls `c.set('sub', ...)`. */
 export function rateLimitByDevice() {
-  return async function rateLimitMiddleware(
-    c: Context<{ Bindings: Env; Variables: Variables }>,
+  return async function rateLimitMiddleware<P extends string>(
+    c: Context<{ Bindings: Env; Variables: Variables }, P>,
     next: Next,
   ) {
     const { success } = await c.env.RATE_LIMITER.limit({ key: c.get('sub') });
@@ -17,8 +17,8 @@ export function rateLimitByDevice() {
 
 /** For routes that may be called without authentication. */
 export function rateLimitByIp() {
-  return async function rateLimitMiddleware(
-    c: Context<{ Bindings: Env; Variables: Variables }>,
+  return async function rateLimitMiddleware<P extends string>(
+    c: Context<{ Bindings: Env; Variables: Variables }, P>,
     next: Next,
   ) {
     const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
