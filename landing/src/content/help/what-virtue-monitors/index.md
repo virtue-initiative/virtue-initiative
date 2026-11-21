@@ -1,4 +1,10 @@
-# What Virtue monitors
+---
+title: 'What Virtue monitors'
+description: 'What Virtue captures and sends, and how it protects your privacy.'
+navTitle: 'Overview'
+topic: monitoring
+order: 1
+---
 
 Virtue takes screenshots at random times, about every 5 minutes on average. It
 blacks out text, shrinks and blurs each screenshot, and encrypts it so only you

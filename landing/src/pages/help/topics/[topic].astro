@@ -1,0 +1,28 @@
+---
+import HelpLayout from '../../../layouts/HelpLayout.astro';
+import { helpTopics, topicHref, topicLinks } from '../../../help/navigation';
+
+export function getStaticPaths() {
+  return helpTopics.map((topic) => ({ params: { topic: topic.id }, props: { topic } }));
+}
+
+const { topic } = Astro.props;
+const links = topicLinks(topic.id);
+---
+
+<HelpLayout currentPath={topicHref(topic.id)} pageTitle={topic.label} description={topic.blurb}>
+  <article class="help-content-card help-doc">
+    <h1>{topic.label}</h1>
+    <p>{topic.blurb}</p>
+    <ul class="help-topic-list">
+      {
+        links.map((link) => (
+          <li>
+            <a href={link.href}>{link.title}</a>
+            <span>{link.description}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </article>
+</HelpLayout>

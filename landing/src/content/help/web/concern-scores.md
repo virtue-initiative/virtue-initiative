@@ -1,8 +1,9 @@
 ---
-sidebar_position: 4
+title: 'Concern scores'
+description: 'How screenshots are scored for concern, and what each level means.'
+topic: activity
+order: 2
 ---
-
-# Concern scores
 
 Every screenshot in your log feed is automatically scored for concern by an
 on-device classifier. This is not a person's judgment. It is an automated

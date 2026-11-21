@@ -1,4 +1,10 @@
-# What Virtue monitors on Android
+---
+title: 'What Virtue monitors on Android'
+description: 'Everything the Virtue app on Android captures and sends.'
+navTitle: 'Android'
+topic: monitoring
+order: 5
+---
 
 This page lists everything the Virtue app on Android captures and sends.
 
@@ -14,7 +20,7 @@ Virtue uses the Accessibility permission only to take screenshots. It does not r
 
 - Before a screenshot leaves this device, Virtue blacks out any text it finds, then shrinks and blurs the image.
 - Virtue rates each screenshot for explicit content on this device. See [concern scores](/help/web/concern-scores).
-- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/developer/security).
+- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/security).
 
 ## Other reports
 

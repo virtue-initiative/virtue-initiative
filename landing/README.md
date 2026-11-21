@@ -18,8 +18,13 @@ Starting the dev server first refreshes the release data `/download` shows
 ## Where things are
 
 - `src/pages/`: routes.
-- `src/content/help/`: the help pages, in Markdown. Follow the copy style checklist in the root
-  `AGENTS.md`, and use the names the apps' UI uses.
+- `src/content/help/`: the help pages, in Markdown, for people using Virtue. Developer docs live
+  in the repo's `docs/` instead. Each page's frontmatter needs a `title`, a one-line
+  `description` (shown on topic pages and in search), a `topic` and an `order`; the topics are
+  listed in `src/help/navigation.ts`, and a page with bad frontmatter fails the build. The
+  topic is not part of the URL, so pages can be regrouped without breaking the links the apps
+  use. Follow the copy style checklist in the root `AGENTS.md`, and use the names the apps' UI
+  uses.
 - `src/content/download-instructions/`: per-platform install steps shown on `/download`.
 - `src/content/blog/`: release notes and posts.
 - `scripts/build-appcast.mjs`: writes `appcast.xml`, the macOS Sparkle feed
@@ -33,6 +38,10 @@ Starting the dev server first refreshes the release data `/download` shows
 just landing-typecheck
 just landing-build
 ```
+
+`bun run build` also runs Pagefind, which indexes the help pages into `dist/pagefind/` for the
+search box. There is no index under `astro dev`, so check search with `bun run build` and
+`bunx astro preview`.
 
 Both need `GITHUB_TOKEN` set (any value works locally, for example `GITHUB_TOKEN=stub`)
 because they prepare release data first. `bun run format:check` checks formatting.

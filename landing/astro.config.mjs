@@ -24,8 +24,20 @@ const EXCLUDED_FROM_SITEMAP = new Set([
   '/newsletter/error',
 ]);
 
+const DOCS = 'https://github.com/virtue-initiative/virtue-initiative/blob/staging';
+
 export default defineConfig({
   site: 'https://virtueinitiative.org',
+  // The developer pages moved out of /help into the repo's docs (#921).
+  redirects: {
+    '/help/developer': '/help',
+    '/help/developer/security': '/help/security',
+    '/help/developer/lifecycle': `${DOCS}/client/core/tampering.md`,
+    '/help/developer/tamper-controls': `${DOCS}/client/core/tampering.md`,
+    '/help/developer/testing': `${DOCS}/docs/manual-testing.md`,
+    '/help/developer/overrides': `${DOCS}/docs/development.md`,
+    '/help/web': '/help/topics/activity',
+  },
   trailingSlash: 'never',
   build: {
     format: 'file',

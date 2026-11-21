@@ -5,21 +5,20 @@ Where each kind of doc lives. When a change makes a doc wrong, fix it in the sam
 
 ## By kind
 
-| Kind                  | What it's for                                                | Where                                                                     |
-| --------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| Overview              | What the system is for and how the parts fit                 | [`overview.md`](overview.md)                                              |
-| Accounts and keys     | Every step of an account's life, and what it does to keys    | [`accounts-and-keys.md`](accounts-and-keys.md)                            |
-| Contracts             | What Rust and TypeScript must agree on to the bit            | [`contracts.md`](contracts.md)                                            |
-| Specs                 | Exact required behavior. The source of truth, cited by tests | `SPEC.md` in each component (table below)                                 |
-| How to build and run  | Getting a component running on a dev machine                 | Each component's `README.md`, and [`development.md`](development.md)      |
-| Design                | How a component is built, and why                            | `*/architecture.md`, `client/*/DESIGN.md`, [`decisions/`](decisions/)     |
-| Releasing             | How a release goes out, then each platform's pipeline        | [`releasing.md`](releasing.md), `client/*/RELEASING.md`                   |
-| Agent instructions    | Rules that are easy to break, for coding agents              | `AGENTS.md` at the root and in `api/`, `web/`, `client/`, `client/core/`  |
-| Testing               | How specs and tests connect                                  | [`../TESTING.md`](../TESTING.md), `api/TESTING.md`                        |
-| Checking a change     | What to run, in what order, and how to see it working        | [`checking-changes.md`](checking-changes.md)                              |
-| CI                    | The exact commands each workflow runs                        | [`ci-checks.md`](ci-checks.md)                                            |
-| User help             | What users read on the website                               | `landing/src/content/help/`, `landing/src/content/download-instructions/` |
-| Public developer help | Security and tamper detection, explained on the website      | `landing/src/content/help/developer/` (`security.mdx`, `lifecycle.md`)    |
+| Kind                 | What it's for                                                | Where                                                                                        |
+| -------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Overview             | What the system is for and how the parts fit                 | [`overview.md`](overview.md)                                                                 |
+| Accounts and keys    | Every step of an account's life, and what it does to keys    | [`accounts-and-keys.md`](accounts-and-keys.md)                                               |
+| Contracts            | What Rust and TypeScript must agree on to the bit            | [`contracts.md`](contracts.md)                                                               |
+| Specs                | Exact required behavior. The source of truth, cited by tests | `SPEC.md` in each component (table below)                                                    |
+| How to build and run | Getting a component running on a dev machine                 | Each component's `README.md`, and [`development.md`](development.md)                         |
+| Design               | How a component is built, and why                            | `*/architecture.md`, `client/*/DESIGN.md`, [`decisions/`](decisions/)                        |
+| Releasing            | How a release goes out, then each platform's pipeline        | [`releasing.md`](releasing.md), `client/*/RELEASING.md`                                      |
+| Agent instructions   | Rules that are easy to break, for coding agents              | `AGENTS.md` at the root and in `api/`, `web/`, `client/`, `client/core/`                     |
+| Testing              | How specs and tests connect, and the manual release checks   | [`../TESTING.md`](../TESTING.md), `api/TESTING.md`, [`manual-testing.md`](manual-testing.md) |
+| Checking a change    | What to run, in what order, and how to see it working        | [`checking-changes.md`](checking-changes.md)                                                 |
+| CI                   | The exact commands each workflow runs                        | [`ci-checks.md`](ci-checks.md)                                                               |
+| User help            | What users read on the website, including the security model | `landing/src/content/help/`, `landing/src/content/download-instructions/`                    |
 
 Specs say _what_ happens, in RFC language, and change before the code does. Everything else
 says _how_ to work with it or _why_ it is that way, and should link to spec IDs rather than

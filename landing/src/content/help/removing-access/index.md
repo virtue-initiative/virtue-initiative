@@ -1,8 +1,9 @@
 ---
-sidebar_position: 1
+title: 'Removing access'
+description: 'Ways to cut off access to pornography, from your router to your phone settings.'
+topic: protection
+order: 1
 ---
-
-# Removing access
 
 One of the first lines of defense is removing access. There are a few main ways
 of restricting or removing access to pornography.

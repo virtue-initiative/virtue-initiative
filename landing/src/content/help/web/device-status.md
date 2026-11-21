@@ -1,8 +1,9 @@
 ---
-sidebar_position: 5
+title: 'Device status'
+description: 'What Online, Offline and the other device status tags mean.'
+topic: activity
+order: 3
 ---
-
-# Device status
 
 Every device on the Devices page or listed on a partner's card carries a status
 tag to show whether the device is still sending information, and whether it is
