@@ -23,7 +23,11 @@ import kotlinx.coroutines.cancel
 // Screen capture is performed by VirtueAccessibilityService.takeScreenshot().
 class ScreenshotService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // False once the service is stopping, so nothing posts a notification
+    // Android has already cancelled with the service (CLIENT-030).
     private var foreground = false
+    // The last post went out while Android would not show it, so it was dropped.
+    private var postedWhileHidden = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -39,25 +43,27 @@ class ScreenshotService : Service() {
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
             foreground = true
+            postedWhileHidden = !notificationsShown()
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Foreground service start refused", e)
-            stopSelf()
+            stop()
             return
         }
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             Log.e(TAG, "Core init failed: $initError")
-            stopSelf()
+            stop()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            stop()
             return START_NOT_STICKY
         }
-        // KeepAliveWorker's start lands here when the service already runs.
+        // Every start lands here: the app coming to the front, KeepAliveWorker,
+        // and the first start right after onCreate (which finds nothing to do).
         repostIfMissing()
         return START_STICKY
     }
@@ -91,18 +97,38 @@ class ScreenshotService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    private fun stop() {
+        foreground = false
+        stopSelf()
+    }
+
     /** Re-posts the notification for the current Accessibility state (CLIENT-030). */
     fun updateNotification() {
+        if (!foreground) return
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        postedWhileHidden = !notificationsShown()
     }
 
     /** Posts the notification again if Android dropped it while notifications were off (CLIENT-030). */
-    fun repostIfMissing() {
+    private fun repostIfMissing() {
         if (!foreground) return
+        val shownNow = notificationsShown()
         val showing = getSystemService(NotificationManager::class.java)
             .activeNotifications.any { it.id == NOTIFICATION_ID }
-        val enabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
-        if (MonitoringNotice.needsRepost(enabled, showing)) updateNotification()
+        if (MonitoringNotice.needsRepost(postedWhileHidden, shownNow, showing)) {
+            updateNotification()
+        } else if (shownNow) {
+            postedWhileHidden = false
+        }
+    }
+
+    /** Whether Android would show a notification on our channel right now. */
+    private fun notificationsShown(): Boolean {
+        val manager = getSystemService(NotificationManager::class.java)
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return true
+        return channel.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     private fun createNotificationChannel() {
@@ -126,6 +152,9 @@ class ScreenshotService : Service() {
             .setContentText(notice.text)
             .setContentIntent(tap)
             .setOngoing(true)
+            // Android 12+ otherwise holds a new service's notification back for
+            // up to 10 s, and CLIENT-030 wants it there as soon as the user looks.
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
@@ -141,11 +170,6 @@ class ScreenshotService : Service() {
         /** Follows the Accessibility service connecting or disconnecting. A no-op when the service is not running. */
         fun refreshNotification() {
             runCatching { instance?.updateNotification() }
-        }
-
-        /** For the app coming back to the front, where the user may just have allowed notifications. */
-        fun repostNotificationIfMissing() {
-            runCatching { instance?.repostIfMissing() }
         }
 
         fun start(context: Context): String? {

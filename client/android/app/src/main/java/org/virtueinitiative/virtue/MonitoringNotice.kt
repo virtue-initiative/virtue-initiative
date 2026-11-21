@@ -17,12 +17,13 @@ object MonitoringNotice {
         }
 
     /**
-     * Whether to post the notification again. Android drops a foreground
-     * service's notification posted while notifications are off, and does not
-     * bring it back when they are allowed later.
+     * Whether to post the notification again. Android drops a notification
+     * posted while notifications (or the channel) are off and does not bring
+     * it back when they are allowed later. One the user dismissed while it
+     * could be seen stays dismissed, so [postedWhileHidden] must be true.
      */
-    fun needsRepost(notificationsEnabled: Boolean, showing: Boolean): Boolean =
-        notificationsEnabled && !showing
+    fun needsRepost(postedWhileHidden: Boolean, shownNow: Boolean, showing: Boolean): Boolean =
+        postedWhileHidden && shownNow && !showing
 
     /**
      * True when [enabledServices] (the colon-separated value of

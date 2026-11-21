@@ -21,12 +21,22 @@ class MonitoringNoticeTest {
         assertTrue(off.opensAccessibilitySettings)
     }
 
-    // CLIENT-030: a notification Android dropped while notifications were off is posted again once they are allowed.
+    // CLIENT-030: a notification posted while Android would not show it comes back once it
+    // would, and one the user dismissed while it could be seen stays dismissed.
     @Test
-    fun noticeIsPostedAgainOnceAllowed() {
-        assertTrue(MonitoringNotice.needsRepost(notificationsEnabled = true, showing = false))
-        assertFalse(MonitoringNotice.needsRepost(notificationsEnabled = true, showing = true))
-        assertFalse(MonitoringNotice.needsRepost(notificationsEnabled = false, showing = false))
+    fun noticeIsPostedAgainOnlyWhenAndroidDroppedIt() {
+        // postedWhileHidden, shownNow, showing -> repost
+        val cases = listOf(
+            Triple(true, true, false) to true, // allowed after sign-in
+            Triple(true, true, true) to false, // already back
+            Triple(true, false, false) to false, // still off, or channel blocked
+            Triple(false, true, false) to false, // the user dismissed it
+            Triple(false, true, true) to false,
+        )
+        for ((input, expected) in cases) {
+            val (postedWhileHidden, shownNow, showing) = input
+            assertEquals(input.toString(), expected, MonitoringNotice.needsRepost(postedWhileHidden, shownNow, showing))
+        }
     }
 
     // CLIENT-030: only a setting that no longer lists the service counts as turned off.
