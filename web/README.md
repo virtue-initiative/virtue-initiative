@@ -2,8 +2,8 @@
 
 The web app at https://app.virtueinitiative.org: sign-up, partners, devices, and reading logs
 and reports. Every batch is decrypted in the browser. What it does is specified in
-[`SPEC.md`](SPEC.md) (`WEB-` IDs); [`AGENTS.md`](AGENTS.md) lists the rules that are easy to
-break.
+[`SPEC.md`](SPEC.md) (`WEB-` IDs); [`architecture.md`](architecture.md) explains how it is built,
+including the local log cache; [`AGENTS.md`](AGENTS.md) lists the rules that are easy to break.
 
 ## Run it
 

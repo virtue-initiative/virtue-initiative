@@ -36,7 +36,10 @@ jobs:
     needs: changes
     # Not `run == 'true'`: if the changes job fails, run the build (fail open).
     if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
-    runs-on: macos-latest
+    # From April 2027 App Store Connect rejects uploads built with an SDK older
+    # than iOS 27. `macos-latest` (macOS 26) still defaults to Xcode 26 and has
+    # no Xcode 27, so use GitHub's Xcode 27 image until `macos-latest` has it.
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v4

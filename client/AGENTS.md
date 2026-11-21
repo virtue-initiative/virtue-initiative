@@ -1,6 +1,6 @@
 # AGENTS.md — client/
 
-Multi-platform Rust monitoring client. All platforms share `core/`; each platform crate is a thin wrapper that supplies raw screen data and OS hooks, then runs `core`'s `Daemon::run_forever()` loop. Start with [README.md](README.md) for the platform table and where each platform's docs live, and `core/architecture.md` for how the core works.
+Multi-platform Rust monitoring client. All platforms share `core/`; each platform crate is a thin wrapper that supplies raw screen data and OS hooks, then runs `core`'s `Daemon` (`run_forever()` everywhere except iOS's Safari extension, which calls `tick_once()`). Start with [README.md](README.md) for the platform table and where each platform's docs live, and `core/architecture.md` for how the core works.
 
 ## Rules
 
@@ -12,15 +12,15 @@ Multi-platform Rust monitoring client. All platforms share `core/`; each platfor
 
 ## Where each platform enters the core
 
-| Platform | Entry point                       | How the UI reaches the daemon                    |
-| -------- | --------------------------------- | ------------------------------------------------ |
-| Linux    | `linux/src/daemon.rs`             | Separate process, IPC socket (`core/src/ipc.rs`) |
-| macOS    | `mac/src/daemon.rs`               | Separate process, IPC socket                     |
-| Windows  | `windows/src/resident_monitor.rs` | In-process, through `windows/src/ffi.rs`         |
-| Android  | `android/rust/src/lib.rs`         | In-process, through JNI                          |
-| iOS      | `ios/rust/src/lib.rs`             | In-process, through C FFI; lifecycle check off   |
+| Platform | Entry point                       | How the UI reaches the daemon                                    |
+| -------- | --------------------------------- | ---------------------------------------------------------------- |
+| Linux    | `linux/src/daemon.rs`             | Separate process, IPC socket (`core/src/ipc.rs`)                 |
+| macOS    | `mac/src/daemon.rs`               | Separate process, IPC socket                                     |
+| Windows  | `windows/src/resident_monitor.rs` | In-process, through `windows/src/ffi.rs`                         |
+| Android  | `android/rust/src/lib.rs`         | In-process, through JNI                                          |
+| iOS      | `ios/rust/src/lib.rs`             | In-process, through C FFI, in two processes; lifecycle check off |
 
 ## Key invariants (don't change without cross-component review)
 
-See `../AGENTS.md` (repo root) for wire format constraints shared with the TypeScript web app.
+See `../docs/contracts.md` for the wire format constraints shared with the TypeScript web app.
 The most dangerous files are `core/src/crypto.rs` and `core/src/module/upload/batch.rs`.

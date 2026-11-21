@@ -45,7 +45,8 @@ HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not fou
 - `src/lib/credentials.ts`: `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`.
 - `src/lib/batch-url.ts`: derives a batch's R2 key and URL from its version, owner and id (API-038). Nothing stores the URL.
 - `src/middleware/`: auth (`auth.ts`), admin gate, rate limiting and Zod validation.
-- `SPEC.md`: every endpoint (`API-` IDs). [README.md](README.md) covers running and deploying.
+- `SPEC.md`: every endpoint (`API-` IDs). [README.md](README.md) covers running and deploying, and [architecture.md](architecture.md) how the pieces fit together.
+- `test/setup.ts` keeps its own copy of the schema; a migration needs the same change there.
 
 ## Type source of truth
 

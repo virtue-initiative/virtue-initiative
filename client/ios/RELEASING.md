@@ -13,6 +13,10 @@ For local builds, see [README.md](README.md).
 | `main`    | `Virtue Initiative iOS Public Beta` (external)        | required, submitted automatically |
 | `staging` | whatever `IOS_STAGING_BETA_GROUP_NAME` names (opt-in) | skipped for internal groups       |
 
+The job runs on GitHub's `xcode-27` image. App Store Connect requires builds made with the
+iOS 27 SDK or later from April 2027, and `macos-latest` only has Xcode 26. Move it back to
+`macos-latest` once that image defaults to Xcode 27 or later.
+
 `scripts/build-and-upload-testflight.sh` ends at `xcrun altool --upload-app`, which only
 parks the build in App Store Connect — it processes for several minutes and then belongs
 to no group. `scripts/distribute-testflight-build.mjs` does everything after that over the
@@ -78,4 +82,4 @@ Security. That is a filing question, not a build question.
 
 A pull request into `main` must have a `# What to Test (iOS)` section in its description. CI
 fails without it, and the distribute step uses that text as the build's "What to Test" in
-TestFlight. See "TestFlight What to Test" in `AGENTS.md`.
+TestFlight. See the TestFlight "What to Test" section of `docs/ci-checks.md`.

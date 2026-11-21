@@ -191,4 +191,8 @@
     <!-- Accessibility service -->
     <string name="accessibility_service_label">Virtue Screen Monitor</string>
     <string name="accessibility_service_description">Virtue uses accessibility permission to capture screenshots for accountability monitoring. No interaction data is collected.</string>
+    <plurals name="msg_force_capture_waiting">
+        <item quantity="one">Taking screenshot in %d second…</item>
+        <item quantity="other">Taking screenshot in %d seconds…</item>
+    </plurals>
 </resources>

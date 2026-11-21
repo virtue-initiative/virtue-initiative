@@ -24,9 +24,10 @@ construction, compression, encryption, and upload semantics.
 `core` is structured around **one sequential loop**, not an event bus.
 `Daemon<P: PlatformHooks, A: ApiTransport>` owns an `Arc<Mutex<DaemonState>>`
 (a read-only snapshot outside the loop thread) and an `mpsc::Sender<DaemonRequest>`.
-Each iteration of `run_forever` clones the state once, then runs the phases
-below straight through against that owned clone — no locking anywhere in the
-middle — before writing the result back to the shared snapshot and to disk:
+Each tick runs inside `with_locked_state`: it takes the cross-process file lock,
+re-reads `event_state.json` from disk, runs the phases below straight through
+against that working copy with no in-process locking in the middle, then persists
+the result and writes it back to the shared snapshot before releasing the lock:
 
 ```
 run_forever loop:
@@ -34,28 +35,29 @@ run_forever loop:
   drain any requests that arrived; apply + persist them; reply to each
     (only after the persist succeeds)
   if no request was applied and the wakeup isn't due yet: continue  // CORE-020
-  working = state.lock().clone()
-  run_phases(&mut working, now_ms):
-    lifecycle::tick, screenshot::plan                              // phase 1, 2a
-    screenshot::capture_and_process                                // phase 2b
-    screenshot::commit, capture_availability::tick,
-      heartbeat::tick, upload::plan_hash_retries                   // phase 2c, 3, 4a
-    upload::execute_hash_retries (network)                         // phase 5a
-    upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
-    upload::execute_batch (network)                                // phase 5b
-    upload::commit_batch                                           // phase 5d
-  compute_next_wakeup, persist, state.lock() = working              // phase 6, 7
+  with_locked_state(|working|                                       // CORE-016
+    run_phases(working, now_ms):
+      lifecycle::tick, screenshot::plan                             // phase 1, 2a
+      screenshot::capture_and_process                               // phase 2b
+      screenshot::commit, capture_availability::tick,
+        heartbeat::tick, upload::plan_hash_retries                  // phase 2c, 3, 4a
+      upload::execute_hash_retries (network)                        // phase 5a
+      upload::commit_hash_retries, upload::plan_batch               // phase 5c, 4b
+      upload::execute_batch (network)                               // phase 5b
+      upload::commit_batch                                          // phase 5d
+    compute_next_wakeup, persist, state.lock() = working)           // phase 6, 7
 ```
 
 Hash results are committed _before_ the batch is planned so an event hashed
-this tick is eligible for the same tick's batch upload — SPEC.md's phase
-list is illustrative, not a literal contract on lock-acquisition count.
+this tick is eligible for the same tick's batch upload.
+
+The file lock matters only on iOS, where the app and its Safari extension each
+hold a `Daemon` for the same state file. Everywhere else it is uncontended.
 
 Each module is a plain `struct FooState` (`#[derive(Serialize, Deserialize,
-Default, Clone)]`, `#[serde(default)]`) plus free functions operating on it —
-no trait, no `Observer`, no event dispatch. A module that needs to enqueue
-work calls `upload::enqueue(&mut upload_state, now_ms, risk, kind)` directly
-instead of publishing an event.
+Default, Clone)]`, `#[serde(default)]`) plus free functions operating on it.
+Modules call each other's functions directly: a module that needs to enqueue
+work calls `upload::enqueue(&mut upload_state, now_ms, risk, kind)`.
 
 ```rust
 let daemon = Daemon::new(config, platform, api, state_path)?;
@@ -64,11 +66,12 @@ daemon.run_forever(); // blocking; call from its own thread
 
 ### DaemonState
 
-One flat struct, persisted to `event_state.json` with **the same top-level
-field names as the pre-rewrite per-observer keys** (`auth`, `lifecycle`,
-`screenshot`, `upload`, `capture_availability`, `heartbeat`) so existing
-installs load cleanly, and readers that bypass the daemon and read the `auth`
-key directly (`read_auth_state` in `client/mac/src/config.rs`) keep working:
+One flat struct, persisted to `event_state.json`. Its top-level keys (`auth`,
+`lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`) are
+what installs already have on disk, so renaming one breaks every existing
+install. Some readers also bypass the daemon and read the `auth` key directly
+(`read_auth_state` in `client/mac/src/config.rs`, and the Android and iOS
+bridges' signed-in checks):
 
 ```rust
 pub struct DaemonState {
@@ -85,9 +88,9 @@ pub struct DaemonState {
 }
 ```
 
-`version` (`DAEMON_STATE_VERSION`) exists so a future breaking change to this
-shape has somewhere to branch migration logic, rather than relying solely on
-`#[serde(default)]`.
+`version` (`DAEMON_STATE_VERSION`) gives a breaking change to this shape an
+upgrade step to run, beyond what `#[serde(default)]` can fill in (see "State
+persistence" below).
 
 ### Responsiveness: a request channel, not a shared mutex
 
@@ -116,6 +119,11 @@ Blocking on the reply means a request can only be served once the loop is
 running. A caller that is about to start the loop itself (Android's restart)
 therefore uses `queue_note_user_start()`, which only enqueues the resume; the
 loop applies it ahead of anything queued after it (CORE-022).
+
+A platform with no thread that can stay alive between calls uses
+`tick_once()` instead of `run_forever()`: it applies whatever requests are
+queued, runs one tick and returns (CORE-015). iOS's Safari extension calls it
+once per message.
 
 A `#[cfg(any(test, feature = "testing"))]` bypass (`test_login`, `test_logout`,
 …, plus `tick_once_for_test`) calls the same `apply_*` functions directly
@@ -156,13 +164,14 @@ the same chance" requirement. Two gates then run:
 ### State persistence
 
 `Daemon::new` loads `DaemonState` from `event_state.json`
-(`state::load_state`, generic over any `Default + DeserializeOwned` type
-now, not just `serde_json::Value`); every tick's final locked phase persists
-it back via `state::store_state` (atomic tmp+rename).
+(`state::load_state`, generic over any `Default + DeserializeOwned` type).
+Every request batch and every tick then re-reads it under the file lock and
+persists it back via `state::store_state` (atomic tmp+rename) before
+releasing the lock (`with_locked_state`, CORE-016).
 
 `DaemonState.version` records the file's format. Every load that a write
-may follow (`Daemon::new` and each locked re-read) goes through
-`load_current_state`, which runs `DaemonState::upgrade`: one step per
+may follow (`Daemon::new` and each re-read in `with_locked_state`) runs
+`DaemonState::upgrade`: one step per
 version, in order, from the saved version up to `DAEMON_STATE_VERSION`.
 Version 0 means nothing saved yet (a missing or unparseable file, or a
 logout's reset via `DaemonState::initial`), and 0 → 1 changes no data,
@@ -204,8 +213,8 @@ target_os = "macos"))]` rather than being gated at its `mod` declaration,
 
 ## Platform process model
 
-Every platform now drives the **same** `Daemon::run_forever()` loop; only how
-each host language reaches it differs.
+Every platform drives the **same** `Daemon`; only how each host language
+reaches it differs. All but the iOS Safari extension run `run_forever()`.
 
 ### Linux / Mac — separate daemon process
 
@@ -221,9 +230,9 @@ independent daemon-loop plumbing, not part of the core alerting model.
 No separate process. `resident_monitor::start_monitoring()` builds a
 `Daemon` once, spawns `run_forever()` on a background thread, and holds
 `Arc<Daemon<...>>` in process-global state. `app_login`/`app_logout`/
-`status_snapshot`/the stop functions call the daemon's synchronous methods
-directly — the daemon's own mutex+condvar already provides the
-responsiveness the old hand-rolled `MonitorCommand` queue existed for.
+`status_snapshot`/the stop functions call the daemon's public methods
+directly, which send a `DaemonRequest` and block on the reply like any other
+caller.
 
 ### Android — JNI entry points, one shared `Arc<Daemon>`
 
@@ -236,16 +245,23 @@ direct method call on that shared daemon (`nativeLogin` → `daemon.login()`,
 previous loop still flushing on its way out instead of failing with `daemon
 already running`, and a stop is only sent to a loop that is `Running`, so
 Kotlin's unconditional `stopDaemonLoop()` cannot leave a stale `Stop` queued for
-the next loop. `nativeIsLoggedIn`/`nativeGetDeviceId` still read
+the next loop. `nativeIsLoggedIn`/`nativeGetDeviceId` read
 `event_state.json`'s `auth` key directly from disk rather than going through
-the daemon, unchanged from before.
+the daemon.
 
-### iOS — same C-FFI/`Arc<Daemon>` shape as Android, lifecycle disabled
+### iOS — two processes, C FFI, lifecycle disabled
 
 `virtue_ios_native_init` builds one `Daemon<IosPlatformHooks, HttpApiClient>`
 and stores it in process-global state, same pattern as Android's JNI bridge;
 every other `virtue_ios_native_*` call is a direct method call on that shared
 daemon.
+
+Two processes do this against the same state file. The Safari extension does
+the monitoring: its native message handler calls `virtue_ios_native_tick_once`
+once per message, because the OS only keeps that process alive for one
+message's round trip. The app runs `run_forever()` only for the length of a
+call that blocks on the loop, such as sign-in. The file lock in `with_locked_state`
+keeps them from overwriting each other's state (CORE-016).
 
 `IosPlatformHooks::lifecycle_enabled()` returns `false`: the monitoring
 process is a short-lived Safari extension host that the OS can suspend the
@@ -265,12 +281,11 @@ check is disabled.
 - `device_name` — stable device identifier
 - `platform_name` — e.g. `"linux"`, `"mac"`, `"windows"`
 - `state_dir` — directory for all state files
-- `screenshot_interval` — mean of the random exponential draw (CORE-003), default 60s in tests
-- `batch_interval` — default 60 s
+- `screenshot_interval` — mean of the random exponential draw (CORE-003); builds default to 300 s
+- `batch_interval` — how long events wait for a batch upload; builds default to 3600 s
 
-There is no runtime override mechanism: `api_base_url`, `capture_interval_seconds`,
-and `batch_window_seconds` are baked in at **compile time** via `env!()`, exactly
-like `DEFAULT_API_BASE_URL`. `client/core/build.rs` reads
+The API URL, capture interval and batch window are baked in at **compile
+time** via `env!()`. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
 back to the repo-root `.env` (gitignored; see `.env.example`) and then to
@@ -292,11 +307,10 @@ compiling it, this one loading path covers every platform.
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------ |
 | `event_state.json` | `Daemon` | Serialised `DaemonState` (screenshot schedule, upload queues, lifecycle late-wakeup array, auth) |
 
-Permanent hash-upload failures (400 responses) go through a normal
-`tracing::error!` call in `upload::commit_hash_retries`, not a dedicated file
-— every platform already has durable `tracing`-based logging (Linux ->
-stdout/journald; Mac/Windows/Android/iOS -> daily rotating file, see
-`src/logging.rs`).
+Permanent hash-upload failures (400 responses) are logged with
+`tracing::error!` in `upload::commit_hash_retries`. Every platform keeps
+durable `tracing` logs (Linux -> stdout/journald; Mac/Windows/Android/iOS ->
+daily rotating file, see `src/logging.rs`).
 
 ## PlatformHooks
 
@@ -376,16 +390,15 @@ exponential backoff — see `RetryBackoff` below) on the next tick.
 
 Each `BatchUpload` also carries `total_count`/`high_risk_count`/`medium_risk_count`/
 `screenshot_count`, sent to the server as `metadata.event_counts` (`{total, high, medium,
-screenshot}`). `high_risk_count`/`medium_risk_count` tally events falling in the high
-(`risk >= 0.7`) and medium (`0.4 <= risk < 0.7`) bands, thresholds mirroring
-`shared-web/risk.ts`; `screenshot_count` tallies `UploadKind::Screenshot` events. These are
+screenshot}`). `high_risk_count`/`medium_risk_count` tally events whose risk rounds to
+70% or more, and to 40% up to 70%, thresholds mirroring `shared-web/risk.ts`; `screenshot_count` tallies `UploadKind::Screenshot` events. These are
 computed client-side from the per-event `risk`/kind before encryption, so the server can
 summarize tamper activity in partner digest emails without ever decrypting the batch.
 
 ## Notify flow
 
-High-risk events (`lifecycle::is_extra_high_risk(risk)`, i.e. a risk that rounds to 90% or more, matching the web app's rating) don't travel through a
-separate notify queue. When `execute_hash_retries` successfully hashes an event, it
+High-risk events (`lifecycle::is_extra_high_risk(risk)`, i.e. a risk that rounds to 90% or more, matching the web app's rating) have no
+notify queue of their own. When `execute_hash_retries` successfully hashes an event, it
 checks whether that event was high-risk and, if so, attaches a `NotifyPayload
 { ts, type, risk, title?, details? }` to the `PendingBatchEvent.notify` field. The
 notify payload then rides with that event into whichever batch carries it:
@@ -395,14 +408,14 @@ request, where the server processes them (best-effort) only after the batch itse
 has durably persisted. Enqueuing a heartbeat or extra-high-risk event sets
 `UploadState.force_flush` (bypassing the batch-interval wait) and, for heartbeats
 specifically, `bypass_lock` too (bypassing the screen-lock gate) — see
-`RetryBackoff`/gating below. `POST /d/notify` no longer exists.
+`RetryBackoff`/gating below.
 
 ## Upload gating and backoff
 
 `UploadState` carries two persisted `RetryBackoff { next_attempt_at_ms,
 current_backoff_ms }` values (`hash_backoff`, `batch_backoff` — doubling from
-1s up to a 20-minute cap, small jitter) so backoff survives a daemon restart,
-unlike the pre-rewrite in-memory version. `plan_hash_retries`/`plan_batch`
+1s up to a 20-minute cap, small jitter) so backoff survives a daemon restart.
+`plan_hash_retries`/`plan_batch`
 each require `screen_active || state.bypass_lock` before attempting network
 I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 0 || interval elapsed || state.force_flush || queue >= MAX_BATCH_ITEMS`.
@@ -411,9 +424,8 @@ stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
 and resumes after that batch lands.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
-backoffs to "ready now" — bypassing the cooldown for one attempt, matching
-the old `FlushBatchNow`/`ProcessStopped` "explicit action, try immediately"
-semantics.
+backoffs to "ready now", so an explicit action skips the cooldown for one
+attempt.
 
 ## Hash chain
 
@@ -425,12 +437,11 @@ new_state    = sha256(current_state[32] || content_hash[32])
 ```
 
 `POST /hash` itself requires a `HashServerToken`, minted by `POST /d/device`, `GET
-/d/device`, and `POST /d/batch` — there is no dedicated `POST /d/token`
-endpoint. On the wire the token rides as `settings.hash_token` (part of the embedded
+/d/device`, and `POST /d/batch`. On the wire the token rides as `settings.hash_token` (part of the embedded
 `DeviceSettings`, not a sibling field); `api.rs` pulls it out into the separate
 `hash_token` field on `RegisteredDevice`/`DeviceState`/`UploadedBatchResponse`.
-`UploadState.hash_token_cache: Option<(String, i64)>` (token, fetched-at UTC-ms,
-persisted — no longer `Instant`-based) is refreshed from whichever of those
+`UploadState.hash_token_cache: Option<(String, i64)>` (the token and the UTC ms
+it was fetched, persisted) is refreshed from whichever of those
 responses arrived most recently and only triggers a `GET /d/device` call
 (inside `execute_hash_retries`, unlocked) when that cache goes stale (110
 minutes, against the token's 2 hour lifetime) without a batch having refreshed it in the meantime,

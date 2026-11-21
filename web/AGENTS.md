@@ -5,7 +5,7 @@ specified in `SPEC.md` (`WEB-` IDs); [README.md](README.md) covers running it.
 
 ## Cross-component contract files
 
-These two files implement the TypeScript side of contracts shared with the Rust client. **Read `../AGENTS.md` before editing them.**
+These two files implement the TypeScript side of contracts shared with the Rust client. **Read `../docs/contracts.md` before editing them.**
 
 - `src/utils/api/crypto.ts` — AES-256-GCM decrypt, HPKE unwrap, argon2id password derivation, hash-chain verification
 - `src/utils/api/batch-materializer.ts` — fetches and decrypts the batch blob produced by the Rust client; decodes the msgpack event array
@@ -15,7 +15,7 @@ Changes to the encryption format, nonce layout, msgpack schema, or hash algorith
 ## Where things are
 
 - `src/utils/api/`: the API client, session and crypto. Every endpoint call goes through `api.ts`.
-- `src/utils/cache/`: the OPFS-backed SQLite cache. A worker (`worker.ts`) owns the database; `client.ts` elects one tab as leader and fans results out to the others.
+- `src/utils/cache/`: the OPFS-backed SQLite cache. A worker (`worker.ts`) owns the database; `client.ts` elects one tab as leader and fans results out to the others. [`architecture.md`](architecture.md) explains how it fits together.
 - `src/pages/<Page>/index.tsx`: one folder per route.
 
 ## Rules

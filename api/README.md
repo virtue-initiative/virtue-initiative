@@ -54,9 +54,9 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 ```
 
 Set `JWT_PRIVATE_KEY` and `JWT_PUBLIC_KEY` in local `.dev.vars`, and in deployed
-environments upload at least the private key with `bunx wrangler secret put <NAME> --name <worker>`. The
-public key can be shared with any other server that needs to verify tokens.
-The worker also exposes the verifier key at `GET /.well-known/jwks.json`.
+environments upload at least the private key with `bunx wrangler secret put <NAME> --name <worker>`.
+The public key can be shared with any other server that needs to verify tokens,
+such as the hash server.
 
 Upload `LOGIN_SALT_SECRET` to each deployed environment before deploying, using
 a long random value such as `openssl rand -base64 32`. Rotate it only after a
@@ -84,4 +84,5 @@ that rewrites `/api/*` to `/*` can replace this Worker-side prefix handling.
 
 ## API
 
-See the [API specification](./SPEC.md).
+See the [API specification](./SPEC.md), and [architecture.md](architecture.md) for how the Worker
+is put together.

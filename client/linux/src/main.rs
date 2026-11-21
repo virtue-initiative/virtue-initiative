@@ -5,7 +5,7 @@ mod style;
 mod tray;
 
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -97,7 +97,7 @@ enum Commands {
     },
     #[command(
         name = "test-screenshot",
-        about = "Take a screenshot and upload it now, same as Test Screenshot on other platforms"
+        about = "Take a screenshot in 10 seconds and upload it, same as Test Screenshot on other platforms"
     )]
     ForceScreenshot,
     #[command(about = "Report an issue to the Virtue Initiative team")]
@@ -1099,7 +1099,15 @@ fn dev_add_log(paths: ClientPaths, args: DeveloperEventArgs) -> Result<()> {
     Ok(())
 }
 
+/// How many seconds `test-screenshot` counts down before it captures, so the
+/// user can bring up the screen they want captured (CLIENT-008).
+const TEST_SCREENSHOT_DELAY_SECS: u32 = 10;
+
 fn force_screenshot(paths: ClientPaths) -> Result<()> {
+    // Fail now, not after the wait, when the daemon isn't running.
+    drop(connect_to_daemon(&paths)?);
+    count_down_to_screenshot();
+
     // The baseline the wait compares against: `force_capture_now` returns once
     // the capture is committed, not once its batch has landed.
     let before = {
@@ -1132,6 +1140,26 @@ fn force_screenshot(paths: ClientPaths) -> Result<()> {
         println!("{}", style::warn(message));
     }
     Ok(())
+}
+
+/// On a terminal the countdown rewrites one line; piped, each second gets its own.
+fn count_down_to_screenshot() {
+    let terminal = io::stdout().is_terminal();
+    for left in (1..=TEST_SCREENSHOT_DELAY_SECS).rev() {
+        let unit = if left == 1 { "second" } else { "seconds" };
+        let line = format!("Taking screenshot in {left} {unit}...");
+        if terminal {
+            // Trailing spaces cover the longer line this one replaces.
+            print!("\r{line}  ");
+            let _ = io::stdout().flush();
+        } else {
+            println!("{line}");
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    if terminal {
+        println!();
+    }
 }
 
 fn prompt_password(label: &str) -> Result<String> {

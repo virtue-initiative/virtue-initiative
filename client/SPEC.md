@@ -91,7 +91,7 @@ Timestamps MUST be shown in local time followed by a relative age in parentheses
 
 ## CLIENT-008 Test Screenshot
 
-A signed-in user MUST be able to request a screenshot now. The app MUST call CORE-021, then poll status every 0.5 s for up to 20 s and report one outcome, with the same wording on every platform:
+A signed-in user MUST be able to request a test screenshot. The app MUST wait 10 s before it calls CORE-021, so the user can bring up the screen they want captured. It MUST then poll status every 0.5 s for up to 20 s and report one outcome, with the same wording on every platform:
 
 - Uploaded: "Screenshot uploaded. Check the web logs page to view it."
 - Not taken, screen unchanged: "No screenshot was taken: the screen hasn't changed since the last one."
@@ -100,10 +100,10 @@ A signed-in user MUST be able to request a screenshot now. The app MUST call COR
 - Not taken, no reason: "No screenshot was taken."
 - Still uploading at the deadline: "Screenshot captured, but it hasn't finished uploading yet. The client will keep trying in the background."
 
-While waiting, the app MUST show "Screenshot uploading…" and MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
+During the 10 s the app MUST count down once a second, showing "Taking screenshot in N seconds…" ("in 1 second…" for the last), and after it "Screenshot uploading…". Until the outcome is reported it MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
 
-- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: a window menu item and a tray item, both shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
-- iOS: "Capture Next Safari Page" only records the request; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
+- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: a window menu item and a tray item, both shown only while signed in; the tray shows the first waiting message, without counting down, and then the outcome in notification balloons. Android: "Take Test Screenshot" in the Advanced section of Status Details (CLIENT-030).
+- iOS: "Capture Next Safari Page" only records the request, without the 10 s wait; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
 
 ## CLIENT-009 Permissions
 
@@ -207,13 +207,13 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 
 Each platform MUST supply the following to the core. A signal that cannot be read MUST fail safe: lock state reads as unlocked (falling back to the change check), and login/logout times read as unavailable.
 
-| Platform | Capture                                                    | Locked or screensaver                                                  | Last login                           | Last logout                                                                 |
-| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
-| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
-| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
+| Platform | Capture                                                    | Locked or screensaver                                                                          | Last login                           | Last logout                                                                 |
+| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive`                         | logind session start                 | last journal entry of the previous boot                                     |
+| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running                                   | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
 | Windows  | every monitor as one image                                 | screensaver running, the session's WTS flags say locked, or the input desktop cannot be opened | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
-| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
-| iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
+| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                                         | device boot time                     | unavailable                                                                 |
+| iOS      | visible Safari tab                                         | (not used)                                                                                     | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
@@ -311,7 +311,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Status Details MUST open with a summary (dot, headline, one sentence), then sections Screenshots (last screenshot, waiting to upload), Account (signed in, and partners while signed in) and Problems (the latest recent error, or "None") of rows with a status dot, label and value, and a hint under a row only when the user must act. The sections MUST flow into two columns when the window is wide enough. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the Open log folder button.
 - Tray tooltip, following the headline: "Virtue: loading status", "Virtue: sign in required", "Virtue: <error>" or "Virtue: monitoring error", "Virtue: monitoring stopped", "Virtue: monitoring active", "Virtue: starting monitoring", with " (update ready)" appended while an update is staged.
 - Before the first status load the app MUST show "Loading..." for signed in and account, and the state `loading`. Once loaded, the signed-in line MUST read "Yes" or "No" and the account line MUST show the email, or "Not signed in" when there is none. A signed-in session whose monitor reports signed out MUST show `starting`. Signed out MUST clear the device id, error, queue count and last screenshot. The device id and email MUST fall back to the daemon's values, the email only while signed in. The email field MUST follow the account while signed in and keep what the user typed while signed out. Displayed states MUST show underscores as spaces. The build line is "Build <label> | Windows package <version>", or "Build <label>" without a package version ("Build unknown" before load).
-- The app MUST refresh monitor state every 5 s without changing the signed-in state, and fully after each action. While an action runs, others MUST be ignored, except that Exit MUST wait for it to finish and then stop, and a progress message MUST be shown ("Signing in...", "Signing out...", "Screenshot uploading...", "Sending report..."); a failure MUST be shown as the error text on the screen where the action started, and MUST stay until the user leaves that screen.
+- The app MUST refresh monitor state every 5 s without changing the signed-in state, and fully after each action. While an action runs, others MUST be ignored, except that Exit MUST wait for it to finish and then stop, and a progress message MUST be shown ("Signing in...", "Signing out...", "Taking screenshot in N seconds...", "Screenshot uploading...", "Sending report..."); a failure MUST be shown as the error text on the screen where the action started, and MUST stay until the user leaves that screen.
 
 ## CLIENT-028 Windows: watchdog
 

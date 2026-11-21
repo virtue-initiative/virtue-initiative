@@ -938,8 +938,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     /// One full sequential pass over `working` — lifecycle check, screenshot
     /// plan/capture/commit, capture-availability, heartbeat, hash retries,
-    /// batch upload — with no locking anywhere in here (`working` is an
-    /// owned clone, not shared). Returns `(screen_active, should_logout)`;
+    /// batch upload — with no in-process locking anywhere in here (`working`
+    /// is the copy `with_locked_state` re-read under the file lock, not the
+    /// shared snapshot). Returns `(screen_active, should_logout)`;
     /// the caller applies the logout (never this function, to avoid
     /// recursing into the request-channel machinery).
     fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {

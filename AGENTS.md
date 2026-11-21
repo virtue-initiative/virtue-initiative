@@ -58,73 +58,7 @@ Read `TESTING.md` before writing or changing a test. In short:
 
 ## Cross-component contracts
 
-These five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**. If you change one side, you must change the other to match.
-
-The shared test vectors in `batch-format/vectors/` (BATCH-008) pin all five. Both sides' tests check them, so drift on either side fails CI.
-
-### 1. Batch wire format
-
-Rust produces, TypeScript consumes. `batch-format/SPEC.md` is the source of truth:
-
-```
-event → msgpack({ts, risk?, type, data?})
-events → msgpack([event, ...]) → gzip → AES-256-GCM(batchKey)
-wire:  nonce[12 bytes] || ciphertext+tag
-```
-
-Key files:
-
-- Rust: `client/core/src/module/upload/batch.rs`, `client/core/src/crypto.rs`
-- TypeScript: `web/src/utils/api/batch-materializer.ts`, `web/src/utils/api/crypto.ts`
-
-### 2. Per-event content hash
-
-Used to build the hash chain uploaded to `POST /hash`:
-
-```
-contentHash = sha256(msgpack-encoded event bytes, exactly as they appear in the batch)
-```
-
-See BATCH-006.
-
-Key files:
-
-- Rust: `client/core/src/crypto.rs` (`compute_event_hash`)
-- TypeScript: `web/src/utils/api/crypto.ts` (`verifyBatch`)
-
-### 3. Rolling hash state
-
-```
-new_state = sha256(current_state[32] || contentHash[32])
-```
-
-### 4. Password auth derivation
-
-Login must hash the password the same way on both platforms before sending. The salt and argon2 parameters come from `GET /user/login-material` (API-015):
-
-```
-argon2id(password, salt=password_salt, m/t/p=params, len=32)
-then HKDF-SHA256("auth", argon_output) → Base64 string sent as password_auth
-```
-
-Key files:
-
-- Rust: `client/core/src/crypto.rs` (`derive_password_auth`)
-- TypeScript: `web/src/utils/api/crypto.ts` (`derivePasswordMaterial`)
-
-### 5. HPKE key wrapping
-
-Batch keys are wrapped per-recipient using `DhkemX25519HkdfSha256 / HkdfSha256 / Aes256Gcm`.
-Wire format: `enc[kem.encSize bytes] || ciphertext`.
-
-Key files:
-
-- Rust: `client/core/src/crypto.rs`
-- TypeScript: `web/src/utils/api/crypto.ts` (`unwrapBatchKey`, `encryptForPublicKey`)
-
-The `access_keys` JSON envelope and `DeviceSettings` shape are also shared between Rust and
-the API, but are plain JSON relay shapes — not independently-reimplemented crypto — so they
-aren't listed as one of the five contracts above. See `api/SPEC.md` for their wire shapes.
+Five things are implemented independently in both Rust (`client/core/`) and TypeScript (`web/`) and **must stay bit-for-bit compatible**: the batch wire format, the per-event content hash, the rolling hash state, the password auth derivation and HPKE key wrapping. [`docs/contracts.md`](docs/contracts.md) gives each one with its files on both sides. If you change one side, you must change the other to match, and the shared vectors in `batch-format/vectors/` (BATCH-008) will fail CI until you do.
 
 ## Key invariant files
 
@@ -135,11 +69,7 @@ Read these before touching crypto, batch, or auth code:
 
 ## What not to change without full cross-component review
 
-- The AES-GCM nonce position or length (must be first 12 bytes)
-- The msgpack schema (an array at the outer level, each event double-encoded)
-- The argon2id parameters or the HKDF label strings (`"auth"`, `"key"`)
-- The JWT token `type` claim values (`"device"`, `"server"`)
-- The hash chain input (the encoded event bytes, hashed as-is)
+The list is in "What not to change without a review across components" in [`docs/contracts.md`](docs/contracts.md): the nonce layout, the msgpack schema, the Argon2id parameters and HKDF labels, the JWT `type` values and the hash chain input.
 
 ## Copy style
 

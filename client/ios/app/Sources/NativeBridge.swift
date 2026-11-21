@@ -104,12 +104,12 @@ enum NativeBridge {
     /// daemon's `run_forever()` loop thread, so it must be running in this
     /// process for the call to complete. Unlike Android (one process), the
     /// Safari extension is a *separate OS process* that runs its own
-    /// independent `Daemon` against the same on-disk state file with no
-    /// cross-process locking — so this process's loop is started only for
-    /// the duration of the calls that need it (ref-counted, to tolerate
-    /// overlapping calls) and stopped immediately after, rather than left
-    /// running continuously, to keep the window where both processes could
-    /// tick — and race each other's writes — as small as possible.
+    /// independent `Daemon` against the same on-disk state file. The two
+    /// take turns through the state file's lock (CORE-016), but the
+    /// extension does the monitoring, so this process's loop is started
+    /// only for the duration of the calls that need it (ref-counted, to
+    /// tolerate overlapping calls) and stopped immediately after, rather
+    /// than left running continuously.
     private static func withDaemonLoop<T>(_ body: () -> T) -> T {
         daemonLock.lock()
         daemonLoopRefCount += 1
