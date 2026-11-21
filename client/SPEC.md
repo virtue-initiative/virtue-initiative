@@ -207,13 +207,13 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 
 Each platform MUST supply the following to the core. A signal that cannot be read MUST fail safe: lock state reads as unlocked (falling back to the change check), and login/logout times read as unavailable.
 
-| Platform | Capture                                                    | Locked or screensaver                                                  | Last login                           | Last logout                                                                 |
-| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
-| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
-| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
+| Platform | Capture                                                    | Locked or screensaver                                                                          | Last login                           | Last logout                                                                 |
+| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive`                         | logind session start                 | last journal entry of the previous boot                                     |
+| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running                                   | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
 | Windows  | every monitor as one image                                 | screensaver running, the session's WTS flags say locked, or the input desktop cannot be opened | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
-| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
-| iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
+| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                                         | device boot time                     | unavailable                                                                 |
+| iOS      | visible Safari tab                                         | (not used)                                                                                     | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
@@ -357,6 +357,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Monitoring covers Safari only: the extension "Virtue Safari Capture" captures the visible tab, and the daemon in the extension takes screenshots from those frames (CORE-015). Tamper detection is disabled (CORE-002, CORE-019).
 - Headline state: signed out; paused (monitoring switch off); setup not finished (the extension is not known to be on; a message from it or an "on" report from the check page counts, and a captured page is not required); Safari permission needed (All Websites or Private Browsing known to be denied); otherwise active. It MUST NOT depend on whether Safari is open.
 - Check Extension MUST open a check page in Safari, which reports back with `virtueinitiative://check-extension?extension=on|off&all_sites=0|1&private=0|1`. Missing flags keep their last values. Any extension message after the check started also counts as on.
+- The app MUST read the CORE-010 status from the state file each time, not from its own daemon, since the extension's daemon updates that file from another process. So a new announcement (CLIENT-033) or screenshot shows without restarting the app.
 - Status Details MUST show the extension's last check-in, which counts as stale after 10 s, its last frame, last page, last error and daemon state.
 - Pause MUST record CORE-011 and turn the switch off; capture stops at the extension's next message. Resume MUST record CORE-022 and turn it on. Signing in MUST turn it on.
 - The Open Settings button MUST, on iOS 26.2 and later, open Safari's settings for the Virtue extension directly (`SFSafariSettings.openExtensionsSettings`), and otherwise, or if that fails, open Settings with `openSettingsURLString`. Where Settings lands varies by iOS version (Virtue's own page, or the Apps list), so the step text MUST be right wherever it lands.
@@ -370,3 +371,12 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - A failed Pause or Resume MUST show its error on Home. Signing out MUST return to Home only after it finishes.
 - Instead of the partners link text in CLIENT-004, iOS Home MUST offer the partners button above only while active.
 - After a successful Report an Issue (CLIENT-016), iOS MUST show "Thanks, your report was sent to the Virtue Initiative team." with a comma in place of the dash. The setup wizard MUST keep following the first unfinished step as it changes and MUST NOT go back to step 1 (signing in). Changing step MUST scroll Home back to the top.
+
+## CLIENT-033 Announcements
+
+Every GUI MUST show the CORE-010 `announcement`, when there is one, on its status screen (the one that says monitoring is active or paused) below its main actions, and MUST show nothing in its place when there is none. Its `message` MUST be shown in full. When it has a `url`, clicking or tapping the message MUST open the url in the default browser.
+
+- `info` MUST look like a small link (or small secondary text when there is no `url`), with no background.
+- `warning` MUST have an orange background and `urgent` a red one, each with text that stays readable on it in light and dark mode.
+- The announcement MUST update when the app next reads status, with no restart.
+- Linux `virtue status` MUST print the message on the line after its headline, with `Note:` before an `info` message and `Important:` before a `warning` or `urgent` one, followed by the url on its own line.
