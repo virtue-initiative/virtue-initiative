@@ -3875,6 +3875,7 @@ dependencies = [
  "clap",
  "dirs",
  "hostname",
+ "image",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "serde",

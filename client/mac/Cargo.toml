@@ -29,6 +29,7 @@ chrono = { version = "0.4", features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 hostname = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFBase", "CFString", "CFDictionary", "CFNumber"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGSession"] }
 serde = { version = "1", features = ["derive"] }
