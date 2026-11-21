@@ -15,11 +15,9 @@ class KeepAliveWorker(context: Context, params: WorkerParameters) : CoroutineWor
 
         if (!NativeBridge.nativeIsLoggedIn()) return Result.success()
 
-        // If the accessibility service is connected it manages its own daemon loop.
-        // Just keep the foreground service alive as a process anchor.
-        if (VirtueAccessibilityService.isConnected()) {
-            ScreenshotService.start(applicationContext)
-        }
+        // Keep the foreground service (and its notification, which says when
+        // Accessibility is off) alive as a process anchor (CLIENT-030).
+        ScreenshotService.start(applicationContext)
 
         return Result.success()
     }
