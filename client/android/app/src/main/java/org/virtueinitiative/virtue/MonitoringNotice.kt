@@ -17,6 +17,14 @@ object MonitoringNotice {
         }
 
     /**
+     * Whether to post the notification again. Android drops a foreground
+     * service's notification posted while notifications are off, and does not
+     * bring it back when they are allowed later.
+     */
+    fun needsRepost(notificationsEnabled: Boolean, showing: Boolean): Boolean =
+        notificationsEnabled && !showing
+
+    /**
      * True when [enabledServices] (the colon-separated value of
      * `Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES`) lists [service]. Entries come in
      * both the short (`pkg/.Cls`) and full (`pkg/pkg.Cls`) forms.
