@@ -146,7 +146,7 @@ Notes:
 - This is the most complete Rust CI workflow and is the baseline for Linux or shared-core changes.
 - `build-deb-docker.sh` is the packaging step CI runs after the tests and the integration test. It builds inside a container with an older glibc, so the `.deb` runs on older distributions. Pushes to `staging` and `main` build without `--debug` and with `VIRTUE_ENABLE_AUTO_UPDATE=1`. Locally, `client/linux/scripts/build-deb.sh` builds the same package against this machine's glibc, without Docker.
 
-### Linux client integration test (`.github/workflows/client-linux.yml`, `client-linux-integration` job)
+### Linux client integration test (`.github/workflows/client-linux.yml`, integration test step)
 
 End-to-end smoke test: starts the API against a fresh local D1 database, runs the real `virtue-linux` daemon under Xvfb, signs in as the seeded dev account and checks that hashes and batches land in the database. See `client/linux/README.md`.
 
@@ -177,7 +177,7 @@ Notes:
 - `build-dmg.sh` validates the app bundle and DMG packaging path.
 - Pushes to `staging` and `main` add `--release` to the cargo commands and run `build-dmg.sh` with no flags, which builds the release app for both architectures.
 
-### macOS client integration test (`.github/workflows/client-macos.yml`, `client-macos-integration` job)
+### macOS client integration test (`.github/workflows/client-macos.yml`, integration test step)
 
 Same smoke test, run against the real `virtue-mac` daemon binary with capture mocked, since CI has no Screen Recording grant. `client/mac/DESIGN.md` explains why that is safe.
 
@@ -209,7 +209,7 @@ Notes:
 - `-SkipTests` stops `build-msix.ps1` running the .NET tests again after `dotnet test` has.
 - Pushes to `staging` and `main` add `--release` to the cargo commands, test with `-c Release`, and package with `-Profile Release -Version <build_label>`. Debug packaging is the PR-time smoke test.
 
-### Windows client integration test (`.github/workflows/client-windows.yml`, `client-windows-integration` job)
+### Windows client integration test (`.github/workflows/client-windows.yml`, integration test step)
 
 Same smoke test, driving the `virtue-windows` library through a small `virtue-windows-ci-runner` binary, since Windows has no separate daemon process. See `client/windows/DESIGN.md`.
 

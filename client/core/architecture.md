@@ -36,16 +36,16 @@ run_forever loop:
     (only after the persist succeeds)
   if no request was applied and the wakeup isn't due yet: continue  // CORE-020
   with_locked_state(|working|                                       // CORE-016
-  run_phases(working, now_ms):
-    lifecycle::tick, screenshot::plan                              // phase 1, 2a
-    screenshot::capture_and_process                                // phase 2b
-    screenshot::commit, capture_availability::tick,
-      heartbeat::tick, upload::plan_hash_retries                   // phase 2c, 3, 4a
-    upload::execute_hash_retries (network)                         // phase 5a
-    upload::commit_hash_retries, upload::plan_batch                // phase 5c, 4b
-    upload::execute_batch (network)                                // phase 5b
-    upload::commit_batch                                           // phase 5d
-  compute_next_wakeup, persist, state.lock() = working)             // phase 6, 7
+    run_phases(working, now_ms):
+      lifecycle::tick, screenshot::plan                             // phase 1, 2a
+      screenshot::capture_and_process                               // phase 2b
+      screenshot::commit, capture_availability::tick,
+        heartbeat::tick, upload::plan_hash_retries                  // phase 2c, 3, 4a
+      upload::execute_hash_retries (network)                        // phase 5a
+      upload::commit_hash_retries, upload::plan_batch               // phase 5c, 4b
+      upload::execute_batch (network)                               // phase 5b
+      upload::commit_batch                                          // phase 5d
+    compute_next_wakeup, persist, state.lock() = working)           // phase 6, 7
 ```
 
 Hash results are committed _before_ the batch is planned so an event hashed
