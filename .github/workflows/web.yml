@@ -39,6 +39,10 @@ jobs:
         run: bun run format:check
         working-directory: api
 
+      - name: Donate API Prettier check
+        run: bun run format:check
+        working-directory: api-donate
+
       - name: Web Prettier check
         run: bun run format:check
         working-directory: web
@@ -58,6 +62,14 @@ jobs:
       - name: API tests
         run: bun run test
         working-directory: api
+
+      - name: Donate API type check
+        run: bun run typecheck
+        working-directory: api-donate
+
+      - name: Donate API tests
+        run: bun run test
+        working-directory: api-donate
 
       - name: Web type check
         run: bun run typecheck
