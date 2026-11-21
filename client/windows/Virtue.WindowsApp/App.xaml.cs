@@ -28,17 +28,39 @@ public partial class App : Application
     private DateTimeOffset? _updateStagedAtUtc;
     private int _updateRestartStarted;
     private static readonly TimeSpan CountdownTickInterval = TimeSpan.FromMinutes(1);
-    private static readonly string StartupLogPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "Virtue",
-        "ui-startup.log");
+    private CancellationTokenSource? _watchdogRenewalCancellation;
+    private static string StartupLogPath => Path.Combine(AppDataDirectory.Current, "ui-startup.log");
 
     public App()
     {
         AppDomain.CurrentDomain.UnhandledException += CurrentDomainOnUnhandledException;
         UnhandledException += OnXamlUnhandledException;
         InitializeComponent();
+        // Before anything touches app files, including the native layer (CLIENT-002).
+        foreach (var line in AppDataDirectory.Initialize(TryGetPackageLocalStatePath()))
+        {
+            LogStartup(line);
+        }
+
         LogStartup("App constructed.");
+    }
+
+    /// <summary>
+    /// The package's own local data folder, which Windows deletes at uninstall, or <c>null</c>
+    /// for an unpackaged run, which has no package identity and so no such folder.
+    /// </summary>
+    private static string? TryGetPackageLocalStatePath()
+    {
+        try
+        {
+            return Windows.Storage.ApplicationData.Current.LocalFolder.Path;
+        }
+        catch
+        {
+            // Without package identity this throws, as an InvalidOperationException or a
+            // COMException depending on the projection.
+            return null;
+        }
     }
 
     protected override async void OnLaunched(WinUiLaunchActivatedEventArgs args)
@@ -76,6 +98,7 @@ public partial class App : Application
             StartRefreshLoop();
 
             RegisterWatchdog();
+            StartWatchdogRenewal();
 
             // The tray host's hidden window is the process's only HWND in resident mode, and
             // StoreContext needs one before any Store call that can show UI — see
@@ -247,12 +270,20 @@ public partial class App : Application
             string.Equals(argument, WatchdogRelaunchArg, StringComparison.Ordinal));
 
     /// <summary>
-    /// Registers the watchdog. A packaged install gets a script that finds the app through the
-    /// package on every run (CLIENT-014), so the task survives a package update — see
-    /// <see cref="AppLaunchPath"/> for why the version-stamped process path silently breaks
-    /// auto-relaunch after every update. The resolved path is used only for an unpackaged run.
+    /// Registers the watchdog at launch (CLIENT-028), launching through the execution alias
+    /// when it exists — see <see cref="AppLaunchPath"/> for why the version-stamped process path
+    /// silently breaks auto-relaunch after every update.
     /// </summary>
     private static void RegisterWatchdog()
+    {
+        RenewWatchdog();
+
+        // We are running, so any one-shot relaunch still armed from an earlier update has
+        // either already done its job or been made redundant by whatever started us.
+        UpdateRelaunchTask.Cancel();
+    }
+
+    private static void RenewWatchdog()
     {
         var launchPath = AppLaunchPath.Resolve(
             AppLaunchPath.ExecutionAliasPath,
@@ -264,12 +295,30 @@ public partial class App : Application
             return;
         }
 
-        LogStartup($"Registering restart watchdog with launch path: {launchPath}");
         LogStartup(RestartWatchdog.Register(launchPath, WatchdogRelaunchArg));
+    }
 
-        // We are running, so any one-shot relaunch still armed from an earlier update has
-        // either already done its job or been made redundant by whatever started us.
-        UpdateRelaunchTask.Cancel();
+    /// <summary>
+    /// The watchdog task expires a day after it is registered, so that it removes itself after
+    /// an uninstall (CLIENT-014). While the app runs it keeps pushing that day forward.
+    /// </summary>
+    private void StartWatchdogRenewal()
+    {
+        if (_watchdogRenewalCancellation is not null)
+        {
+            return;
+        }
+
+        _watchdogRenewalCancellation = new CancellationTokenSource();
+        var token = _watchdogRenewalCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(RestartWatchdog.RenewInterval);
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                RenewWatchdog();
+            }
+        }, token);
     }
 
     /// <summary>
@@ -433,8 +482,9 @@ public partial class App : Application
 
         try
         {
-            // Keeps only the uninstall cleanup (CLIENT-014), so Exit is not relaunched.
-            RestartWatchdog.StopRelaunching(WatchdogRelaunchArg);
+            // Stop renewing first, so a renewal can't put back the task Exit is removing.
+            _watchdogRenewalCancellation?.Cancel();
+            RestartWatchdog.Unregister();
             // A deliberate exit must not be resurrected by a relaunch armed for an update that
             // is no longer going to happen.
             UpdateRelaunchTask.Cancel();

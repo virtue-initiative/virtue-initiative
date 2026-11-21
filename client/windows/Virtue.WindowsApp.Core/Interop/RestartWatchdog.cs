@@ -7,15 +7,20 @@ namespace Virtue.WindowsApp.Core.Interop;
 /// Per-user Scheduled Task that periodically relaunches the resident app if it isn't
 /// running, covering accidental crashes/hangs. Windows' Application Recovery and
 /// Restart API (RegisterApplicationRestart) does not automatically relaunch
-/// MSIX-packaged apps, so this repo uses a Scheduled Task instead.
+/// MSIX-packaged apps, so this repo uses a Scheduled Task instead (CLIENT-028).
 ///
-/// For a packaged install the task is a PowerShell script (CLIENT-014) that, once a minute,
-/// relaunches the app from the package's current install location while it is installed and
-/// cleans up after an uninstall. The app's existing single-instance redirect (see
+/// The task runs the app's own executable directly. The app's single-instance redirect (see
 /// `App.EnsureSingleInstanceAsync`) makes each relaunch a no-op when the app is already
-/// running, so no separate "is it running" check is needed. After a deliberate Exit the
-/// same task is re-registered cleanup-only (<see cref="StopRelaunching"/>). A task aimed at
-/// any other path (an unpackaged or dev run) just launches that exe every minute.
+/// running, so no separate "is it running" check is needed. An earlier version ran a hidden
+/// PowerShell script here that also deleted the device state after an uninstall, and
+/// behavior-based antivirus (Bitdefender) quarantined it as malware. The state now lives inside
+/// the package, which Windows deletes itself (CLIENT-002, CLIENT-014).
+///
+/// The task is the one thing the package does not own, so it expires: its trigger ends
+/// <see cref="Lifetime"/> after registration, and Task Scheduler deletes it once expired. The
+/// app registers it again at every launch and every <see cref="RenewInterval"/> while running,
+/// so it never expires while Virtue is installed and in use, and it disappears on its own within
+/// about a day of an uninstall.
 ///
 /// 1 minute is Task Scheduler's floor for a repeating trigger — the schema pins
 /// `Repetition/Interval` at `minInclusive="PT1M"`, so schtasks.exe rejects a
@@ -27,12 +32,17 @@ namespace Virtue.WindowsApp.Core.Interop;
 public static class RestartWatchdog
 {
     private const string TaskName = "VirtueResidentWatchdog";
-    private const string PackageName = "VirtueInitiative.VirtueAccountability";
-    /// <summary>Must match the <c>Application</c> executable in <c>Package.appxmanifest</c>.</summary>
-    private const string ExeName = "Virtue.WindowsApp.exe";
+
+    /// <summary>How long after registration the task's trigger ends (CLIENT-028).</summary>
+    public static readonly TimeSpan Lifetime = TimeSpan.FromDays(1);
+
+    /// <summary>How often the running app registers the task again (CLIENT-028).</summary>
+    public static readonly TimeSpan RenewInterval = TimeSpan.FromHours(6);
 
     /// <summary>
-    /// Creates (or refreshes) the per-user watchdog task. Safe to call repeatedly.
+    /// Creates or replaces the per-user watchdog task, with a fresh expiry. Safe to call
+    /// repeatedly. Replacing it also turns a task left by an older version (the PowerShell
+    /// form) into this one.
     /// </summary>
     /// <param name="exePath">Full path to the resident app's executable.</param>
     /// <param name="quietArg">
@@ -42,119 +52,38 @@ public static class RestartWatchdog
     /// <returns>A human-readable outcome for the startup log.</returns>
     public static string Register(string exePath, string quietArg)
     {
-        // CLIENT-014: a packaged install also needs cleanup after an uninstall (MSIX runs no app
-        // code then), so it gets the script form, which finds the app through the package itself.
-        // A task aimed at anything else (an unpackaged or dev run) keeps the plain per-minute launch.
-        if (string.Equals(exePath, AppLaunchPath.ExecutionAliasPath, StringComparison.OrdinalIgnoreCase) || IsPackaged())
-        {
-            return RegisterWithCleanup(quietArg, relaunch: true);
-        }
-
-        var result = Schtasks.Run(
-            "/Create", "/F",
-            "/SC", "MINUTE", "/MO", "1",
-            "/TN", TaskName,
-            "/TR", $"\"{exePath}\" {quietArg}",
-            "/RL", "LIMITED");
+        var registeredAt = DateTime.Now;
+        var result = Schtasks.CreateFromXml(TaskName, BuildTaskXml(exePath, quietArg, registeredAt));
         return result.Succeeded
-            ? $"Restart watchdog registered ({exePath})."
+            ? $"Restart watchdog registered until {registeredAt + Lifetime:yyyy-MM-dd HH:mm} ({exePath})."
             : $"Restart watchdog registration failed ({result}).";
     }
 
     /// <summary>
-    /// Called on a deliberate Exit. A packaged install keeps the task but only for the
-    /// CLIENT-014 uninstall cleanup, so the app is not relaunched yet an uninstall still
-    /// removes the device state. Any other task is deleted, as it has nothing to clean up.
+    /// Deletes the watchdog task (a deliberate Exit, CLIENT-011).
     /// </summary>
-    public static void StopRelaunching(string quietArg)
-    {
-        if (IsPackaged())
-        {
-            RegisterWithCleanup(quietArg, relaunch: false);
-        }
-        else
-        {
-            Unregister();
-        }
-    }
-
-    // A packaged run lives under ...\WindowsApps\. Checked as well as the alias, which the user
-    // can switch off while the app stays installed.
-    private static bool IsPackaged() =>
-        Environment.ProcessPath?.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase) == true;
-
-    private static string RegisterWithCleanup(string quietArg, bool relaunch)
-    {
-        // schtasks reads an XML definition only from a file, so it goes to the temp path and is
-        // deleted right after.
-        var xmlPath = Path.Combine(Path.GetTempPath(), $"virtue-watchdog-{Guid.NewGuid():N}.xml");
-        try
-        {
-            // UTF-16 with a BOM, matching the encoding the document declares.
-            File.WriteAllText(xmlPath, BuildTaskXml(quietArg, DateTime.Now, relaunch), System.Text.Encoding.Unicode);
-            var result = Schtasks.Run("/Create", "/F", "/TN", TaskName, "/XML", xmlPath);
-            return result.Succeeded
-                ? "Restart watchdog registered with uninstall cleanup."
-                : $"Restart watchdog registration failed ({result}).";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return $"Restart watchdog registration failed ({ex.Message}).";
-        }
-        finally
-        {
-            try
-            {
-                File.Delete(xmlPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // A leftover temp file is harmless.
-            }
-        }
-    }
+    public static void Unregister() => Schtasks.Run("/Delete", "/F", "/TN", TaskName);
 
     /// <summary>
-    /// The PowerShell the task runs each minute (CLIENT-014). While the package is installed it
-    /// starts the app's exe from the package's install location (a no-op when already running).
-    /// That location is looked up on every run, so it follows updates, and unlike the execution
-    /// alias the user cannot switch it off. When the package is gone, after a short re-check that
-    /// rules out the moment an update swaps the package, it deletes the device state under
-    /// ProgramData and unregisters the task. With <paramref name="relaunch"/> false it never
-    /// starts the app.
+    /// Task Scheduler 1.2 XML for the watchdog: every minute from <paramref name="registeredAt"/>
+    /// until <see cref="Lifetime"/> later, then deleted. Like <see cref="UpdateRelaunchTask"/>,
+    /// the boundaries are local times with no offset and the principal has no <c>UserId</c>.
+    ///
+    /// <c>ExecutionTimeLimit</c> is <c>PT0S</c> (none) because the process the task starts is the
+    /// resident app itself, and Task Scheduler stops a task's process at its limit: with the
+    /// <c>PT5M</c> an earlier draft had, the VM showed the app killed five minutes after every
+    /// watchdog relaunch.
     /// </summary>
-    public static string BuildScript(string quietArg, bool relaunch = true)
+    public static string BuildTaskXml(string exePath, string arguments, DateTime registeredAt)
     {
-        var arg = quietArg.Replace("'", "''");
-        // A failed query counts as installed, so only a clean empty answer can delete anything.
-        var query = $"Get-AppxPackage -Name '{PackageName}' -ErrorAction Stop";
-        var installed = $"$(try {{ [bool]({query}) }} catch {{ $true }})";
-        var start = relaunch
-            ? $"if ($p) {{ Start-Process -FilePath (Join-Path $p.InstallLocation '{ExeName}') -ArgumentList '{arg}' }} "
-            : "";
-        return $"$ok = $true; try {{ $p = @({query})[0] }} catch {{ $ok = $false }}; "
-            + $"if (-not $ok -or $p) {{ {start}}} "
-            + "else { Start-Sleep -Seconds 20; "
-            + $"if (-not {installed}) {{ "
-            + "Remove-Item -LiteralPath (Join-Path $env:ProgramData 'Virtue') -Recurse -Force -ErrorAction SilentlyContinue; "
-            + $"Unregister-ScheduledTask -TaskName '{TaskName}' -Confirm:$false -ErrorAction SilentlyContinue }} }}";
-    }
-
-    /// <summary>
-    /// Task Scheduler 1.2 XML for the watchdog. <c>conhost.exe --headless</c> hosts PowerShell
-    /// so no console window flashes every minute.
-    /// </summary>
-    public static string BuildTaskXml(string quietArg, DateTime startAt, bool relaunch = true)
-    {
-        var start = startAt.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
-        var arguments = "--headless powershell.exe -NoProfile -NonInteractive -Command "
-            + "\"" + BuildScript(quietArg, relaunch) + "\"";
+        var start = FormatBoundary(registeredAt);
+        var end = FormatBoundary(registeredAt + Lifetime);
 
         return $"""
             <?xml version="1.0" encoding="UTF-16"?>
             <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
               <RegistrationInfo>
-                <Description>Relaunches Virtue if it is not running. Removes itself and its device state once Virtue is uninstalled.</Description>
+                <Description>Relaunches Virtue if it is not running. Virtue renews this task while it runs; it expires and is deleted a day after Virtue stops renewing it.</Description>
               </RegistrationInfo>
               <Triggers>
                 <TimeTrigger>
@@ -162,6 +91,7 @@ public static class RestartWatchdog
                     <Interval>PT1M</Interval>
                   </Repetition>
                   <StartBoundary>{start}</StartBoundary>
+                  <EndBoundary>{end}</EndBoundary>
                   <Enabled>true</Enabled>
                 </TimeTrigger>
               </Triggers>
@@ -180,21 +110,22 @@ public static class RestartWatchdog
                 <AllowStartOnDemand>true</AllowStartOnDemand>
                 <Enabled>true</Enabled>
                 <Hidden>true</Hidden>
-                <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+                <DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>
                 <Priority>7</Priority>
               </Settings>
               <Actions Context="Author">
                 <Exec>
-                  <Command>conhost.exe</Command>
-                  <Arguments>{SecurityElement.Escape(arguments)}</Arguments>
+                  <Command>{Escape(exePath)}</Command>
+                  <Arguments>{Escape(arguments)}</Arguments>
                 </Exec>
               </Actions>
             </Task>
             """;
     }
 
-    /// <summary>
-    /// Deletes the watchdog task (a non-packaged run's deliberate exit; see <see cref="StopRelaunching"/>).
-    /// </summary>
-    public static void Unregister() => Schtasks.Run("/Delete", "/F", "/TN", TaskName);
+    private static string FormatBoundary(DateTime value) =>
+        value.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string Escape(string value) => SecurityElement.Escape(value) ?? string.Empty;
 }

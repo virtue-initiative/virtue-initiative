@@ -27,6 +27,37 @@ internal static class Schtasks
             Started ? $"exit {ExitCode}: {Output.Trim()}" : $"could not run schtasks.exe: {Output}";
     }
 
+    /// <summary>
+    /// Creates or replaces <paramref name="taskName"/> from a Task Scheduler 1.2 definition.
+    /// <c>schtasks /XML</c> reads only from a file, so the definition goes to the temp folder
+    /// and is deleted right after. It is written as UTF-16 with a BOM, matching the encoding the
+    /// document declares, since schtasks rejects the file otherwise.
+    /// </summary>
+    internal static Result CreateFromXml(string taskName, string xml)
+    {
+        var xmlPath = Path.Combine(Path.GetTempPath(), $"virtue-task-{Guid.NewGuid():N}.xml");
+        try
+        {
+            File.WriteAllText(xmlPath, xml, System.Text.Encoding.Unicode);
+            return Run("/Create", "/F", "/TN", taskName, "/XML", xmlPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return new Result(Started: false, ExitCode: -1, Output: ex.Message);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(xmlPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A leftover temp file is harmless.
+            }
+        }
+    }
+
     internal static Result Run(params string[] arguments)
     {
         try
