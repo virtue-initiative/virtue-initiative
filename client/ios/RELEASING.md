@@ -82,4 +82,4 @@ Security. That is a filing question, not a build question.
 
 A pull request into `main` must have a `# What to Test (iOS)` section in its description. CI
 fails without it, and the distribute step uses that text as the build's "What to Test" in
-TestFlight. See "TestFlight What to Test" in `AGENTS.md`.
+TestFlight. See the TestFlight "What to Test" section of `docs/ci-checks.md`.

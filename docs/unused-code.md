@@ -18,7 +18,7 @@ First run will offer to create `knip.json`. For monorepo-style layout here, run 
 Caveats:
 
 - Dynamically-imported components may show as false positives — add them to `ignore` in `knip.json`.
-- Don't run `--fix` on crypto / wire-format code without manual review (see the cross-component contracts in `AGENTS.md`).
+- Don't run `--fix` on crypto / wire-format code without manual review (see `docs/contracts.md`).
 
 ## Plain CSS: [PurgeCSS](https://purgecss.com)
 

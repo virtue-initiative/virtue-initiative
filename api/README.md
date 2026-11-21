@@ -84,4 +84,5 @@ that rewrites `/api/*` to `/*` can replace this Worker-side prefix handling.
 
 ## API
 
-See the [API specification](./SPEC.md).
+See the [API specification](./SPEC.md), and [architecture.md](architecture.md) for how the Worker
+is put together.

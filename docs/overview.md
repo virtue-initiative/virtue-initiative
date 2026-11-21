@@ -116,7 +116,8 @@ flowchart LR
 
 Every account has a key pair. The private key is encrypted in the browser with a key derived
 from the password and stored on the server in that form only; the password itself is never
-sent, only a value derived from it (contract 4 in `AGENTS.md`). A device learns the public keys
+sent, only a value derived from it ([`accounts-and-keys.md`](accounts-and-keys.md) follows it
+through every step). A device learns the public keys
 it must encrypt for, its **wrapping keys**, from the API's device settings. So adding or
 removing a partner changes who can read batches uploaded from then on, not earlier ones. A
 forgotten password can't recover old logs, because nothing on the server can decrypt them.
@@ -151,5 +152,8 @@ names it as having no logs.
 
 - [`docs/README.md`](README.md): every doc and what it covers.
 - [`docs/development.md`](development.md): setting up a machine and running the stack.
+- [`docs/accounts-and-keys.md`](accounts-and-keys.md): signup, sign-in, partners and passwords,
+  and what each does to the keys.
+- [`docs/releasing.md`](releasing.md): how a change reaches the servers and people's devices.
 - [`client/README.md`](../client/README.md): the platform apps.
 - [`TESTING.md`](../TESTING.md): how specs and tests connect.

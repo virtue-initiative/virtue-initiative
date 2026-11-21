@@ -22,5 +22,5 @@ Multi-platform Rust monitoring client. All platforms share `core/`; each platfor
 
 ## Key invariants (don't change without cross-component review)
 
-See `../AGENTS.md` (repo root) for wire format constraints shared with the TypeScript web app.
+See `../docs/contracts.md` for the wire format constraints shared with the TypeScript web app.
 The most dangerous files are `core/src/crypto.rs` and `core/src/module/upload/batch.rs`.
