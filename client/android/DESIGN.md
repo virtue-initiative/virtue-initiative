@@ -22,10 +22,10 @@ Everything runs in the app's process:
   loop state, so a restart waits for a previous loop that is still flushing instead of failing
   (see `client/core/architecture.md`).
 
-Capture used to use MediaProjection and moved to the Accessibility service in #386.
-MediaProjection can't be granted silently, some devices ask again after a reboot or after the
+Capture runs in the Accessibility service (#386). MediaProjection was ruled out because it can't
+be granted silently, some devices ask again after a reboot or after the
 process is killed, and on Android 14+ each grant works only once. None of that fits unattended
-monitoring. `ProjectionPermissionStore.kt` is left over from that and is no longer used.
+monitoring. `ProjectionPermissionStore.kt` is a leftover MediaProjection helper that nothing uses.
 
 ## Self-update
 

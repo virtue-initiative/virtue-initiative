@@ -17,13 +17,13 @@ From `api/`:
 ```bash
 bun install
 bun run typecheck
-bun test
+bun run test
 bun run format:check
 ```
 
 Notes:
 
-- `bun test` runs `vitest run`.
+- `bun run test` runs `vitest run`. Plain `bun test` would start Bun's own test runner instead.
 - API tests are documented in `api/TESTING.md`.
 
 ### Donate API
@@ -33,13 +33,13 @@ From `api-donate/`:
 ```bash
 bun install
 bun run typecheck
-bun test
+bun run test
 bun run format:check
 ```
 
 Notes:
 
-- `bun test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
+- `bun run test` runs `vitest run` (Stripe calls are mocked via `cloudflare:test` `fetchMock`; webhook signatures are generated locally).
 - Standalone Worker with separate `staging`/`prod` environments (own D1 database and route each), same pattern as `api/`. Deploys via `bun run deploy:staging` or `bun run deploy:prod`.
 - Requires secrets `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` per environment (`wrangler secret put ... --env staging|prod`).
 
@@ -73,7 +73,7 @@ Notes:
 
 ### Shared web package
 
-`shared-web/` does not currently have its own typecheck or test step in CI. If you change it, at minimum run:
+`shared-web/` has no typecheck or test step of its own in CI, only the format check. If you change it, at minimum run:
 
 From `shared-web/`:
 
@@ -138,15 +138,15 @@ cargo clippy -p virtue-linux --all-targets -- -D warnings
 cargo test -p virtue-core
 cargo test -p virtue-core --features testing --tests
 cargo test -p virtue-linux
-./linux/scripts/build-deb.sh
+./linux/scripts/build-deb-docker.sh --debug
 ```
 
 Notes:
 
 - This is the most complete Rust CI workflow and is the baseline for Linux or shared-core changes.
-- `build-deb.sh` is the packaging step CI runs after tests.
+- `build-deb-docker.sh` is the packaging step CI runs after the tests and the integration test. It builds inside a container with an older glibc, so the `.deb` runs on older distributions. Pushes to `staging` and `main` build without `--debug` and with `VIRTUE_ENABLE_AUTO_UPDATE=1`. Locally, `client/linux/scripts/build-deb.sh` builds the same package against this machine's glibc, without Docker.
 
-### Linux client integration test (`.github/workflows/client-linux.yml`, `client-linux-integration` job)
+### Linux client integration test (`.github/workflows/client-linux.yml`, integration test step)
 
 End-to-end smoke test: starts the API against a fresh local D1 database, runs the real `virtue-linux` daemon under Xvfb, signs in as the seeded dev account and checks that hashes and batches land in the database. See `client/linux/README.md`.
 
@@ -163,21 +163,21 @@ Run these on macOS.
 From `client/`:
 
 ```bash
-cargo build -p virtue-core
-cargo build -p virtue-mac
-cargo clippy -p virtue-core --all-targets -- -D warnings
-cargo clippy -p virtue-mac --all-targets -- -D warnings
-cargo test -p virtue-core
-cargo test -p virtue-core --features testing --tests
+cargo build --target aarch64-apple-darwin -p virtue-mac -p virtue-mac-ffi
+cargo clippy --target aarch64-apple-darwin -p virtue-core --all-targets -- -D warnings
+cargo clippy --target aarch64-apple-darwin -p virtue-mac --all-targets -- -D warnings
+cargo test --target aarch64-apple-darwin -p virtue-core
+cargo test --target aarch64-apple-darwin -p virtue-core --features testing --tests
 (cd shared-swift && swift test)
-./mac/scripts/build-dmg.sh
+./mac/scripts/build-dmg.sh --profile debug --arch arm64
 ```
 
 Notes:
 
 - `build-dmg.sh` validates the app bundle and DMG packaging path.
+- Pushes to `staging` and `main` add `--release` to the cargo commands and run `build-dmg.sh` with no flags, which builds the release app for both architectures.
 
-### macOS client integration test (`.github/workflows/client-macos.yml`, `client-macos-integration` job)
+### macOS client integration test (`.github/workflows/client-macos.yml`, integration test step)
 
 Same smoke test, run against the real `virtue-mac` daemon binary with capture mocked, since CI has no Screen Recording grant. `client/mac/DESIGN.md` explains why that is safe.
 
@@ -194,22 +194,22 @@ Run these on Windows.
 From `client/`:
 
 ```powershell
-cargo build --target x86_64-pc-windows-msvc -p virtue-core
-cargo build --target x86_64-pc-windows-msvc -p virtue-windows
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-core --all-targets -- -D warnings
 cargo clippy --target x86_64-pc-windows-msvc -p virtue-windows --all-targets -- -D warnings
 cargo test --target x86_64-pc-windows-msvc -p virtue-core
 cargo test --target x86_64-pc-windows-msvc -p virtue-core --features testing --tests
 cargo test --target x86_64-pc-windows-msvc -p virtue-windows
-./windows/scripts/build-msix.ps1 -Profile Debug
+dotnet test ./windows/Virtue.WindowsApp.Tests/Virtue.WindowsApp.Tests.csproj -c Debug
+./windows/scripts/build-msix.ps1 -Profile Debug -SkipTests
 ```
 
 Notes:
 
 - From Linux, run the same checks in the Windows VM with `./client/windows/scripts/remote-windows-build.sh --build-host <vm> --mode smoke` (see `client/windows/README.md`).
-- Release builds use `-Profile Release -Version <build_label>`, but debug packaging is the PR-time smoke test.
+- `-SkipTests` stops `build-msix.ps1` running the .NET tests again after `dotnet test` has.
+- Pushes to `staging` and `main` add `--release` to the cargo commands, test with `-c Release`, and package with `-Profile Release -Version <build_label>`. Debug packaging is the PR-time smoke test.
 
-### Windows client integration test (`.github/workflows/client-windows.yml`, `client-windows-integration` job)
+### Windows client integration test (`.github/workflows/client-windows.yml`, integration test step)
 
 Same smoke test, driving the `virtue-windows` library through a small `virtue-windows-ci-runner` binary, since Windows has no separate daemon process. See `client/windows/DESIGN.md`.
 
@@ -226,16 +226,16 @@ Run these on a machine with JDK 17, the Android SDK, NDK `26.1.10909125`, and th
 From `client/android/`:
 
 ```bash
-./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+./gradlew --no-daemon -PrustProfile=debug :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
 Notes:
 
 - CI also installs `cargo-ndk`.
-- Release packaging in CI additionally runs:
+- Pushes to `staging` and `main` run this instead, to build the signed release APK:
 
 ```bash
-./gradlew --no-daemon :app:assembleRelease
+./gradlew --no-daemon -PrustProfile=release :app:lintRelease :app:assembleRelease
 ```
 
 ### iOS client CI (`.github/workflows/client-ios.yml`)
@@ -245,29 +245,19 @@ Run these on macOS with Xcode.
 From `client/`:
 
 ```bash
-cargo build -p virtue-core
-```
-
-From `client/ios/rust/`:
-
-```bash
-cargo build --manifest-path Cargo.toml
+cargo clippy -p virtue-ios --all-targets -- -D warnings
 ```
 
 From `client/ios/`:
 
 ```bash
-./scripts/build-ios.sh --destination "generic/platform=iOS Simulator" --derived-data .derived-data-ci-ios
+./scripts/build-ios.sh --destination "generic/platform=iOS" --derived-data .derived-data-ci-ios --code-signing-allowed NO
 ```
 
 Notes:
 
-- CI's PR-time smoke test is the simulator build above.
-- Release CI also builds an unsigned device app bundle:
-
-```bash
-./scripts/build-ios.sh --destination "generic/platform=iOS" --configuration Release --derived-data .derived-data-ci-ios-release --code-signing-allowed NO
-```
+- CI's PR-time smoke test is the unsigned device build above.
+- Pushes to `staging` and `main` add `--configuration Release`, then package the app and upload it to TestFlight with `client/ios/scripts/build-and-upload-testflight.sh`.
 
 ### Swift style (`.github/workflows/swift-format.yml`)
 
