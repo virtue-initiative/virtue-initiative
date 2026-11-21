@@ -2,7 +2,9 @@
 
 A short end-to-end checklist to work through by hand on the dev builds before a release (step 3
 of "A release, step by step" in [`releasing.md`](releasing.md)). Automated tests are covered in
-[`../TESTING.md`](../TESTING.md).
+[`../TESTING.md`](../TESTING.md). The log entries these steps expect come from the tamper checks
+in [`../client/core/tampering.md`](../client/core/tampering.md): a late wakeup only counts once
+it is more than 2 minutes late, so a kill that is restarted within a minute or so logs nothing.
 
 ## Signup flow
 
@@ -18,14 +20,12 @@ of "A release, step by step" in [`releasing.md`](releasing.md)). Automated tests
 1. Invite a non-existent account from web.
 2. Ensure an email is sent and can be used to sign up with an account
 3. Ensure the account is automatically added as a partner
-4. Confirm that there is clear indication of why the partner cannot see logs yet
-5. Click confirm partner on the original account
-6. Confirm the partner can see the logs
-7. Remove the partnership and confirm they can no longer see the logs
+4. Confirm the partner can see logs uploaded after they accepted, and none from before
+5. Remove the partnership and confirm they can no longer see the logs
 
-8. Invite an existing user
-9. Accept the invite from the other account.
-10. Ensure the other user can accept it
+6. Invite an existing user
+7. Accept the invite from the other account.
+8. Ensure the other user can see the logs
 
 ## Session and recovery
 
@@ -49,13 +49,13 @@ Install the `.dmg`, drag to Applications, and launch.
 
 1. Confirm the tray icon appears in the menu bar.
 2. Log in from the tray menu and confirm screenshots appear in the web app within ~10 minutes.
-3. Sleep and wake the machine; confirm zero-risk suspend and wake logs and that capture resumes automatically.
-4. Reboot the machine; confirm zero-risk shutdown and startup logs and that monitoring resumes without re-login.
-5. Use tray → Stop Monitoring; confirm the confirmation prompt and a high-risk user-stop log with a marker so the next start is zero-risk.
-6. Use tray → Logout; confirm the confirmation prompt and a high-risk logout log.
-7. `kill <daemon-pid>` outside a system shutdown; confirm a 0.5-risk stop log followed by a startup classification based on the stop marker (zero-risk if within 10 seconds, otherwise high-risk).
-8. `kill -9 <daemon-pid>`; confirm no stop log is emitted and the next startup emits a high-risk log if the gap exceeds the 70-second ping window.
-9. Revoke Screen Recording in System Settings; confirm capture stops and a high-risk log is emitted for the permission loss; restoring permission resumes capture.
+3. Sleep and wake the machine; confirm capture resumes automatically and no Screenshot Missed entry appears.
+4. Reboot the machine; confirm zero-risk login and logout entries, no Screenshot Missed entry, and that monitoring resumes without re-login.
+5. Use Stop Monitoring and Quit from the menu bar; confirm the confirmation prompt, a Monitoring Stopped by User entry and email, and a Monitoring Resumed by User entry with no Screenshot Missed entry when you open Virtue again more than 2 minutes later.
+6. Sign out from the window menu; confirm the confirmation prompt, that the device shows Deactivated, and that partners are emailed.
+7. Unload the LaunchAgent so the daemon stays down for more than 2 minutes, then load it again; confirm a Screenshot Missed entry.
+8. Kill the daemon 20 times within 10 minutes; confirm a Repeated Restarts entry, emailed to partners straight away.
+9. Revoke Screen Recording in System Settings; confirm capture stops and a Capture Failed entry appears after five failed screenshots; restoring permission resumes capture.
 
 ## Windows
 
@@ -63,14 +63,14 @@ Install the MSIX and launch from Start.
 
 1. Confirm the tray icon appears and no window opens automatically.
 2. Sign in from the window and confirm screenshots appear in the web app within ~10 minutes.
-3. Sleep and wake the machine; confirm zero-risk suspend and wake logs and that capture resumes automatically.
-4. Reboot the machine; confirm zero-risk shutdown and startup logs and that monitoring restarts via the startup task without re-login.
-5. Sign out of the Windows user session; confirm a zero-risk session-logout log.
-6. Use tray → Exit; confirm the confirmation prompt and a high-risk user-stop log with a marker so the next start is zero-risk.
-7. Select **Stop Monitoring** in the window; confirm the same prompt and log as tray → Exit.
-8. Open the window menu (**☰**) and choose **Sign Out**; confirm the confirmation prompt and a high-risk logout log.
-9. Force-kill `Virtue.WindowsApp.exe` from Task Manager (End Task); confirm a 0.5-risk stop log if cleanup runs, or a high-risk log on next start determined by ping timestamps.
-10. Disable the `VirtueTrayStartup` task and reboot; confirm a high-risk log on the next time the app runs.
+3. Sleep and wake the machine; confirm capture resumes automatically and no Screenshot Missed entry appears.
+4. Reboot the machine; confirm zero-risk login and logout entries, no Screenshot Missed entry, and that monitoring restarts via the startup task without re-login.
+5. Sign out of the Windows user session and back in; confirm a zero-risk logout entry and no Screenshot Missed entry.
+6. Use tray → Exit; confirm the confirmation prompt, a Monitoring Stopped by User entry and email, and a Monitoring Resumed by User entry with no Screenshot Missed entry when you start Virtue again.
+7. Select **Stop Monitoring** in the window; confirm the same prompt and entries as tray → Exit.
+8. Open the window menu (**☰**) and choose **Sign Out**; confirm the confirmation prompt, that the device shows Deactivated, and that partners are emailed.
+9. Force-kill `Virtue.WindowsApp.exe` from Task Manager (End Task); confirm the watchdog relaunches it within a minute and no entry is logged.
+10. Disable the `VirtueTrayStartup` task and reboot, then start Virtue by hand more than 2 minutes after signing in; confirm a Screenshot Missed entry.
 
 ## Linux
 
@@ -78,26 +78,27 @@ Install the `.deb` and verify.
 
 1. Run `virtue login` and confirm `virtue status` shows "Monitoring active".
 2. Confirm screenshots appear in the web app within ~10 minutes.
-3. Suspend and resume the machine; confirm zero-risk suspend and wake logs and that capture resumes automatically.
-4. Reboot the machine; confirm zero-risk shutdown and startup logs and that the systemd user service starts automatically without re-login.
-5. Run `virtue daemon stop`; confirm the confirmation prompt and a high-risk user-stop log with a marker so the next `virtue daemon start` is zero-risk.
-6. Run `virtue logout`; confirm the confirmation prompt and a high-risk logout log.
-7. Run `systemctl --user stop virtue.service` (outside `virtue daemon stop`); confirm a 0.5-risk stop log and a startup classification based on the stop marker on next start.
-8. `kill <daemon-pid>` (SIGTERM) outside a system shutdown; confirm a 0.5-risk stop log.
-9. `kill -9 <daemon-pid>` (SIGKILL); confirm no stop log is emitted and the next startup emits a high-risk log if the gap exceeds the 70-second ping window.
+3. Suspend and resume the machine; confirm capture resumes automatically and no Screenshot Missed entry appears.
+4. Reboot the machine; confirm zero-risk login and logout entries, no Screenshot Missed entry, and that the systemd user service starts automatically without re-login.
+5. Run `virtue daemon stop`; confirm the confirmation prompt and a Monitoring Stopped by User entry and email. Wait more than 2 minutes, run `virtue daemon start`, and confirm a Monitoring Resumed by User entry with no Screenshot Missed entry.
+6. Run `virtue logout`; confirm the confirmation prompt, that the device shows Deactivated, and that partners are emailed.
+7. Run `systemctl --user stop virtue.service` (outside `virtue daemon stop`), wait more than 2 minutes and start it again; confirm a Screenshot Missed entry.
+8. `kill -9 <daemon-pid>` once; confirm systemd restarts it within 5 seconds and no entry is logged.
+9. Kill the daemon 20 times within 10 minutes; confirm a Repeated Restarts entry, emailed to partners straight away.
 10. On Wayland without a supported capture tool, confirm the client logs a capture failure but does not crash and continues retrying uploads.
 
 ## Android
 
 Install the APK and launch.
 
-1. Log in and grant the screen capture (MediaProjection) permission; confirm a persistent foreground notification appears.
+1. Turn on the Virtue Screen Monitor Accessibility service from the setup guide, then log in; confirm a persistent notification appears.
 2. Confirm screenshots appear in the web app within ~10 minutes.
 3. Swipe the app away from Recents; confirm monitoring continues via the foreground service.
 4. Reboot the device; confirm monitoring restarts automatically and new activity appears in the web app.
-5. Force-stop the app from Android Settings → Apps; confirm a high-risk tamper log is emitted and monitoring resumes on next launch.
-6. Revoke screen-capture permission mid-session; confirm a high-risk log is emitted for the permission loss, the app does not crash, and capture resumes when permission is re-granted.
-7. Sign out; confirm a high-risk logout log, the service stops, and the login screen is shown.
+5. Force-stop the app from Android Settings → Apps and leave it more than 2 minutes; confirm a Screenshot Missed entry once monitoring resumes.
+6. Pause monitoring; confirm the confirmation prompt, a Monitoring Stopped by User entry and email, and a Monitoring Resumed by User entry after resuming.
+7. Turn off the Accessibility service mid-session; confirm the app does not crash, capture stops, and capture resumes when it is turned back on.
+8. Sign out; confirm the device shows Deactivated, partners are emailed, and the login screen is shown.
 
 ## iOS
 
@@ -105,9 +106,10 @@ Build and run on a device or simulator.
 
 1. Log in and enable the Safari extension in iOS Settings with All Websites access.
 2. Browse in Safari and confirm screenshots appear in the web app within ~5 minutes.
-3. Disable the Safari extension; confirm a high-risk tamper log is emitted, new captures stop, and any queued data still uploads.
+3. Disable the Safari extension; confirm Check Extension reports it off, new captures stop, any queued data still uploads, and no Screenshot Missed entry appears (iOS has no tamper detection).
 4. Force-quit Safari or the extension and reopen; confirm capture resumes when Safari is active again.
-5. Sign out; confirm a high-risk logout log and the login screen is shown.
+5. Pause monitoring; confirm the confirmation prompt and a Monitoring Stopped by User entry and email.
+6. Sign out; confirm the device shows Deactivated, partners are emailed, and the login screen is shown.
 
 ## Specific tests
 

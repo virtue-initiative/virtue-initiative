@@ -24,7 +24,7 @@ const EXCLUDED_FROM_SITEMAP = new Set([
   '/newsletter/error',
 ]);
 
-const DOCS = 'https://github.com/virtue-initiative/virtue-initiative/blob/main';
+const DOCS = 'https://github.com/virtue-initiative/virtue-initiative/blob/staging';
 
 export default defineConfig({
   site: 'https://virtueinitiative.org',
