@@ -9,6 +9,7 @@ import {
   createBatch,
   createDevice,
   createSessionRecord,
+  deleteBatch,
   deleteDeviceSessionsByDeviceId,
   findDeviceById,
   findUserById,
@@ -20,7 +21,7 @@ import { encodeAccessKeys } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
-import { hashGet, hashReset } from '../lib/hash-server';
+import { hashGet, hashReset, hashResetAt } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
@@ -61,13 +62,25 @@ const eventCountsSchema = z.object({
   screenshot: z.number().int().nonnegative(),
 });
 
-const batchMetadataSchema = z.object({
-  start_time: z.number().int().nonnegative(),
-  end_time: z.number().int().nonnegative(),
-  access_keys: z.record(z.uuid(), z.base64()),
-  event_counts: eventCountsSchema,
-  notifications: z.array(notifyEntrySchema).optional().default([]),
-});
+// HASH-006: seq is a u32 on the hash server, and 0 is never accepted.
+const hashSeqSchema = z.number().int().positive().max(0xffff_ffff);
+
+const batchMetadataSchema = z
+  .object({
+    start_time: z.number().int().nonnegative(),
+    end_time: z.number().int().nonnegative(),
+    start_seq: hashSeqSchema.optional(),
+    end_seq: hashSeqSchema.optional(),
+    access_keys: z.record(z.uuid(), z.base64()),
+    event_counts: eventCountsSchema,
+    notifications: z.array(notifyEntrySchema).optional().default([]),
+  })
+  .refine((m) => (m.start_seq === undefined) === (m.end_seq === undefined), {
+    message: 'start_seq and end_seq must be sent together',
+  })
+  .refine((m) => m.start_seq === undefined || m.start_seq <= m.end_seq!, {
+    message: 'start_seq must not be greater than end_seq',
+  });
 
 const uploadBatchSchema = z.object({
   metadata: jsonField(batchMetadataSchema, 'metadata'),
@@ -282,6 +295,11 @@ async function notifyAboutDeviceLogout(
   }
 }
 
+const hashChainMoved = {
+  error: 'The device hashed more events after this batch was built',
+  code: 'hash_chain_moved',
+} as const;
+
 /**
  * POST /d/batch - Upload an encrypted batch blob for the authenticated device.
  *
@@ -302,7 +320,8 @@ deviceOnly.post(
     }
 
     const { metadata, file } = c.req.valid('form');
-    const { start_time, end_time, access_keys, event_counts, notifications } = metadata;
+    const { start_time, end_time, start_seq, end_seq, access_keys, event_counts, notifications } =
+      metadata;
 
     const createdAt = Date.now();
     // API-038: the times come from the device clock, and a batch is uploaded after the
@@ -329,6 +348,27 @@ deviceOnly.post(
       console.error(`[batch] hash server returned a malformed hash for device ${device.id}`);
       return c.json({ error: 'Hash server returned an invalid hash' }, 502);
     }
+    // API-038: with the batch's seqs, check it against the chain the hash server holds.
+    const checkSeqs = start_seq !== undefined && end_seq !== undefined;
+    if (checkSeqs) {
+      const firstSeq = hashState.first_seq ?? 0;
+      if (hashState.seq === 0 || (firstSeq !== 0 && firstSeq > start_seq)) {
+        // An earlier attempt stored this batch's first events and reset the chain,
+        // and the device never got that response.
+        return c.json(
+          {
+            error: 'This batch begins with events that were already stored',
+            code: 'batch_already_stored',
+            first_seq: firstSeq,
+            seq: hashState.seq,
+          },
+          409,
+        );
+      }
+      if (hashState.seq > end_seq) {
+        return c.json(hashChainMoved, 409);
+      }
+    }
     const batchId = uuidv4();
     const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
     const { key, url } = batchObject(c.env, stored);
@@ -350,7 +390,15 @@ deviceOnly.post(
       await deleteObject(c.env, key);
       return c.json({ error: 'Not found' }, 404);
     }
-    await hashReset(c.env, device.id);
+    if (!checkSeqs) {
+      await hashReset(c.env, device.id);
+    } else if (!(await hashResetAt(c.env, device.id, hashState.seq))) {
+      // API-038: the device hashed more while this was stored, so end_hash no longer
+      // ends the chain. Only a retry holding those events can be stored.
+      await deleteBatch(c.env.DB, { ...stored, created_at: createdAt });
+      await deleteObject(c.env, key);
+      return c.json(hashChainMoved, 409);
+    }
 
     for (const notification of notifications) {
       try {

@@ -113,6 +113,7 @@ mod tests {
                 .upload
                 .pending_batch_events
                 .push(crate::module::upload::PendingBatchEvent {
+                    seq: None,
                     ts: 0,
                     risk: 0.0,
                     encoded: vec![1],

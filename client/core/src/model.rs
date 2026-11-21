@@ -233,6 +233,12 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUpload {
+    /// The hash server `seq` of the batch's first and last event, when every
+    /// event has one (API-038). Set by `plan_batch`, not the builder.
+    #[serde(default)]
+    pub start_seq: Option<u32>,
+    #[serde(default)]
+    pub end_seq: Option<u32>,
     pub start_time_ms: i64,
     pub end_time_ms: i64,
     #[serde(with = "serde_bytes")]

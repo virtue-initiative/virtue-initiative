@@ -99,7 +99,7 @@ impl TestServer {
             .unwrap()
     }
 
-    /// The `{hash, seq, last_received}` entry that GET /hash reports for a device.
+    /// The `{hash, seq, first_seq, last_received}` entry that GET /hash reports for a device.
     pub async fn state(&self, device: &str) -> Value {
         let resp = self.get_devices(&format!("devices={device}")).await;
         assert_eq!(resp.status(), 200);
@@ -108,13 +108,21 @@ impl TestServer {
     }
 }
 
-pub async fn spawn_server() -> TestServer {
-    let (signing_key_pem, public_key_pem) = new_signing_key_pem();
-    let db_path = std::env::temp_dir().join(format!(
+pub fn temp_db_path() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
         "hash-server-edge-{}-{}.sqlite",
         std::process::id(),
         uuid::Uuid::new_v4()
-    ));
+    ))
+}
+
+pub async fn spawn_server() -> TestServer {
+    spawn_server_at(&temp_db_path()).await
+}
+
+/// A server on an existing database file, as after a restart or an upgrade.
+pub async fn spawn_server_at(db_path: &std::path::Path) -> TestServer {
+    let (signing_key_pem, public_key_pem) = new_signing_key_pem();
     let config = Config {
         bind_addr: "127.0.0.1:0".to_string(),
         database_path: db_path.to_string_lossy().to_string(),

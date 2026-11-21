@@ -439,6 +439,21 @@ expired token look fresh). `Daemon::new`
 also performs one such refresh at startup if already authenticated (CORE-005's
 "refreshed on process startup" requirement).
 
+Each `PendingBatchEvent` keeps the `seq` it was hashed under, and `plan_batch`
+sends the first and last as `start_seq`/`end_seq` (API-038) when every event
+has one. The API stores a batch only if those match the hash server's chain,
+which is how a lost `POST /d/batch` response is handled without holding
+hashing. Say an attempt is stored, the chain reset, and the response lost.
+`commit_batch` records the attempt's `end_seq` in
+`UploadState.unconfirmed_through_seq`, and hashing carries on into the new
+chain. The retry holds the old events plus the new ones, so the API answers
+`batch_already_stored` with the chain's `first_seq`, and
+`drop_stored_events` drops the front events below it, never past
+`unconfirmed_through_seq`. If that would drop nothing, it clears every
+waiting event's `seq` so the next attempt goes up unchecked, rather than
+being refused forever. `hash_chain_moved` (the device hashed more while an
+earlier attempt was still in flight) is retried like any failure.
+
 ## Testing
 
 The `testing` feature (auto-enabled under `cfg(test)`) exposes:
