@@ -60,7 +60,8 @@ release PR is where everything shipping gets listed. A release goes like this:
 2. **Do what `staging` needs as each PR lands.** Merging to `staging` deploys there, so a new
    secret or migration has to be set on staging before the PR that needs it merges.
 3. **Test the dev builds** on every platform: sign in, check that monitoring starts, and work
-   through the manual tests on the issue.
+   through the manual tests on the issue and the checklist in
+   [`manual-testing.md`](manual-testing.md).
 4. **Open the release PR** from `staging` into `main`, titled "Release x.y.z" and listing the PRs
    it ships. Its description needs a `# What to Test (iOS)` section, because CI reads it and sends
    it to TestFlight testers (`testflight-notes-check.yml`).

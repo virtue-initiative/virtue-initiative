@@ -4,8 +4,8 @@ This page follows an account from signup to deletion and shows what happens to i
 step, across the web app, the API and the client apps. Every account has one X25519 key pair. The
 private key reaches the server encrypted with a key derived from the password, and devices are
 given public keys only. The exact rules are in the specs (each step names its sections), and the
-primitives (Argon2id parameters, HKDF labels, HPKE suite) are in the developer help page
-[`landing/src/content/help/developer/security.mdx`](../landing/src/content/help/developer/security.mdx).
+primitives (Argon2id parameters, HKDF labels, HPKE suite) are in the public security page
+[`landing/src/content/help/security/index.mdx`](../landing/src/content/help/security/index.mdx).
 This page shows how the steps connect and where each one lives in the code.
 
 ## The pieces

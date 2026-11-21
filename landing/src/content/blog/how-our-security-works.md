@@ -90,7 +90,7 @@ multiple partners without making multiple copies of the screenshots) and other
 smaller things that improve security.
 
 If you are interested in the raw details, you can take a look at our
-[cryptography and security](/help/developer/security) page which aims to
+[cryptography and security](/help/security) page which aims to
 completely explain every part of it, but be warned, it assumes a decent
 knowledge of cryptography.
 

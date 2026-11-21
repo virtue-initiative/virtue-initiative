@@ -1,4 +1,10 @@
-# What Virtue monitors on Windows
+---
+title: 'What Virtue monitors on Windows'
+description: 'Everything the Virtue app on Windows captures and sends.'
+navTitle: 'Windows'
+topic: monitoring
+order: 2
+---
 
 This page lists everything the Virtue app on Windows captures and sends.
 
@@ -12,7 +18,7 @@ This page lists everything the Virtue app on Windows captures and sends.
 
 - Before a screenshot leaves this PC, Virtue blacks out any text it finds, then shrinks and blurs the image.
 - Virtue rates each screenshot for explicit content on this PC. See [concern scores](/help/web/concern-scores).
-- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/developer/security).
+- Screenshots are encrypted so only you and your partners can see them. See [security and encryption](/help/security).
 
 ## Other reports
 

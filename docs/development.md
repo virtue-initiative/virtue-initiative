@@ -64,6 +64,22 @@ Note: `APP_URL`, `LANDING_URL`, `R2_URL`, and `HASH_SERVER_URL` are _not_ on thi
 always computes them itself from the ports it picks that run, so overriding them here would have
 no effect under `launch.sh` (they'd only apply if you ran `bun run dev` directly).
 
+### Build-time client settings
+
+The client's API URL, capture interval and batch window are baked in when it is built, so there
+is no config file or in-app override. Set them through the layers above and rebuild the client:
+
+| Variable                                  | Default                                                         | Minimum |
+| ----------------------------------------- | --------------------------------------------------------------- | ------- |
+| `VIRTUE_DEFAULT_API_URL`                  | The production API on `main`, the staging API on other branches | None    |
+| `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS` | `300`                                                           | `15`    |
+| `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS`     | `3600`                                                          | `1`     |
+
+A value that is not a number, or is below its minimum, fails the build. Android emulators reach
+a local API at `http://10.0.2.2:8787`, not `localhost`. On Linux, `virtue status --advanced`
+prints the values the build used. After switching between the production and a local API,
+rebuild, then sign out and back in.
+
 ## Driving the web app in a browser
 
 Agents check UI changes in `web/` and `landing/` with Playwright CLI (`@playwright/cli`, a root

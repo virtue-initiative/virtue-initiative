@@ -1,98 +1,127 @@
-export type HelpNavItem = {
+import { z } from 'astro/zod';
+
+// Help pages are grouped by what the reader is trying to do. The topic lives in each page's
+// frontmatter, not its path, so regrouping never changes a URL: the apps link to several help
+// pages directly (/help/web/*, /help/what-virtue-monitors/<platform>).
+export const helpTopics = [
+  {
+    id: 'getting-started',
+    label: 'Getting started',
+    blurb: 'Create an account, install Virtue and invite a partner.',
+    links: [
+      {
+        title: 'Install Virtue',
+        href: '/download',
+        description: 'Download the app for Windows, Mac, Linux, Android, iPhone or iPad.',
+        order: 2,
+      },
+    ],
+  },
+  {
+    id: 'partners',
+    label: 'Partners',
+    blurb: 'Invite partners and see what they can see.',
+  },
+  {
+    id: 'activity',
+    label: 'Reviewing activity',
+    blurb: 'Log types, concern scores and device status.',
+  },
+  {
+    id: 'monitoring',
+    label: 'What Virtue monitors',
+    blurb: 'What each app captures on each device.',
+  },
+  {
+    id: 'protection',
+    label: 'Staying protected',
+    blurb: 'Close the gaps Virtue cannot watch.',
+  },
+  {
+    id: 'account',
+    label: 'Account and security',
+    blurb: 'Passwords, email and how your data is encrypted.',
+  },
+  {
+    id: 'troubleshooting',
+    label: 'Troubleshooting',
+    blurb: 'Fix common problems or report a new one.',
+  },
+  {
+    id: 'encouragement',
+    label: 'Encouragement',
+    blurb: 'Tips for fighting pornography and further reading.',
+  },
+] as const satisfies readonly HelpTopicDefinition[];
+
+type HelpTopicDefinition = {
+  id: string;
   label: string;
-  href?: string;
-  items?: HelpNavItem[];
+  blurb: string;
+  // Pages outside /help that belong in the topic, such as the download page.
+  links?: { title: string; href: string; description: string; order: number }[];
 };
 
-export const helpSidebar: HelpNavItem[] = [
-  {
-    label: 'Getting started',
-    href: '/help/getting-started',
-  },
-  {
-    label: 'Installation',
-    href: '/download',
-    items: [
-      { label: 'Windows', href: '/download#windows' },
-      { label: 'Mac', href: '/download#mac' },
-      { label: 'Linux', href: '/download#linux' },
-      { label: 'Android', href: '/download#android' },
-      { label: 'iOS', href: '/download#ios' },
-    ],
-  },
-  {
-    label: 'How it works',
-    href: '/help/how-it-works',
-  },
-  {
-    label: 'What Virtue monitors',
-    href: '/help/what-virtue-monitors',
-    items: [
-      { label: 'Windows', href: '/help/what-virtue-monitors/windows' },
-      { label: 'Mac', href: '/help/what-virtue-monitors/mac' },
-      { label: 'Linux', href: '/help/what-virtue-monitors/linux' },
-      { label: 'Android', href: '/help/what-virtue-monitors/android' },
-      { label: 'iPhone and iPad', href: '/help/what-virtue-monitors/ios' },
-    ],
-  },
-  {
-    label: 'Removing access',
-    href: '/help/removing-access',
-    items: [
-      {
-        label: 'Block app installs (iPhone)',
-        href: '/help/removing-access/block-app-installs-ios',
-      },
-    ],
-  },
-  {
-    label: 'Reporting an issue',
-    href: '/help/reporting-an-issue',
-  },
-  {
-    label: 'Tips',
-    href: '/help/tips',
-  },
-  {
-    label: 'Web',
-    href: '/help/web',
-    items: [
-      { label: 'Inviting a partner', href: '/help/web/inviting-a-partner' },
-      { label: 'Log types', href: '/help/web/log-types' },
-      { label: 'Decryption errors', href: '/help/web/decryption-errors' },
-      { label: 'Concern scores', href: '/help/web/concern-scores' },
-      { label: 'Device status', href: '/help/web/device-status' },
-      { label: 'Locked passwords', href: '/help/web/locked-passwords' },
-    ],
-  },
-  {
-    label: 'Developer',
-    href: '/help/developer',
-    items: [
-      { label: 'Lifecycle events', href: '/help/developer/lifecycle' },
-      { label: 'Testing', href: '/help/developer/testing' },
-      {
-        label: 'Developer overrides',
-        href: '/help/developer/overrides',
-      },
-      {
-        label: 'Security and encryption',
-        href: '/help/developer/security',
-      },
-      {
-        label: 'Tamper protection',
-        href: '/help/developer/tamper-controls',
-      },
-    ],
-  },
-];
+export type HelpTopicId = (typeof helpTopics)[number]['id'];
 
-function flatten(items: HelpNavItem[]): HelpNavItem[] {
-  return items.flatMap((item) => [item, ...(item.items ? flatten(item.items) : [])]);
+const topicIds = helpTopics.map((topic) => topic.id) as [HelpTopicId, ...HelpTopicId[]];
+
+const frontmatterSchema = z.object({
+  title: z.string(),
+  // Shown on topic pages and in search results, so every page needs one.
+  description: z.string(),
+  // A shorter label for the sidebar, when the title is long.
+  navTitle: z.string().optional(),
+  topic: z.enum(topicIds),
+  order: z.number(),
+});
+
+type HelpModule = {
+  frontmatter: unknown;
+  Content: any;
+  compiledContent?: () => Promise<string>;
+};
+
+export type HelpArticle = z.infer<typeof frontmatterSchema> & {
+  slug: string;
+  href: string;
+  module: HelpModule;
+};
+
+export type HelpLink = {
+  title: string;
+  navTitle?: string;
+  description: string;
+  href: string;
+  order: number;
+};
+
+const modules = import.meta.glob<HelpModule>('../content/help/**/*.{md,mdx}', { eager: true });
+
+export const helpArticles: HelpArticle[] = Object.entries(modules).map(([key, module]) => {
+  const slug = key
+    .replace('../content/help/', '')
+    .replace(/\.mdx?$/, '')
+    .replace(/\/index$/, '');
+  const parsed = frontmatterSchema.safeParse(module.frontmatter);
+  if (!parsed.success) {
+    throw new Error(`Bad frontmatter in ${key}: ${parsed.error.message}`);
+  }
+  return { ...parsed.data, slug, href: `/help/${slug}`, module };
+});
+
+export function topicHref(id: HelpTopicId) {
+  return `/help/topics/${id}`;
 }
 
-const flatHelpSidebar = flatten(helpSidebar);
+export function topicLinks(id: HelpTopicId): HelpLink[] {
+  const topic = helpTopics.find((t) => t.id === id);
+  const extra: HelpLink[] = topic && 'links' in topic ? [...topic.links] : [];
+  return [...helpArticles.filter((article) => article.topic === id), ...extra].sort(
+    (a, b) => a.order - b.order || a.title.localeCompare(b.title),
+  );
+}
 
-export function findHelpItem(pathname: string) {
-  return flatHelpSidebar.find((item) => item.href === pathname);
+export function findHelpArticle(pathname: string) {
+  return helpArticles.find((article) => article.href === pathname);
 }

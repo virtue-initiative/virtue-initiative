@@ -1,8 +1,9 @@
 ---
-sidebar_position: 6
+title: 'Locked passwords'
+description: 'Keep a secret, like a Screen Time passcode, that your partners hear about if you reveal it.'
+topic: account
+order: 3
 ---
-
-# Locked passwords
 
 A locked password stores a secret that you might need to access, but generally
 should not, like a Screen Time passcode. You can find it on the **Passwords**

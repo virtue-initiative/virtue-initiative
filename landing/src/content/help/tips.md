@@ -1,8 +1,9 @@
 ---
-sidebar_position: 1
+title: 'Tips'
+description: 'Practical ways to fight pornography, with Virtue as one part of the plan.'
+topic: encouragement
+order: 1
 ---
-
-# Tips
 
 Here are some tips on how to beat pornography.
 

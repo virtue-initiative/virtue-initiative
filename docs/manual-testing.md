@@ -1,6 +1,8 @@
-# Testing
+# Manual testing
 
-Use this as a short manual end-to-end checklist before shipping.
+A short end-to-end checklist to work through by hand on the dev builds before a release (step 3
+of "A release, step by step" in [`releasing.md`](releasing.md)). Automated tests are covered in
+[`../TESTING.md`](../TESTING.md).
 
 ## Signup flow
 
