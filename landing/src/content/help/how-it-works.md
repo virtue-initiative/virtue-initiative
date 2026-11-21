@@ -2,7 +2,7 @@
 title: 'How it works'
 description: 'How Virtue captures, blurs and encrypts screenshots and sends them to your partners.'
 topic: getting-started
-order: 3
+order: 4
 ---
 
 Our main accountability tool is an app that takes screenshots at random
