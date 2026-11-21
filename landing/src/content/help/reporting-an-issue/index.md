@@ -1,8 +1,9 @@
 ---
-sidebar_position: 1
+title: 'Reporting an issue'
+description: 'Send a report from the website, the web app or any Virtue app.'
+topic: troubleshooting
+order: 1
 ---
-
-# Reporting an issue
 
 Virtue is still being tested, so you may run into rough edges. Reports are the
 fastest way for us to find and fix them. Every report goes straight to the
