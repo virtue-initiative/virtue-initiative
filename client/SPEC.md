@@ -373,7 +373,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 ## CLIENT-033 Announcements
 
-While signed in, every GUI MUST show the CORE-010 `announcement`, when there is one, on its main screen below its main actions, and MUST show nothing in its place when there is none. Its `message` MUST be shown in full. When it has a `url`, clicking or tapping the message MUST open the url in the default browser.
+Every GUI MUST show the CORE-010 `announcement`, when there is one, on its status screen (the one that says monitoring is active or paused) below its main actions, and MUST show nothing in its place when there is none. Its `message` MUST be shown in full. When it has a `url`, clicking or tapping the message MUST open the url in the default browser.
 
 - `info` MUST look like a small link (or small secondary text when there is no `url`), with no background.
 - `warning` MUST have an orange background and `urgent` a red one, each with text that stays readable on it in light and dark mode.

@@ -402,9 +402,8 @@ class MainActivity : AppCompatActivity() {
         // The sign-in form keeps focus and the keyboard while the user types, so
         // a refresh that changes nothing must not rebuild it. Only the guide
         // shows the permissions, so nothing else pays for asking Android.
-        val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
         val permissions = state == State.A11Y_OFF && AccessibilitySetupGuide.permissionsGranted(this)
-        val key = "${state.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        val key = homeScreenKey(state.name, json, permissions, AppUpdater.readyVersion(this))
         if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
@@ -1315,4 +1314,21 @@ class MainActivity : AppCompatActivity() {
         const val PREFS_PERMISSIONS = "permissions"
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
     }
+}
+
+/**
+ * What the home screen shows, so a status refresh rebuilds it only when this
+ * changes. The sign-in form keeps focus and the keyboard while the user types.
+ */
+internal fun homeScreenKey(
+    state: String,
+    status: JSONObject,
+    permissionsGranted: Boolean,
+    readyVersion: String?,
+): String {
+    val partners = if (status.isNull("partner_count")) 0 else status.optInt("partner_count", 0)
+    val lastScreenshot = status.optLong("last_screenshot_at_ms", 0)
+    // CLIENT-033: a new announcement shows without waiting for anything else to change.
+    val announcement = Announcement.fromStatus(status)
+    return "$state/$permissionsGranted/$lastScreenshot/${partners > 0}/$readyVersion/$announcement"
 }
