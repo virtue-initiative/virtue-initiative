@@ -1,0 +1,18 @@
+---
+import { Button } from '@virtueinitiative/shared-web';
+import { ReportBugButton } from './ReportBugButton';
+---
+
+<aside class="help-contact" aria-labelledby="help-contact-title">
+  <div class="help-contact-copy">
+    <h2 id="help-contact-title">Still need help?</h2>
+    <p>
+      If you can't find an answer here, tell us what's wrong. Add your email to the report if you'd
+      like a reply, or email us at help@virtueinitiative.org.
+    </p>
+  </div>
+  <div class="help-contact-actions">
+    <ReportBugButton client:load variant="primary" label="Report an issue" />
+    <Button href="mailto:help@virtueinitiative.org" variant="outline">Email us</Button>
+  </div>
+</aside>
