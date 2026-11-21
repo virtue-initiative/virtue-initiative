@@ -55,26 +55,7 @@ const { large = false } = Astro.props;
     results.replaceChildren(p);
   }
 
-  async function runSearch(query: string, results: HTMLElement) {
-    if (!query.trim()) {
-      results.hidden = true;
-      results.replaceChildren();
-      return;
-    }
-    const module = await loadPagefind();
-    results.hidden = false;
-    if (!module) {
-      message(results, 'Search is not available right now. Browse the topics instead.');
-      return;
-    }
-    const search = await module.debouncedSearch(query);
-    // A newer keystroke replaced this search.
-    if (!search) return;
-    if (search.results.length === 0) {
-      message(results, `No pages match "${query}".`);
-      return;
-    }
-    const pages = await Promise.all(search.results.slice(0, 8).map((result) => result.data()));
+  function renderResults(results: HTMLElement, pages: PagefindData[]) {
     const list = document.createElement('ul');
     for (const page of pages) {
       const item = document.createElement('li');
@@ -94,17 +75,64 @@ const { large = false } = Astro.props;
     results.replaceChildren(list);
   }
 
-  for (const root of document.querySelectorAll<HTMLElement>('[data-help-search]')) {
+  function setUpSearch(root: HTMLElement) {
     const input = root.querySelector<HTMLInputElement>('[data-help-search-input]');
     const results = root.querySelector<HTMLElement>('[data-help-search-results]');
-    if (!input || !results) continue;
-    input.addEventListener('focus', () => void loadPagefind());
-    input.addEventListener('input', () => void runSearch(input.value, results));
+    if (!input || !results) return;
+
+    // Each search takes a number. A search that finishes after a newer one started (or after
+    // the box was cleared) drops its results instead of showing them over the newer ones.
+    let generation = 0;
+
+    const runSearch = async (query: string) => {
+      const current = ++generation;
+      if (!query.trim()) {
+        results.hidden = true;
+        results.replaceChildren();
+        return;
+      }
+      const module = await loadPagefind();
+      if (current !== generation) return;
+      results.hidden = false;
+      if (!module) {
+        message(results, 'Search is not available right now. Browse the topics instead.');
+        return;
+      }
+      const search = await module.debouncedSearch(query);
+      if (!search || current !== generation) return;
+      if (search.results.length === 0) {
+        message(results, `No pages match "${query}".`);
+        return;
+      }
+      const pages = await Promise.all(search.results.slice(0, 8).map((result) => result.data()));
+      if (current !== generation) return;
+      renderResults(results, pages);
+    };
+
+    input.addEventListener('focus', () => {
+      void loadPagefind();
+      if (input.value.trim() && results.childElementCount > 0) results.hidden = false;
+    });
+    input.addEventListener('input', () => void runSearch(input.value));
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         input.value = '';
-        void runSearch('', results);
+        void runSearch('');
       }
     });
+    // Hide the results on a click outside the search, or when Tab moves focus out of it.
+    // Safari doesn't focus a link on click, so a focusout with no new target is ignored: it may
+    // be a click on a result.
+    document.addEventListener('pointerdown', (event) => {
+      if (!root.contains(event.target as Node)) results.hidden = true;
+    });
+    root.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && !root.contains(next)) results.hidden = true;
+    });
+  }
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-help-search]')) {
+    setUpSearch(root);
   }
 </script>

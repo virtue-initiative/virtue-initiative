@@ -17,19 +17,20 @@ import { helpTopics, topicHref, topicLinks } from '../../help/navigation';
     </header>
     <ul class="help-topic-cards">
       {
-        helpTopics.map((topic) => (
-          <li>
-            <a class="help-topic-card" href={topicHref(topic.id)}>
-              <span class="help-topic-card-title">{topic.label}</span>
-              <span class="help-topic-card-blurb">{topic.blurb}</span>
-              <span class="help-topic-card-count">
-                {topicLinks(topic.id).length === 1
-                  ? '1 article'
-                  : `${topicLinks(topic.id).length} articles`}
-              </span>
-            </a>
-          </li>
-        ))
+        helpTopics.map((topic) => {
+          const count = topicLinks(topic.id).length;
+          return (
+            <li>
+              <a class="help-topic-card" href={topicHref(topic.id)}>
+                <span class="help-topic-card-title">{topic.label}</span>
+                <span class="help-topic-card-blurb">{topic.blurb}</span>
+                <span class="help-topic-card-count">
+                  {count === 1 ? '1 article' : `${count} articles`}
+                </span>
+              </a>
+            </li>
+          );
+        })
       }
     </ul>
   </div>
