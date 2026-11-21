@@ -1,4 +1,5 @@
 import { DAY_MS } from './digest-schedule';
+import type { Announcement } from '../../../shared-web/types';
 
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
@@ -1579,15 +1580,7 @@ export async function setUserFlagOverride(
 
 // ── Announcements (API-068) ──────────────────────────────────────────────────
 
-type AnnouncementRow = {
-  id: string;
-  message: string;
-  url: string | null;
-  level: 'info' | 'warning' | 'urgent';
-  platforms: string | null;
-  below_version: string | null;
-  created_at: number;
-};
+type AnnouncementRow = Omit<Announcement, 'platforms'> & { platforms: string | null };
 
 // Platforms are stored as a JSON array. Anything else counts as every platform
 // rather than failing a device's settings request.
@@ -1602,7 +1595,7 @@ function parseAnnouncementPlatforms(json: string | null): string[] | null {
 }
 
 // Newest first, which is the order API-069 returns and API-068 picks from.
-export async function listAnnouncements(db: D1Database) {
+export async function listAnnouncements(db: D1Database): Promise<Announcement[]> {
   const rows = await allWithUuidFields<AnnouncementRow>(
     db.prepare(
       `SELECT id, message, url, level, platforms, below_version, created_at
@@ -1614,18 +1607,7 @@ export async function listAnnouncements(db: D1Database) {
   return rows.map((row) => ({ ...row, platforms: parseAnnouncementPlatforms(row.platforms) }));
 }
 
-export async function createAnnouncement(
-  db: D1Database,
-  input: {
-    id: string;
-    message: string;
-    url: string | null;
-    level: 'info' | 'warning' | 'urgent';
-    platforms: string[] | null;
-    below_version: string | null;
-    created_at: number;
-  },
-) {
+export async function createAnnouncement(db: D1Database, input: Announcement) {
   await db
     .prepare(
       `INSERT INTO announcements (id, message, url, level, platforms, below_version, created_at)

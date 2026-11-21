@@ -1,30 +1,17 @@
 import { listFeatureFlags, listUserFlagOverrides } from './db';
 import type { FeatureFlag } from '../../../shared-web/types';
+import { tableCache } from './table-cache';
 
 type FlagRule = { key: string; rollout_percent: number };
 
 // API-061: the flag table may be cached for up to 60 seconds. It's read on
 // every GET /user and every device settings response, so without this each of
 // those would cost one more query.
-const CACHE_TTL_MS = 60_000;
-let cached: { rules: FlagRule[]; expiresAt: number } | null = null;
+const rulesCache = tableCache(async (db): Promise<FlagRule[]> =>
+  (await listFeatureFlags(db)).map(({ key, rollout_percent }) => ({ key, rollout_percent })),
+);
 
-async function loadRules(db: D1Database, now: number) {
-  if (cached && cached.expiresAt > now) {
-    return cached.rules;
-  }
-  const rules = (await listFeatureFlags(db)).map(({ key, rollout_percent }) => ({
-    key,
-    rollout_percent,
-  }));
-  cached = { rules, expiresAt: now + CACHE_TTL_MS };
-  return rules;
-}
-
-// Called after an admin route changes a flag, so this isolate sees it at once.
-export function clearFeatureFlagCache() {
-  cached = null;
-}
+export const clearFeatureFlagCache = rulesCache.clear;
 
 // API-061: uint32_be(sha256(key ":" user_id)[0..4]) % 10000. Salting with the
 // key gives each flag its own cohort; the user id never changes, unlike email.
@@ -52,7 +39,7 @@ export async function enabledFeatureFlags(
   overrides: Map<string, boolean>,
   now = Date.now(),
 ) {
-  const rules = await loadRules(db, now);
+  const rules = await rulesCache.get(db, now);
   const enabled = await Promise.all(rules.map((rule) => isEnabled(rule, userId, overrides)));
   return rules.filter((_, index) => enabled[index]).map((rule) => rule.key);
 }

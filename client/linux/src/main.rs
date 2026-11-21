@@ -20,8 +20,7 @@ use clap::{Args, Parser, Subcommand};
 use virtue_core::ScreenshotSkipReason;
 use virtue_core::ipc::ClientController;
 use virtue_core::{
-    AnnouncementLevel, DeviceAnnouncement, ScreenshotHooks, ServiceStatus, StatusSkipReason,
-    Upload, UploadKind,
+    AnnouncementLevel, ScreenshotHooks, ServiceStatus, StatusSkipReason, Upload, UploadKind,
 };
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
@@ -607,7 +606,8 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         Tone::Bad => style::bad(headline.text),
     };
     println!("{}", style::heading(&painted));
-    if let Some(announcement) = shown_announcement(&status) {
+    // CLIENT-033. Signing out clears it with the rest of the state.
+    if let Some(announcement) = &status.announcement {
         let label = match announcement.level {
             AnnouncementLevel::Info => style::dim("Note:"),
             AnnouncementLevel::Warning => style::warn("Important:"),
@@ -799,15 +799,6 @@ struct Headline {
     tone: Tone,
     /// The commands that fix this state, in order; empty if there is nothing to fix.
     fix_commands: &'static [&'static str],
-}
-
-/// The announcement `virtue status` prints under its headline: only while
-/// signed in (CLIENT-033).
-fn shown_announcement(status: &ServiceStatus) -> Option<&DeviceAnnouncement> {
-    status
-        .announcement
-        .as_ref()
-        .filter(|_| status.is_authenticated)
 }
 
 /// The one-line monitoring state `virtue status` opens with (CLIENT-006).
@@ -1291,9 +1282,7 @@ fn format_risk(risk: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cli, Commands, DaemonCommands, Tone, parse_os_release, shown_announcement, status_headline,
-    };
+    use super::{Cli, Commands, DaemonCommands, Tone, parse_os_release, status_headline};
     use clap::Parser;
     use virtue_core::ServiceStatus;
 
@@ -1345,34 +1334,6 @@ mod tests {
         let headline = status_headline(&active);
         assert_eq!(headline.text, "Monitoring active");
         assert!(headline.fix_commands.is_empty());
-    }
-
-    // CLIENT-033: the announcement is shown only while signed in.
-    #[test]
-    fn announcement_is_shown_only_while_signed_in() {
-        let announcement = virtue_core::DeviceAnnouncement {
-            message: "Update by hand".into(),
-            url: None,
-            level: virtue_core::AnnouncementLevel::Urgent,
-        };
-        let signed_in = ServiceStatus {
-            is_authenticated: true,
-            announcement: Some(announcement.clone()),
-            ..Default::default()
-        };
-        assert_eq!(shown_announcement(&signed_in), Some(&announcement));
-
-        let signed_out = ServiceStatus {
-            is_authenticated: false,
-            ..signed_in.clone()
-        };
-        assert_eq!(shown_announcement(&signed_out), None);
-
-        let none = ServiceStatus {
-            is_authenticated: true,
-            ..Default::default()
-        };
-        assert_eq!(shown_announcement(&none), None);
     }
 
     // CLIENT-007: ages read Ns, Nm, Nh Mm or Nd Nh ago, rounded down, without

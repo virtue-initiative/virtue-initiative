@@ -988,9 +988,9 @@ public sealed partial class MainWindow : Window
         _reportFromHomeButton.Visibility = VisibleIf(signedIn && needsAttention);
         _stopButton.Visibility = VisibleIf(signedIn);
 
-        // Rebuilt only when it changes, since button colors are fixed once its
-        // template is applied.
-        var announcement = signedIn ? ViewModel.Announcement : null;
+        // CLIENT-033. Rebuilt only when it changes, since button colors are
+        // fixed once its template is applied.
+        var announcement = signedIn ? ViewModel.MonitorStatus?.Announcement : null;
         if (announcement != _shownAnnouncement)
         {
             _shownAnnouncement = announcement;
@@ -1779,59 +1779,43 @@ public sealed partial class MainWindow : Window
     {
         var prominent = announcement.Level is "warning" or "urgent";
         Uri? url = Uri.TryCreate(announcement.Url, UriKind.Absolute, out var parsed) ? parsed : null;
-        var transparent = new SolidColorBrush(Colors.Transparent);
-        var background = announcement.Level switch
+        var box = new Border
         {
-            "urgent" => AnnouncementUrgentBrush,
-            "warning" => AnnouncementWarningBrush,
-            _ => transparent,
+            Background = announcement.Level switch
+            {
+                "urgent" => AnnouncementUrgentBrush,
+                "warning" => AnnouncementWarningBrush,
+                _ => null,
+            },
+            CornerRadius = new CornerRadius(6),
+            Padding = prominent ? new Thickness(14, 10, 14, 10) : new Thickness(0, 4, 0, 4),
+            Child = new TextBlock
+            {
+                Text = announcement.Message,
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = prominent ? TextAlignment.Left : TextAlignment.Center,
+                FontSize = prominent ? 14 : 12,
+                FontWeight = prominent ? FontWeights.Medium : FontWeights.Normal,
+                Foreground = prominent ? OnAccentBrush : url is null ? TextMutedBrush : LinkBrush,
+                TextDecorations = url is null
+                    ? Windows.UI.Text.TextDecorations.None
+                    : Windows.UI.Text.TextDecorations.Underline,
+            },
         };
-        var foreground = prominent ? OnAccentBrush : url is null ? TextMutedBrush : LinkBrush;
-        var padding = prominent ? new Thickness(14, 10, 14, 10) : new Thickness(0, 4, 0, 4);
-        var text = new TextBlock
-        {
-            Text = announcement.Message,
-            TextWrapping = TextWrapping.Wrap,
-            TextAlignment = prominent ? TextAlignment.Left : TextAlignment.Center,
-            FontSize = prominent ? 14 : 12,
-            FontWeight = prominent ? FontWeights.Medium : FontWeights.Normal,
-            Foreground = foreground,
-            TextDecorations = url is null
-                ? Windows.UI.Text.TextDecorations.None
-                : Windows.UI.Text.TextDecorations.Underline,
-        };
-
         if (url is null)
         {
-            return new Border
-            {
-                Child = text,
-                Background = background,
-                CornerRadius = new CornerRadius(6),
-                Padding = padding,
-            };
+            return box;
         }
 
         var button = new Button
         {
-            Content = text,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = prominent ? HorizontalAlignment.Left : HorizontalAlignment.Center,
-            Padding = padding,
+            Content = box,
+            Padding = new Thickness(0),
             CornerRadius = new CornerRadius(6),
-            BorderThickness = new Thickness(0),
-            Background = background,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
-        var r = button.Resources;
-        r["ButtonBackground"] = background;
-        r["ButtonBackgroundPointerOver"] = background;
-        r["ButtonBackgroundPressed"] = background;
-        r["ButtonForeground"] = foreground;
-        r["ButtonForegroundPointerOver"] = foreground;
-        r["ButtonForegroundPressed"] = foreground;
-        r["ButtonBorderBrush"] = transparent;
-        r["ButtonBorderBrushPointerOver"] = transparent;
-        r["ButtonBorderBrushPressed"] = transparent;
+        StyleQuietButton(button);
         AutomationProperties.SetName(button, announcement.Message);
         ToolTipService.SetToolTip(button, url.AbsoluteUri);
         button.Click += (_, _) => OpenInBrowser(url.AbsoluteUri);

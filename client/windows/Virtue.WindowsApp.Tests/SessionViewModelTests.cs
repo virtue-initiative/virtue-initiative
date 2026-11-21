@@ -315,27 +315,6 @@ public sealed class SessionViewModelTests
             result.Announcement);
     }
 
-    // CLIENT-033: the announcement comes from status and shows only while signed in.
-    [Fact]
-    public async Task Announcement_ShowsOnlyWhileSignedIn()
-    {
-        var announcement = new AnnouncementPayload("Update by hand", null, "warning");
-        var fakeClient = new FakeRustInteropClient
-        {
-            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-123"),
-            MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null, Announcement: announcement),
-        };
-        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
-
-        await viewModel.RefreshAsync();
-        Assert.Equal(announcement, viewModel.Announcement);
-
-        fakeClient.SessionStatus = new SessionStatusPayload(false, null, null, "build-123");
-        fakeClient.MonitorStatus = new MonitorStatusPayload("running", false, 0, null, null, Announcement: announcement);
-        await viewModel.RefreshAsync();
-        Assert.Null(viewModel.Announcement);
-    }
-
     // CLIENT-004: sign-in without an email is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
