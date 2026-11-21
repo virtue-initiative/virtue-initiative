@@ -122,6 +122,12 @@
     overflow-x: auto;
   }
 
+  /* tables.css centers every column after the first, for the home page's comparison table.
+     Help tables hold sentences, which read better left-aligned. */
+  & :is(th, td):not(:first-child) {
+    text-align: left;
+  }
+
   & pre {
     overflow-x: auto;
     background: var(--bg-subtle);

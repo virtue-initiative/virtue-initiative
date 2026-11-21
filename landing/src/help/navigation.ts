@@ -13,7 +13,7 @@ export const helpTopics = [
         title: 'Install Virtue',
         href: '/download',
         description: 'Download the app for Windows, Mac, Linux, Android, iPhone or iPad.',
-        order: 2,
+        order: 3,
       },
     ],
   },

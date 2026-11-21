@@ -55,7 +55,7 @@ A user resumed monitoring after previously stopping it.
 
 ## Repeated Restarts
 
-The monitoring process started many times in a short span (more than 20 times
+The monitoring process started many times in a short span (20 or more times
 within 10 minutes). This can indicate someone is repeatedly trying to disable
 monitoring by killing the process, or a genuine crash loop. Updates can also
 cause a few restarts, but not this many. Investigate if you see this.
