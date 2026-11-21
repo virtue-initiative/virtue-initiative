@@ -27,8 +27,8 @@ Each partner chooses in **Settings** how often they hear from Virtue:
 - **Daily** or **Weekly** summaries give the number of screenshots and alerts for each person
   they monitor, and name any device that sent nothing.
 - Some events are emailed straight away, whatever the summary setting, unless the partner chose
-  **None**: stopping monitoring in the app, signing a device out, and revealing a
-  [locked password](/help/web/locked-passwords).
+  **None**: stopping monitoring in the app, repeated restarts, signing a device out, and
+  revealing a [locked password](/help/web/locked-passwords).
 
 ## What partners cannot see
 

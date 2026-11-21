@@ -28,9 +28,9 @@ unreadable. Without the old password, nobody can unlock the old key.
 
 Some things are not encrypted, because Virtue needs them to work:
 
-- your email address and name, and who your partners are;
-- your devices and when each one last checked in;
-- the other entries in your log feed, such as sign-ins and alerts, so Virtue can email alerts
+- Your email address and name, and who your partners are.
+- Your devices and when each one last checked in.
+- The other entries in your log feed, such as sign-ins and alerts, so Virtue can email alerts
   and summaries to your partners.
 
 ## Locked passwords
