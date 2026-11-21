@@ -68,7 +68,7 @@ is how a device picks up a new partner or a new hash token.
 
 ## Scheduled jobs
 
-Two crons in `wrangler.json` drive the background work, and `scheduled` in `src/index.ts` runs
+Two crons in `src/crons.ts`, registered by `cloudflare.config.ts`, drive the background work, and `scheduled` in `src/index.ts` runs
 the jobs for whichever one fired.
 
 | Cron                 | Jobs                                                                                                                                                                                            |
@@ -112,7 +112,7 @@ and the digests. A few rules apply to all of them:
 | Digests and their timing             | `src/lib/scheduler.ts`, `src/lib/digest-schedule.ts` |
 | Email sending and templates          | `src/lib/email.ts`, `src/lib/email/templates.ts`     |
 | Feature flags                        | `src/lib/feature-flags.ts`                           |
-| Bindings and environment             | `src/types/bindings.ts`, `wrangler.json`             |
+| Bindings and environment             | `src/types/bindings.ts`, `cloudflare.config.ts`      |
 
 The tests send real HTTP requests to the Worker with real local D1 and R2, and
 [`TESTING.md`](TESTING.md) explains how. That is also the quickest way to see any route on this

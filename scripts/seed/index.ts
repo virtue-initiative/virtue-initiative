@@ -11,9 +11,9 @@
 // to the current time. Re-run it (`just seed`) whenever the sample week gets
 // stale, then use "Clear cache" in the web app so it drops the old batches.
 //
-// Writes go straight to the same local state `wrangler dev --env staging
-// --local` reads (api/.wrangler/state/v3), through wrangler's platform proxy,
-// so no servers need to be running.
+// Writes go straight to the same local state `cf dev --mode staging` reads
+// (api/.cloudflare/state/v3), through wrangler's platform proxy, so no servers
+// need to be running.
 import type { D1Database, D1PreparedStatement, R2Bucket } from '@cloudflare/workers-types';
 import { getPlatformProxy } from 'wrangler';
 import { dirname, join } from 'path';
@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url';
 import { encodeAccessKeys } from '../../api/src/lib/access-keys';
 import { batchObject } from '../../api/src/lib/batch-url';
 import { CURRENT_API_VERSION } from '../../shared-web/api-version';
+import { writeWranglerConfig } from '../cf-config';
 import { deriveAccount, PASSWORD, type AccountMaterial } from './accounts';
 import { buildBatch } from './batch';
 import {
@@ -45,9 +46,8 @@ for (const user of USERS) {
 }
 
 const proxy = await getPlatformProxy<Env>({
-  configPath: join(ROOT, 'api', 'wrangler.json'),
-  environment: 'staging',
-  persist: { path: join(ROOT, 'api', '.wrangler', 'state', 'v3') },
+  configPath: await writeWranglerConfig('api', 'staging'),
+  persist: { path: join(ROOT, 'api', '.cloudflare', 'state', 'v3') },
 });
 const { DB, BUCKET } = proxy.env;
 const blob = (hex: string) => hexToBytes(hex);

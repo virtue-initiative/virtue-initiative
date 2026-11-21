@@ -4,12 +4,16 @@ import { authenticateWebSession } from '../middleware/auth';
 import { requireAdmin } from '../middleware/admin';
 import { validateZ } from '../middleware/validation';
 import {
+  createAnnouncement,
+  deleteAnnouncement,
   deleteFeatureFlag,
   listAnalyticsSnapshots,
+  listAnnouncements,
   setUserFlagOverride,
   upsertFeatureFlag,
 } from '../lib/db';
 import { snapshotAnalytics } from '../lib/analytics';
+import { clearAnnouncementCache } from '../lib/announcements';
 import { clearFeatureFlagCache, listFeatureFlagsWithOverrides } from '../lib/feature-flags';
 import {
   FullScanError,
@@ -21,11 +25,13 @@ import {
 import { Env, Variables } from '../types/bindings';
 import {
   adminQuerySchema,
+  createAnnouncementSchema,
   featureFlagKeySchema,
   setFeatureFlagOverrideSchema,
   upsertFeatureFlagSchema,
   type AnalyticsMetrics,
   type AnalyticsSnapshot,
+  type Announcement,
 } from '../../../shared-web/types';
 
 const admin = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -147,5 +153,34 @@ admin.put(
     return c.json(await findFeatureFlag(c.env.DB, key));
   },
 );
+
+// API-069
+admin.get('/announcements', async (c) => c.json(await listAnnouncements(c.env.DB)));
+
+// API-070
+admin.post('/announcements', validateZ('json', createAnnouncementSchema), async (c) => {
+  const body = c.req.valid('json');
+  const announcement: Announcement = {
+    id: crypto.randomUUID(),
+    message: body.message,
+    url: body.url ?? null,
+    level: body.level,
+    platforms: body.platforms ?? null,
+    below_version: body.below_version ?? null,
+    created_at: Date.now(),
+  };
+  await createAnnouncement(c.env.DB, announcement);
+  clearAnnouncementCache();
+  return c.json(announcement);
+});
+
+// API-071. A malformed id is answered as unknown (API-004) by uuidToBytes.
+admin.delete('/announcements/:id', async (c) => {
+  if (!(await deleteAnnouncement(c.env.DB, c.req.param('id')))) {
+    return c.json({ error: 'Not found' }, 404);
+  }
+  clearAnnouncementCache();
+  return c.body(null, 204);
+});
 
 export default admin;

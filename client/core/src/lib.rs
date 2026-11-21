@@ -27,11 +27,11 @@ pub use daemon::{DAEMON_STATE_VERSION, Daemon, DaemonState};
 pub use error::{CoreError, CoreResult};
 pub use force_capture::{ForcedCaptureOutcome, wait_for_upload as wait_for_forced_capture_upload};
 pub use model::{
-    AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
+    AnnouncementLevel, DeviceAnnouncement, DeviceCredentials, DeviceSettings, Redacted,
+    ScreenshotSkipReason, StatusError, StatusSkipReason, UploadKind,
 };
 pub use model::{
-    DeviceCredentials, DeviceSettings, Redacted, ScreenshotSkipReason, StatusError,
-    StatusSkipReason, UploadKind,
+    AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
 };
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};

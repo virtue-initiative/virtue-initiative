@@ -12,7 +12,7 @@
 #   domain    Optional. Registers [domain].localhost and app.[domain].localhost
 #             (plus donate.[domain].localhost with --donate) via Caddy reverse
 #             proxy (https), mimicking the production URL structure.
-#             app.[domain].localhost/api is routed through Vite's /api proxy to wrangler.
+#             app.[domain].localhost/api is routed through Vite's /api proxy to the API.
 #
 # Ports are random unless VIRTUE_API_PORT, VIRTUE_WEB_PORT, VIRTUE_LANDING_PORT,
 # VIRTUE_DONATE_PORT and VIRTUE_HASH_PORT set them, which keeps a client build's
@@ -75,11 +75,11 @@ if [ -f "$ROOT/.env" ]; then
 fi
 
 # api/.dev.vars keys that can be centrally overridden (see docs/development.md); passed
-# as --var so they win over api/.dev.vars without editing that file.
+# to start_worker so they win over api/.dev.vars without editing that file.
 API_EXTRA_VARS=()
 for _key in JWT_PRIVATE_KEY JWT_PUBLIC_KEY APP_NAME API_BASE_PATH EMAIL_DELIVERY_MODE BUG_REPORT_EMAIL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
     eval "_value=\${$_key:-}"
-    [ -n "$_value" ] && API_EXTRA_VARS+=(--var "$_key:$_value")
+    [ -n "$_value" ] && API_EXTRA_VARS+=("$_key=$_value")
 done
 unset _key _value
 
@@ -115,10 +115,13 @@ fi
 
 export FORCE_COLOR=1
 
+LAUNCH_VARS_FILES=()
+
 cleanup() {
     trap '' INT TERM
     kill 0 2>/dev/null || true
     wait 2>/dev/null || true
+    rm -f "${LAUNCH_VARS_FILES[@]}"
 }
 trap cleanup INT TERM EXIT
 
@@ -129,6 +132,27 @@ run() {
         | while IFS= read -r line; do
             printf '\033[%sm[%s]\033[0m %s\n' "$color" "$name" "$line"
           done &
+}
+
+# Start a Worker with `cf dev --mode launch` on $4. cf dev can't pass --var on to
+# Wrangler, so this run's KEY=value pairs (the remaining args) go in
+# <dir>/.dev.vars.launch instead: a copy of .dev.vars with them appended (later
+# lines win). `--mode launch` reads that file in place of .dev.vars, and cleanup
+# deletes it. With --host, DEV_IP makes Wrangler listen on that address
+# (wrangler.config.ts), since cf dev's own --host doesn't.
+start_worker() {
+    local name="$1" color="$2" dir="$3" port="$4" kv value
+    shift 4
+    local vars_file="$ROOT/$dir/.dev.vars.launch"
+    {
+        [ -f "$ROOT/$dir/.dev.vars" ] && cat "$ROOT/$dir/.dev.vars" && echo
+        for kv in "$@"; do
+            value="${kv#*=}"
+            printf '%s="%s"\n' "${kv%%=*}" "${value//$'\n'/\\n}"
+        done
+    } > "$vars_file"
+    LAUNCH_VARS_FILES+=("$vars_file")
+    run "$name" "$color" "$dir" env DEV_IP="$HOST" bun run cf dev --mode launch --port "$port"
 }
 
 # Start the standalone hash server (see hash-server/SPEC.md). Always run, since
@@ -148,10 +172,8 @@ start_donate() {
     local landing_url="$1"
     local webhook_url="http://${HOST:-localhost}:${DONATE_PORT}/webhook"
     local donate_vars=()
-    local listen=()
-    [ -n "$HOST" ] && listen=(--ip "$HOST")
 
-    [ -n "$STRIPE_SECRET_KEY" ] && donate_vars+=(--var "STRIPE_SECRET_KEY:${STRIPE_SECRET_KEY}")
+    [ -n "$STRIPE_SECRET_KEY" ] && donate_vars+=("STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}")
 
     if command -v stripe > /dev/null 2>&1; then
         # `stripe listen` signs forwarded events with this secret; grab it so the
@@ -168,10 +190,10 @@ start_donate() {
         echo "Warning: stripe CLI not found; webhook forwarding disabled." >&2
     fi
 
-    [ -n "$STRIPE_WEBHOOK_SECRET" ] && donate_vars+=(--var "STRIPE_WEBHOOK_SECRET:${STRIPE_WEBHOOK_SECRET}")
+    [ -n "$STRIPE_WEBHOOK_SECRET" ] && donate_vars+=("STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}")
 
-    run "donate" "35" "api-donate" bun run dev -- "${listen[@]}" --port "$DONATE_PORT" \
-        --var "LANDING_URL:${landing_url}" "${donate_vars[@]}"
+    start_worker "donate" "35" "api-donate" "$DONATE_PORT" \
+        "LANDING_URL=${landing_url}" "${donate_vars[@]}"
 }
 
 if [ -n "$DOMAIN" ]; then
@@ -254,12 +276,12 @@ if [ -n "$DOMAIN" ]; then
     }
 
     start_hash_server
-    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
-        --var "APP_URL:https://app.${DOMAIN}.localhost" \
-        --var "LANDING_URL:https://${DOMAIN}.localhost" \
-        --var "R2_URL:https://app.${DOMAIN}.localhost/r2" \
-        --var "DEV_R2_ROUTE:true" \
-        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+    start_worker "api" "31" "api" "$API_PORT" \
+        "APP_URL=https://app.${DOMAIN}.localhost" \
+        "LANDING_URL=https://${DOMAIN}.localhost" \
+        "R2_URL=https://app.${DOMAIN}.localhost/r2" \
+        "DEV_R2_ROUTE=true" \
+        "HASH_SERVER_URL=http://localhost:${HASH_PORT}" \
         "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "https://${DOMAIN}.localhost"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host 127.0.0.1
@@ -292,12 +314,12 @@ elif [ -n "$HOST" ]; then
     printf '\n'
 
     start_hash_server
-    run "api"     "31" "api"     bun run dev -- --ip "$HOST" --port "$API_PORT" \
-        --var "APP_URL:${WEB_URL}" \
-        --var "LANDING_URL:${LANDING_URL}" \
-        --var "R2_URL:${WEB_URL}/r2" \
-        --var "DEV_R2_ROUTE:true" \
-        --var "HASH_SERVER_URL:http://${HOST}:${HASH_PORT}" \
+    start_worker "api" "31" "api" "$API_PORT" \
+        "APP_URL=${WEB_URL}" \
+        "LANDING_URL=${LANDING_URL}" \
+        "R2_URL=${WEB_URL}/r2" \
+        "DEV_R2_ROUTE=true" \
+        "HASH_SERVER_URL=http://${HOST}:${HASH_PORT}" \
         "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "$LANDING_URL"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT" --host "$HOST"
@@ -317,12 +339,12 @@ else
     printf '\n'
 
     start_hash_server
-    run "api"     "31" "api"     bun run dev -- --port "$API_PORT" \
-        --var "APP_URL:http://localhost:${WEB_PORT}" \
-        --var "LANDING_URL:http://localhost:${LANDING_PORT}" \
-        --var "R2_URL:http://localhost:${API_PORT}/r2" \
-        --var "DEV_R2_ROUTE:true" \
-        --var "HASH_SERVER_URL:http://localhost:${HASH_PORT}" \
+    start_worker "api" "31" "api" "$API_PORT" \
+        "APP_URL=http://localhost:${WEB_PORT}" \
+        "LANDING_URL=http://localhost:${LANDING_PORT}" \
+        "R2_URL=http://localhost:${API_PORT}/r2" \
+        "DEV_R2_ROUTE=true" \
+        "HASH_SERVER_URL=http://localhost:${HASH_PORT}" \
         "${API_EXTRA_VARS[@]}"
     [ "$DONATE" = 1 ] && start_donate "http://localhost:${LANDING_PORT}"
     run "web"     "32" "web"     bun run dev -- --port "$WEB_PORT"

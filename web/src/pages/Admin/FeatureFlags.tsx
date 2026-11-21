@@ -15,18 +15,10 @@ import { FeatureFlag } from '../../utils/api/api';
 import { api, describeError } from '../../utils/api';
 import { usePromise } from '../../hooks/usePromise';
 import { formatRelativeTimestamp } from '../../utils/time';
+import { isForbidden } from './forbidden';
 
 // Mirrors featureFlagKeySchema; the API rejects anything else with a 400.
 const FLAG_KEY_PATTERN = '[a-z0-9_]{1,64}';
-
-function isForbidden(err: unknown) {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'status' in err &&
-    (err as { status?: unknown }).status === 403
-  );
-}
 
 function parsePercent(text: string) {
   const value = Number(text);

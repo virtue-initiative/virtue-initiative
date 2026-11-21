@@ -64,8 +64,7 @@ function GlobalEmailActionHandler() {
     window.sessionStorage.removeItem(GLOBAL_MESSAGE_KEY);
     try {
       const parsed = JSON.parse(stored) as
-        | { message: string; isError: boolean }
-        | Array<{ message: string; isError: boolean }>;
+        { message: string; isError: boolean } | Array<{ message: string; isError: boolean }>;
       const parsedList = Array.isArray(parsed) ? parsed : [parsed];
       for (const item of parsedList.filter(
         (i) => typeof i.message === 'string' && i.message.trim(),
