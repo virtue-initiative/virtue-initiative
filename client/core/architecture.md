@@ -409,14 +409,6 @@ I/O; `plan_batch` additionally requires `post_login_proof_batches_remaining >
 A batch always takes every hashed event (BATCH-006), so `plan_hash_retries`
 stops hashing once `MAX_BATCH_ITEMS_PER_UPLOAD` hashed events are waiting,
 and resumes after that batch lands.
-Each batch gets a fresh `upload_id` (API-038). A batch that was sent and
-failed is kept in `UploadState.unconfirmed_batch`, because the server may have
-stored it and reset the hash chain with only the response lost. Until an
-attempt lands, `plan_batch` resends the same events under the same
-`upload_id` with `retry` set, so a stored batch is returned rather than stored
-twice, and hashing stops so that no event is hashed into a chain the server
-may already have reset (CORE-005). A batch that could not be built was never
-sent, so it does not count.
 `Daemon::flush_batch_now()` (and the daemon's own shutdown-time flush) call
 `upload::request_immediate_flush`, which sets both flags **and** resets both
 backoffs to "ready now" — bypassing the cooldown for one attempt, matching
@@ -446,6 +438,21 @@ or when the hash server answered 401, which clears the cache (a wall clock set b
 expired token look fresh). `Daemon::new`
 also performs one such refresh at startup if already authenticated (CORE-005's
 "refreshed on process startup" requirement).
+
+Each `PendingBatchEvent` keeps the `seq` it was hashed under, and `plan_batch`
+sends the first and last as `start_seq`/`end_seq` (API-038) when every event
+has one. The API stores a batch only if those match the hash server's chain,
+which is how a lost `POST /d/batch` response is handled without holding
+hashing. Say an attempt is stored, the chain reset, and the response lost.
+`commit_batch` records the attempt's `end_seq` in
+`UploadState.unconfirmed_through_seq`, and hashing carries on into the new
+chain. The retry holds the old events plus the new ones, so the API answers
+`batch_already_stored` with the chain's `first_seq`, and
+`drop_stored_events` drops the front events below it, never past
+`unconfirmed_through_seq`. If that would drop nothing, it clears every
+waiting event's `seq` so the next attempt goes up unchecked, rather than
+being refused forever. `hash_chain_moved` (the device hashed more while an
+earlier attempt was still in flight) is retried like any failure.
 
 ## Testing
 

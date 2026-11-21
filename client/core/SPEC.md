@@ -100,7 +100,12 @@ An event with a risk of 90% or more, rounded to a whole percent, MUST force the 
 
 A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
 
-Each batch MUST get a new `upload_id` (API-038). An upload that was sent and failed may still have been stored, with only its response lost, so until an attempt at that batch succeeds the daemon MUST retry it with the same `upload_id` and events and with `retry` set, and MUST NOT upload more hashes. Otherwise the server could store the batch twice, and the retry would not match the hash chain the server reset when it stored the first attempt.
+The daemon MUST keep the hash server `seq` of each hashed event, and MUST send a batch's first and last as `start_seq` and `end_seq` (API-038) whenever every event in it has one. A batch upload can be stored with only its response lost, and the daemon keeps hashing while it retries, so these let the server say which events it already has:
+
+- On `batch_already_stored`, the daemon MUST drop the events whose `seq` is below the response's `first_seq` (every event, if its `seq` is 0), but only those it sent in an earlier attempt that did not succeed, and retry the rest. If that drops nothing, the daemon MUST forget the `seq` of every waiting event, so the next attempt is stored without the check (and fails verification) rather than being refused forever.
+- On `hash_chain_moved`, the daemon MUST retry as after any other failure.
+
+The daemon MUST NOT hold hash uploads while it retries a batch, beyond the 200-event limit above.
 
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 

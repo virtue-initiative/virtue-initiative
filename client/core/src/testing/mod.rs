@@ -70,8 +70,8 @@ mod tests {
             hash_token: "canned-hash-token".into(),
         }));
         let batch = crate::model::BatchUpload {
-            upload_id: "upload-1".into(),
-            retry: false,
+            start_seq: None,
+            end_seq: None,
             start_time_ms: 0,
             end_time_ms: 1,
             bytes: vec![1, 2, 3],

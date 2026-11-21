@@ -69,6 +69,11 @@ pub struct PendingBatchEvent {
     /// sent standalone.
     #[serde(default)]
     pub notify: Option<NotifyPayload>,
+    /// The hash server `seq` this event was accepted under (CORE-005), or
+    /// `None` for an event queued before seqs were kept, or whose seq was
+    /// dropped after a mismatch nothing could fix.
+    #[serde(default)]
+    pub seq: Option<u32>,
 }
 
 /// Builds the notification payload for a high-risk event.
@@ -142,10 +147,6 @@ impl RetryBackoff {
 #[serde(default)]
 pub struct UploadState {
     pub pending_batch_events: Vec<PendingBatchEvent>,
-    /// A batch that was sent and failed, so the server may have stored it with
-    /// only the response lost (CORE-005). Until an attempt at it succeeds, it is
-    /// retried as it was and nothing more is hashed.
-    pub unconfirmed_batch: Option<UnconfirmedBatch>,
     pub pending_hash_events: Vec<LogEntry>,
     pub last_batch_at_ms: Option<i64>,
     pub post_login_proof_batches_remaining: u32,
@@ -157,6 +158,10 @@ pub struct UploadState {
     /// batch upload that lands (the API resets the server's hash state right after
     /// storing the batch).
     pub next_hash_seq: u32,
+    /// The highest `end_seq` of a batch attempt that was sent and failed, so
+    /// the server may have stored it with only the response lost. On
+    /// `batch_already_stored` only events up to here may be dropped (CORE-005).
+    pub unconfirmed_through_seq: Option<u32>,
     pub hash_backoff: RetryBackoff,
     pub batch_backoff: RetryBackoff,
     /// Cached hash-server JWT and the UTC-ms time it was fetched. Refreshed via
@@ -170,14 +175,6 @@ pub struct UploadState {
     /// additionally bypasses the screen-lock battery gate. Cleared once a
     /// batch successfully lands.
     pub bypass_lock: bool,
-}
-
-/// The `upload_id` of a sent batch and how many of the front
-/// `pending_batch_events` it held.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct UnconfirmedBatch {
-    pub upload_id: String,
-    pub count: usize,
 }
 
 impl UploadState {
@@ -280,13 +277,8 @@ pub fn next_batch_attempt_at_ms(
 
 /// How many more events may be hashed before the pending batch is full. A
 /// batch must hold every event hashed since the last one (BATCH-006), so
-/// hashing stops at the cap until that batch uploads (CORE-005). It also
-/// stops while a sent batch is unconfirmed: if the server stored it, it reset
-/// the hash chain, and an event hashed now would belong to neither batch.
+/// hashing stops at the cap until that batch uploads (CORE-005).
 fn batch_room(state: &UploadState) -> usize {
-    if state.unconfirmed_batch.is_some() {
-        return 0;
-    }
     MAX_BATCH_ITEMS_PER_UPLOAD.saturating_sub(state.pending_batch_events.len())
 }
 
@@ -455,6 +447,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
                     encoded,
                     is_screenshot,
                     notify,
+                    seq: Some(seq),
                 });
             }
             Err(err) if err.is_bad_request() => {
@@ -576,7 +569,7 @@ pub struct BatchPlan {
     /// a deferred upload so it backs off like any other failure, rather than
     /// leaving the batch due and spinning the loop (CORE-020).
     batch: CoreResult<BatchUpload>,
-    sent: UnconfirmedBatch,
+    count: usize,
 }
 
 /// Phase 4: decide whether a batch upload should run this tick.
@@ -602,26 +595,14 @@ pub fn plan_batch(
 
     // BATCH-006: the batch holds every hashed event, in the order the hash
     // server accepted them (the queue's order), or it fails verification.
-    // `batch_room` is what keeps this within MAX_BATCH_ITEMS_PER_UPLOAD, and
-    // stops hashing while a batch is unconfirmed, so a retry (CORE-005) holds
-    // the same events as the attempt before it.
-    let (sent, retry) = match &state.unconfirmed_batch {
-        Some(unconfirmed) => (
-            UnconfirmedBatch {
-                upload_id: unconfirmed.upload_id.clone(),
-                count: unconfirmed.count.min(state.pending_batch_events.len()),
-            },
-            true,
-        ),
-        None => (
-            UnconfirmedBatch {
-                upload_id: CryptoEngine.generate_uuid(),
-                count: state.pending_batch_events.len(),
-            },
-            false,
-        ),
-    };
-    let items = state.pending_batch_events[..sent.count].to_vec();
+    // `batch_room` is what keeps this within MAX_BATCH_ITEMS_PER_UPLOAD.
+    let count = state.pending_batch_events.len();
+    let items = state.pending_batch_events.clone();
+    // CORE-005: send the seqs only when every event has one.
+    let seqs: Option<Vec<u32>> = items.iter().map(|event| event.seq).collect();
+    let (start_seq, end_seq) = seqs
+        .map(|seqs| (seqs.first().copied(), seqs.last().copied()))
+        .unwrap_or_default();
     let start_time_ms = items.iter().map(|event| event.ts).min()?;
     let high_risk_count = items
         .iter()
@@ -650,8 +631,8 @@ pub fn plan_batch(
         notifications,
     )
     .map(|batch| BatchUpload {
-        upload_id: sent.upload_id.clone(),
-        retry,
+        start_seq,
+        end_seq,
         ..batch
     });
 
@@ -659,7 +640,7 @@ pub fn plan_batch(
         device_id: creds.device_id.clone(),
         refresh_token: creds.refresh_token.clone(),
         batch,
-        sent,
+        count,
     })
 }
 
@@ -676,8 +657,15 @@ pub enum BatchOutcome {
     Deferred {
         device_id: String,
         error: String,
-        /// The batch, when it was sent and so may have been stored.
-        sent: Option<UnconfirmedBatch>,
+        /// The batch's `end_seq`, when it was sent and so may have been stored.
+        sent_end_seq: Option<u32>,
+    },
+    /// API-038: the batch began with events an earlier attempt stored.
+    AlreadyStored {
+        device_id: String,
+        error: String,
+        first_seq: u32,
+        seq: u32,
     },
 }
 
@@ -687,7 +675,9 @@ impl BatchOutcome {
     pub fn error(&self) -> Option<(String, String)> {
         match self {
             BatchOutcome::Uploaded { .. } => None,
-            BatchOutcome::LoggedOut { error, .. } | BatchOutcome::Deferred { error, .. } => {
+            BatchOutcome::LoggedOut { error, .. }
+            | BatchOutcome::Deferred { error, .. }
+            | BatchOutcome::AlreadyStored { error, .. } => {
                 Some(("batch_upload".to_string(), error.clone()))
             }
         }
@@ -703,17 +693,18 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
             return BatchOutcome::Deferred {
                 device_id: plan.device_id,
                 error: format!("building the batch failed: {err}"),
-                sent: None,
+                sent_end_seq: None,
             };
         }
     };
+    let end_seq = batch.end_seq;
     match api.upload_batch(&plan.refresh_token, &batch) {
         Ok(response) => {
-            tracing::info!(count = plan.sent.count, "batch upload ok");
+            tracing::info!(count = plan.count, "batch upload ok");
             BATCH_UPLOAD_SUCCESS_COUNT.fetch_add(1, Ordering::Relaxed);
             BatchOutcome::Uploaded {
                 device_id: plan.device_id,
-                count: plan.sent.count,
+                count: plan.count,
                 response,
             }
         }
@@ -727,12 +718,24 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
                 error: format!("device deregistered or unauthorized, logging out: {err}"),
             }
         }
+        Err(CoreError::BatchAlreadyStored { first_seq, seq }) => {
+            let error = format!(
+                "batch upload: the server already stored its first events (chain at {first_seq}..={seq})"
+            );
+            tracing::warn!("{error}");
+            BatchOutcome::AlreadyStored {
+                device_id: plan.device_id,
+                error,
+                first_seq,
+                seq,
+            }
+        }
         Err(err) => {
             log_warning("batch upload deferred", Some(&err));
             BatchOutcome::Deferred {
                 device_id: plan.device_id,
                 error: format!("batch upload deferred: {err}"),
-                sent: Some(plan.sent),
+                sent_end_seq: end_seq,
             }
         }
     }
@@ -746,6 +749,7 @@ pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64)
         BatchOutcome::Uploaded { device_id, .. } => device_id,
         BatchOutcome::LoggedOut { device_id, .. } => device_id,
         BatchOutcome::Deferred { device_id, .. } => device_id,
+        BatchOutcome::AlreadyStored { device_id, .. } => device_id,
     };
     if state
         .device_credentials
@@ -760,7 +764,7 @@ pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64)
             count, response, ..
         } => {
             state.pending_batch_events.drain(..count);
-            state.unconfirmed_batch = None;
+            state.unconfirmed_through_seq = None;
             if state.post_login_proof_batches_remaining > 0 {
                 state.post_login_proof_batches_remaining -= 1;
             }
@@ -778,13 +782,70 @@ pub fn commit_batch(state: &mut UploadState, outcome: BatchOutcome, now_ms: i64)
             false
         }
         BatchOutcome::LoggedOut { .. } => true,
-        BatchOutcome::Deferred { sent, .. } => {
-            if sent.is_some() {
-                state.unconfirmed_batch = sent;
+        BatchOutcome::Deferred { sent_end_seq, .. } => {
+            if let Some(end_seq) = sent_end_seq {
+                state.unconfirmed_through_seq = state.unconfirmed_through_seq.max(Some(end_seq));
             }
             state.batch_backoff.record_failure(now_ms);
             false
         }
+        BatchOutcome::AlreadyStored { first_seq, seq, .. } => {
+            drop_stored_events(state, first_seq, seq, now_ms);
+            state.batch_backoff.record_failure(now_ms);
+            false
+        }
+    }
+}
+
+/// CORE-005: after `batch_already_stored`, drops the events an earlier attempt
+/// stored: those before the chain's `first_seq` (all of them if the chain is
+/// empty), but only ones sent in an attempt that failed. If that drops nothing,
+/// forgets every waiting event's seq so the next attempt is stored unchecked
+/// rather than refused forever.
+fn drop_stored_events(state: &mut UploadState, first_seq: u32, seq: u32, now_ms: i64) {
+    let stored_before = match (seq, first_seq) {
+        (0, _) => u32::MAX,
+        (_, 0) => 0,
+        (_, first) => first,
+    };
+    let sent_through = state.unconfirmed_through_seq;
+    let stored = state
+        .pending_batch_events
+        .iter()
+        .take_while(|event| {
+            event
+                .seq
+                .zip(sent_through)
+                .is_some_and(|(seq, sent)| seq < stored_before && seq <= sent)
+        })
+        .count();
+
+    if stored == 0 {
+        tracing::warn!(
+            first_seq,
+            seq,
+            "batch_already_stored, but no waiting event was sent before; uploading unchecked"
+        );
+        for event in &mut state.pending_batch_events {
+            event.seq = None;
+        }
+        return;
+    }
+
+    tracing::info!(
+        count = stored,
+        "dropping events an earlier batch attempt stored"
+    );
+    state.pending_batch_events.drain(..stored);
+    state.unconfirmed_through_seq = None;
+    // The earlier attempt landed, so count it as the batch it was.
+    if state.post_login_proof_batches_remaining > 0 {
+        state.post_login_proof_batches_remaining -= 1;
+    }
+    state.last_batch_at_ms = Some(now_ms);
+    if state.pending_batch_events.is_empty() {
+        state.force_flush = false;
+        state.bypass_lock = false;
     }
 }
 
@@ -883,6 +944,7 @@ mod tests {
     fn batch_plan_none_when_lock_gate_blocks_and_not_bypassed() {
         let mut state = authenticated_state();
         state.pending_batch_events.push(PendingBatchEvent {
+            seq: None,
             ts: 0,
             risk: 0.0,
             encoded: vec![1, 2, 3],
@@ -897,6 +959,7 @@ mod tests {
     fn batch_upload_round_trip_drains_queue_and_advances_state() {
         let mut state = authenticated_state();
         state.pending_batch_events.push(PendingBatchEvent {
+            seq: None,
             ts: 0,
             risk: 0.0,
             encoded: vec![1, 2, 3],
@@ -916,6 +979,7 @@ mod tests {
 
     fn pending_batch_event() -> PendingBatchEvent {
         PendingBatchEvent {
+            seq: None,
             ts: 0,
             risk: 0.0,
             encoded: vec![1, 2, 3],
@@ -1013,6 +1077,7 @@ mod tests {
         state.last_batch_at_ms = None;
         for (ts, encoded) in [(300, vec![3]), (100, vec![1]), (200, vec![2])] {
             state.pending_batch_events.push(PendingBatchEvent {
+                seq: None,
                 ts,
                 risk: 0.0,
                 encoded,
@@ -1061,6 +1126,7 @@ mod tests {
     fn batch_that_fails_to_build_backs_off_without_calling_the_api() {
         let mut state = authenticated_state();
         state.pending_batch_events.push(PendingBatchEvent {
+            seq: None,
             ts: 0,
             risk: 0.0,
             encoded: vec![1, 2, 3],
@@ -1111,6 +1177,7 @@ mod tests {
     fn commit_ignores_outcome_from_a_stale_session() {
         let mut state = authenticated_state();
         state.pending_batch_events.push(PendingBatchEvent {
+            seq: None,
             ts: 0,
             risk: 0.0,
             encoded: vec![1, 2, 3],

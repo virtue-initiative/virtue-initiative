@@ -10,13 +10,20 @@ import {
 } from '../lib/db';
 import { wrappedKeyForUser } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
-import { storedHashHex } from '../lib/encoding';
+import { encodeHex } from '../lib/encoding';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { serializeUser, serializeWatchers, serializeWatching } from '../lib/serializers';
 import { validateZ } from '../middleware/validation';
 import { Env, Variables } from '../types/bindings';
 
 const data = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+// batches.end_hash is a 32-byte BLOB, which D1 hands back as an ArrayBuffer or a
+// plain array of byte values.
+function endHashHex(stored: unknown): string {
+  if (typeof stored === 'string') return stored;
+  return encodeHex(stored instanceof ArrayBuffer ? stored : Uint8Array.from(stored as number[]));
+}
 
 const listDataSchema = z.object({
   since: z.coerce.number().int().nonnegative().optional().default(0),
@@ -56,7 +63,7 @@ data.get('/', authenticateWebSession(), validateZ('query', listDataSchema), asyn
           id: batch.id,
           start_time: batch.start_time,
           end_time: batch.end_time,
-          end_hash: storedHashHex(batch.end_hash),
+          end_hash: endHashHex(batch.end_hash),
           version: batch.version,
           url: batchObject(c.env, batch).url,
           encrypted_key: encryptedKey,

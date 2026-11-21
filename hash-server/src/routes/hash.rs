@@ -20,6 +20,7 @@ fn validate_device_id(id: &str) -> Result<(), ApiError> {
 pub struct DeviceInfo {
     hash: String,
     seq: u32,
+    first_seq: u32,
     last_received: u32,
 }
 
@@ -28,6 +29,7 @@ impl From<DeviceState> for DeviceInfo {
         DeviceInfo {
             hash: hex::encode(state.hash),
             seq: state.seq,
+            first_seq: state.first_seq,
             last_received: state.last_received,
         }
     }
@@ -93,6 +95,8 @@ pub async fn get_many(
 #[derive(Deserialize)]
 pub struct DeviceQuery {
     device: Option<String>,
+    /// HASH-008: reset only if the device's current `seq` is this.
+    seq: Option<u32>,
 }
 
 /// `DELETE /hash?device=device1` — see HASH-008.
@@ -109,7 +113,7 @@ pub async fn reset(
     })?;
     validate_device_id(&device_id)?;
 
-    let prior = app.writer.reset(device_id).await?;
+    let prior = app.writer.reset(device_id, query.seq).await?;
 
     Ok(Json(prior.into()))
 }

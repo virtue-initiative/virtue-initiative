@@ -666,9 +666,11 @@ async fn get_returns_one_entry_per_device() {
     for id in [unknown, DEVICE_B] {
         assert_eq!(body[id]["hash"], ZERO_HEX);
         assert_eq!(body[id]["seq"], 0);
+        assert_eq!(body[id]["first_seq"], 0);
         assert_eq!(body[id]["last_received"], 0);
     }
-    // Each entry has exactly the three documented fields.
+    assert_eq!(body[DEVICE_A]["first_seq"], 2);
+    // Each entry has exactly the four documented fields.
     let mut keys: Vec<_> = body[DEVICE_A]
         .as_object()
         .unwrap()
@@ -676,7 +678,7 @@ async fn get_returns_one_entry_per_device() {
         .cloned()
         .collect();
     keys.sort();
-    assert_eq!(keys, ["hash", "last_received", "seq"]);
+    assert_eq!(keys, ["first_seq", "hash", "last_received", "seq"]);
 }
 
 // HASH-007: a device is listed once even if requested twice; reading does not create it.
@@ -774,7 +776,7 @@ async fn delete_of_an_unknown_device_returns_the_zero_state() {
     let body: Value = resp.json().await.unwrap();
     assert_eq!(
         body,
-        json!({ "hash": ZERO_HEX, "seq": 0, "last_received": 0 })
+        json!({ "hash": ZERO_HEX, "seq": 0, "first_seq": 0, "last_received": 0 })
     );
 }
 

@@ -166,8 +166,6 @@ export async function createDeviceForUser(
 }
 
 export function batchMetadataForm(input: {
-  upload_id?: string;
-  retry?: boolean;
   start_time: number;
   end_time: number;
   access_keys: Record<string, string>;
@@ -179,8 +177,6 @@ export function batchMetadataForm(input: {
   form.set(
     'metadata',
     JSON.stringify({
-      ...(input.upload_id !== undefined ? { upload_id: input.upload_id } : {}),
-      ...(input.retry !== undefined ? { retry: input.retry } : {}),
       start_time: input.start_time,
       end_time: input.end_time,
       access_keys: input.access_keys,

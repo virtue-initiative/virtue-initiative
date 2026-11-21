@@ -18,10 +18,3 @@ export function encodeHex(value: ArrayBuffer | Uint8Array): string {
 export function decodeHex(value: string): ArrayBuffer {
   return Uint8Array.from(Buffer.from(value, 'hex')).buffer;
 }
-
-// batches.end_hash is a 32-byte BLOB, which D1 hands back as an ArrayBuffer or a
-// plain array of byte values.
-export function storedHashHex(stored: unknown): string {
-  if (typeof stored === 'string') return stored;
-  return encodeHex(stored instanceof ArrayBuffer ? stored : Uint8Array.from(stored as number[]));
-}

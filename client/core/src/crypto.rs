@@ -44,23 +44,6 @@ impl CryptoEngine {
         Ok(out)
     }
 
-    /// A random (version 4) UUID, in the usual hyphenated lowercase form.
-    pub fn generate_uuid(&self) -> String {
-        let mut bytes = [0_u8; 16];
-        AesOsRng.fill_bytes(&mut bytes);
-        bytes[6] = (bytes[6] & 0x0f) | 0x40;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        format!(
-            "{}-{}-{}-{}-{}",
-            &hex[0..8],
-            &hex[8..12],
-            &hex[12..16],
-            &hex[16..20],
-            &hex[20..32]
-        )
-    }
-
     pub fn generate_batch_key(&self) -> [u8; 32] {
         let mut batch_key = [0_u8; 32];
         AesOsRng.fill_bytes(&mut batch_key);

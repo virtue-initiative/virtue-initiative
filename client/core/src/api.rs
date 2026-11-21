@@ -347,10 +347,12 @@ impl ApiTransport for HttpApiClient {
 
         #[derive(Serialize)]
         struct BatchMetadata<'a> {
-            upload_id: &'a str,
-            retry: bool,
             start_time: i64,
             end_time: i64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            start_seq: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            end_seq: Option<u32>,
             access_keys: std::collections::BTreeMap<&'a str, &'a str>,
             event_counts: EventCounts,
             notifications: &'a [NotifyPayload],
@@ -363,10 +365,10 @@ impl ApiTransport for HttpApiClient {
         }
 
         let metadata = serde_json::to_string(&BatchMetadata {
-            upload_id: &batch.upload_id,
-            retry: batch.retry,
             start_time: batch.start_time_ms,
             end_time: batch.end_time_ms,
+            start_seq: batch.start_seq,
+            end_seq: batch.end_seq,
             access_keys: batch
                 .access_keys
                 .iter()
@@ -383,11 +385,17 @@ impl ApiTransport for HttpApiClient {
 
         let boundary = multipart_boundary();
         let body = encode_multipart(&boundary, &batch.bytes, &metadata);
-        let response: UploadBatchResponse = self.expect_json(
-            self.post(None, "/d/batch", Some(device_refresh_token))
-                .content_type(format!("multipart/form-data; boundary={boundary}"))
-                .send(&body)?,
-        )?;
+        let response = self
+            .post(None, "/d/batch", Some(device_refresh_token))
+            .content_type(format!("multipart/form-data; boundary={boundary}"))
+            .send(&body)?;
+        if response.status() == StatusCode::CONFLICT {
+            self.note_server_time(&response);
+            let mut response = response;
+            let body = response.body_mut().read_to_string().ok();
+            return Err(batch_conflict_error(body.as_deref()));
+        }
+        let response: UploadBatchResponse = self.expect_json(response)?;
         let hash_token = response.settings.hash_token.clone();
         Ok(UploadedBatchResponse {
             id: response.id,
@@ -603,6 +611,27 @@ fn multipart_boundary() -> String {
 /// Derives a non-empty error message from a non-2xx response body, falling
 /// back to a status-line-bearing message (e.g. "HTTP 502 Bad Gateway error")
 /// when the body is missing, empty, or unparseable.
+/// API-038: a 409 from `POST /d/batch` is `batch_already_stored`, which says
+/// where the hash chain now starts, or else an ordinary failure to retry.
+fn batch_conflict_error(body: Option<&str>) -> CoreError {
+    #[derive(Deserialize)]
+    struct AlreadyStored {
+        code: String,
+        first_seq: u32,
+        seq: u32,
+    }
+    match body.and_then(|body| serde_json::from_str::<AlreadyStored>(body).ok()) {
+        Some(stored) if stored.code == "batch_already_stored" => CoreError::BatchAlreadyStored {
+            first_seq: stored.first_seq,
+            seq: stored.seq,
+        },
+        _ => CoreError::HttpStatus {
+            status: StatusCode::CONFLICT.as_u16(),
+            message: error_message_from_body(StatusCode::CONFLICT, body),
+        },
+    }
+}
+
 fn error_message_from_body(status: StatusCode, body: Option<&str>) -> String {
     let fallback = body
         .filter(|s| !s.trim().is_empty())
@@ -807,6 +836,38 @@ mod tests {
             a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
             "unexpected character in boundary {a}"
         );
+    }
+
+    // API-038: a batch_already_stored 409 says where the hash chain now starts.
+    #[test]
+    fn batch_conflict_error_reads_batch_already_stored() {
+        let err = batch_conflict_error(Some(
+            r#"{"error":"stored","code":"batch_already_stored","first_seq":41,"seq":42}"#,
+        ));
+        assert!(matches!(
+            err,
+            CoreError::BatchAlreadyStored {
+                first_seq: 41,
+                seq: 42
+            }
+        ));
+    }
+
+    // API-038: any other 409 from the batch upload is an ordinary failure.
+    #[test]
+    fn batch_conflict_error_treats_other_conflicts_as_failures() {
+        for body in [
+            Some(r#"{"error":"moved","code":"hash_chain_moved"}"#),
+            Some(r#"{"error":"odd","code":"batch_already_stored"}"#),
+            Some("not json"),
+            None,
+        ] {
+            let err = batch_conflict_error(body);
+            assert!(
+                matches!(err, CoreError::HttpStatus { status: 409, .. }),
+                "{body:?}"
+            );
+        }
     }
 
     // CORE-026: API error messages.

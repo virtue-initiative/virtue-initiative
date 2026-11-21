@@ -873,10 +873,10 @@ The client MUST send a multipart form request:
 - `metadata`: JSON
   - ```js
     {
-      "upload_id": UUID | undefined,
-      "retry": boolean | undefined,
       "start_time": DateTime,
       "end_time": DateTime,
+      "start_seq": positive int | undefined,
+      "end_seq": positive int | undefined,
       "access_keys`: {
         "<user_id UUID>": Base64 // hpke_key
       },
@@ -903,7 +903,18 @@ The server MUST upload the file to object storage and store the metadata in the 
 
 The server MUST take `end_hash` from the hash server's current hash for the device (see `hash-server/SPEC.md`). If that is not 64 hexadecimal characters, the server MUST respond **HTTP 502** and MUST NOT store the batch. After storing the batch the server MUST reset the device's hash state. If the device no longer exists when the batch is stored, the server MUST NOT keep the batch or its object, and MUST respond **HTTP 404**.
 
-The client SHOULD send `upload_id`, a UUID it chooses for each batch and keeps for every attempt to upload that batch, and SHOULD set `retry` to `true` on an attempt that follows one whose response it did not get. When `retry` is `true` and the device already has a batch stored with that `upload_id`, the earlier attempt was stored and only its response was lost. In that case the server MUST NOT store the upload again and MUST NOT send its `notifications`. It MUST reset the device's hash state, in case the earlier attempt was stored but did not reach the reset, and MUST respond as below with the stored batch. The client does not hash new events while a batch is unconfirmed (CORE-005), so the reset drops nothing. The server SHOULD NOT look a batch up by `upload_id` when `retry` is not `true`, because the lookup reads the owner's stored batches.
+The client SHOULD send `start_seq` and `end_seq`, the hash server `seq` (HASH-006) of the batch's first and last event, and MUST send both or neither, with `start_seq` no greater than `end_seq`. They let the server tell a batch it already stored, whose response the device did not get, from a new one. When they are sent, the server MUST check them against the device's hash state before storing the batch, treating a `first_seq` the hash server does not report as 0:
+
+- If the hash state's `seq` is 0, or its `first_seq` is not 0 and is greater than `start_seq`, the batch begins with events the server already stored and reset. The server MUST NOT store it and MUST respond **HTTP 409** with `code` `batch_already_stored` and the hash state's `first_seq` and `seq`.
+- If the hash state's `seq` is greater than `end_seq`, the device hashed events after it built this batch, which happens only while an earlier attempt is still in flight. The server MUST NOT store it and MUST respond **HTTP 409** with `code` `hash_chain_moved`.
+- Otherwise the server MUST store the batch, and MUST then reset the hash state only if its `seq` is still the one it read (HASH-008). If it is not, the server MUST delete the batch and its object and respond **HTTP 409** with `code` `hash_chain_moved`, because the stored `end_hash` no longer ends the chain.
+
+```js
+// HTTP 409
+{ "error": string, "code": "batch_already_stored", "first_seq": int, "seq": int }
+```
+
+Without `start_seq` and `end_seq`, the server MUST store the batch and reset the hash state unconditionally, as for clients that predate them.
 
 For each entry in `notifications`, the server MUST immediately email a tamper alert to every accepted watcher of the device's owner, whatever the entry's `risk`. The alert names the device and uses the entry's `title` and `details`; `title` defaults to `Device reported <type>.` with underscores in the type replaced by spaces. The server MUST NOT send the alert to a watcher whose `email_frequency` is `none` or whose email is unverified. `risk` is required on every entry. A failure to send an alert MUST NOT fail the upload.
 
