@@ -9,68 +9,41 @@ more information about the current state.
 
 ## Structure
 
-- [`/web`](./web) contains the code for the main web app. (https://app.virtueinitiative.org)
-- [`/landing`](./landing) contains the code for the landing page and help pages. (https://virtueinitiative.org)
-- [`/client`](./client) contains subdirectories containing the code for the various desktop/mobile monitoring apps.
-- [`/api`](./api) contains the API code that runs on Cloudflare workers. (https://api.virtueinitiative.org)
+| Folder                          | What                                                                                       | Live at                          |
+| ------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------- |
+| [`web/`](web)                   | The web app, where people manage partners and read logs                                    | https://app.virtueinitiative.org |
+| [`landing/`](landing)           | The website, downloads and help pages                                                      | https://virtueinitiative.org     |
+| [`api/`](api)                   | The API, a Cloudflare Worker                                                               | https://api.virtueinitiative.org |
+| [`hash-server/`](hash-server)   | The hash server that keeps batches tamper-evident                                          |                                  |
+| [`api-donate/`](api-donate)     | The donations Worker                                                                       |                                  |
+| [`client/`](client)             | The monitoring apps for Linux, macOS, Windows, Android and iOS, and their shared Rust core |                                  |
+| [`shared-web/`](shared-web)     | UI components and API types shared by `web/` and `landing/`                                |                                  |
+| [`batch-format/`](batch-format) | The encrypted batch format and its test vectors                                            |                                  |
+| [`docs/`](docs)                 | Docs that span components                                                                  |                                  |
 
-## Local Development
+## Documentation
 
-This project uses [Bun](https://bun.sh) as its package manager and runtime.
+- [`docs/overview.md`](docs/overview.md): how the system works, end to end.
+- [`docs/README.md`](docs/README.md): every doc and what it covers.
+- [`docs/development.md`](docs/development.md): setting up a machine and running the stack.
+- Each folder's `README.md`: building and running that part.
+- Each folder's `SPEC.md`: exactly what that part must do.
 
-### First-time setup
+## Local development
 
-The NSFW screenshot model (`client/core/models/*.nnef.tar`) is stored with
-[Git LFS](https://git-lfs.com). Install and pull it before building any client,
-or the risk classifier silently reports `0` for every screenshot (the client
-build now fails loudly if the model is still an unresolved LFS pointer):
-
-```
-git lfs install
-git lfs pull
-```
-
-Run the setup script from the repo root. It installs all dependencies, copies
-example config files, runs local database migrations, and installs/configures
-[Caddy](https://caddyserver.com) for HTTPS reverse-proxying:
-
-```
-./scripts/setup.sh
-```
-
-Also configure the git hooks:
+This project uses [Bun](https://bun.sh) and [just](https://just.systems).
 
 ```
+git lfs install && git lfs pull      # the NSFW model the clients need
+./scripts/setup.sh                   # dependencies, config, local database, Caddy
 git config --local core.hookspath scripts/hooks
+./scripts/launch.sh                  # API, web, landing and hash server, on ports it prints
 ```
 
-### Starting the dev servers
-
-Use `launch.sh` to start the API, web app, and landing site together with
-interleaved, colour-coded logs. Ports are chosen automatically.
-
-**Plain HTTP (simplest):**
-
-```
-./scripts/launch.sh
-```
-
-**HTTPS via Caddy with a custom local domain** (mimics production URL
-structure — useful for testing auth flows, cookies, etc.):
-
-```
-./scripts/launch.sh <domain>
-```
-
-This registers `<domain>.localhost` (landing) and `app.<domain>.localhost`
-(web + API) in the running Caddy instance. Caddy must be running first
-(`setup.sh` starts it).
-
-**Client:** Check the build instructions in `client/` and point it at the API
-URL printed by `launch.sh` (e.g. `VIRTUE_BASE_API_URL=http://localhost:<port>`).
-
-More information about each component can be found in their respective
-subfolders.
+Then log in to the web app as `dev@dev.com` / `devpassword` after running `just seed`.
+`just --list` shows the everyday commands. [`docs/development.md`](docs/development.md) has the
+details, including HTTPS local domains, and [`client/README.md`](client/README.md) covers
+pointing a client app at your local API.
 
 ## Contributing
 

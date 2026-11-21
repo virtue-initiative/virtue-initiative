@@ -97,5 +97,5 @@ targets the new account's `app-bucket`/`staging-app-bucket`).
 - Double check nothing else in the old account references these names
   (`wrangler whoami`, `wrangler d1 list`, `wrangler r2 bucket list` against
   the old account ID should come back clean of `virtueinitiative-*` entries).
-- Delete this file (`CLEANUP-OLD-ACCOUNT.md`) once cleanup is confirmed done —
+- Delete this file once cleanup is confirmed done —
   it has no further purpose after this point.

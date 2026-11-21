@@ -60,7 +60,7 @@ pub fn logout<A: ApiTransport>(state: &mut DaemonState, api: &A) {
     if let Some(creds) = &state.auth.device_credentials {
         let _ = api.logout(&creds.refresh_token);
     }
-    *state = DaemonState::default();
+    *state = DaemonState::initial();
 }
 
 #[cfg(test)]

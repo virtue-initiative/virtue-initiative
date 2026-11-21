@@ -211,9 +211,18 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
-    /// Forces an immediate screenshot capture, bypassing the normal
-    /// interval-due gate (still honors the locked/screensaver and
-    /// fingerprint-dedup gates), then waits for the resulting batch to reach
+    /// How many seconds Test Screenshot counts down before it captures, so the
+    /// user can bring up the screen they want captured (CLIENT-008).
+    static let testScreenshotDelaySeconds = 10
+
+    static func testScreenshotWaitingMessage(_ seconds: Int) -> String {
+        let unit = seconds == 1 ? "second" : "seconds"
+        return "Taking screenshot in \(seconds) \(unit)…"
+    }
+
+    /// After counting down `testScreenshotDelaySeconds`, forces a screenshot capture,
+    /// bypassing the normal interval-due gate (still honors the
+    /// locked/screensaver and fingerprint-dedup gates), then waits for the resulting batch to reach
     /// the server so the confirmation reflects what actually happened — a
     /// gated capture and an upload still in flight each say so. Shows a
     /// transient message that clears itself after a few seconds, rather than
@@ -223,8 +232,12 @@ final class MonitoringCoordinator: ObservableObject {
             return
         }
         isForceCapturing = true
-        forceCaptureMessage = "Screenshot uploading…"
         Task {
+            for left in stride(from: Self.testScreenshotDelaySeconds, to: 0, by: -1) {
+                forceCaptureMessage = Self.testScreenshotWaitingMessage(left)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            forceCaptureMessage = "Screenshot uploading…"
             let result = await Task.detached(priority: .userInitiated) {
                 NativeBridge.forceCapture()
             }.value

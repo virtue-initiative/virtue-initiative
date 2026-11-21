@@ -118,10 +118,18 @@ struct ContentView: View {
         }
     }
 
+    /// While a Test Screenshot runs, its current step (CLIENT-008).
+    private var testScreenshotLabel: String {
+        guard coordinator.isForceCapturing else {
+            return "Test Screenshot"
+        }
+        return coordinator.forceCaptureMessage ?? "Screenshot uploading…"
+    }
+
     @ViewBuilder
     private var menuItems: some View {
         if coordinator.loggedIn {
-            Button(coordinator.isForceCapturing ? "Screenshot uploading…" : "Test Screenshot") {
+            Button(testScreenshotLabel) {
                 coordinator.forceCapture()
             }
             .disabled(coordinator.needsScreenRecording || coordinator.isForceCapturing)

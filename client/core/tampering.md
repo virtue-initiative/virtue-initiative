@@ -16,8 +16,8 @@ loop spec, kept minimal by design):
   scheduled for. The difference is appended to a last-10 array
   (`LifecycleState.late_wakeups`), unless the wakeup is within 2 minutes of
   a system login, was scheduled within 2 minutes of a system logout, or a
-  suspend (detected via divergence between the wall clock and a clock that
-  doesn't advance while suspended) accounts for essentially the whole gap —
+  suspend (detected via divergence between the boot clock, which counts
+  suspend, and a clock that doesn't) accounts for essentially the whole gap —
   in any of these cases it's excused, not recorded. Unlike the login/logout
   pair, suspend evidence can only ever add an excuse, never block one.
 - An alert (`UploadKind::ScreenshotMissed`, `HIGH_RISK_LIFECYCLE_ALERT`) fires
