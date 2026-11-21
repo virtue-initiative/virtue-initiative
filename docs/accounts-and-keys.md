@@ -106,11 +106,12 @@ partners' copies are unaffected, and partners can still read everything uploaded
 
 ## Deleting things
 
-Deleting a device from the web app (`DELETE /device/:id`, API-031) deletes it and its batches and
-emails the owner and their partners. Deleting an account (`DELETE /user`, API-021) removes the
-account, its devices, batches, sessions and tokens. In both cases the encrypted batch files in R2
-expire under the bucket's 30-day rule (see [`api/architecture.md`](../api/architecture.md)), and
-with the database rows gone nothing points at them in the meantime.
+Deleting a device from the web app (`DELETE /device/:id`, API-031) deletes it, its batch rows
+and their encrypted files in R2, and emails the owner and their partners. Deleting an account
+(`DELETE /user`, API-021) removes the account, its devices, batches, sessions and tokens, but
+leaves the batch files in R2 to expire under the bucket's 30-day rule (see
+[`api/architecture.md`](../api/architecture.md)). With the database rows gone, nothing points at
+them in the meantime.
 
 ## Where the code is
 

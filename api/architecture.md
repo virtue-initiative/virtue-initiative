@@ -20,8 +20,9 @@ newsletter, bug report and email webhook routes sit at the root.
 Most routes then pass through the same few pieces of middleware in `src/middleware/`. `auth.ts`
 accepts a web session (the `refresh_token` cookie, or the same token as a bearer header) or a
 device token, and each route accepts one kind: `/d/*` takes device tokens and everything else
-takes web sessions (API-003). `rate-limit.ts` limits by IP on the account, bug report and newsletter routes, and by device
-on `/d/*` (API-034). `validation.ts` checks the body or query against a Zod schema and returns the
+takes web sessions (API-003). `rate-limit.ts` limits a few routes: by IP on `POST /password-reset`,
+bug reports and the newsletter signup, and by the signed-in device or user on `GET /d/device`,
+`POST /d/batch` (API-034) and `POST /user/password`. `validation.ts` checks the body or query against a Zod schema and returns the
 standard 400 when it does not match. Every D1 query lives in `src/lib/db.ts`, which keeps the SQL
 in one place and makes it much easier to see what an index is for.
 
