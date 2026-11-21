@@ -56,6 +56,15 @@ public sealed class UpdateRelaunchTaskTests
         Assert.Equal("true", (string)settings.Element(Ns + "StartWhenAvailable")!);
     }
 
+    // CLIENT-029: the relaunched app is the task's own process, so a run time limit would kill it.
+    [Fact]
+    public void BuildTaskXml_HasNoRunTimeLimit()
+    {
+        var settings = Build().Element(Ns + "Settings")!;
+
+        Assert.Equal("PT0S", (string)settings.Element(Ns + "ExecutionTimeLimit")!);
+    }
+
     [Fact]
     public void BuildTaskXml_EscapesPathsSoAnAmpersandCannotCorruptTheDefinition()
     {
