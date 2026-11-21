@@ -4,7 +4,6 @@ import {
   BASE,
   batchMetadataForm,
   clearDB,
-  createDeviceForUser,
   passwordAuthFor,
   signupAndGetCookie,
   uuidToBytes,
@@ -54,6 +53,63 @@ function fetchSettings(refreshToken: string, version?: string) {
   });
 }
 
+function uploadBatch(
+  device: { id: string; refresh_token: string },
+  ownerId: string,
+  version?: string,
+) {
+  seedHashState(device.id, { hash: '5a'.repeat(32), seq: 3, last_received: 1_700_000_000 });
+  return SELF.fetch(`${BASE}/d/batch`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${device.refresh_token}`,
+      ...(version !== undefined ? { 'X-Virtue-Version': version } : {}),
+    },
+    body: batchMetadataForm({
+      start_time: 1_000,
+      end_time: 2_000,
+      access_keys: { [ownerId]: btoa('owner-envelope') },
+      file: new File([new Uint8Array([1, 2, 3])], 'batch.enc'),
+    }),
+  });
+}
+
+// Counts writes to devices.app_version while `run` runs.
+async function countVersionWrites(run: () => Promise<void>) {
+  await env.DB.batch([
+    env.DB.prepare('CREATE TABLE version_writes (n INTEGER)'),
+    env.DB.prepare(
+      `CREATE TRIGGER count_version_writes AFTER UPDATE OF app_version ON devices
+       BEGIN INSERT INTO version_writes VALUES (1); END`,
+    ),
+  ]);
+  try {
+    await run();
+    const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM version_writes').first<{
+      n: number;
+    }>();
+    return row!.n;
+  } finally {
+    await env.DB.batch([
+      env.DB.prepare('DROP TRIGGER count_version_writes'),
+      env.DB.prepare('DROP TABLE version_writes'),
+    ]);
+  }
+}
+
+// Makes every write to devices.app_version fail while `run` runs.
+async function withFailingVersionWrites(run: () => Promise<void>) {
+  await env.DB.prepare(
+    `CREATE TRIGGER fail_version_writes BEFORE UPDATE OF app_version ON devices
+     BEGIN SELECT RAISE(ABORT, 'version written'); END`,
+  ).run();
+  try {
+    await run();
+  } finally {
+    await env.DB.prepare('DROP TRIGGER fail_version_writes').run();
+  }
+}
+
 describe('POST /d/device (API-035)', () => {
   it('stores the version the client sends', async () => {
     await signupAndGetCookie('owner@example.com');
@@ -61,14 +117,16 @@ describe('POST /d/device (API-035)', () => {
     expect(await storedVersion(device.id)).toBe('0.1.9');
   });
 
-  it('stores none when the header is missing or invalid', async () => {
+  it.each([
+    ['missing', undefined],
+    ['not a version', '0.1.9; DROP TABLE'],
+    ['too long', '1'.repeat(33)],
+    ['without a leading number', 'dev'],
+    ['only a sign', '+'],
+  ])('stores none when the header is %s', async (_, version) => {
     await signupAndGetCookie('owner@example.com');
-    const missing = await register('owner@example.com');
-    expect(await storedVersion(missing.id)).toBeNull();
-    const invalid = await register('owner@example.com', '0.1.9; DROP TABLE');
-    expect(await storedVersion(invalid.id)).toBeNull();
-    const tooLong = await register('owner@example.com', '1'.repeat(33));
-    expect(await storedVersion(tooLong.id)).toBeNull();
+    const device = await register('owner@example.com', version);
+    expect(await storedVersion(device.id)).toBeNull();
   });
 });
 
@@ -87,44 +145,75 @@ describe('GET /d/device (API-036)', () => {
 
     expect((await fetchSettings(device.refresh_token)).status).toBe(200);
     expect((await fetchSettings(device.refresh_token, 'not a version!')).status).toBe(200);
+    expect((await fetchSettings(device.refresh_token, 'dev')).status).toBe(200);
     expect(await storedVersion(device.id)).toBe('0.1.9');
   });
 
-  it('does not write the device when the version is unchanged', async () => {
+  it('writes the device only when the version changed', async () => {
     await signupAndGetCookie('owner@example.com');
     const device = await register('owner@example.com', '0.1.9');
-    // Any write to devices now fails the request.
-    await env.DB.prepare(
-      `CREATE TRIGGER no_device_writes BEFORE UPDATE ON devices
-       BEGIN SELECT RAISE(ABORT, 'device written'); END`,
-    ).run();
-    try {
+
+    const unchanged = await countVersionWrites(async () => {
       expect((await fetchSettings(device.refresh_token, '0.1.9')).status).toBe(200);
-      expect((await fetchSettings(device.refresh_token, '0.2.0')).status).toBe(500);
-    } finally {
-      await env.DB.prepare('DROP TRIGGER no_device_writes').run();
-    }
+    });
+    expect(unchanged).toBe(0);
+
+    const changed = await countVersionWrites(async () => {
+      expect((await fetchSettings(device.refresh_token, '0.2.0')).status).toBe(200);
+    });
+    expect(changed).toBe(1);
+  });
+
+  it('still returns the settings when storing the version fails', async () => {
+    await signupAndGetCookie('owner@example.com');
+    const device = await register('owner@example.com', '0.1.9');
+
+    await withFailingVersionWrites(async () => {
+      expect((await fetchSettings(device.refresh_token, '0.2.0')).status).toBe(200);
+    });
+    expect(await storedVersion(device.id)).toBe('0.1.9');
   });
 });
 
 describe('POST /d/batch (API-036)', () => {
-  it('does not change the stored version', async () => {
+  it('stores a changed version, for a client that started offline', async () => {
     const { userId } = await signupAndGetCookie('owner@example.com');
-    const device = await createDeviceForUser('owner@example.com');
-    seedHashState(device.id, { hash: '5a'.repeat(32), seq: 3, last_received: 1_700_000_000 });
-    expect(await storedVersion(device.id)).toBeNull();
+    const device = await register('owner@example.com', '0.1.9');
 
-    const res = await SELF.fetch(`${BASE}/d/batch`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${device.refresh_token}`, 'X-Virtue-Version': '0.2.0' },
-      body: batchMetadataForm({
-        start_time: 1_000,
-        end_time: 2_000,
-        access_keys: { [userId]: btoa('owner-envelope') },
-        file: new File([new Uint8Array([1, 2, 3])], 'batch.enc'),
-      }),
+    expect((await uploadBatch(device, userId, '0.2.0')).status).toBe(200);
+    expect(await storedVersion(device.id)).toBe('0.2.0');
+  });
+
+  it('keeps the stored version when the header is missing or invalid', async () => {
+    const { userId } = await signupAndGetCookie('owner@example.com');
+    const device = await register('owner@example.com', '0.1.9');
+
+    expect((await uploadBatch(device, userId)).status).toBe(200);
+    expect((await uploadBatch(device, userId, 'dev')).status).toBe(200);
+    expect(await storedVersion(device.id)).toBe('0.1.9');
+  });
+
+  it('writes the device only when the version changed', async () => {
+    const { userId } = await signupAndGetCookie('owner@example.com');
+    const device = await register('owner@example.com', '0.1.9');
+
+    const writes = await countVersionWrites(async () => {
+      expect((await uploadBatch(device, userId, '0.1.9')).status).toBe(200);
     });
-    expect(res.status).toBe(200);
-    expect(await storedVersion(device.id)).toBeNull();
+    expect(writes).toBe(0);
+  });
+
+  it('still stores the batch when storing the version fails', async () => {
+    const { userId } = await signupAndGetCookie('owner@example.com');
+    const device = await register('owner@example.com', '0.1.9');
+
+    await withFailingVersionWrites(async () => {
+      expect((await uploadBatch(device, userId, '0.2.0')).status).toBe(200);
+    });
+    expect(await storedVersion(device.id)).toBe('0.1.9');
+    const batches = await env.DB.prepare('SELECT COUNT(*) AS n FROM batches WHERE device_id = ?')
+      .bind(uuidToBytes(device.id))
+      .first<{ n: number }>();
+    expect(batches!.n).toBe(1);
   });
 });

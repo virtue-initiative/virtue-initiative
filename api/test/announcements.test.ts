@@ -159,6 +159,10 @@ describe('Announcements in device settings (API-068)', () => {
     });
     // An old client sends no version, so it counts as below every version.
     expect((await deviceAnnouncement(windows.refresh_token))?.message).toBe('Update Windows');
+    // So does a version that isn't valid, even with a leading number.
+    expect((await deviceAnnouncement(windows.refresh_token, '0.2.0 beta'))?.message).toBe(
+      'Update Windows',
+    );
     // Up to date, or another platform: the older announcement for everyone.
     expect((await deviceAnnouncement(windows.refresh_token, '0.2.0'))?.message).toBe(
       'For everyone',

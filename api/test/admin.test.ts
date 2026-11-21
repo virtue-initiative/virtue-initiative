@@ -137,6 +137,32 @@ describe('Admin queries (API-055)', () => {
     }
   });
 
+  it('sorts devices by version numerically, unknown last (API-054)', async () => {
+    const { cookie, userId } = await adminCookie();
+    const versions = ['0.9.0', null, '0.10.0', '0.1.9', '0.1.10', '1.0.0-dev', '0.10.0'];
+    for (const [i, version] of versions.entries()) {
+      await env.DB.prepare(
+        `INSERT INTO devices (id, owner, name, platform, app_version, created_at)
+         VALUES (?, ?, ?, 'linux', ?, 0)`,
+      )
+        .bind(uuidToBytes(crypto.randomUUID()), uuidToBytes(userId), `Device ${i}`, version)
+        .run();
+    }
+
+    const res = await query(cookie, { preset: 'devices_by_version' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AdminQueryResult;
+    expect(body.columns).toEqual(['platform', 'app_version', 'devices']);
+    expect(body.rows).toEqual([
+      ['linux', '1.0.0-dev', 1],
+      ['linux', '0.10.0', 2],
+      ['linux', '0.9.0', 1],
+      ['linux', '0.1.10', 1],
+      ['linux', '0.1.9', 1],
+      ['linux', 'unknown', 1],
+    ]);
+  });
+
   it('returns 404 for an unknown preset', async () => {
     const { cookie } = await adminCookie();
     const res = await query(cookie, { preset: 'nope' });
