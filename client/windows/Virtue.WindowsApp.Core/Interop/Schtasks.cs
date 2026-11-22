@@ -43,7 +43,7 @@ internal static class Schtasks
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new Result(Started: false, ExitCode: -1, Output: ex.Message);
+            return new Result(Started: false, ExitCode: -1, Output: $"could not write the task definition: {ex.Message}");
         }
         finally
         {

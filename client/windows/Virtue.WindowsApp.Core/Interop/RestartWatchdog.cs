@@ -40,6 +40,22 @@ public static class RestartWatchdog
     public static readonly TimeSpan RenewInterval = TimeSpan.FromHours(6);
 
     /// <summary>
+    /// How often the running app checks whether <see cref="IsRenewalDue"/>. A timer does not
+    /// count time the PC is asleep, so a 6-hour timer could leave a laptop that slept for a day
+    /// waking to an expired, deleted task and waiting hours more for the next renewal. Checking
+    /// wall-clock time every minute renews it within a minute of waking.
+    /// </summary>
+    public static readonly TimeSpan RenewalCheckInterval = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Whether the task should be registered again (CLIENT-028): once <see cref="RenewInterval"/>
+    /// of wall-clock time has passed since <paramref name="lastRegisteredAt"/>, including time
+    /// asleep, or when the clock has moved back before it.
+    /// </summary>
+    public static bool IsRenewalDue(DateTime lastRegisteredAt, DateTime now) =>
+        now < lastRegisteredAt || now - lastRegisteredAt >= RenewInterval;
+
+    /// <summary>
     /// Creates or replaces the per-user watchdog task, with a fresh expiry. Safe to call
     /// repeatedly. Replacing it also turns a task left by an older version (the PowerShell
     /// form) into this one.

@@ -75,6 +75,28 @@ public sealed class AppDataDirectoryTests : IDisposable
         Assert.True(File.Exists(Path.Combine(Legacy, "data", "event_state.json")));
     }
 
+    // CLIENT-002: a launch that hands off to the running instance (the watchdog's, every
+    // minute) never moves the old folder, which that instance may still be using.
+    [Fact]
+    public void Choose_ForALaunchThatHandsOff_LeavesTheOldFolderInPlace()
+    {
+        WriteLegacyState();
+
+        Assert.Equal(Legacy, AppDataDirectory.Choose(Legacy, Package, mayMove: false, _log.Add));
+        Assert.True(File.Exists(Path.Combine(Legacy, "data", "event_state.json")));
+        Assert.False(Directory.Exists(Package));
+    }
+
+    // CLIENT-002: the running instance moves the old folder.
+    [Fact]
+    public void Choose_ForTheRunningInstance_MovesTheOldFolder()
+    {
+        WriteLegacyState();
+
+        Assert.Equal(Package, AppDataDirectory.Choose(Legacy, Package, mayMove: true, _log.Add));
+        Assert.False(Directory.Exists(Legacy));
+    }
+
     // CLIENT-002: when the copy fails, the launch keeps using the old folder and nothing is
     // lost or half-moved.
     [Fact]

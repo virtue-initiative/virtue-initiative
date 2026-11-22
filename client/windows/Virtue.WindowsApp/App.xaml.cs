@@ -28,7 +28,12 @@ public partial class App : Application
     private DateTimeOffset? _updateStagedAtUtc;
     private int _updateRestartStarted;
     private static readonly TimeSpan CountdownTickInterval = TimeSpan.FromMinutes(1);
+    private const string MainInstanceKey = "VirtueResidentMain";
     private CancellationTokenSource? _watchdogRenewalCancellation;
+    // Held while registering or deleting the watchdog, so a renewal already under way can't
+    // put the task back after Exit deletes it.
+    private readonly object _watchdogLock = new();
+    private DateTime _watchdogRegisteredAt;
     private static string StartupLogPath => Path.Combine(AppDataDirectory.Current, "ui-startup.log");
 
     public App()
@@ -36,8 +41,13 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += CurrentDomainOnUnhandledException;
         UnhandledException += OnXamlUnhandledException;
         InitializeComponent();
-        // Before anything touches app files, including the native layer (CLIENT-002).
-        foreach (var line in AppDataDirectory.Initialize(TryGetPackageLocalStatePath()))
+        // Before anything touches app files, including the native layer (CLIENT-002). Only the
+        // process that will be the running instance may move an older version's folder: the
+        // watchdog starts a process every minute that only hands off, and if the running
+        // instance fell back to the old folder, such a process must not move it out from
+        // under it.
+        _mainInstance = AppLifecycleInstance.FindOrRegisterForKey(MainInstanceKey);
+        foreach (var line in AppDataDirectory.Initialize(TryGetPackageLocalStatePath(), mayMove: _mainInstance.IsCurrent))
         {
             LogStartup(line);
         }
@@ -196,7 +206,7 @@ public partial class App : Application
 
     private async Task<bool> EnsureSingleInstanceAsync()
     {
-        _mainInstance = AppLifecycleInstance.FindOrRegisterForKey("VirtueResidentMain");
+        _mainInstance ??= AppLifecycleInstance.FindOrRegisterForKey(MainInstanceKey);
         if (_mainInstance.IsCurrent)
         {
             _mainInstance.Activated += MainInstanceOnActivated;
@@ -274,17 +284,24 @@ public partial class App : Application
     /// when it exists — see <see cref="AppLaunchPath"/> for why the version-stamped process path
     /// silently breaks auto-relaunch after every update.
     /// </summary>
-    private static void RegisterWatchdog()
+    private void RegisterWatchdog()
     {
-        RenewWatchdog();
+        lock (_watchdogLock)
+        {
+            RenewWatchdog();
+        }
 
         // We are running, so any one-shot relaunch still armed from an earlier update has
         // either already done its job or been made redundant by whatever started us.
         UpdateRelaunchTask.Cancel();
     }
 
-    private static void RenewWatchdog()
+    /// <summary>Call with <see cref="_watchdogLock"/> held.</summary>
+    private void RenewWatchdog()
     {
+        // Recorded even when registration fails, so a failure is retried at the next renewal
+        // rather than every minute.
+        _watchdogRegisteredAt = DateTime.Now;
         var launchPath = AppLaunchPath.Resolve(
             AppLaunchPath.ExecutionAliasPath,
             Environment.ProcessPath,
@@ -300,7 +317,9 @@ public partial class App : Application
 
     /// <summary>
     /// The watchdog task expires a day after it is registered, so that it removes itself after
-    /// an uninstall (CLIENT-014). While the app runs it keeps pushing that day forward.
+    /// an uninstall (CLIENT-014). While the app runs it keeps pushing that day forward, going by
+    /// wall-clock time so a PC that slept through the expiry renews it as soon as it wakes (see
+    /// <see cref="RestartWatchdog.RenewalCheckInterval"/>).
     /// </summary>
     private void StartWatchdogRenewal()
     {
@@ -313,10 +332,17 @@ public partial class App : Application
         var token = _watchdogRenewalCancellation.Token;
         _ = Task.Run(async () =>
         {
-            using var timer = new PeriodicTimer(RestartWatchdog.RenewInterval);
+            using var timer = new PeriodicTimer(RestartWatchdog.RenewalCheckInterval);
             while (await timer.WaitForNextTickAsync(token))
             {
-                RenewWatchdog();
+                lock (_watchdogLock)
+                {
+                    if (!token.IsCancellationRequested
+                        && RestartWatchdog.IsRenewalDue(_watchdogRegisteredAt, DateTime.Now))
+                    {
+                        RenewWatchdog();
+                    }
+                }
             }
         }, token);
     }
@@ -482,9 +508,13 @@ public partial class App : Application
 
         try
         {
-            // Stop renewing first, so a renewal can't put back the task Exit is removing.
-            _watchdogRenewalCancellation?.Cancel();
-            RestartWatchdog.Unregister();
+            // Stop renewing first, and under the lock, so a renewal already under way finishes
+            // before the delete and can't put back the task Exit is removing.
+            lock (_watchdogLock)
+            {
+                _watchdogRenewalCancellation?.Cancel();
+                RestartWatchdog.Unregister();
+            }
             // A deliberate exit must not be resurrected by a relaunch armed for an update that
             // is no longer going to happen.
             UpdateRelaunchTask.Cancel();

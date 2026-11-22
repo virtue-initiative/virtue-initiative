@@ -63,6 +63,20 @@ public sealed class RestartWatchdogTests
         Assert.Equal(TimeSpan.FromHours(6), RestartWatchdog.RenewInterval);
     }
 
+    // CLIENT-028: renewal is due after 6 hours of wall-clock time, so a PC that slept through
+    // the task's expiry renews it as soon as it wakes, not 6 awake hours later.
+    [Fact]
+    public void IsRenewalDue_CountsWallClockTime_IncludingTimeAsleep()
+    {
+        Assert.False(RestartWatchdog.IsRenewalDue(RegisteredAt, RegisteredAt.AddHours(5)));
+        Assert.True(RestartWatchdog.IsRenewalDue(RegisteredAt, RegisteredAt.AddHours(6)));
+        // Woke after sleeping past the task's expiry.
+        Assert.True(RestartWatchdog.IsRenewalDue(RegisteredAt, RegisteredAt.AddDays(2)));
+        // The clock moved back.
+        Assert.True(RestartWatchdog.IsRenewalDue(RegisteredAt, RegisteredAt.AddMinutes(-5)));
+        Assert.True(RestartWatchdog.RenewalCheckInterval <= TimeSpan.FromMinutes(1));
+    }
+
     // CLIENT-028: the task runs with least privilege as the signed-in user.
     [Fact]
     public void BuildTaskXml_RunsWithLeastPrivilege_AsTheCurrentUser()

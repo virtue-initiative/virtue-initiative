@@ -39,16 +39,37 @@ public static class AppDataDirectory
     /// <param name="packageLocalStatePath">
     /// <c>ApplicationData.Current.LocalFolder.Path</c>, or <c>null</c> for an unpackaged run.
     /// </param>
+    /// <param name="mayMove">
+    /// Whether this process will be the running instance. Only it may move an older version's
+    /// folder: a launch that hands off to a running instance must not, since that instance may
+    /// still be using the old folder.
+    /// </param>
     /// <returns>Lines for the startup log.</returns>
-    public static IReadOnlyList<string> Initialize(string? packageLocalStatePath)
+    public static IReadOnlyList<string> Initialize(string? packageLocalStatePath, bool mayMove)
     {
         var log = new List<string>();
         Current = string.IsNullOrWhiteSpace(packageLocalStatePath)
             ? LegacyPath
-            : Prepare(LegacyPath, Path.Combine(packageLocalStatePath, FolderName), log.Add);
+            : Choose(LegacyPath, Path.Combine(packageLocalStatePath, FolderName), mayMove, log.Add);
         Environment.SetEnvironmentVariable(EnvironmentVariable, Current);
         log.Add($"App data directory: {Current}");
         return log;
+    }
+
+    /// <summary>
+    /// Returns the folder to use for a packaged run (CLIENT-002). The running instance
+    /// (<paramref name="mayMove"/>) gets <see cref="Prepare"/>, which may move the old folder.
+    /// A launch that is only handing off to the running instance never moves anything: it
+    /// uses whichever folder the running instance is using, so its few log lines land there.
+    /// </summary>
+    public static string Choose(string legacyDir, string packageDir, bool mayMove, Action<string> log)
+    {
+        if (mayMove)
+        {
+            return Prepare(legacyDir, packageDir, log);
+        }
+
+        return !Directory.Exists(packageDir) && Directory.Exists(legacyDir) ? legacyDir : packageDir;
     }
 
     /// <summary>
