@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,11 @@ import kotlinx.coroutines.cancel
 // Screen capture is performed by VirtueAccessibilityService.takeScreenshot().
 class ScreenshotService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // False once the service is stopping, so nothing posts a notification
+    // Android has already cancelled with the service (CLIENT-030).
+    private var foreground = false
+    // The last post went out while Android would not show it, so it was dropped.
+    private var postedWhileHidden = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,24 +42,29 @@ class ScreenshotService : Service() {
         // go without the notification until the next start attempt.
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
+            foreground = true
+            postedWhileHidden = !notificationsShown()
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Foreground service start refused", e)
-            stopSelf()
+            stop()
             return
         }
 
         val initError = NativeBridge.ensureInitialized(this)
         if (initError != null) {
             Log.e(TAG, "Core init failed: $initError")
-            stopSelf()
+            stop()
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            stopSelf()
+            stop()
             return START_NOT_STICKY
         }
+        // Every start lands here: the app coming to the front, KeepAliveWorker,
+        // and the first start right after onCreate (which finds nothing to do).
+        repostIfMissing()
         return START_STICKY
     }
 
@@ -86,9 +97,38 @@ class ScreenshotService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    private fun stop() {
+        foreground = false
+        stopSelf()
+    }
+
     /** Re-posts the notification for the current Accessibility state (CLIENT-030). */
     fun updateNotification() {
+        if (!foreground) return
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification())
+        postedWhileHidden = !notificationsShown()
+    }
+
+    /** Posts the notification again if Android dropped it while notifications were off (CLIENT-030). */
+    private fun repostIfMissing() {
+        if (!foreground) return
+        val shownNow = notificationsShown()
+        val showing = getSystemService(NotificationManager::class.java)
+            .activeNotifications.any { it.id == NOTIFICATION_ID }
+        if (MonitoringNotice.needsRepost(postedWhileHidden, shownNow, showing)) {
+            updateNotification()
+        } else if (shownNow) {
+            postedWhileHidden = false
+        }
+    }
+
+    /** Whether Android would show a notification on our channel right now. */
+    private fun notificationsShown(): Boolean {
+        val manager = getSystemService(NotificationManager::class.java)
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return true
+        return channel.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     private fun createNotificationChannel() {
@@ -112,6 +152,9 @@ class ScreenshotService : Service() {
             .setContentText(notice.text)
             .setContentIntent(tap)
             .setOngoing(true)
+            // Android 12+ otherwise holds a new service's notification back for
+            // up to 10 s, and CLIENT-030 wants it there as soon as the user looks.
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
