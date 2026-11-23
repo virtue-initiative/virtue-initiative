@@ -105,8 +105,9 @@ public static class UpdateRelaunchTask
     ///
     /// <c>ExecutionTimeLimit</c> is <c>PT0S</c> (none), as for <see cref="RestartWatchdog"/>: the
     /// process this task starts is the relaunched app itself, and Task Scheduler stops a task's
-    /// process at its limit. The <c>PT5M</c> this had before killed the app five minutes after
-    /// every update.
+    /// process at its limit. The <c>PT5M</c> this had before only spared the app because the task
+    /// is deleted (cancelled at launch, or expired) before the limit is reached, and a deleted
+    /// task's instance is no longer timed; <c>PT0S</c> stops that from depending on the delete.
     /// </summary>
     public static string BuildTaskXml(string exePath, string arguments, DateTime startAt, TimeSpan triggerWindow)
     {
