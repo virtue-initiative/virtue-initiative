@@ -4,7 +4,7 @@ use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::OnceCell;
@@ -12,8 +12,8 @@ use serde::de::DeserializeOwned;
 use virtue_core::api::{BugReportRequest, HttpApiClient};
 use virtue_core::module::status;
 use virtue_core::{
-    load_state, AuthState, Config, CoreError, CoreResult, Daemon, DaemonState, DeviceSettings,
-    LifecycleHooks, Screenshot, ScreenshotHooks,
+    AuthState, Config, CoreError, CoreResult, Daemon, DaemonState, DeviceSettings, LifecycleHooks,
+    Screenshot, ScreenshotHooks, ServiceStatus,
 };
 
 static CORE: OnceCell<IosCore> = OnceCell::new();
@@ -42,6 +42,9 @@ struct IosCore {
     state_dir: PathBuf,
     daemon: Arc<IosDaemon>,
     daemon_running: Mutex<bool>,
+    /// The last status built from the state file, with the file's modified
+    /// time and length when it was read. See `status_from_state_file`.
+    status_cache: Mutex<Option<((SystemTime, u64), ServiceStatus)>>,
 }
 
 #[derive(Clone)]
@@ -237,6 +240,7 @@ pub extern "C" fn virtue_ios_native_init(
                 state_dir,
                 daemon: Arc::new(daemon),
                 daemon_running: Mutex::new(false),
+                status_cache: Mutex::new(None),
             })
             .map_err(|_| anyhow!("core already initialized"))?;
         }
@@ -372,10 +376,7 @@ pub extern "C" fn virtue_ios_native_report_issue(
 pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
     let json = (|| -> Result<String> {
         let core = core()?;
-        let state: DaemonState = load_state(&core.state_dir.join("event_state.json"))?;
-        let running = core.daemon_running.lock().map(|r| *r).unwrap_or(false);
-        let status = status::build(&state, &build_core_config(&core.state_dir), running);
-        Ok(serde_json::to_string(&status)?)
+        Ok(serde_json::to_string(&status_from_state_file(core)?)?)
     })();
 
     match json {
@@ -384,6 +385,41 @@ pub extern "C" fn virtue_ios_native_get_status_json() -> *mut c_char {
             .unwrap_or(std::ptr::null_mut()),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// The status built from the state file, which is parsed again only when the
+/// file changes. The app polls status every 2 s on the main thread, and the
+/// file holds every pending screenshot, so parsing it on each poll is slow.
+/// It's read with serde rather than `load_state`, since CORE-017's backup of
+/// an unparseable file is for the daemon about to overwrite it: a poller would
+/// write a fresh copy every 2 s for as long as the file stayed broken.
+fn status_from_state_file(core: &IosCore) -> Result<ServiceStatus> {
+    let path = core.state_dir.join("event_state.json");
+    let stamp = fs::metadata(&path)
+        .and_then(|meta| Ok((meta.modified()?, meta.len())))
+        .ok();
+    let running = core.daemon_running.lock().map(|r| *r).unwrap_or(false);
+    let mut cache = core
+        .status_cache
+        .lock()
+        .map_err(|_| anyhow!("status cache lock poisoned"))?;
+
+    let mut status = match (stamp, cache.as_ref()) {
+        (Some(stamp), Some((cached_stamp, cached))) if stamp == *cached_stamp => cached.clone(),
+        _ => {
+            let state: DaemonState = match fs::read(&path) {
+                Ok(bytes) if !bytes.is_empty() => {
+                    serde_json::from_slice(&bytes).unwrap_or_default()
+                }
+                _ => DaemonState::default(),
+            };
+            let status = status::build(&state, &build_core_config(&core.state_dir), running);
+            *cache = stamp.map(|stamp| (stamp, status.clone()));
+            status
+        }
+    };
+    status.is_running = running;
+    Ok(status)
 }
 
 #[no_mangle]
@@ -624,7 +660,7 @@ mod tests {
 
         // As the extension does: a settings refresh saved to the shared file.
         let state_path = dir.join("event_state.json");
-        let mut state: DaemonState = load_state(&state_path).unwrap();
+        let mut state: DaemonState = virtue_core::load_state(&state_path).unwrap();
         state.upload.settings = Some(DeviceSettings {
             device_id: "d".into(),
             name: "iPhone".into(),
@@ -640,12 +676,42 @@ mod tests {
         });
         virtue_core::store_state(&state_path, &state).unwrap();
 
-        let json = virtue_ios_native_get_status_json();
-        assert!(!json.is_null());
-        let status: serde_json::Value =
-            serde_json::from_str(&unsafe { CString::from_raw(json) }.into_string().unwrap())
-                .unwrap();
-        assert_eq!(status["announcement"]["message"], "Update by hand");
+        let read_status = || {
+            let json = virtue_ios_native_get_status_json();
+            assert!(!json.is_null());
+            serde_json::from_str::<serde_json::Value>(
+                &unsafe { CString::from_raw(json) }.into_string().unwrap(),
+            )
+            .unwrap()
+        };
+        assert_eq!(read_status()["announcement"]["message"], "Update by hand");
+
+        // A later save shows too, though status was already read once.
+        if let Some(announcement) = state
+            .upload
+            .settings
+            .as_mut()
+            .and_then(|s| s.announcement.as_mut())
+        {
+            announcement.message = "Update by hand now".into();
+        }
+        virtue_core::store_state(&state_path, &state).unwrap();
+        assert_eq!(
+            read_status()["announcement"]["message"],
+            "Update by hand now"
+        );
+
+        // Polling a broken file reads as signed out and leaves no CORE-017
+        // backups behind; those are for the daemon about to overwrite it.
+        std::fs::write(&state_path, b"{not json").unwrap();
+        assert_eq!(read_status()["is_authenticated"], false);
+        read_status();
+        let backups = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .count();
+        assert_eq!(backups, 0);
 
         std::fs::remove_dir_all(&dir).ok();
     }

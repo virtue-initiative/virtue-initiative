@@ -169,7 +169,7 @@ function NewAnnouncementForm({ onCreated }: { onCreated: (announcement: Announce
             id="admin-announcement-url"
             type="url"
             pattern="https://.*"
-            title="A link starting with https://"
+            title="Use a link that starts with https."
             placeholder="https://virtueinitiative.org/download"
             value={url}
             onInput={(e) => setUrl((e.target as HTMLInputElement).value)}

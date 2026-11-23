@@ -502,8 +502,15 @@ class MainActivity : AppCompatActivity() {
     // warning and urgent sit on an orange or red background. With a url,
     // tapping it opens the url.
     private fun announcementView(announcement: Announcement): TextView {
-        val open = announcement.url?.let { url ->
-            { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        val open: (() -> Unit)? = announcement.url?.let { url ->
+            {
+                // A monitored phone may have no browser at all; a tap must not crash the app.
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (e: android.content.ActivityNotFoundException) {
+                    android.util.Log.w("MainActivity", "no app can open the announcement link", e)
+                }
+            }
         }
         val view = when {
             announcement.prominent -> text(announcement.message, 15f, android.R.color.white, bold = true).apply {
