@@ -540,11 +540,15 @@ impl HttpApiClient {
         if health.name.as_deref() != Some(VIRTUE_API_NAME) {
             return None;
         }
+        // Every app opens this in a browser, so only a web address is kept.
         Some(
             health
                 .app_url
                 .map(|url| url.trim().trim_end_matches('/').to_string())
-                .filter(|url| !url.is_empty()),
+                .filter(|url| {
+                    let lower = url.to_ascii_lowercase();
+                    lower.starts_with("https://") || lower.starts_with("http://")
+                }),
         )
     }
 
@@ -593,6 +597,11 @@ pub fn normalize_server_address(address: &str) -> CoreResult<String> {
 /// True when the authority at the start of `rest` names this machine.
 fn is_loopback(rest: &str) -> bool {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // `localhost:1@example.org` is a user name and password for
+    // `example.org`, not this machine.
+    if authority.contains('@') {
+        return false;
+    }
     let host = match authority.strip_prefix('[') {
         Some(v6) => v6.split(']').next().unwrap_or(""),
         None => authority.split(':').next().unwrap_or(""),
@@ -1044,6 +1053,17 @@ mod tests {
         assert_eq!(server.web_app_url, None);
     }
 
+    // CORE-028: a web app URL that is not a web address is dropped.
+    #[test]
+    fn resolve_server_drops_a_web_app_that_is_not_a_web_address() {
+        let url = serve_health(
+            "",
+            r#"{"name":"Virtue Initiative API","status":"ok","app_url":"file:///etc"}"#,
+        );
+        let server = client().resolve_server(&url).unwrap();
+        assert_eq!(server.web_app_url, None);
+    }
+
     // CORE-028: something that is not a Virtue API is refused.
     #[test]
     fn resolve_server_refuses_a_server_that_is_not_virtue() {
@@ -1089,6 +1109,8 @@ mod tests {
         for bad in [
             "http://virtue.example.org",
             "http://localhost.example.org",
+            "http://localhost:80@virtue.example.org",
+            "http://[::1]@virtue.example.org",
             "ftp://virtue.example.org",
         ] {
             assert_eq!(

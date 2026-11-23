@@ -47,7 +47,7 @@ the apps only goes to the Virtue Initiative server, so the apps hide it while
 
 The server can only be changed while signed out. To move a device to another
 server, sign out and sign in again. Signing out deactivates the device, and
-anyone monitoring you may be alerted, the same as any other sign-out.
+your partners may be alerted, the same as any other sign-out.
 
 To see which server a device is using, open Status Details. The API URL row
 under Advanced shows it.

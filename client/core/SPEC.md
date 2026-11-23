@@ -270,5 +270,5 @@ A user MAY sign in to a server other than the build's default (CLIENT-033). Befo
 - Surrounding whitespace and trailing slashes MUST be removed, and a URL with no scheme MUST be read as `https://`.
 - The URL MUST use `https`, except that `http` MAY be used with a loopback host (`localhost`, `127.0.0.1` or `[::1]`). Any other URL MUST fail with "The server address must start with https://."
 - The core MUST ask for the health payload (API-007) at the URL and, if that does not reply with the name `Virtue Initiative API`, at the URL with `/api` added. It MUST accept the first that does. If neither does, it MUST fail with "No Virtue server found at <url>." naming the URL as resolved so far.
-- The accepted API URL, and the `app_url` from its health payload when present, MUST be stored with the device credentials, so they last as long as the session and logout clears them (CORE-009).
+- The accepted API URL, and the `app_url` from its health payload when present and an `http` or `https` URL, MUST be stored with the device credentials, so they last as long as the session and logout clears them (CORE-009).
 - A session with no stored server, including one from a build before this rule, MUST use the build's default API URL.

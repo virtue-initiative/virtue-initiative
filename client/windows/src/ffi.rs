@@ -337,13 +337,14 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
 
         let paths = ensure_paths_initialized()?;
 
-        // Read the device refresh token straight off disk, same disk-fallback
-        // approach the Linux `report-issue` command uses, so a report can be
-        // attributed to this device even when the resident daemon isn't
-        // running (or hasn't finished starting up yet).
+        // Read the device credentials (and so its server, CLIENT-033)
+        // straight off disk, same disk-fallback approach the Linux
+        // `report-issue` command uses, so a report can be attributed to this
+        // device even when the resident daemon isn't running (or hasn't
+        // finished starting up yet).
         let state: virtue_core::DaemonState =
             virtue_core::load_state(&paths.state_dir.join("event_state.json")).unwrap_or_default();
-        let bearer_token = state.auth.device_credentials;
+        let credentials = state.auth.device_credentials;
 
         let platform_details = windows_platform_details();
         let logs = request
@@ -354,7 +355,7 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
         let config = build_core_config(&paths);
         let api = virtue_core::api::HttpApiClient::new(&config)?;
         api.report_issue(
-            bearer_token.as_ref(),
+            credentials.as_ref(),
             &virtue_core::api::BugReportRequest {
                 message: &message,
                 contact_email: request.contact_email.as_deref(),

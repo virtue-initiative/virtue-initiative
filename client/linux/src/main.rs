@@ -237,8 +237,12 @@ fn login(
     device_name: Option<String>,
     server: Option<String>,
 ) -> Result<()> {
-    // CLIENT-033: a self-hosted server's accounts are made on its own website.
-    let server = server.filter(|s| !s.trim().is_empty());
+    // CLIENT-033: an empty address fails before any request, rather than
+    // quietly signing in to the default server.
+    if server.as_deref().is_some_and(|s| s.trim().is_empty()) {
+        anyhow::bail!("Server address is required");
+    }
+    // A self-hosted server's accounts are made on its own website.
     if server.is_none() {
         println!(
             "Don't have an account? Sign up at {}",
@@ -449,12 +453,10 @@ fn recent_logs() -> Option<Vec<u8>> {
     Some(logs)
 }
 
-/// Reads this device's refresh token straight off disk rather than through
-/// the daemon, so `report-issue` still works (anonymously otherwise) even
-/// when the daemon isn't running. See CORE-010's disk-fallback precedent in
-/// `load_service_status`.
-/// This device's credentials from disk, so a report works while the daemon is
-/// down (CLIENT-016). They also name the server to send it to (CLIENT-033).
+/// Reads this device's credentials straight off disk rather than through the
+/// daemon, so `report-issue` still works (anonymously otherwise) even when the
+/// daemon isn't running (CLIENT-016). See CORE-010's disk-fallback precedent in
+/// `load_service_status`. They also name the server to send it to (CLIENT-033).
 fn read_device_credentials(paths: &ClientPaths) -> Option<virtue_core::DeviceCredentials> {
     let state_path = paths.state_dir.join("event_state.json");
     let state: virtue_core::DaemonState = virtue_core::load_state(&state_path).ok()?;
@@ -1458,6 +1460,27 @@ mod tests {
                 ..
             } if server == "virtue.example.org"
         ));
+    }
+
+    // CLIENT-033: an empty --server fails before any prompt or request,
+    // rather than signing in to the default server.
+    #[test]
+    fn login_with_an_empty_server_address_fails() {
+        let dir =
+            std::env::temp_dir().join(format!("virtue-linux-empty-server-{}", std::process::id()));
+        let paths = crate::config::ClientPaths {
+            config_dir: dir.clone(),
+            data_dir: dir.clone(),
+            state_dir: dir,
+        };
+        let err = super::login(
+            paths,
+            Some("me@example.org".into()),
+            Some("box".into()),
+            Some("   ".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Server address is required");
     }
 
     // CLIENT-033: web app links use the server's own web app when it named one.
