@@ -1,6 +1,6 @@
 # Catalog of the commands devs actually run day to day, grouped by component.
 # Run `just --list` to see everything. Each recipe is a thin delegation to an
-# existing script or package.json command — see AGENTS.md for the exact
+# existing script or package.json command — see docs/ci-checks.md for the exact
 # command sequences CI runs.
 
 set positional-arguments
@@ -32,6 +32,11 @@ dev domain="":
 dev-donate domain="":
     ./scripts/launch.sh --donate {{domain}}
 
+# Run the CI checks for every area changed since staging. `--list` prints them; `just check web` runs one area.
+[group('dev')]
+check *args:
+    bun scripts/check-changed.ts {{args}}
+
 # --- specs ---------------------------------------------------------------
 
 # Check every test cites a SPEC.md section ID and uncovered sections match the allow-list.
@@ -44,9 +49,19 @@ spec-check:
 spec-coverage:
     bun scripts/spec-check.ts --report
 
+# List the tests that cite each spec ID, with a command that runs just those, e.g. `just tests-for CORE-002`.
+[group('specs')]
+tests-for +ids:
+    bun scripts/spec-check.ts --tests-for {{ids}}
+
+# Check that every file path and relative link in the markdown docs exists.
+[group('specs')]
+doc-check:
+    bun scripts/doc-check.ts
+
 # --- api -----------------------------------------------------------------
 
-# Run the API worker locally (wrangler dev).
+# Run the API worker locally (cf dev).
 [group('api')]
 [working-directory: 'api']
 api-dev:
@@ -72,7 +87,7 @@ api-format:
 
 # --- api-donate ------------------------------------------------------------
 
-# Run the donations worker locally (wrangler dev).
+# Run the donations worker locally (cf dev).
 [group('api-donate')]
 [working-directory: 'api-donate']
 api-donate-dev:

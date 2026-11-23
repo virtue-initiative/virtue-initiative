@@ -26,7 +26,7 @@ page (configured on the landing site via `PUBLIC_STRIPE_PORTAL_URL`); no server 
 ```bash
 bun install
 bun run db:migrate:local   # apply migrations to the local D1
-bun run dev                # wrangler dev on http://localhost:8788
+bun run dev                # cf dev on http://localhost:8788
 ```
 
 To exercise the webhook locally, forward Stripe events with the Stripe CLI:
@@ -51,7 +51,7 @@ The repo's launch script can run this worker alongside the web/api/landing dev s
 Rather than editing `.dev.vars` each time, put shared secrets in `~/.config/virtue-dev.env`
 (machine-wide) and/or `.env` at the repo root (per-worktree override — see `.env.example`).
 These are the repo's general-purpose "set once, available everywhere" mechanism — see the
-root `AGENTS.md` for the full list of recognized keys across `api`, `api-donate`, the client
+`docs/development.md` for the full list of recognized keys across `api`, `api-donate`, the client
 build, and Android, plus `scripts/setup.sh`, which copies any of these values it finds into a
 freshly created `.dev.vars`. Both files are read as shell, so use `KEY=value`:
 
@@ -68,7 +68,7 @@ launch-time values override whatever is in `.dev.vars`.
 ## Deploy
 
 Like `api/`, this worker has separate `staging` and `prod` environments defined in
-`wrangler.json`, each with its own D1 database and route:
+`cloudflare.config.ts` (selected with `--mode`), each with its own D1 database and route:
 
 - `staging` → `staging-donate`, served at
   `staging.donate-api.virtueinitiative.org`
@@ -82,20 +82,20 @@ Like `api/`, this worker has separate `staging` and `prod` environments defined 
 
 1. Create the D1 database:
    ```bash
-   wrangler d1 create donate-db           # prod
-   wrangler d1 create staging-donate-db    # staging
+   bunx cf d1 create --name donate-db --mode prod           # prod
+   bunx cf d1 create --name staging-donate-db --mode staging    # staging
    ```
-   and paste the resulting id into the matching `env.prod`/`env.staging` block in
-   `wrangler.json`.
+   and paste the resulting id into the matching `prod`/`staging` entry of `MODES` in
+   `cloudflare.config.ts`.
 2. Point a proxied (orange-clouded) DNS record in the `virtueinitiative.org` zone at each
    hostname above — Worker routes only intercept traffic for hostnames that already have a
    DNS record in the zone; they don't create one.
 3. Set secrets per environment:
    ```bash
-   wrangler secret put STRIPE_SECRET_KEY --env staging
-   wrangler secret put STRIPE_WEBHOOK_SECRET --env staging
-   wrangler secret put STRIPE_SECRET_KEY --env prod
-   wrangler secret put STRIPE_WEBHOOK_SECRET --env prod
+   bunx wrangler secret put STRIPE_SECRET_KEY --name staging-donate
+   bunx wrangler secret put STRIPE_WEBHOOK_SECRET --name staging-donate
+   bunx wrangler secret put STRIPE_SECRET_KEY --name donate
+   bunx wrangler secret put STRIPE_WEBHOOK_SECRET --name donate
    ```
 4. Apply migrations remotely:
    ```bash
@@ -151,7 +151,7 @@ WebP, which Outlook can't show. A post marked `draft: true` can't be sent. Any o
 works too, with its first `# Heading` as the subject. Previews and sent logs go in `.newsletter/`,
 which is gitignored because the logs list subscribers.
 
-`--env local` reads the local API's D1 (under `api/.wrangler`), which is what the dev API writes to.
+`--env local` reads the local API's D1 (under `api/.cloudflare/state`), which is what the dev API writes to.
 Set `NEWSLETTER_LANDING_URL` and `NEWSLETTER_API_URL` to the ports `launch.sh` printed so the
 unsubscribe links, and a blog post's images, point at them.
 

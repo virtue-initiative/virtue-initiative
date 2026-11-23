@@ -1,6 +1,7 @@
 ---
 // Click-to-enlarge for every image in markdown-rendered content (.help-doc
-// covers help pages, blog posts, and the download-instructions panels).
+// covers help pages, blog posts, and the download-instructions panels), plus
+// the home page's screenshots (.home-shot).
 // One instance is included in each page layout; the click listener is
 // delegated on document so it also covers content added after load.
 ---
@@ -34,7 +35,7 @@
     document.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLImageElement)) return;
-      if (!target.closest('.help-doc')) return;
+      if (!target.closest('.help-doc, .home-shot')) return;
 
       image.src = target.currentSrc || target.src;
       image.alt = target.alt;

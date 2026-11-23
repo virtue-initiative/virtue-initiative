@@ -11,7 +11,13 @@ import {
 } from '@virtueinitiative/shared-web';
 import { API_URL } from '../lib/api-url';
 
-export function ReportBugButton() {
+type ReportBugButtonProps = {
+  // Without a variant the trigger is the footer's plain link-style button.
+  variant?: 'primary' | 'outline';
+  label?: string;
+};
+
+export function ReportBugButton({ variant, label = 'Report an issue' }: ReportBugButtonProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [message, setMessage] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -60,9 +66,15 @@ export function ReportBugButton() {
 
   return (
     <>
-      <button type="button" class="footer-link-button" onClick={open}>
-        Report an issue
-      </button>
+      {variant ? (
+        <Button variant={variant} type="button" onClick={open}>
+          {label}
+        </Button>
+      ) : (
+        <button type="button" class="footer-link-button" onClick={open}>
+          {label}
+        </button>
+      )}
       <Dialog dialogRef={dialogRef}>
         <DialogHeader>Report an issue</DialogHeader>
         {sent ? (

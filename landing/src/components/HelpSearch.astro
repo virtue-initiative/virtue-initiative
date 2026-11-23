@@ -1,0 +1,138 @@
+---
+interface Props {
+  large?: boolean;
+}
+
+const { large = false } = Astro.props;
+---
+
+<div class:list={['help-search', { 'help-search-large': large }]} data-help-search>
+  <label class="help-search-field">
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.6"
+      ></circle>
+      <path d="M12.6 12.6 17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+      ></path>
+    </svg>
+    <input
+      type="search"
+      placeholder="Search help"
+      aria-label="Search help"
+      autocomplete="off"
+      data-help-search-input
+    />
+  </label>
+  <div class="help-search-results" data-help-search-results hidden></div>
+</div>
+
+<script>
+  // The index is built by Pagefind after `astro build` (see landing/README.md), so it is
+  // missing under `astro dev`.
+  type PagefindResult = { data: () => Promise<PagefindData> };
+  type PagefindData = { url: string; excerpt: string; meta: { title?: string } };
+  type Pagefind = {
+    options: (options: object) => Promise<void>;
+    debouncedSearch: (query: string) => Promise<{ results: PagefindResult[] } | null>;
+  };
+
+  let pagefind: Promise<Pagefind | null> | undefined;
+
+  function loadPagefind() {
+    const path = '/pagefind/pagefind.js';
+    pagefind ??= import(/* @vite-ignore */ path)
+      .then(async (module: Pagefind) => {
+        await module.options({ excerptLength: 24 });
+        return module;
+      })
+      .catch(() => null);
+    return pagefind;
+  }
+
+  function message(results: HTMLElement, text: string) {
+    const p = document.createElement('p');
+    p.className = 'help-search-message';
+    p.textContent = text;
+    results.replaceChildren(p);
+  }
+
+  function renderResults(results: HTMLElement, pages: PagefindData[]) {
+    const list = document.createElement('ul');
+    for (const page of pages) {
+      const item = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = page.url.replace(/\.html$/, '');
+      const title = document.createElement('span');
+      title.className = 'help-search-result-title';
+      title.textContent = page.meta.title ?? link.pathname;
+      const excerpt = document.createElement('span');
+      excerpt.className = 'help-search-result-excerpt';
+      // Pagefind escapes the page text and adds only <mark> tags.
+      excerpt.innerHTML = page.excerpt;
+      link.append(title, excerpt);
+      item.append(link);
+      list.append(item);
+    }
+    results.replaceChildren(list);
+  }
+
+  function setUpSearch(root: HTMLElement) {
+    const input = root.querySelector<HTMLInputElement>('[data-help-search-input]');
+    const results = root.querySelector<HTMLElement>('[data-help-search-results]');
+    if (!input || !results) return;
+
+    // Each search takes a number. A search that finishes after a newer one started (or after
+    // the box was cleared) drops its results instead of showing them over the newer ones.
+    let generation = 0;
+
+    const runSearch = async (query: string) => {
+      const current = ++generation;
+      if (!query.trim()) {
+        results.hidden = true;
+        results.replaceChildren();
+        return;
+      }
+      const module = await loadPagefind();
+      if (current !== generation) return;
+      results.hidden = false;
+      if (!module) {
+        message(results, 'Search is not available right now. Browse the topics instead.');
+        return;
+      }
+      const search = await module.debouncedSearch(query);
+      if (!search || current !== generation) return;
+      if (search.results.length === 0) {
+        message(results, `No pages match "${query}".`);
+        return;
+      }
+      const pages = await Promise.all(search.results.slice(0, 8).map((result) => result.data()));
+      if (current !== generation) return;
+      renderResults(results, pages);
+    };
+
+    input.addEventListener('focus', () => {
+      void loadPagefind();
+      if (input.value.trim() && results.childElementCount > 0) results.hidden = false;
+    });
+    input.addEventListener('input', () => void runSearch(input.value));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        input.value = '';
+        void runSearch('');
+      }
+    });
+    // Hide the results on a click outside the search, or when Tab moves focus out of it.
+    // Safari doesn't focus a link on click, so a focusout with no new target is ignored: it may
+    // be a click on a result.
+    document.addEventListener('pointerdown', (event) => {
+      if (!root.contains(event.target as Node)) results.hidden = true;
+    });
+    root.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && !root.contains(next)) results.hidden = true;
+    });
+  }
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-help-search]')) {
+    setUpSearch(root);
+  }
+</script>

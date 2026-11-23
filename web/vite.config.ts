@@ -1,4 +1,5 @@
 /// <reference types="vitest" />
+import { readFileSync } from 'fs';
 import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
 import preact from '@preact/preset-vite';
 
@@ -10,6 +11,12 @@ export default defineConfig(({ mode }) => {
     ?.split(',')
     .map((host) => host.trim())
     .filter(Boolean);
+  // `launch.sh --host` serves the app on a VPN or LAN address, where it needs https for Web
+  // Crypto. These name a certificate for that address.
+  const https =
+    env.VIRTUE_DEV_TLS_CERT && env.VIRTUE_DEV_TLS_KEY
+      ? { cert: readFileSync(env.VIRTUE_DEV_TLS_CERT), key: readFileSync(env.VIRTUE_DEV_TLS_KEY) }
+      : undefined;
 
   return {
     define:
@@ -41,6 +48,7 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     server: {
+      https,
       // Vite's dev server answers CORS preflight requests itself (before the
       // /api proxy below even runs) using its own default cors options, which
       // don't set Access-Control-Allow-Credentials. Since api.ts's req()

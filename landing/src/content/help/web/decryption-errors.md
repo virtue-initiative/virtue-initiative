@@ -1,12 +1,13 @@
 ---
-sidebar_position: 3
+title: 'Decryption errors'
+description: 'Why a batch of screenshots sometimes fails to decrypt, and what to do about it.'
+topic: activity
+order: 4
 ---
-
-# Decryption errors
 
 Every screenshot batch a device uploads is encrypted before it leaves the
 device, and only decrypted in your browser when you view your logs (see
-[Security and encryption](/help/developer/security)). Occasionally a batch
+[Security and encryption](/help/security)). Occasionally a batch
 permanently fails to decrypt. This page explains why, and what you need to
 do about it, if anything.
 

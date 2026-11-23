@@ -1,0 +1,119 @@
+name: Client Changes
+
+# Reusable check, called by each client-*.yml workflow, that decides whether the
+# client build is needed. A PR into staging runs it only if it touches files that
+# client build depends on; everything else (PRs into main, pushes,
+# workflow_dispatch) always runs it, so main and the release builds still get
+# every check. Fails open: if the PR's file list can't be read in full, the build
+# runs, and callers gate the build on `run != 'false'` so it also runs when this
+# job fails.
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: >-
+          Newline-separated picomatch globs for this platform, on top of the
+          shared ones below. Use `**` to cross `/`, as in `client/linux/**`.
+        required: true
+        type: string
+      integration:
+        description: >-
+          Also match what the device -> api/hash-server integration test needs
+          (INTEGRATION_PATHS below).
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      run:
+        description: "'true' if the client build should run."
+        value: ${{ jobs.detect.outputs.run }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  detect:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      # The gate's answer if it gave one, else the filter's, else (the filter
+      # failed) run the build.
+      run: ${{ steps.gate.outputs.run || steps.filter.outputs.run || 'true' }}
+    steps:
+      - name: Build path filter
+        id: gate
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PLATFORM_PATHS: ${{ inputs.paths }}
+          INTEGRATION: ${{ inputs.integration }}
+          # The integration test starts api and hash-server and seeds accounts
+          # with scripts/seed, which imports api, shared-web and the web app's
+          # crypto (the password auth derivation the client must match).
+          INTEGRATION_PATHS: |
+            api/**
+            shared-web/**
+            hash-server/**
+            scripts/seed/**
+            web/src/utils/api/**
+            package.json
+            bun.lock
+          # Shared by every client build: the Rust core and workspace, client
+          # scripts (version.sh and friends), the batch format vectors the core
+          # tests check, the LFS-tracked models, and the CI plumbing itself.
+          SHARED_PATHS: |
+            client/core/**
+            client/text-detection/**
+            client/Cargo.toml
+            client/Cargo.lock
+            client/.cargo/**
+            client/.env
+            client/version.properties
+            client/scripts/**
+            batch-format/**
+            .gitattributes
+            .github/actions/**
+            .github/workflows/client-changes.yml
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" != "pull_request" || "$BASE_REF" != "staging" ]]; then
+            echo "Not a PR into staging; running the build."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The PR files endpoint lists at most 3000 files, so a bigger PR can't
+          # be checked in full.
+          if (( CHANGED_FILES >= 3000 )); then
+            echo "PR changes $CHANGED_FILES files, more than can be listed; running the build."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          all_paths=$(printf '%s\n%s\n' "$SHARED_PATHS" "$PLATFORM_PATHS")
+          if [[ "$INTEGRATION" == "true" ]]; then
+            all_paths+=$'\n'"$INTEGRATION_PATHS"
+          fi
+          # One filter named `run`, each glob a single-quoted YAML list item.
+          {
+            echo 'filters<<EOF_FILTERS'
+            echo 'run:'
+            printf '%s\n' "$all_paths" \
+              | sed '/^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//' \
+              | sed "s/.*/  - '&'/"
+            echo 'EOF_FILTERS'
+          } >> "$GITHUB_OUTPUT"
+
+      # Lists the PR's files through the API (no checkout needed) and also
+      # matches the old name of a renamed file.
+      - name: Match changed files
+        id: filter
+        if: steps.gate.outputs.run != 'true'
+        continue-on-error: true
+        uses: dorny/paths-filter@v4
+        with:
+          filters: ${{ steps.gate.outputs.filters }}

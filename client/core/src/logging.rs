@@ -1,6 +1,6 @@
 //! Rotation/retention conventions shared by every platform that installs a
 //! `tracing` subscriber. `core` never installs a subscriber itself (see
-//! `client/CLAUDE.md`'s cross-component contracts) — only the host process
+//! the root `AGENTS.md`'s cross-component contracts) — only the host process
 //! knows its own process model — but the naming/retention knobs are pure
 //! logic worth centralizing rather than reimplementing per platform.
 

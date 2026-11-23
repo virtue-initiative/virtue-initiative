@@ -1,34 +1,37 @@
 ---
-import { Button } from '@virtueinitiative/shared-web';
+import HelpSearch from '../../components/HelpSearch.astro';
 import HelpLayout from '../../layouts/HelpLayout.astro';
-import { helpSidebar } from '../../help/navigation';
+import { helpTopics, topicHref, topicLinks } from '../../help/navigation';
 ---
 
 <HelpLayout
   currentPath="/help"
   pageTitle="Help and Setup Guides"
   description="Guides for installing Virtue, setting up an accountability partner, and reviewing activity."
+  wide
 >
-  <article class="help-content-card help-doc">
-    <h1>Help</h1>
-    <p>
-      Guides and documentation for getting started with The Virtue Initiative, installing clients,
-      and setting up accountability.
-    </p>
-    <div class="section-actions">
-      <Button href="/help/getting-started" variant="primary">Get Started</Button>
-      <Button href="/download" variant="outline">Downloads</Button>
-    </div>
-
-    <h2>Sections</h2>
-    <ul class="help-child-index">
+  <div class="help-home">
+    <header class="help-home-hero">
+      <h1>How can we help?</h1>
+      <HelpSearch large />
+    </header>
+    <ul class="help-topic-cards">
       {
-        helpSidebar.map((item) => (
-          <li>
-            <a href={item.href}>{item.label}</a>
-          </li>
-        ))
+        helpTopics.map((topic) => {
+          const count = topicLinks(topic.id).length;
+          return (
+            <li>
+              <a class="help-topic-card" href={topicHref(topic.id)}>
+                <span class="help-topic-card-title">{topic.label}</span>
+                <span class="help-topic-card-blurb">{topic.blurb}</span>
+                <span class="help-topic-card-count">
+                  {count === 1 ? '1 article' : `${count} articles`}
+                </span>
+              </a>
+            </li>
+          );
+        })
       }
     </ul>
-  </article>
+  </div>
 </HelpLayout>

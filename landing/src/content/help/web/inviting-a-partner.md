@@ -1,8 +1,9 @@
 ---
-sidebar_position: 1
+title: 'Inviting a partner'
+description: 'Invite someone you trust to see your activity, and what happens until they accept.'
+topic: partners
+order: 1
 ---
-
-# Inviting a partner
 
 1. Open the **Partners** page from the sidebar, then click **Invite partner**
    under **Monitor you**.

@@ -1,36 +1,41 @@
-# Web App
+# Web app
 
-This is the web app for The Virtue Initiative. Hosted at
-https://app.virtueinitiative.org, it handles signup, partners, and viewing
-logs.
+The web app at https://app.virtueinitiative.org: sign-up, partners, devices, and reading logs
+and reports. Every batch is decrypted in the browser. What it does is specified in
+[`SPEC.md`](SPEC.md) (`WEB-` IDs); [`architecture.md`](architecture.md) explains how it is built,
+including the local log cache; [`AGENTS.md`](AGENTS.md) lists the rules that are easy to break.
 
-## Development
+## Run it
 
-Set up the environment
-
-```bash
-npm install
-cp .env.example .env.local
-```
-
-Run the dev server
+Usually you run it with the rest of the stack: `./scripts/launch.sh` from the repo root (see
+[`docs/development.md`](../docs/development.md)). To run only the web app against an API you
+already have:
 
 ```bash
-npm run dev
+cp .env.example .env.local   # then set VITE_API_URL
+just web-dev
 ```
 
-For testing the local web app from another device over HTTPS, see
-[HTTPS-DEVICE-TESTING.md](./HTTPS-DEVICE-TESTING.md).
+To open the local web app from a phone or another machine over HTTPS, see
+[HTTPS-DEVICE-TESTING.md](HTTPS-DEVICE-TESTING.md).
 
-## Deploying
+## Check it
 
 ```bash
-npm run deploy:prod
+just web-typecheck
+just web-test
+just web-build
 ```
+
+`bun run format:check` checks formatting. `just mutants-web` runs mutation testing on the
+crypto and cache code (see `TESTING.md`).
+
+## Deploy
+
+CI deploys on pushes to `staging` and `main` (`.github/workflows/deploy.yml`). By hand:
+`bun run deploy:staging` or `bun run deploy:prod`.
 
 ## Stack
 
-- **Language**: Typescript
-- **Framework**: [Preact](https://preactjs.com/)
-- **Icons**: [Heroicons](https://heroicons.com/)
-- **Styles**: Plain CSS
+Preact, TypeScript, Vite, plain CSS with the tokens from `shared-web/`, and
+[Heroicons](https://heroicons.com/). The local cache is SQLite in OPFS, run in a worker.

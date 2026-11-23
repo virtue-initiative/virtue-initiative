@@ -17,9 +17,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: iOS changes
+    # A PR into staging skips the build below when nothing it depends on
+    # changed (see client-changes.yml). A skipped job counts as passing.
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/client-changes.yml
+    with:
+      paths: |
+        client/ios/**
+        client/shared-swift/**
+        .github/workflows/client-ios.yml
+
   client-ios:
     name: Client iOS
-    runs-on: macos-latest
+    needs: changes
+    # Not `run == 'true'`: if the changes job fails, run the build (fail open).
+    if: ${{ !cancelled() && needs.changes.outputs.run != 'false' }}
+    # From April 2027 App Store Connect rejects uploads built with an SDK older
+    # than iOS 27. `macos-latest` (macOS 26) still defaults to Xcode 26 and has
+    # no Xcode 27, so use GitHub's Xcode 27 image until `macos-latest` has it.
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v4

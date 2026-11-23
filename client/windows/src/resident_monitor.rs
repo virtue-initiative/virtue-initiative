@@ -42,9 +42,8 @@ impl Default for MonitorStatusSnapshot {
 
 /// A running daemon plus the OS thread its `run_forever` loop occupies.
 /// `daemon` is shared so `app_login`/`app_logout`/`status_snapshot`/the
-/// stop functions below can call its synchronous methods directly — the
-/// daemon's own mutex+condvar already gives every caller the responsiveness
-/// the old hand-rolled `MonitorCommand` queue existed for.
+/// stop functions below can call its public methods directly; each sends a
+/// `DaemonRequest` to the loop thread and blocks on the reply.
 struct MonitorWorker {
     daemon: Arc<WindowsDaemon>,
     handle: thread::JoinHandle<()>,

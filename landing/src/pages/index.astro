@@ -39,29 +39,44 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       </div>
     </section>
 
-    <section class="home-section">
-      <div class="eyebrow">The app</div>
-      <div class="home-section-heading">
-        <h2>How it works</h2>
+    <section class="home-section home-how">
+      <div class="home-how-copy">
+        <div class="eyebrow">The app</div>
+        <div class="home-section-heading">
+          <h2>How it works</h2>
+        </div>
+        <ol class="steps-grid">
+          <li class="step-card">
+            <span class="step-number">1.</span>
+            <a href={`${APP_URL}/signup`}>Create an account</a>
+          </li>
+          <li class="step-card">
+            <span class="step-number">2.</span>
+            <a href="/download">Install the app on your devices</a>
+          </li>
+          <li class="step-card">
+            <span class="step-number">3.</span>
+            <span>It captures blurred screenshots of your activity</span>
+          </li>
+          <li class="step-card">
+            <span class="step-number">4.</span>
+            <span>Your accountability partner can review them</span>
+          </li>
+        </ol>
       </div>
-      <ol class="steps-grid">
-        <li class="step-card">
-          <span class="step-number">1.</span>
-          <a href={`${APP_URL}/signup`}>Create an account</a>
-        </li>
-        <li class="step-card">
-          <span class="step-number">2.</span>
-          <a href="/download">Install the app on your devices</a>
-        </li>
-        <li class="step-card">
-          <span class="step-number">3.</span>
-          <span>It captures blurred screenshots of your activity</span>
-        </li>
-        <li class="step-card">
-          <span class="step-number">4.</span>
-          <span>Your accountability partner can review them</span>
-        </li>
-      </ol>
+      <figure class="home-shot">
+        <img
+          src="/images/home/web-logs.webp"
+          width="1280"
+          height="800"
+          alt="The Logs page in the Virtue web app, showing a gallery of blurred screenshots with two marked as high and medium concern."
+          loading="lazy"
+        />
+        <figcaption>
+          Your partner reviews screenshots from all of your devices on the web. Anything the app
+          flags as concerning is marked.
+        </figcaption>
+      </figure>
     </section>
 
     <section class="home-section home-section-split">
@@ -91,53 +106,80 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
           </p>
         </div>
       </div>
+      <figure class="home-shot">
+        <img
+          src="/images/home/email-report.webp"
+          width="640"
+          height="480"
+          alt="A daily summary email for Sam Rivera, showing 412 screenshots, 1 high risk and 2 medium risk, with a button to read the report."
+          loading="lazy"
+        />
+        <figcaption>Your partner can also get a daily or weekly summary by email.</figcaption>
+      </figure>
     </section>
 
-    <section class="home-section">
-      <div class="vi-card privacy-card">
-        <div class="home-section-heading">
-          <h2>Privacy &amp; security</h2>
-        </div>
-        <div class="home-row-with-spacing">
-          <RightArrowIcon /><div>Screenshots are shrunk and blurred before being shared</div>
-        </div>
-        <div class="home-row-with-spacing">
-          <RightArrowIcon /><div>Data is end-to-end encrypted</div>
-        </div>
-        <div class="home-row-with-spacing">
-          <RightArrowIcon /><div>
-            Only your chosen accountability partner can view your activity
-          </div>
-        </div>
-        <div class="home-row-with-spacing">
-          <RightArrowIcon /><div>No ads or data selling</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="home-section">
-      <div class="eyebrow">Answers</div>
+    <section class="home-section" id="privacy">
+      <div class="eyebrow">Your data</div>
       <div class="home-section-heading">
-        <h2>FAQ</h2>
+        <h2>Privacy &amp; security</h2>
+      </div>
+      <p class="home-section-lead">
+        Before a screenshot leaves your device, the app blacks out the text on screen, then shrinks
+        and blurs the image. Your partner can tell what kind of thing was on your screen, but cannot
+        read your messages, emails or passwords.
+      </p>
+      <ol class="home-redaction-steps">
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-screen.webp"
+              width="1440"
+              height="900"
+              alt="A web page with a heading, a paragraph and a picture of the Virtue app."
+              loading="lazy"
+            />
+            <figcaption>On your screen.</figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-redacted.webp"
+              width="1440"
+              height="900"
+              alt="The same page with each word covered by a black box. The picture is left as it was."
+              loading="lazy"
+            />
+            <figcaption>Text blacked out.</figcaption>
+          </figure>
+        </li>
+        <li>
+          <figure class="home-shot">
+            <img
+              src="/images/home/redaction-shared.webp"
+              width="180"
+              height="113"
+              alt="The redacted page, shrunk and blurred so that only rough shapes remain."
+              loading="lazy"
+            />
+            <figcaption>What your partner sees.</figcaption>
+          </figure>
+        </li>
+      </ol>
+      <ul class="privacy-points">
+        <li><CheckIcon />Data is end-to-end encrypted.</li>
+        <li><CheckIcon />Only your chosen accountability partner can view your activity.</li>
+        <li><CheckIcon />No ads or data selling.</li>
+      </ul>
+    </section>
+
+    <section class="home-section">
+      <div class="eyebrow">FAQ</div>
+      <div class="home-section-heading">
+        <h2>Common questions</h2>
       </div>
 
       <div class="faq-list">
-        <details class="faq-item" open>
-          <summary>What does the app share?</summary>
-          <p>
-            It captures blurred screenshots of activity on supported devices and makes them
-            available to the accountability partner you choose.
-          </p>
-        </details>
-
-        <details class="faq-item" open>
-          <summary>Do I need an accountability partner before I start?</summary>
-          <p>
-            Yes. This only works if one other person can review your activity. Start with one person
-            you trust.
-          </p>
-        </details>
-
         <details class="faq-item">
           <summary>Is it really free?</summary>
           <p>
@@ -148,10 +190,35 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
         </details>
 
         <details class="faq-item">
-          <summary>Who can see my data?</summary>
+          <summary>How often does it take screenshots?</summary>
           <p>
-            Only the accountability partner you authorize can review it. The data is end-to-end
-            encrypted, and the service does not sell it or use it for ads.
+            About every 5 minutes on average, at random times. The app uploads them in an encrypted
+            batch about once an hour.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>What happens if I turn the app off?</summary>
+          <p>
+            Stopping the app is logged as high risk, and your partner can be alerted by email right
+            away. A device that stops sending screenshots also shows up in your partner's daily or
+            weekly summary.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Does my partner need to install anything?</summary>
+          <p>
+            No. Your partner makes a free account and reviews your activity in the web app from any
+            browser.
+          </p>
+        </details>
+
+        <details class="faq-item">
+          <summary>Can I have more than one partner?</summary>
+          <p>
+            Yes. Invite as many partners as you like from the Partners page. Each one only sees
+            activity uploaded after they accept your invite.
           </p>
         </details>
 
@@ -167,11 +234,11 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
     </section>
 
     <section class="home-section" id="platforms">
-      <div class="eyebrow">Features</div>
+      <div class="eyebrow">Platforms</div>
       <div class="home-section-heading">
-        <h2>Currently supported platforms &amp; features</h2>
+        <h2>Supported platforms &amp; features</h2>
       </div>
-      <p>
+      <p class="home-section-lead">
         We are working hard to support more platforms and features. Below is the current feature
         support by platform. Virtue is still being tested, so some features may change.
       </p>
@@ -301,17 +368,21 @@ const latestPosts = (await getCollection('blog', ({ data }) => !data.draft))
       )
     }
 
-    <NewsletterForm />
-
-    <section class="home-section home-cta">
-      <div class="home-section-heading">
-        <h2>Get started</h2>
+    <section class="home-closing">
+      <div class="home-closing-cta">
+        <div class="eyebrow">Get started</div>
+        <h2>Start with one partner you trust</h2>
+        <p>Create a free account, install the app, then invite your accountability partner.</p>
+        <div class="section-actions">
+          <Button href={`${APP_URL}/signup`} variant="primary" size="lg">
+            <div class="home-text-icon-button-container">
+              <div>Get started</div><RightArrowIcon />
+            </div>
+          </Button>
+          <Button href="/download" size="lg">Download</Button>
+        </div>
       </div>
-      <p>Create your account and set up your accountability partner.</p>
-      <div class="section-actions">
-        <Button href={`${APP_URL}/signup`} variant="primary" size="lg">Get started</Button>
-        <Button href="/download" size="lg">Download</Button>
-      </div>
+      <NewsletterForm />
     </section>
   </div>
 </SiteLayout>

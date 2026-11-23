@@ -2,7 +2,7 @@
 // checks at login, plus the HPKE key pair the web app unwraps batch keys with.
 //
 // Password derivation reuses derivePasswordMaterial from the web app so the
-// seeded hash can't drift from what the login form sends (CLAUDE.md contract 4).
+// seeded hash can't drift from what the login form sends (AGENTS.md contract 4).
 import { DhkemX25519HkdfSha256 } from '@hpke/dhkem-x25519';
 import { CURRENT_HASH_PARAMS } from '../../api/src/lib/password';
 import { derivePasswordMaterial } from '../../web/src/utils/api/crypto';

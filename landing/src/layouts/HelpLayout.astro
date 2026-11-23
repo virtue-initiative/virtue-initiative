@@ -1,11 +1,12 @@
 ---
 import CanonicalLink from '../components/CanonicalLink.astro';
+import HelpContact from '../components/HelpContact.astro';
+import HelpSearch from '../components/HelpSearch.astro';
 import HelpSidebarNav from '../components/HelpSidebarNav.astro';
 import Footer from '../components/Footer.astro';
 import Header from '../components/Header.astro';
 import ImageLightbox from '../components/ImageLightbox.astro';
 import NoindexMeta from '../components/NoindexMeta.astro';
-import { helpSidebar } from '../help/navigation';
 import { DEFAULT_DESCRIPTION } from '../lib/site';
 import '../styles/global.css';
 
@@ -13,11 +14,17 @@ interface Props {
   currentPath: string;
   pageTitle?: string;
   description?: string;
+  // The help home has no sidebar on desktop; its topic cards do that job.
+  wide?: boolean;
 }
 
-const { currentPath, pageTitle = 'Help', description = DEFAULT_DESCRIPTION } = Astro.props;
+const {
+  currentPath,
+  pageTitle = 'Help',
+  description = DEFAULT_DESCRIPTION,
+  wide = false,
+} = Astro.props;
 const title = `${pageTitle} - The Virtue Initiative`;
-const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
 ---
 
 <!doctype html>
@@ -43,13 +50,19 @@ const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
   </head>
   <body class="help-page">
     <Header tagline="Guides and docs for The Virtue Initiative" />
-    <main class="help-main">
-      <aside class="help-sidebar help-sidebar-desktop">
-        <HelpSidebarNav currentPath={currentPath} rootLinks={rootLinks} />
-      </aside>
+    <main class:list={['help-main', { 'help-main-wide': wide }]}>
+      {
+        !wide && (
+          <aside class="help-sidebar help-sidebar-desktop">
+            <HelpSidebarNav currentPath={currentPath} />
+          </aside>
+        )
+      }
 
       <div class="help-content">
+        {!wide && <HelpSearch />}
         <slot />
+        <HelpContact />
       </div>
     </main>
     <button
@@ -91,7 +104,7 @@ const rootLinks = [{ label: 'Help', href: '/help' }, ...helpSidebar];
         </button>
       </div>
       <nav aria-label="Help navigation">
-        <HelpSidebarNav currentPath={currentPath} rootLinks={rootLinks} />
+        <HelpSidebarNav currentPath={currentPath} />
       </nav>
     </aside>
     <Footer />

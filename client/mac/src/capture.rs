@@ -8,10 +8,35 @@ use uuid::Uuid;
 use virtue_core::{CoreError, CoreResult, LifecycleHooks, Screenshot, ScreenshotHooks};
 use wait_timeout::ChildExt;
 
+use crate::display_layout::{self, DisplayBounds};
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGPoint {
+    x: f64,
+    y: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGSize {
+    width: f64,
+    height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGRect {
+    origin: CGPoint,
+    size: CGSize,
+}
+
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
+    fn CGGetActiveDisplayList(max_displays: u32, displays: *mut u32, count: *mut u32) -> i32;
+    fn CGDisplayBounds(display: u32) -> CGRect;
 }
 
 /// The hidden `virtue-daemon` subcommand that answers whether Screen
@@ -74,9 +99,58 @@ fn capture_after_check(check: AccessCheck) -> Result<Vec<u8>> {
         ));
     }
 
-    run_capture_command("/usr/sbin/screencapture", &["-x", "-t", "png"])
-        .or_else(|_| run_capture_command("screencapture", &["-x", "-t", "png"]))
-        .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")
+    capture_all_displays()
+}
+
+/// Captures every active display as one PNG (CLIENT-018). `screencapture`
+/// writes one file per display, in the order `CGGetActiveDisplayList`
+/// returns them (main display first), up to the number of files it's given.
+fn capture_all_displays() -> Result<Vec<u8>> {
+    let displays = active_display_bounds();
+    // With no display list, one file still gets the main display.
+    let files = displays.len().max(1);
+    let images = run_capture_command("/usr/sbin/screencapture", files)
+        .or_else(|_| run_capture_command("screencapture", files))
+        .with_context(|| "screencapture failed (grant Screen Recording permission in macOS)")?;
+    if images.len() != files {
+        tracing::warn!(
+            displays = displays.len(),
+            images = images.len(),
+            "display count changed during capture; placing images side by side"
+        );
+    }
+    display_layout::combine_pngs(images, &displays)
+}
+
+/// Each active display's bounds, main display first. Empty if macOS won't
+/// say, which leaves `screencapture` to capture just the main display.
+fn active_display_bounds() -> Vec<DisplayBounds> {
+    const MAX_DISPLAYS: u32 = 32;
+    let mut ids = [0u32; MAX_DISPLAYS as usize];
+    let mut count = 0u32;
+    // SAFETY: `ids` holds `MAX_DISPLAYS` entries and `count` is a valid
+    // out-param; neither is retained past the call.
+    let err = unsafe { CGGetActiveDisplayList(MAX_DISPLAYS, ids.as_mut_ptr(), &mut count) };
+    if err != 0 {
+        tracing::warn!(
+            err,
+            "CGGetActiveDisplayList failed; capturing the main display only"
+        );
+        return Vec::new();
+    }
+    ids[..(count.min(MAX_DISPLAYS) as usize)]
+        .iter()
+        .map(|&id| {
+            // SAFETY: takes a display id by value and returns a struct.
+            let rect = unsafe { CGDisplayBounds(id) };
+            DisplayBounds {
+                x: rect.origin.x,
+                y: rect.origin.y,
+                width: rect.size.width,
+                height: rect.size.height,
+            }
+        })
+        .collect()
 }
 
 /// Whether this process may capture the screen. macOS answers once per
@@ -141,13 +215,21 @@ pub fn is_permission_missing_error(text: &str) -> bool {
         || normalized.contains("permission")
 }
 
-fn run_capture_command(cmd: &str, args: &[&str]) -> Result<Vec<u8>> {
-    let output_path = temporary_capture_path();
-    let output_path_str = output_path.display().to_string();
+/// Runs `cmd -x -t png <file>...` with `files` output files and returns each
+/// one it wrote, in order. It writes fewer when there are fewer displays.
+fn run_capture_command(cmd: &str, files: usize) -> Result<Vec<Vec<u8>>> {
+    let output_paths: Vec<PathBuf> = (0..files).map(|_| temporary_capture_path()).collect();
+    let result = run_capture_command_into(cmd, &output_paths);
+    for path in &output_paths {
+        let _ = fs::remove_file(path);
+    }
+    result
+}
 
+fn run_capture_command_into(cmd: &str, output_paths: &[PathBuf]) -> Result<Vec<Vec<u8>>> {
     let output = Command::new(cmd)
-        .args(args)
-        .arg(&output_path_str)
+        .args(["-x", "-t", "png"])
+        .args(output_paths)
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
@@ -156,19 +238,18 @@ fn run_capture_command(cmd: &str, args: &[&str]) -> Result<Vec<u8>> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let _ = fs::remove_file(&output_path);
         return Err(anyhow!("{} exited with {}: {}", cmd, output.status, stderr));
     }
 
-    let bytes =
-        fs::read(&output_path).with_context(|| format!("failed reading {}", output_path_str))?;
-    let _ = fs::remove_file(&output_path);
-
-    if bytes.is_empty() {
-        return Err(anyhow!("{} returned empty output file", cmd));
+    let images: Vec<Vec<u8>> = output_paths
+        .iter()
+        .filter_map(|path| fs::read(path).ok())
+        .filter(|bytes| !bytes.is_empty())
+        .collect();
+    if images.is_empty() {
+        return Err(anyhow!("{} returned no images", cmd));
     }
-
-    Ok(bytes)
+    Ok(images)
 }
 
 fn temporary_capture_path() -> PathBuf {
@@ -360,6 +441,7 @@ struct MachTimebaseInfo {
 
 unsafe extern "C" {
     fn mach_absolute_time() -> u64;
+    fn mach_continuous_time() -> u64;
     fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
 }
 
@@ -384,6 +466,14 @@ impl LifecycleHooks for MacPlatformHooks {
         // SAFETY: `mach_absolute_time` takes no arguments and has no
         // preconditions.
         mach_ticks_to_ms(unsafe { mach_absolute_time() })
+    }
+
+    /// Time since boot, in milliseconds, INCLUDING time spent suspended. The
+    /// daemon's own clock runs on it (CORE-027).
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        // SAFETY: `mach_continuous_time` takes no arguments and has no
+        // preconditions.
+        mach_ticks_to_ms(unsafe { mach_continuous_time() })
     }
 
     fn get_last_login_utc_ms(&self) -> CoreResult<Option<i64>> {

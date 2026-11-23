@@ -11,10 +11,11 @@ type AvatarProps = {
 export function Avatar({ src, name, size = 'md', class: className }: AvatarProps) {
   const initials = name
     ? name
-        .split(' ')
-        .map((w) => w[0])
-        .join('')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => Array.from(w)[0])
         .slice(0, 2)
+        .join('')
         .toUpperCase()
     : '?';
   return (

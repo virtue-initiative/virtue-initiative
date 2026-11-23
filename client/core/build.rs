@@ -38,7 +38,7 @@ fn main() {
 
 /// Loads compile-time defaults (API URL, intervals) from, in priority order: the repo-root
 /// `.env` (per-worktree overrides), then `~/.config/virtue-dev.env` (machine-wide defaults,
-/// `$VIRTUE_DEV_ENV`-overridable — see root AGENTS.md; shared with the shell scripts that
+/// `$VIRTUE_DEV_ENV`-overridable — see docs/development.md; shared with the shell scripts that
 /// source the same file). Each `KEY=VALUE` pair is set as a process env var only if that key
 /// isn't already set — by an earlier, higher-priority file in this same loop, or by a real
 /// process/CI env var set before `cargo build` ran — so real env vars always win, and the

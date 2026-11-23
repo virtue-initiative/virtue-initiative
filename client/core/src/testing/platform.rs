@@ -24,6 +24,11 @@ struct TestPlatformInner {
     /// When `Some`, overrides `get_monotonic_clock_ms()` instead of it
     /// mirroring `clock` (the default — see `set_monotonic_clock_override`).
     monotonic_override_ms: Option<i64>,
+    /// How far the system clock is set from `clock`, which stands for real
+    /// time and drives the boot clock. See `set_system_clock_offset`.
+    system_clock_offset_ms: i64,
+    /// How far the boot clock is from `clock`. See `set_boot_clock_offset`.
+    boot_clock_offset_ms: i64,
 }
 
 impl TestPlatformHooks {
@@ -43,6 +48,8 @@ impl TestPlatformHooks {
                 last_logout_utc_ms: None,
                 lifecycle_enabled: true,
                 monotonic_override_ms: None,
+                system_clock_offset_ms: 0,
+                boot_clock_offset_ms: 0,
             })),
         }
     }
@@ -87,6 +94,23 @@ impl TestPlatformHooks {
         self.lock().monotonic_override_ms = ms;
     }
 
+    /// Sets the system clock `offset_ms` away from `clock`, as a user
+    /// changing it would: the boot and suspend-safe clocks keep following
+    /// `clock`. 0 by default.
+    pub fn set_system_clock_offset(&self, offset_ms: i64) {
+        self.lock().system_clock_offset_ms = offset_ms;
+    }
+
+    /// Sets the boot clock `offset_ms` away from `clock`, e.g. far behind it
+    /// to simulate a reboot since a reading was taken. 0 by default.
+    pub fn set_boot_clock_offset(&self, offset_ms: i64) {
+        self.lock().boot_clock_offset_ms = offset_ms;
+    }
+
+    fn system_clock_ms(&self) -> i64 {
+        self.clock.now_ms() + self.lock().system_clock_offset_ms
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, TestPlatformInner> {
         self.inner.lock().expect("TestPlatformHooks state poisoned")
     }
@@ -110,7 +134,7 @@ impl ScreenshotHooks for TestPlatformHooks {
     }
 
     fn get_time_utc_ms(&self) -> CoreResult<i64> {
-        Ok(self.clock.now_ms())
+        Ok(self.system_clock_ms())
     }
 
     fn is_locked_or_screensaver(&self) -> CoreResult<bool> {
@@ -120,7 +144,11 @@ impl ScreenshotHooks for TestPlatformHooks {
 
 impl LifecycleHooks for TestPlatformHooks {
     fn get_utc_clock_ms(&self) -> CoreResult<i64> {
-        Ok(self.clock.now_ms())
+        Ok(self.system_clock_ms())
+    }
+
+    fn get_boot_clock_ms(&self) -> CoreResult<i64> {
+        Ok(self.clock.now_ms() + self.lock().boot_clock_offset_ms)
     }
 
     fn get_monotonic_clock_ms(&self) -> CoreResult<i64> {

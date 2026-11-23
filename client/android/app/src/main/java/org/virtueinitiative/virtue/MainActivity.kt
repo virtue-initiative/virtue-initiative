@@ -41,9 +41,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.virtueinitiative.virtue.databinding.ActivityMainBinding
 import java.text.DateFormat
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 /**
  * What must outlive the activity. A rotation recreates it while a native call
@@ -104,7 +102,8 @@ class MainActivity : AppCompatActivity() {
     // prompts never stack.
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { requestBatteryExemption() }
+    ) { if (askBatteryNext) requestBatteryExemption() }
+    private var askBatteryNext = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -189,15 +188,22 @@ class MainActivity : AppCompatActivity() {
 
     // Home follows the monitoring state while it is on screen, so "Waiting for
     // first capture" turns into "Monitoring active" without leaving the app.
+    // Status Details polls too, so its relative ages (CLIENT-007) keep counting.
     private val homePoll = object : Runnable {
         override fun run() {
-            if (screen == Screen.HOME) refreshUi()
+            // Status Details also picks up the test screenshot button following Accessibility (CLIENT-008).
+            if (screen == Screen.HOME || screen == Screen.STATUS_DETAILS) refreshUi()
             binding.root.postDelayed(this, 3000)
         }
     }
 
     override fun onStart() {
         super.onStart()
+        // The instance on screen is the one results must reach. Another
+        // instance being created and destroyed meanwhile would otherwise
+        // leave Session.activity null here, and a sign-in or test screenshot
+        // would finish into nothing (#874).
+        Session.activity = this
         AppUpdater.uiVisible = true
         binding.root.postDelayed(homePoll, 3000)
     }
@@ -210,6 +216,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The user may be back from allowing notifications, and the service
+        // may have stopped meanwhile. A start from the front is allowed, and
+        // the service posts the notification again if Android dropped it (CLIENT-030).
+        if (signedIn(statusJson())) ScreenshotService.start(this)
         refreshUi()
         // Re-check after short delay in case the accessibility service just connected
         binding.root.postDelayed({ refreshUi() }, 600)
@@ -402,7 +412,12 @@ class MainActivity : AppCompatActivity() {
         // shows the permissions, so nothing else pays for asking Android.
         val partners = if (json.isNull("partner_count")) 0 else json.optInt("partner_count", 0)
         val permissions = state == State.A11Y_OFF && AccessibilitySetupGuide.permissionsGranted(this)
-        val key = "${state.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
+        val focus = HomeFocus.of(
+            accessibilityConnected = state != State.A11Y_OFF,
+            signedIn = signedIn(json),
+            notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled(),
+        )
+        val key = "${state.name}/${focus.name}/$permissions/${lastScreenshotMs(json)}/${partners > 0}/${AppUpdater.readyVersion(this)}"
         if (lastHomeKey == key && content.childCount > 0) return
         lastHomeKey = key
 
@@ -418,8 +433,8 @@ class MainActivity : AppCompatActivity() {
             content.addView(install.topMargin(8))
         }
 
-        when (state) {
-            State.A11Y_OFF -> {
+        when (focus) {
+            HomeFocus.SETUP_GUIDE -> {
                 val guide = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -429,9 +444,19 @@ class MainActivity : AppCompatActivity() {
                 content.addView(guide)
                 AccessibilitySetupGuide.renderGuide(this, guide, ::handleGuideAction)
             }
-            State.SIGNED_OUT -> renderSignIn(content)
-            else -> renderStatusFocus(content, state, json)
+            HomeFocus.ALLOW_NOTIFICATIONS -> renderAllowNotifications(content)
+            HomeFocus.SIGN_IN -> renderSignIn(content)
+            HomeFocus.STATUS -> renderStatusFocus(content, state, json)
         }
+    }
+
+    /** Signed out with notifications off: sign-in waits for them (CLIENT-030). */
+    private fun renderAllowNotifications(content: LinearLayout) {
+        content.addView(text(getString(R.string.allow_notifications_title), 26f, bold = true).apply {
+            ViewCompat.setAccessibilityHeading(this, true)
+        }.topMargin(24))
+        content.addView(text(getString(R.string.allow_notifications_body), 16f, R.color.ink_3).topMargin(8))
+        content.addView(filledButton(getString(R.string.btn_allow_notifications)) { requestNotifications() }.topMargin(28))
     }
 
     private fun renderStatusFocus(content: LinearLayout, state: State, json: JSONObject) {
@@ -610,6 +635,8 @@ class MainActivity : AppCompatActivity() {
             }
             Session.signingIn = false
             if (error == null) {
+                // Show the notification now, not at the next keep-alive run (CLIENT-030).
+                ScreenshotService.start(app)
                 AccountEmailStore.save(app, email)
                 Session.passwordDraft = ""
                 Session.loginError = null
@@ -753,25 +780,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The guide's "Request permissions" button (CLIENT-030). Neither is needed to
-     * capture. Each tap moves on to whatever is still missing, so it never does
+     * The guide's "Request permissions" button (CLIENT-030). Notifications must be
+     * allowed before sign-in; the battery exemption is optional. Each tap moves on to whatever is still missing, so it never does
      * nothing while the button is enabled.
      */
     private fun requestPermissions() {
         val notificationsOn = NotificationManagerCompat.from(this).areNotificationsEnabled()
         when {
-            !notificationsOn && canPromptForNotifications() -> {
-                getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).edit()
-                    .putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            !notificationsOn && canPromptForNotifications() -> promptForNotifications(askBattery = true)
             !batteryExempt() -> requestBatteryExemption()
-            !notificationsOn -> runCatching {
-                startActivity(
-                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                )
-            }
+            !notificationsOn -> openNotificationSettings()
+        }
+    }
+
+    /** Home's "Allow notifications" button: the prompt, or the app's notification settings once Android won't show it. */
+    private fun requestNotifications() {
+        if (canPromptForNotifications()) {
+            promptForNotifications(askBattery = false)
+        } else {
+            openNotificationSettings()
+        }
+    }
+
+    private fun promptForNotifications(askBattery: Boolean) {
+        getSharedPreferences(PREFS_PERMISSIONS, MODE_PRIVATE).edit()
+            .putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
+        askBatteryNext = askBattery
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun openNotificationSettings() {
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            )
         }
     }
 
@@ -860,9 +903,14 @@ class MainActivity : AppCompatActivity() {
 
         // `optString` renders a JSON null as the literal "null", so absent and
         // null values are both routed through `isNull` first.
-        fun optText(key: String): String =
-            if (json.isNull(key)) "—" else json.optString(key, "").ifBlank { "—" }
-        fun optTime(key: String): String = formatTimestampMs(json.optLong(key, 0))
+        // Absent values read the same on every platform (CLIENT-007): plain
+        // words in the summary rows, `<none>` or `<unknown>` under Advanced.
+        val unknown = getString(R.string.details_unknown)
+        fun optText(key: String, absent: String): String =
+            if (json.isNull(key)) absent else json.optString(key, "").ifBlank { absent }
+        fun optSeconds(key: String): String =
+            if (json.isNull(key)) "<unknown>" else "${json.optLong(key, 0)}s"
+        fun optTime(key: String): String = StatusTimestamp.full(json.optLong(key, 0))
 
         // Summary: dot, headline and one sentence.
         content.addView(LinearLayout(this).apply {
@@ -890,14 +938,14 @@ class MainActivity : AppCompatActivity() {
         val account = mutableListOf<DetailRow>()
         if (loggedIn) {
             account += DetailRow(
-                Tone.GOOD, getString(R.string.details_signed_in), optText("account_email"),
-                getString(R.string.details_device_hint, optText("device_name")),
+                Tone.GOOD, getString(R.string.details_signed_in), optText("account_email", unknown),
+                getString(R.string.details_device_hint, optText("device_name", unknown)),
             )
             val partners = if (json.isNull("partner_count")) null else json.optInt("partner_count", 0)
             account += DetailRow(
                 if ((partners ?: 0) > 0) Tone.GOOD else Tone.WARN,
                 getString(R.string.details_partners),
-                partners?.toString() ?: "—",
+                partners?.toString() ?: unknown,
                 if (partners == 0) getString(R.string.details_partners_hint) else null,
             )
         } else {
@@ -941,7 +989,7 @@ class MainActivity : AppCompatActivity() {
             DetailRow(
                 if (lastShot > 0) Tone.GOOD else if (loggedIn) Tone.WARN else Tone.NEUTRAL,
                 getString(R.string.details_last_screenshot),
-                if (lastShot > 0) formatClock(lastShot) else getString(R.string.details_none),
+                if (lastShot > 0) StatusTimestamp.short(lastShot) else getString(R.string.details_none),
             ),
             DetailRow(null, getString(R.string.details_waiting_upload), (pendingHash + pendingBatch).toString()),
         )))
@@ -952,7 +1000,7 @@ class MainActivity : AppCompatActivity() {
         val errorRows = (0 until (recentErrors?.length() ?: 0)).mapNotNull { recentErrors?.optJSONObject(it) }.map { error ->
             error.optLong("at_ms", 0) to DetailRow(
                 null, getString(R.string.details_recent_error), error.optString("message"),
-                "${formatTimestampMs(error.optLong("at_ms", 0))} · ${error.optString("context")}",
+                "${StatusTimestamp.full(error.optLong("at_ms", 0))} · ${error.optString("context")}",
             )
         }
         content.addView(sectionLabel(getString(R.string.details_group_problems)))
@@ -971,7 +1019,13 @@ class MainActivity : AppCompatActivity() {
             "static_screen" -> "Screen unchanged since the last upload"
             "locked_or_screensaver" -> "Screen locked or screensaver active"
             "capture_failed" -> "Capture failed"
-            else -> "—"
+            else -> StatusTimestamp.NONE
+        }
+        // The capture loop is Android's daemon (CLIENT-007).
+        val monitorState = when {
+            VirtueAccessibilityService.isEnabled() -> "Running"
+            VirtueAccessibilityService.isPaused() -> "Paused"
+            else -> "Stopped"
         }
         val a11yStatus = when {
             VirtueAccessibilityService.isEnabled() -> "Active"
@@ -979,7 +1033,7 @@ class MainActivity : AppCompatActivity() {
             VirtueAccessibilityService.isConnected() -> "Connected (not running)"
             else -> "Not enabled"
         }
-        val hashBaseUrl = if (json.isNull("hash_base_url")) "default" else json.optString("hash_base_url", "").ifBlank { "default" }
+        val hashBaseUrl = optText("hash_base_url", "<default>")
         val logFile = java.io.File(filesDir, "core-data/logs").listFiles()?.maxByOrNull { it.lastModified() }
 
         val advancedBody = LinearLayout(this).apply {
@@ -990,32 +1044,36 @@ class MainActivity : AppCompatActivity() {
             )
         }
         advancedBody.addView(detailGroup(listOf(
-            DetailRow(null, "Device ID", optText("device_id")),
-            DetailRow(null, "API URL", optText("api_base_url")),
+            DetailRow(null, "Device ID", optText("device_id", StatusTimestamp.NONE)),
+            DetailRow(null, "API URL", optText("api_base_url", "<unknown>")),
             DetailRow(null, "Hash base URL", hashBaseUrl),
-            DetailRow(null, "Capture interval", "${json.optLong("capture_interval_seconds", 0)}s"),
-            DetailRow(null, "Batch window", "${json.optLong("batch_window_seconds", 0)}s"),
+            DetailRow(null, "Capture interval", optSeconds("capture_interval_seconds")),
+            DetailRow(null, "Batch window", optSeconds("batch_window_seconds")),
             DetailRow(null, "Build", BuildConfig.VIRTUE_BUILD_LABEL),
             DetailRow(null, "Accessibility service", a11yStatus),
+            DetailRow(null, "Monitor state", monitorState),
             DetailRow(null, "Waiting for hash", pendingHash.toString()),
             DetailRow(null, "Waiting in batch", pendingBatch.toString()),
             DetailRow(null, "Pending requests", json.optInt("pending_request_count", 0).toString()),
             DetailRow(null, "Last batch upload", optTime("last_batch_at_ms")),
             DetailRow(null, "Last loop", optTime("last_loop_at_ms")),
             DetailRow(null, "Last attempt", optTime("last_screenshot_attempt_at_ms")),
+            DetailRow(null, "Last screenshot", optTime("last_screenshot_at_ms")),
             DetailRow(null, "Last skip reason", skipReason),
-            DetailRow(null, "Log file", logFile?.absolutePath ?: "—"),
+            DetailRow(null, "Log file", logFile?.absolutePath ?: StatusTimestamp.NONE),
         ) + errorRows.ifEmpty {
-            listOf(0L to DetailRow(null, getString(R.string.details_recent_errors), getString(R.string.details_none)))
+            listOf(0L to DetailRow(null, getString(R.string.details_recent_errors), StatusTimestamp.NONE))
         }.map { it.second }))
         advancedBody.addView(tonalButton(getString(R.string.btn_open_log)) { openLogFile(logFile) }.topMargin(12))
         val test = tonalButton(getString(R.string.btn_take_test_screenshot)) { forceCapture() }
-        test.isEnabled = loggedIn && !Session.capturing
+        val a11yConnected = VirtueAccessibilityService.isConnected()
+        test.isEnabled = loggedIn && a11yConnected && !Session.capturing
         testButton = test
         advancedBody.addView(test.topMargin(8))
-        val message = text(Session.detailsMessage.orEmpty(), 14f, R.color.ink_3).apply {
+        val hint = if (loggedIn && !a11yConnected) getString(R.string.msg_force_capture_needs_accessibility) else Session.detailsMessage
+        val message = text(hint.orEmpty(), 14f, R.color.ink_3).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = if (Session.detailsMessage == null) View.GONE else View.VISIBLE
+            visibility = if (hint == null) View.GONE else View.VISIBLE
         }.topMargin(8) as TextView
         detailsMessageView = message
         advancedBody.addView(message)
@@ -1068,20 +1126,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun forceCapture() {
-        // CLIENT-008: no second request while one is running.
-        if (Session.capturing) return
+        // CLIENT-008: no second request while one is running. Without
+        // Accessibility no loop runs to answer it.
+        if (Session.capturing || !VirtueAccessibilityService.isConnected()) return
         Session.capturing = true
         testButton?.isEnabled = false
-        showDetailsMessage(getString(R.string.msg_force_capture_started), clear = false)
         val app = applicationContext
         Session.scope.launch {
+            // CLIENT-008: count down so the user can bring up the screen they want captured.
+            for (left in TEST_SCREENSHOT_DELAY_SECONDS downTo 1) {
+                val waiting = app.resources.getQuantityString(R.plurals.msg_force_capture_waiting, left, left)
+                showDetailsMessage(waiting, clear = false)
+                delay(1_000)
+            }
+            showDetailsMessage(app.getString(R.string.msg_force_capture_started), clear = false)
             // The native call waits for the batch to land, so its message
             // reports what actually happened rather than assuming an upload.
-            val raw = withContext(Dispatchers.IO) {
+            val raw = withDeadline(FORCE_CAPTURE_DEADLINE_MS) {
                 NativeBridge.nativeForceCapture()
-            }
+            } ?: """{"error":"timed out"}"""
             Session.capturing = false
-            Session.activity?.testButton?.isEnabled = true
+            Session.activity?.testButton?.isEnabled = VirtueAccessibilityService.isConnected()
 
             val report = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
             val error = if (report.isNull("error")) null else report.optString("error", "").ifBlank { null }
@@ -1243,13 +1308,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun formatTimestampMs(ms: Long): String {
-        if (ms <= 0L) return "—"
-        return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(ms))
-    }
-
     private companion object {
+        const val FORCE_CAPTURE_DEADLINE_MS = 30_000L
         const val KEY_SCREEN = "screen"
+        const val TEST_SCREENSHOT_DELAY_SECONDS = 10
         const val KEY_ADVANCED_OPEN = "advanced_open"
         const val KEY_EMAIL = "email"
         const val KEY_DEVICE = "device"

@@ -28,7 +28,7 @@ The API URL, capture interval and batch window are fixed at build time on every 
 
 ## CLIENT-003 Installing and first run
 
-- Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. Before `virtue login`, the daemon runs with capture disabled.
+- Linux: the `.deb` MUST enable `virtue.service` globally for every user, start or restart it for every logged-in user, and enable the update timer only when the package was built with auto-update on (CLIENT-023). On Cinnamon it MUST add the panel applet that hosts tray icons if it is missing. It MUST run each user's commands without a login shell, so a broken `~/.profile` or other login script cannot fail the install, and a failure for one user MUST NOT fail the install. A fresh install, not an upgrade, SHOULD end by telling the user to run `virtue login`. Before `virtue login`, the daemon runs with capture disabled.
 - macOS: the first launch MUST open the main window, request Screen Recording (CLIENT-025), register the app as a login item, and install and start the daemon LaunchAgent (CLIENT-024).
 - Windows: the app is installed from the Microsoft Store as an MSIX. Launching it MUST start monitoring in-process, create the tray icon, register the watchdog (CLIENT-028) and show the main window.
 - Android: the app MUST keep a signed-out user on the Accessibility setup guide until the Accessibility service is connected, and only then show the sign-in form (CLIENT-030). The app MUST NOT ask for the notification permission (Android 13+) or for exemption from battery optimization when it opens; the setup guide's first step MUST explain why both are wanted and offer a "Request permissions" button that asks for them (CLIENT-030).
@@ -45,6 +45,7 @@ The sign-in form MUST take an email, a password and an optional device name, and
 - Sign-in needs a running daemon loop (CORE-007). Linux and macOS MUST fail with "failed to connect to daemon (is it running?)" when the daemon is unreachable; Windows with "monitoring is not running". Android MUST show the Accessibility guide instead of attempting sign-in while the service is disconnected, and MUST restart a paused loop before signing in.
 - Linux `virtue login` MUST mask the typed password with `*`, abort on Ctrl+C or Ctrl+D, prompt `Device name [<hostname>]:` unless `--device-name` is given, and skip the email prompt when `--email` is given. On success it MUST print the capture probe result (CLIENT-020), the device id, the partners instruction and the monitoring summary, plus a warning when the probe failed.
 - macOS MUST show "Login failed. Check your email and password and try again." when the error mentions unauthorized, bad request or login failed, and "Login failed: <error>" otherwise. Android MUST show "Sign in failed. <error>." (adding the period only when the error lacks terminal punctuation).
+- Windows MUST NOT show raw core text for the two common failures. A rejected email or password (HTTP 400, 401 or 403) MUST show "Sign in failed. Check your email and password and try again." A request that never reaches the server (no network, unknown host, timeout) MUST show "Can't reach Virtue. Check your internet connection and try again." Any other failure MUST show "Sign in failed. <error>." with the period added only when the error lacks terminal punctuation. A failed sign-in MUST save nothing and leave the form usable.
 
 > OPEN: Android retries a sign-in that fails with "serialization error" after deleting the entire `core-data` directory, including any events still waiting to upload, although CORE-017 already recovers unreadable state — is the wipe still needed, and may it discard queued alerts?
 
@@ -58,18 +59,20 @@ While signed out, no screenshots are taken (CORE-009):
 - Android: sign-out MUST also stop the daemon loop and remove the persistent notification.
 - iOS: sign-out MUST also turn the monitoring switch off (CLIENT-032).
 
+<!-- doc-check: ignore -->
+
 > OPEN: when native logout fails, Android deletes `core-data/auth.json`, a file that no longer exists (auth lives in `event_state.json`), so the fallback does nothing — should it be removed or retargeted?
 
 ## CLIENT-006 Status the user can see
 
 Every app MUST show whether the user is signed in and a one-line monitoring state, and MUST give access to Status Details (CLIENT-007).
 
-- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021).
+- Linux: `virtue status` (CLIENT-020) and the tray tooltip (CLIENT-021). `virtue status` MUST open with a headline, first match wins: "Signed out"; "Monitoring stopped" (daemon not running); "Monitoring active" (a screenshot has been taken); otherwise "Waiting for the first screenshot". The first two MUST be followed by the command that fixes them (`virtue login`, `virtue daemon start`); when signed out with the daemon not running, `virtue daemon start` MUST come before `virtue login`, since login needs the daemon.
 - macOS window headline, first match wins: "Screen Recording off"; "Signed out"; "Monitoring stopped" (daemon reported stopped, CLIENT-024); "Monitoring active" (daemon running and a screenshot has been taken); otherwise "Starting…".
 - Windows: see CLIENT-027.
 - Android headline, first match wins: "Accessibility is off" (the service is not connected, signed in or not); "Signed out"; "Monitoring paused" (user paused); "Monitoring active" (loop running and a screenshot has been taken); otherwise "Waiting for first capture" (CLIENT-030).
 - iOS headline: "Signed out"; "Monitoring paused"; "Setup not finished"; "Safari permission needed"; "Monitoring active" (CLIENT-032).
-- Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status`.
+- Every app MUST show its build label. Every GUI MUST show the "What Virtue Monitors" summary with a Learn more link to `https://virtueinitiative.org/help/what-virtue-monitors/<platform>`; Linux prints it after login and at the end of `virtue status --full`.
 
 ## CLIENT-007 Status Details
 
@@ -81,14 +84,14 @@ Status Details MUST render the CORE-010 fields, grouped as:
 - Recent errors: each with its time, context and message, or a none marker.
 - Advanced: device id, API URL, hash base URL (`<default>` when unset), capture interval, batch window, and where the logs are (CLIENT-017).
 
-Timestamps MUST be shown in local time with a relative age; absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
+Timestamps MUST be shown in local time followed by a relative age in parentheses, such as `2026-11-11 19:32:05 (5m ago)`. A summary row MAY shorten the time to the time of day, with the date added when it is not today, such as `7:32 PM (5m ago)`. The age MUST read `Ns ago` under a minute, `Nm ago` under an hour, `Nh Mm ago` under a day and `Nd Nh ago` from then on, rounded down and without a second unit of zero, or `in the future` for a timestamp ahead of now. Absent values MUST show `<none>`, or `<unknown>` for a setting or count the daemon has not reported (partners, API URL, capture interval, batch window). Summary rows shown above an Advanced section MUST instead use plain words, such as "None", "None yet" or "Unknown". Skip reasons MUST read "Screen unchanged since the last upload", "Screen locked or screensaver active" or "Capture failed".
 
-- macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot.
-- Linux `virtue status` MUST show the five newest errors and format ages as `Ns`/`Nm`/`Nh`/`Nd ago`, or "in the future" for a timestamp ahead of now.
+- macOS adds Screen Recording on/off, the build and a Reveal Logs button. Windows adds an "Open log folder" button. Android adds "Open log file", which shares the newest log file with a text viewer, and says "No log file has been written yet." or "No app on this device can open a text file." when it cannot. Android's daemon state row is "Monitor state", reading "Running", "Paused" or "Stopped" for its capture loop.
+- Linux Status Details is `virtue status --full`, which MUST leave out the Advanced group; `virtue status --advanced` MUST show every group. It MUST show the five newest errors.
 
 ## CLIENT-008 Test Screenshot
 
-A signed-in user MUST be able to request a screenshot now. The app MUST call CORE-021, then poll status every 0.5 s for up to 20 s and report one outcome, with the same wording on every platform:
+A signed-in user MUST be able to request a test screenshot. The app MUST wait 10 s before it calls CORE-021, so the user can bring up the screen they want captured. It MUST then poll status every 0.5 s for up to 20 s and report one outcome, with the same wording on every platform:
 
 - Uploaded: "Screenshot uploaded. Check the web logs page to view it."
 - Not taken, screen unchanged: "No screenshot was taken: the screen hasn't changed since the last one."
@@ -97,10 +100,10 @@ A signed-in user MUST be able to request a screenshot now. The app MUST call COR
 - Not taken, no reason: "No screenshot was taken."
 - Still uploading at the deadline: "Screenshot captured, but it hasn't finished uploading yet. The client will keep trying in the background."
 
-While waiting, the app MUST show "Screenshot uploading…" and MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s).
+During the 10 s the app MUST count down once a second, showing "Taking screenshot in N seconds…" ("in 1 second…" for the last), and after it "Screenshot uploading…". Until the outcome is reported it MUST NOT start a second request. A failed request MUST show "Test screenshot failed: <error>". Transient messages clear after a few seconds (macOS 3 s, Android 2.5 s). Once the countdown ends, a request MUST NOT outlast 30 s: if the core has not answered by then, the app MUST show "Test screenshot failed: timed out" and re-enable the button. The message and the button MUST follow the screen showing them, including the one that signed in.
 
-- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: a window menu item and a tray item, both shown only while signed in; the tray reports the outcome in a notification balloon. Android: "Take test screenshot" in the Advanced section of Status Details (CLIENT-030).
-- iOS: "Capture Next Safari Page" only records the request; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
+- Linux: `virtue test-screenshot`. macOS: window button and menu bar item, both disabled while Screen Recording is off. Windows: a window menu item and a tray item, both shown only while signed in; the tray shows the first waiting message, without counting down, and then the outcome in notification balloons. Android: "Take test screenshot" in the Advanced section of Status Details (CLIENT-030), disabled while Accessibility is off, with "Turn on Accessibility to take a test screenshot." under it.
+- iOS: "Capture Next Safari Page" only records the request, without the 10 s wait; the extension captures the next Safari page it sees and uploads it with everything else waiting (CORE-021 via `tick_once`). The app does not wait for an outcome.
 
 ## CLIENT-009 Permissions
 
@@ -126,15 +129,15 @@ Monitoring MUST start without user action after a reboot or sign-in to the OS, a
 
 A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed stop MUST be recorded with CORE-011 before monitoring stops, so partners see Monitoring Stopped by User and the gap is excused (CORE-002). The next start records Monitoring Resumed by User (CORE-022).
 
-| Platform | Control                                                              | Source tag             | After stopping                                                 |
-| -------- | -------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
-| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in |
-| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                          |
-| Windows  | "Stop monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog and relaunch task removed, app exits                  |
-| Android  | "Pause monitoring" / "Resume monitoring"                             | `android_pause_button` | loop stopped, app stays open                                   |
-| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                            |
+| Platform | Control                                                              | Source tag             | After stopping                                                                          |
+| -------- | -------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in                          |
+| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                                                   |
+| Windows  | "Stop monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog stops relaunching (CLIENT-014 cleanup stays), relaunch task removed, app exits |
+| Android  | "Pause monitoring" / "Resume monitoring"                             | `android_pause_button` | loop stopped, app stays open                                                            |
+| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                                                     |
 
-- Confirmation text: Linux "Warning: stopping the daemon will alert people monitoring you." with the prompt defaulting to No; macOS "Stop monitoring and quit?" / "This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted."; Windows "Stop monitoring and close Virtue?" / "This will stop monitoring on this device and close the main window and tray app." / "People monitoring you may be alerted."; Android and iOS "This will stop monitoring on this device. People monitoring you may be alerted."
+- Confirmation text: Linux "warning: stopping the daemon will alert people monitoring you." with the prompt defaulting to No; macOS "Stop monitoring and quit?" / "This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted."; Windows "Stop monitoring and close Virtue?" / "This will stop monitoring on this device and close the main window and tray app." / "People monitoring you may be alerted."; Android and iOS "This will stop monitoring on this device. People monitoring you may be alerted."
 - Linux MUST say "<service> is already stopped." and do nothing when the service is inactive, and MUST NOT stop the service if the stop could not be recorded.
 - While signed out, quitting MUST NOT ask for confirmation or record a user stop. macOS shows "Quit" in the menu and disables the window button; Windows Exit stops monitoring and exits.
 - Android resume MUST ask "Resume monitoring on this device?" and, if Accessibility is off, MUST show the setup guide instead.
@@ -148,7 +151,7 @@ A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed s
 An OS sign-out or shutdown MUST stop the daemon cleanly without recording a user stop; the resulting gap is excused by login/logout evidence (CORE-002, CLIENT-018).
 
 - Linux and macOS: the service manager's SIGTERM or SIGINT MUST make the daemon finish its current tick and exit (CORE-014).
-- Windows: the app MUST stop monitoring when the tray host observes session logoff or system shutdown.
+- Windows: the app MUST stop monitoring when the tray host observes session logoff or system shutdown. Handling session end MUST NOT start a process and MUST NOT wait on anything slower than the daemon's final flush, so the OS never lists Virtue as preventing sign-out (see the event-log rule in CLIENT-018).
 - macOS: the daemon MUST ask for an immediate batch upload after the system wakes from sleep.
 
 ## CLIENT-013 Updates
@@ -162,12 +165,13 @@ Shared rules for every platform that updates itself:
 
 ## CLIENT-014 Uninstalling
 
-- Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user. Upgrades run the same stop, then CLIENT-003's start.
-- macOS, Windows, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user, running each user's commands as CLIENT-003 does. Upgrades run the same stop, then CLIENT-003's start.
+- macOS, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
+- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the package is no longer installed (checked again after a short delay, so an update swap is not mistaken for an uninstall), the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the package is installed, the task MUST relaunch the app from the package's current install location, so the launch survives an update and does not depend on the app execution alias. After a deliberate Exit (CLIENT-011) the task MUST keep running only this cleanup and MUST NOT relaunch the app.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
 
-> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app, and Windows leaves the `VirtueResidentWatchdog` task running every minute — should these be cleaned up?
+> OPEN: macOS leaves the KeepAlive LaunchAgent plist pointing at the deleted app — should it be cleaned up?
 
 ## CLIENT-015 Communication between UI and daemon
 
@@ -203,21 +207,21 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 
 Each platform MUST supply the following to the core. A signal that cannot be read MUST fail safe: lock state reads as unlocked (falling back to the change check), and login/logout times read as unavailable.
 
-| Platform | Capture                                                    | Locked or screensaver                                                  | Last login                           | Last logout                                                                 |
-| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
-| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive` | logind session start                 | last journal entry of the previous boot                                     |
-| macOS    | main display via `screencapture`                           | session screen-locked flag, or a screensaver process running           | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
-| Windows  | every monitor as one image                                 | screensaver running, or the input desktop cannot be opened             | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
-| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                 | device boot time                     | unavailable                                                                 |
-| iOS      | visible Safari tab                                         | (not used)                                                             | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
+| Platform | Capture                                                    | Locked or screensaver                                                                          | Last login                           | Last logout                                                                 |
+| -------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- |
+| Linux    | all screens: `grim` on Wayland, else `import`, then `maim` | logind `LockedHint`, else freedesktop or GNOME screensaver `GetActive`                         | logind session start                 | last journal entry of the previous boot                                     |
+| macOS    | every display as one image, via `screencapture`            | session screen-locked flag, or a screensaver process running                                   | newest real login in `last`          | newest of a `shutdown time` entry or a finished session's end in `last`     |
+| Windows  | every monitor as one image                                 | screensaver running, the session's WTS flags say locked, or the input desktop cannot be opened | current logon session start          | newest of the registry `ShutdownTime` and the last System event before boot |
+| Android  | default display via Accessibility (Android 11+)            | screen not interactive                                                                         | device boot time                     | unavailable                                                                 |
+| iOS      | visible Safari tab                                         | (not used)                                                                                     | tamper detection disabled (CORE-002) | tamper detection disabled                                                   |
 
 - Linux MUST prefer Wayland when both Wayland and X11 are available, and MUST treat "no graphical session detected", "x11 display unavailable", "unable to open x server" and "can't open display" (any case) as the session being absent rather than a capture fault.
 - Linux previous-boot parsing MUST accept the timestamp as a number or a string of microseconds, and MUST return unavailable for no previous boot, an empty list or invalid JSON.
+- macOS MUST capture every active display in one `screencapture` run and, with more than one, MUST combine them into one image placed as the displays are arranged, at the highest pixel density among them. If the captured images do not match the display list (a display was added or removed mid-capture), it MUST still combine every captured image, side by side.
 - macOS `last` parsing MUST skip `reboot` and `shutdown` pseudo-entries when finding a login, MUST ignore sessions still logged in, and MUST compute a session's end from its start plus its duration.
+- Windows MUST read the last System event before boot through the Event Log API (`EvtQuery`) and MUST NOT start a process for it. The value cannot change during a boot, so a successful read MUST be kept for the rest of the run, and a failed read MAY be retried at most once per minute.
 - Windows event-log parsing MUST read the single-quoted `SystemTime` attribute and return unavailable for an empty result or a malformed timestamp.
-- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance.
-
-> OPEN: macOS captures only the main display, while Linux and Windows capture every screen — should macOS capture all displays?
+- Wall-clock time MUST be UTC milliseconds since the epoch. The suspend-excluding clock (CORE-002) MUST be `CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS, unbiased interrupt time on Windows and `uptimeMillis` on Android. Both MUST be positive, and the suspend-excluding clock MUST advance. The boot clock (CORE-027) MUST count from boot including time spent suspended: `CLOCK_BOOTTIME` on Linux, `mach_continuous_time` on macOS, interrupt time on Windows and `elapsedRealtime` on Android. iOS does not supply one, and the core uses the system clock in its place.
 
 ## CLIENT-019 Text recognition for redaction
 
@@ -233,7 +237,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `virtue login [--email E] [--device-name N]`                                 | CLIENT-004                                                                                           |
 | `virtue logout [--yes]`                                                      | CLIENT-005; prints "Logged out. Monitoring is disabled on this device until you run `virtue login`." |
-| `virtue status [--json]`                                                     | CLIENT-007                                                                                           |
+| `virtue status [--full] [--advanced] [--json]`                               | CLIENT-006, CLIENT-007                                                                               |
 | `virtue daemon`                                                              | runs the daemon and tray (used by systemd)                                                           |
 | `virtue daemon start`                                                        | `systemctl --user start` the service                                                                 |
 | `virtue daemon stop [--yes]`                                                 | CLIENT-011                                                                                           |
@@ -242,9 +246,11 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 | `virtue dev upload-log` / `dev add-log [--risk R] [--title T] [--details D]` | queue a Developer log, sent now or with the next batch                                               |
 | `virtue dev send --type T` (debug builds)                                    | queue any log type, or `all`                                                                         |
 
+- Output SHOULD use color and bold headings when written to a terminal. It MUST NOT contain color codes when the stream is not a terminal, `NO_COLOR` is set to a non-empty value, or `TERM` is `dumb`.
 - `--risk` MUST be a number from 0 to 1 and defaults to 0.5. `virtue --version` MUST print the build label.
 - The login capture probe MUST report one of: Wayland capture working; Wayland capture failing, with advice to use X11 or a compositor that allows `grim`; X11 working; X11 failing, with advice to install ImageMagick or `maim`; or no graphical session, with advice to run `virtue login` inside the desktop session.
-- `status --json` MUST output the CORE-010 fields plus `backend`, `service_name`, `service_active`, `state_dir`, `log_command`, and the older keys `logged_in`, `running` and `base_api_url`.
+- `virtue status` with no flags MUST show only the headline (CLIENT-006), the signed-in email, the age of the last screenshot ("None yet" when there is none), how many events are waiting to upload, how many recent errors there are, and a pointer to `--full`.
+- `status --json` MUST output every field whatever the other flags, namely the CORE-010 fields plus `backend`, `service_name`, `service_active`, `state_dir`, `log_command`, and the older keys `logged_in`, `running` and `base_api_url`.
 
 > OPEN: `virtue dev upload-log` always sends risk 1.0 but prints the `--risk` value it was given — should it honor `--risk` or stop accepting it?
 
@@ -304,7 +310,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Status Details MUST open with a summary (dot, headline, one sentence), then sections Screenshots (last screenshot, waiting to upload), Account (signed in, and partners while signed in) and Problems (the latest recent error, or "None") of rows with a status dot, label and value, and a hint under a row only when the user must act. The sections MUST flow into two columns when the window is wide enough. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the "Open log folder" button.
 - Tray tooltip, following the headline: "Virtue: loading status", "Virtue: sign in required", "Virtue: <error>" or "Virtue: monitoring error", "Virtue: monitoring stopped", "Virtue: monitoring active", "Virtue: starting monitoring", with " (update ready)" appended while an update is staged.
 - Before the first status load the app MUST show "Loading..." for signed in and account, and the state `loading`. Once loaded, the signed-in line MUST read "Yes" or "No" and the account line MUST show the email, or "Not signed in" when there is none. A signed-in session whose monitor reports signed out MUST show `starting`. Signed out MUST clear the device id, error, queue count and last screenshot. The device id and email MUST fall back to the daemon's values, the email only while signed in. The email field MUST follow the account while signed in and keep what the user typed while signed out. Displayed states MUST show underscores as spaces. The build line is "Build <label> | Windows package <version>", or "Build <label>" without a package version ("Build unknown" before load).
-- The app MUST refresh monitor state every 5 s without changing the signed-in state, and fully after each action. While an action runs, others MUST be ignored, except that Exit MUST wait for it to finish and then stop, and a progress message MUST be shown ("Signing in...", "Signing out...", "Screenshot uploading...", "Sending report..."); a failure MUST be shown as the error text on the screen where the action started, and MUST stay until the user leaves that screen.
+- The app MUST refresh monitor state every 5 s without changing the signed-in state, and fully after each action. While an action runs, others MUST be ignored, except that Exit MUST wait for it to finish and then stop, and a progress message MUST be shown ("Signing in...", "Signing out...", "Taking screenshot in N seconds...", "Screenshot uploading...", "Sending report..."); a failure MUST be shown as the error text on the screen where the action started, and MUST stay until the user leaves that screen.
 
 ## CLIENT-028 Windows: watchdog
 
@@ -325,13 +331,14 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 ## CLIENT-030 Android: Accessibility and background services
 
-- The Accessibility service "Virtue Screen Monitor" is the capture permission and MUST run the daemon loop while connected and not paused. Turning it off MUST stop the loop without recording a user stop.
+- The Accessibility service "Virtue Screen Monitor" is the capture permission and MUST run the daemon loop while connected and not paused. Turning it off in Android's settings MUST stop the loop. While the app is running and signed in, and not paused, the app MUST first record a user stop (CORE-011, source `accessibility_off`) so partners hear at once, and turning it back on sends the matching `user_start` (CORE-022). The app MUST do this only when Android's list of enabled accessibility services (`Settings.Secure`) no longer holds the service, so a short disconnect that leaves the setting on (a service rebind, a `uiautomator` dump) records nothing.
 - The setup guide MUST match the running Android version. On Android 13+ it MUST add the "Allow restricted settings" steps for apps installed from a downloaded file, and on Android 13 and 14 also when the first launch was such an install (an in-app update does not lift the block there).
-- The persistent notification "Monitoring active" (channel "Virtue monitoring") MUST be shown while signed in. If Android refuses to start it, monitoring MUST continue without it.
+- The persistent notification (channel "Virtue monitoring") MUST be shown while signed in, starting as soon as sign-in succeeds, not at the next keep-alive run. When notifications are allowed only after sign-in, it MUST appear by the time the user returns to the app, even if Android had stopped it meanwhile. Opening the app or the keep-alive run MUST NOT bring back a notification the user dismissed. It MUST read "Monitoring active" while the Accessibility service is connected, and otherwise "Monitoring stopped" with "Accessibility is off. Tap to turn it on.", and tapping it then MUST open Android's Accessibility settings. It MUST follow the service connecting and disconnecting. If Android refuses to start it, monitoring MUST continue without it.
 - Restarting the loop MUST queue the resume (CORE-022) rather than wait for it, and MUST wait up to 15 s for a previous loop to finish stopping.
 - Home MUST show a top app bar with the V logo and "Virtue Initiative" (together one link to the website) and an overflow menu labelled "More options", and below it exactly one focus area chosen by the headline state:
-  - Accessibility is off: the setup guide with all its steps on one page, under the title "Turn on Accessibility" and the intro. The first step MUST always be "Allow permissions": it says why Virtue wants notifications (the persistent "Monitoring active" notification) and unrestricted battery use (so Android does not stop Virtue in the background), and its "Request permissions" button asks for the notification permission and then for the battery exemption. When Android can no longer show the notification prompt, the button MUST ask for the battery exemption if that is still missing and otherwise open the app's notification settings, so it never does nothing. Once both are granted the button MUST read "Permissions allowed" and be disabled. The guide MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
-  - signed out (Accessibility on): the sign-in form (CLIENT-004), whose password field has a show and hide control;
+  - Accessibility is off: the setup guide with all its steps on one page, under the title "Turn on Accessibility" and the intro. The first step MUST always be "Allow permissions": it says why Virtue wants notifications (the persistent "Monitoring active" notification, which MUST be allowed before sign-in) and unrestricted battery use (so Android does not stop Virtue in the background), and its "Request permissions" button asks for the notification permission and then for the battery exemption. When Android can no longer show the notification prompt, the button MUST ask for the battery exemption if that is still missing and otherwise open the app's notification settings, so it never does nothing. Once both are granted the button MUST read "Permissions allowed" and be disabled. The guide MUST be shown to a signed-in user whose service was turned off, and Resume MUST show it instead of asking when Accessibility is off;
+  - signed out with notifications off (Accessibility on): the title "Allow notifications", a sentence saying notifications must be allowed before signing in, and an "Allow notifications" button that asks for the notification permission, or opens the app's notification settings when Android can no longer show the prompt. The sign-in form MUST NOT be shown until notifications are allowed;
+  - signed out (Accessibility and notifications on): the sign-in form (CLIENT-004), whose password field has a show and hide control;
   - active, waiting for first capture or paused: a ring, the headline, one sentence and buttons. Active and waiting MUST offer "Add partners" (no partners) or "Add more partners", which open the Partners page on the website, and "Pause monitoring", which MUST ask for confirmation first. Paused MUST offer "Resume monitoring".
 - The overflow menu MUST list "Setup steps", "Status details", "What Virtue monitors", "Report an issue" and, only when signed in, "Sign out" (which MUST ask for confirmation, then stop the loop and remove the persistent notification, and MUST also work while paused or with Accessibility off, by running the loop just long enough to log out), with the build label as a last item that cannot be selected. Each item MUST open a full screen with a back arrow, and Back MUST return to Home. Setup Steps MUST list all steps of the guide.
 - Status Details MUST open with a summary (state, headline, one sentence), then sections Account, Android, Screenshots and Problems of rows with a status dot, label and value, and a hint only when the user must act. The Android section MUST show Accessibility, Notifications and Battery; Notifications off and a restricted battery setting MUST be shown as a warning, not as an error. Everything else in CLIENT-007 MUST sit in a collapsed Advanced section with the "Open log file" and "Take test screenshot" buttons. Problems MUST show the newest recent error, as a warning for 24 hours and as neutral after that, since a past error needs no action. Advanced MUST list every recent error.
@@ -352,7 +359,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Check Extension MUST open a check page in Safari, which reports back with `virtueinitiative://check-extension?extension=on|off&all_sites=0|1&private=0|1`. Missing flags keep their last values. Any extension message after the check started also counts as on.
 - Status Details MUST show the extension's last check-in, which counts as stale after 10 s, its last frame, last page, last error and daemon state.
 - Pause MUST record CORE-011 and turn the switch off; capture stops at the extension's next message. Resume MUST record CORE-022 and turn it on. Signing in MUST turn it on.
-- The Open Settings button MUST, on iOS 26.2 and later, open Safari's settings for the Virtue extension directly (`SFSafariSettings.openExtensionsSettings`), and otherwise, or if that fails, open Virtue's own page in Settings.
+- The Open Settings button MUST, on iOS 26.2 and later, open Safari's settings for the Virtue extension directly (`SFSafariSettings.openExtensionsSettings`), and otherwise, or if that fails, open Settings with `openSettingsURLString`. Where Settings lands varies by iOS version (Virtue's own page, or the Apps list), so the step text MUST be right wherever it lands.
 - Home MUST show a one-line header (the V logo and "Virtue Initiative", together one link to the website) with an icon-only menu button labelled "Menu", and below it exactly one focus area chosen by the headline state:
   - signed out: the sign-in form (CLIENT-004) with "Email is required" or "Password is required" when a field is empty;
   - setup not finished or Safari permission needed: one setup step at a time, starting at the first step not done, with the step number, headline, "Step N of 5", a progress bar, and Back and Next buttons;

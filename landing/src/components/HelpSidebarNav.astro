@@ -1,71 +1,64 @@
 ---
-import type { HelpNavItem } from '../help/navigation';
+import { helpTopics, topicHref, topicLinks } from '../help/navigation';
 
 interface Props {
   currentPath: string;
-  rootLinks: HelpNavItem[];
 }
 
-const { currentPath, rootLinks } = Astro.props;
-
-function sectionContainsPath(item: HelpNavItem, pathname: string): boolean {
-  if (item.href === pathname) {
-    return true;
-  }
-
-  return item.items?.some((child) => sectionContainsPath(child, pathname)) ?? false;
-}
+const { currentPath } = Astro.props;
+const sections = helpTopics.map((topic) => {
+  const href = topicHref(topic.id);
+  const links = topicLinks(topic.id);
+  return {
+    label: topic.label,
+    href,
+    links,
+    open: href === currentPath || links.some((link) => link.href === currentPath),
+  };
+});
 ---
 
 <ul class="help-sidebar-list">
+  <li>
+    <a href="/help" class:list={['help-sidebar-item', { 'is-active': currentPath === '/help' }]}>
+      Help home
+    </a>
+  </li>
   {
-    rootLinks.map((item) => (
+    sections.map((section) => (
       <li>
-        {item.items && item.items.length > 0 ? (
-          <details class="help-sidebar-section" open={sectionContainsPath(item, currentPath)}>
-            <summary
-              class:list={[
-                'help-sidebar-section-summary',
-                { 'is-active': item.href === currentPath },
-              ]}
-            >
-              {item.href && (
-                <a
-                  href={item.href}
-                  class:list={['help-sidebar-item', { 'is-active': item.href === currentPath }]}
-                >
-                  {item.label}
-                </a>
-              )}
-              <span class="help-sidebar-toggle" aria-hidden="true" />
-            </summary>
-            <ul class="help-sidebar-sublist">
-              {item.items.map((child) => (
-                <li>
-                  <a
-                    href={child.href}
-                    class:list={[
-                      'help-sidebar-item',
-                      'help-sidebar-item-child',
-                      { 'is-active': child.href === currentPath },
-                    ]}
-                  >
-                    {child.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </details>
-        ) : (
-          item.href && (
+        <details class="help-sidebar-section" open={section.open}>
+          <summary
+            class:list={[
+              'help-sidebar-section-summary',
+              { 'is-active': section.href === currentPath },
+            ]}
+          >
             <a
-              href={item.href}
-              class:list={['help-sidebar-item', { 'is-active': item.href === currentPath }]}
+              href={section.href}
+              class:list={['help-sidebar-item', { 'is-active': section.href === currentPath }]}
             >
-              {item.label}
+              {section.label}
             </a>
-          )
-        )}
+            <span class="help-sidebar-toggle" aria-hidden="true" />
+          </summary>
+          <ul class="help-sidebar-sublist">
+            {section.links.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  class:list={[
+                    'help-sidebar-item',
+                    'help-sidebar-item-child',
+                    { 'is-active': link.href === currentPath },
+                  ]}
+                >
+                  {link.navTitle ?? link.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
       </li>
     ))
   }

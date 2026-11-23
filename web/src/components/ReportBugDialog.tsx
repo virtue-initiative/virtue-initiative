@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import { useSingleFlight } from '../hooks/usePromise';
 import {
   Alert,
   Button,
@@ -20,6 +21,7 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
   const [message, setMessage] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const user = useUser();
 
@@ -34,25 +36,27 @@ export function ReportBugDialog({ dialogRef }: ReportBugDialogProps) {
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    setLoading(true);
-    try {
-      await api.reportBug({
-        message,
-        contact_email: contactEmail.trim() || undefined,
-        platform: 'web',
-      });
-      pushToast('Thanks for the report — we’ll take a look.', 'success');
-      close();
-    } catch (err) {
-      const message = describeError(err, 'Failed to send report');
-      if (message) pushToast(message, 'error');
-    } finally {
-      setLoading(false);
-    }
+    await once(async () => {
+      setLoading(true);
+      try {
+        await api.reportBug({
+          message,
+          contact_email: contactEmail.trim() || undefined,
+          platform: 'web',
+        });
+        pushToast('Thanks for the report — we’ll take a look.', 'success');
+        close();
+      } catch (err) {
+        const message = describeError(err, 'Failed to send report');
+        if (message) pushToast(message, 'error');
+      } finally {
+        setLoading(false);
+      }
+    });
   }
 
   return (
-    <Dialog dialogRef={dialogRef} onClose={handleClose}>
+    <Dialog dialogRef={dialogRef} onClose={handleClose} busy={loading}>
       <DialogHeader>Report an issue</DialogHeader>
       <form onSubmit={handleSubmit}>
         <Alert variant="info">

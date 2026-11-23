@@ -26,6 +26,12 @@ jobs:
           git fetch origin main --depth=1
           echo "sha=$(git rev-parse origin/main)" >> $GITHUB_OUTPUT
 
+      # cf needs Node 24.22 or later.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:

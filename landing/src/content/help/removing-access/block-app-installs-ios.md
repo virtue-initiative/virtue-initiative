@@ -1,8 +1,9 @@
 ---
-sidebar_position: 4
+title: 'Block app installs (iPhone)'
+description: 'Use Screen Time to stop other browsers from being installed on your iPhone.'
+topic: protection
+order: 2
 ---
-
-# Block app installs (iPhone)
 
 You can use Screen Time to stop new apps from being installed, such as
 non-Safari web browsers. Virtue can only monitor Safari, so blocking other

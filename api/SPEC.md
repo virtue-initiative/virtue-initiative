@@ -588,6 +588,8 @@ The client MUST authenticate with a **Web Token** and send
 
 The server SHOULD send a partner request email to the provided email address.
 
+The server MUST compare and store `email` trimmed and lowercased. If it is the user's own email, the server MUST respond **HTTP 400**.
+
 If `replace_id` is provided, it MUST name a partnership the user owns that has not been accepted, otherwise the server MUST respond **HTTP 404**. The server MUST delete that partnership and its invite token before creating the new one. This is how a failed invite is resent.
 
 The server SHOULD then respond **HTTP 200**
@@ -990,6 +992,10 @@ For each user watched, a digest MUST give the number of screenshots and of high 
 A failure to build or send one watcher's digest MUST NOT stop the server from sending the others. The server SHOULD log each failure, SHOULD log how many digests were due before it sends any, and SHOULD report the job as failed once it ends if any digest failed.
 
 The server MUST limit how fast it sends digests, so that digests and the other email sent during the job stay under the email provider's sending rate.
+
+### API-067 Email delivery retries
+
+When a send to the email provider fails with any 5xx status, the server SHOULD retry it a few times with backoff before treating the send as failed, whatever the response body is. This includes statuses such as 520 that Cloudflare returns when the connection to the provider fails.
 
 ### API-058 `POST /newsletter`
 

@@ -1,0 +1,80 @@
+# AGENTS.md — API
+
+Cloudflare Workers API using Hono. Entry point: `src/index.ts`.
+
+## Token types and TTLs
+
+Two kinds of credential exist: **opaque session refresh tokens** (looked up in the `sessions` table) and **short-lived EdDSA JWTs**.
+
+| Token                | Kind   | TTL        | Auth header             | Notes                                                                                                                                                 |
+| -------------------- | ------ | ---------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| web refresh token    | opaque | 1 year     | `refresh_token` cookie¹ | Authenticates user/web routes directly                                                                                                                |
+| device refresh token | opaque | ~1000 yr   | `Bearer <token>`        | Authenticates `/d/*` routes directly                                                                                                                  |
+| `device`             | JWT    | 2 hours    | `Bearer <jwt>`          | `POST /hash` on the standalone hash server (see `../hash-server/SPEC.md`), not this API; minted by `POST /d/device`, `GET /d/device`, `POST /d/batch` |
+| `server`             | JWT    | 60 seconds | `Bearer <jwt>`          | `GET /hash` / `DELETE /hash` on the standalone hash server; minted by this API, `sub` ignored                                                         |
+
+¹ The web refresh token is also accepted as `Bearer <token>` (used by the cache worker).
+
+There is no access-token exchange: opaque refresh tokens authenticate their routes directly. Both JWT types authenticate against the standalone hash server, not any route on this API — this API only mints them. `sub` is the device ID for `device` tokens; ignored for `server` tokens.
+
+## Validation pattern
+
+Routes use `validateZ` from `src/middleware/validation.ts` with a Zod schema:
+
+```ts
+app.post('/route', validateZ('json', schema), async (c) => { ... })
+```
+
+On failure it returns `{ error: 'Invalid request data', details: z.treeifyError(...) }` with status 400.
+
+## Error format
+
+All error responses:
+
+```json
+{ "error": "Human-readable message", "details": { ... } }
+```
+
+HTTP status codes: 400 bad request, 401 unauthorized, 403 forbidden, 404 not found, 409 conflict, 500 server error.
+
+## Where things are
+
+- `src/routes/`: one file per route group. `device-only.ts` is the `/d/*` device API; `data.ts` serves batches with access control.
+- `src/lib/db.ts`: every D1 query.
+- `src/lib/hash-server.ts`: the client for the standalone hash server (`GET`/`DELETE /hash`).
+- `src/lib/credentials.ts`: `verifyUserCredentials`, shared by `POST /login` and `POST /d/device`.
+- `src/lib/batch-url.ts`: derives a batch's R2 key and URL from its version, owner and id (API-038). Nothing stores the URL.
+- `src/middleware/`: auth (`auth.ts`), admin gate, rate limiting and Zod validation.
+- `SPEC.md`: every endpoint (`API-` IDs). [README.md](README.md) covers running and deploying, and [architecture.md](architecture.md) how the pieces fit together.
+- `test/setup.ts` keeps its own copy of the schema; a migration needs the same change there.
+
+## Type source of truth
+
+Response shapes shared with the web are defined as Zod schemas in `shared-web/types.ts` and imported from there by both the API (`src/lib/email-domain.ts` re-exports `emailFrequencySchema` and friends) and the web. When changing an API response shape, update `shared-web/types.ts` first, then update the route handler to match.
+
+## Admin routes and analytics
+
+`/admin/*` (see `SPEC.md` API-051) is gated by `src/middleware/admin.ts`, which checks the `admins` table. There is deliberately no API to grant admin; do it by hand:
+
+```bash
+# from api/; cf takes the database ID from cloudflare.config.ts, not the binding name
+# local dev (staging's DB ID)
+bun run cf d1 raw f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --local \
+  --sql "INSERT INTO admins (user_id, created_at) SELECT id, unixepoch() FROM users WHERE email = 'you@example.com'"
+# staging / prod
+bun run cf d1 query f00a68e9-9ca0-4fa9-98e9-c135a489df3f --mode staging --sql "..."
+bun run cf d1 query 141a161a-a16b-41cb-a8b3-e5e40803391a --mode prod --sql "..."
+```
+
+`src/lib/analytics.ts` computes the `AnalyticsMetrics` snapshot. The `20 0 * * *` cron (`src/crons.ts`, registered by `cloudflare.config.ts`) stores one per UTC day and deletes expired batches; the `5 * * * *` cron keeps doing the hourly notification and other retention work (`scheduled` in `src/index.ts` branches on `controller.cron`). To fire it locally:
+
+```bash
+# against a running `bun run dev` / scripts/launch.sh API (port varies under launch.sh)
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?cron=20+0+*+*+*"
+```
+
+Preset queries and the raw-SQL guard live in `src/lib/admin-queries.ts`. Raw queries are run through `EXPLAIN QUERY PLAN` first and refused (400, `details.code = 'full_scan'`) when they would fully scan a table in `LARGE_TABLES`, unless the request sets `allow_scan: true`; every result reports `rows_read`, which is what D1 bills.
+
+## Bindings
+
+`c.env.DB` is the D1 database. `c.env.BUCKET` is the R2 bucket. See `src/types/bindings.ts` for the full `Env` interface.

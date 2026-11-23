@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useSingleFlight } from '../../hooks/usePromise';
 import { useLocation } from 'preact-iso';
 import {
   Device,
@@ -208,6 +209,7 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -223,18 +225,20 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      const status = await onInvitePartner(email);
-      close();
-      if (status === 'invite_failed') pushToast(bouncedMessage(email), 'error');
-    } catch (err) {
-      const message = describeError(err, 'Failed to send invite');
-      if (message) setError(message);
-    } finally {
-      setLoading(false);
-    }
+    await once(async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const status = await onInvitePartner(email);
+        close();
+        if (status === 'invite_failed') pushToast(bouncedMessage(email), 'error');
+      } catch (err) {
+        const message = describeError(err, 'Failed to send invite');
+        if (message) setError(message);
+      } finally {
+        setLoading(false);
+      }
+    });
   }
 
   return (
@@ -242,7 +246,7 @@ function InviteButton({ onInvitePartner }: { onInvitePartner: InvitePartner }) {
       <Button variant="primary" type="button" onClick={open} style={{ gap: '0.4rem' }}>
         <UserPlusIcon /> Invite partner
       </Button>
-      <Dialog dialogRef={dialogRef}>
+      <Dialog dialogRef={dialogRef} busy={loading}>
         <DialogHeader>Invite a partner</DialogHeader>
         <p class="invite-desc">
           Your partner can <b>view any screenshots and activity logs </b>
@@ -289,6 +293,7 @@ function PendingPartnerCard({
   const [action, setAction] = useState<'remove' | 'resend' | null>(null);
   const [resendEmail, setResendEmail] = useState(partner.user.email);
   const [resendError, setResendError] = useState('');
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const resendRef = useRef<HTMLDialogElement>(null);
@@ -306,30 +311,34 @@ function PendingPartnerCard({
   async function resend(e: Event) {
     e.preventDefault();
     if (!onInvitePartner) return;
-    setAction('resend');
-    setResendError('');
-    try {
-      // Resending replaces this invite, so this card goes away with it.
-      const status = await onInvitePartner(resendEmail, partner.id);
-      resendRef.current?.close();
-      if (status === 'invite_failed') pushToast(bouncedMessage(resendEmail), 'error');
-    } catch (err) {
-      const message = describeError(err, 'Failed to resend invite');
-      if (message) setResendError(message);
-    } finally {
-      setAction(null);
-    }
+    await once(async () => {
+      setAction('resend');
+      setResendError('');
+      try {
+        // Resending replaces this invite, so this card goes away with it.
+        const status = await onInvitePartner(resendEmail, partner.id);
+        resendRef.current?.close();
+        if (status === 'invite_failed') pushToast(bouncedMessage(resendEmail), 'error');
+      } catch (err) {
+        const message = describeError(err, 'Failed to resend invite');
+        if (message) setResendError(message);
+      } finally {
+        setAction(null);
+      }
+    });
   }
 
   async function removeConfirmed() {
-    setAction('remove');
-    try {
-      await (kind === 'watching' ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
-    } catch (err) {
-      const message = describeError(err, 'Failed to remove request');
-      if (message) pushToast(message, 'error');
-      setAction(null);
-    }
+    await once(async () => {
+      setAction('remove');
+      try {
+        await (kind === 'watching' ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
+      } catch (err) {
+        const message = describeError(err, 'Failed to remove request');
+        if (message) pushToast(message, 'error');
+        setAction(null);
+      }
+    });
   }
 
   return (
@@ -360,7 +369,7 @@ function PendingPartnerCard({
         </Button>
       </CardActions>
       {inviteFailed && (
-        <Dialog dialogRef={resendRef}>
+        <Dialog dialogRef={resendRef} busy={action === 'resend'}>
           <DialogHeader>Resend invite</DialogHeader>
           <p class="invite-desc">
             The invite email to <b>{partner.user.email}</b> could not be delivered. Check the
@@ -393,7 +402,7 @@ function PendingPartnerCard({
           </form>
         </Dialog>
       )}
-      <Dialog dialogRef={confirmRef}>
+      <Dialog dialogRef={confirmRef} busy={action !== null}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">This will cancel the pending partner relationship.</p>
         <DialogActions>
@@ -463,6 +472,7 @@ function PartnerCard({
   const { route } = useLocation();
   const isWatching = kind === 'watching';
   const [action, setAction] = useState<'remove' | null>(null);
+  const once = useSingleFlight();
   const { push: pushToast } = useToast();
   const confirmRef = useRef<HTMLDialogElement>(null);
   const allDevicesRef = useRef<HTMLDialogElement>(null);
@@ -476,14 +486,16 @@ function PartnerCard({
   }
 
   async function removeConfirmed() {
-    setAction('remove');
-    try {
-      await (isWatching ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
-    } catch (err) {
-      const message = describeError(err, 'Failed to remove partner');
-      if (message) pushToast(message, 'error');
-      setAction(null);
-    }
+    await once(async () => {
+      setAction('remove');
+      try {
+        await (isWatching ? onRemoveWatching(partner.id) : onRemoveWatcher(partner.id));
+      } catch (err) {
+        const message = describeError(err, 'Failed to remove partner');
+        if (message) pushToast(message, 'error');
+        setAction(null);
+      }
+    });
   }
 
   return (
@@ -556,7 +568,7 @@ function PartnerCard({
           </Button>
         </CardActions>
       )}
-      <Dialog dialogRef={confirmRef}>
+      <Dialog dialogRef={confirmRef} busy={action !== null}>
         <DialogHeader>Remove {partnerName}?</DialogHeader>
         <p class="invite-desc">
           This will remove your partner relationship with this person. The partner will be notified.
