@@ -560,6 +560,33 @@ fn already_stored_drops_no_further_than_the_lost_attempt() {
     assert_eq!(batch_seqs(&scenario)[2], (Some(3), Some(3)));
 }
 
+// CORE-005: an attempt answered with a 4xx was not stored, so a later
+// batch_already_stored (here a hash server that lost its chain) drops nothing.
+#[test]
+fn already_stored_never_drops_events_a_4xx_rejected() {
+    let mut scenario = quiet_scenario();
+    scenario.api.program_batch(Err(CoreError::HttpStatus {
+        status: 429,
+        message: "slow down".into(),
+    }));
+    scenario.api.program_batch(Err(already_stored(0, 0)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert_eq!(scenario.state().upload.unconfirmed_through_seq, None);
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 3
+    });
+    assert_eq!(
+        batch_seqs(&scenario),
+        [(Some(1), Some(2)), (Some(1), Some(2)), (None, None)]
+    );
+    assert_eq!(scenario.api.state().batch_uploads[2].batch.total_count, 2);
+}
+
 // CORE-005: hash_chain_moved, rejections and timeouts are retried like any
 // failure, and none of them stops hashing.
 #[test]

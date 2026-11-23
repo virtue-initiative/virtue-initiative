@@ -732,10 +732,18 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
         }
         Err(err) => {
             log_warning("batch upload deferred", Some(&err));
+            // CORE-005: a 4xx means the server did not store the batch.
+            let rejected = matches!(
+                err,
+                CoreError::HttpStatus {
+                    status: 400..=499,
+                    ..
+                }
+            );
             BatchOutcome::Deferred {
                 device_id: plan.device_id,
                 error: format!("batch upload deferred: {err}"),
-                sent_end_seq: end_seq,
+                sent_end_seq: if rejected { None } else { end_seq },
             }
         }
     }

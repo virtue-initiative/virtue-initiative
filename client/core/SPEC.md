@@ -102,7 +102,7 @@ A batch MUST hold every event hashed since the last batch, in the order they wer
 
 The daemon MUST keep the hash server `seq` of each hashed event, and MUST send a batch's first and last as `start_seq` and `end_seq` (API-038) whenever every event in it has one. A batch upload can be stored with only its response lost, and the daemon keeps hashing while it retries, so these let the server say which events it already has:
 
-- On `batch_already_stored`, the daemon MUST drop the events whose `seq` is below the response's `first_seq` (every event, if its `seq` is 0), but only those it sent in an earlier attempt that did not succeed, and retry the rest. If that drops nothing, the daemon MUST forget the `seq` of every waiting event, so the next attempt is stored without the check (and fails verification) rather than being refused forever.
+- On `batch_already_stored`, the daemon MUST drop the events whose `seq` is below the response's `first_seq` (every event, if its `seq` is 0), but only those it sent in an earlier attempt that may have been stored: one with no response, or a 5xx. A 4xx response means the batch was not stored, so it MUST NOT count. The daemon MUST retry the rest. If that drops nothing, the daemon MUST forget the `seq` of every waiting event, so the next attempt is stored without the check (and fails verification) rather than being refused forever.
 - On `hash_chain_moved`, the daemon MUST retry as after any other failure.
 
 The daemon MUST NOT hold hash uploads while it retries a batch, beyond the 200-event limit above.
