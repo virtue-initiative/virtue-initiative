@@ -42,6 +42,12 @@ which Windows deletes at uninstall (CLIENT-002). See [Files on a running machine
   uninstall. Bitdefender quarantined the task and then blocked the script as malware (#920): a
   hidden console, inline PowerShell, file deletion and self-removal are the shape of malware
   persistence. Moving the state into the package removed the need for any of it.
+- **Expiry leaves a known gap, on purpose.** The old task never expired, so it relaunched Virtue
+  after sign-in even when the user had turned off the "Virtue Tray" startup entry. Now, if the
+  startup entry is off and Virtue doesn't run for more than a day (PC off, or nobody signed in),
+  the task has expired and nothing starts Virtue at the next sign-in. We accept this rather than
+  lengthen the lifetime or watch the startup entry's state: the time Virtue isn't running is
+  reported to partners as a gap anyway.
 
 - **Every minute** is Task Scheduler's floor for a repeating trigger (`Repetition/Interval` is
   `minInclusive="PT1M"`, and `schtasks.exe` rejects less). The core's late-wakeup threshold
