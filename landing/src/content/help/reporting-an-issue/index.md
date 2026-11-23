@@ -14,8 +14,8 @@ much easier to track down.
 
 ## On the website
 
-1. Click **Report an Issue** in the footer of any page on this site.
-   ![the Report an Issue link in the website footer](./website-footer-link.png)
+1. Click **Report an issue** in the footer of any page on this site.
+   ![the Report an issue link in the website footer](./website-footer-link.png)
 2. Describe what happened and what you expected instead. Add a contact email if
    you would like a reply, then click **Send report**.
    ![the Report an issue dialog on the website](./website-dialog.png)
@@ -30,13 +30,13 @@ much easier to track down.
 
 ## In the apps
 
-Each app has a **Report an Issue** option that opens a short form. Describe what
+Each app has an option to report an issue, which opens a short form. Describe what
 happened and send it.
 
-- **Windows:** Open the menu (**☰**) in the main window and choose **Report an Issue**, or right-click the
-  Virtue icon in the system tray and choose **Report an Issue**.
+- **Windows:** Open the menu (**☰**) in the main window and choose **Report an issue**, or right-click the
+  Virtue icon in the system tray and choose **Report an issue**.
 - **Mac:** Click the menu button (**⋯**) at the top right of the Virtue window, then click **Report an Issue**.
-- **Android:** Tap **Report an Issue** on the main screen.
+- **Android:** Tap the menu (**⋮**) at the top right of the Virtue app, then tap **Report an issue**.
 - **iPhone and iPad:** Tap the menu button at the top right of the Virtue app, then tap **Report an Issue**.
 - **Linux:** Run `virtue report-issue` in a terminal and follow the prompts.
 

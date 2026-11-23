@@ -270,7 +270,7 @@ Filters MUST live in the URL, so a link or reload keeps them and the back button
 - **Type** (`type`): All, or one category from WEB-041.
 - **Show skipped screenshots** (`show_skipped`): off by default. While off, "Screenshot Skipped" events MUST be hidden unless the Type filter is "Screenshot Skipped".
 
-On narrow screens the same filters MUST be available from an **Edit Search** button. When the filters match nothing, the view MUST say "No logs found."
+On narrow screens the same filters MUST be available from an **Edit search** button. When the filters match nothing, the view MUST say "No logs found."
 
 > OPEN: "today" is taken as the UTC date but the range bounds are local midnight, so east of UTC the morning's logs fall outside "Past day" until the UTC date changes — should the range use the local date, as Report does?
 

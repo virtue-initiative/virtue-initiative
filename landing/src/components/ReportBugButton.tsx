@@ -61,7 +61,7 @@ export function ReportBugButton() {
   return (
     <>
       <button type="button" class="footer-link-button" onClick={open}>
-        Report an Issue
+        Report an issue
       </button>
       <Dialog dialogRef={dialogRef}>
         <DialogHeader>Report an issue</DialogHeader>

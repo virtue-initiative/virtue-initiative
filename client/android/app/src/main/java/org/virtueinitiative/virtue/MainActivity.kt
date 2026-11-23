@@ -753,7 +753,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The guide's "Request Permissions" button (CLIENT-030). Neither is needed to
+     * The guide's "Request permissions" button (CLIENT-030). Neither is needed to
      * capture. Each tap moves on to whatever is still missing, so it never does
      * nothing while the button is enabled.
      */

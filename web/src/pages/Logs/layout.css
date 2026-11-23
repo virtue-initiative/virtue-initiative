@@ -62,7 +62,7 @@
     margin-bottom: 1rem;
   }
 
-  /* Edit Search and the view switcher share one row; the button takes the
+  /* Edit search and the view switcher share one row; the button takes the
      space the switcher leaves. */
   .logs-header-actions {
     flex-wrap: nowrap;

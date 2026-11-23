@@ -12,7 +12,7 @@
 
 1. Open the app. (You can do this from the tray in the bottom right.)
    ![open the app from the tray](./win-usage-open-app.png)
-2. To log out (permanent), open the menu (**☰**) and choose **Sign Out**. To stop monitoring until you next sign in to Windows, select **Stop Monitoring**. **Note: after you log out, logging back in will create a new device in your account. If you just want to stop monitoring, use "Stop Monitoring" instead**.
+2. To log out (permanent), open the menu (**☰**) and choose **Sign out**. To stop monitoring until you next sign in to Windows, select **Stop monitoring**. **Note: after you log out, logging back in will create a new device in your account. If you just want to stop monitoring, use "Stop monitoring" instead**.
    ![sign out or stop monitoring](./win-usage-logout.png)
 3. Done! **Note: the service will send an alert if you stop monitoring.**
 

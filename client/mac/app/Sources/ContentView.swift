@@ -36,7 +36,7 @@ struct ContentView: View {
             .toolbar { toolbar }
             .overlay(alignment: .bottom) { toast }
             .background { shortcuts }
-            .alert("Report sent", isPresented: $showReportSent) {
+            .alert("Report Sent", isPresented: $showReportSent) {
                 Button("OK") {}
             } message: {
                 Text("Thanks, your report was sent to the Virtue Initiative team.")
@@ -469,8 +469,8 @@ private struct StatusFocus: View {
     /// A missing count means unknown, not zero, so it never claims there are
     /// no partners.
     private var partnersTitle: String {
-        guard let count = coordinator.coreStatus?.partnerCount else { return "Manage partners" }
-        return count > 0 ? "Add more partners" : "Add partners"
+        guard let count = coordinator.coreStatus?.partnerCount else { return "Manage Partners" }
+        return count > 0 ? "Add More Partners" : "Add Partners"
     }
 
     var body: some View {
