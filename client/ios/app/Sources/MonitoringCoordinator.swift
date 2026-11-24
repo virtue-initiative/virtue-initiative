@@ -80,7 +80,8 @@ final class MonitoringCoordinator: ObservableObject {
     /// closing it goes back to the default, so a hidden choice never applies
     /// (CLIENT-034).
     @Published var advancedExpanded: Bool =
-        UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) != nil {
+        UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) != nil
+    {
         didSet {
             if !advancedExpanded {
                 serverChoice = .virtueInitiative
