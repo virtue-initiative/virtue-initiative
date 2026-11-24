@@ -1,4 +1,5 @@
 import { DAY_MS } from './digest-schedule';
+import type { Announcement } from '../../../shared-web/types';
 
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
@@ -1585,5 +1586,60 @@ export async function setUserFlagOverride(
           )
           .bind(path, enabled ? 'true' : 'false', email);
   const result = await statement.run();
+  return result.meta.changes > 0;
+}
+
+// ── Announcements (API-068) ──────────────────────────────────────────────────
+
+type AnnouncementRow = Omit<Announcement, 'platforms'> & { platforms: string | null };
+
+// Platforms are stored as a JSON array. Anything else counts as every platform
+// rather than failing a device's settings request.
+function parseAnnouncementPlatforms(json: string | null): string[] | null {
+  if (json === null) return null;
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+// Newest first, which is the order API-069 returns and API-068 picks from.
+export async function listAnnouncements(db: D1Database): Promise<Announcement[]> {
+  const rows = await allWithUuidFields<AnnouncementRow>(
+    db.prepare(
+      `SELECT id, message, url, level, platforms, below_version, created_at
+       FROM announcements
+       ORDER BY created_at DESC, id DESC`,
+    ),
+    ['id'],
+  );
+  return rows.map((row) => ({ ...row, platforms: parseAnnouncementPlatforms(row.platforms) }));
+}
+
+export async function createAnnouncement(db: D1Database, input: Announcement) {
+  await db
+    .prepare(
+      `INSERT INTO announcements (id, message, url, level, platforms, below_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      input.message,
+      input.url,
+      input.level,
+      input.platforms === null ? null : JSON.stringify(input.platforms),
+      input.below_version,
+      input.created_at,
+    )
+    .run();
+}
+
+export async function deleteAnnouncement(db: D1Database, id: string) {
+  const result = await db
+    .prepare('DELETE FROM announcements WHERE id = ?')
+    .bind(uuidToBytes(id))
+    .run();
   return result.meta.changes > 0;
 }

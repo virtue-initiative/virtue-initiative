@@ -644,6 +644,7 @@ pub fn plan_batch(
     })
 }
 
+#[allow(clippy::large_enum_variant)] // Built once per upload; boxing buys nothing.
 pub enum BatchOutcome {
     Uploaded {
         device_id: String,
@@ -880,6 +881,7 @@ mod tests {
             }],
             hash_base_url: None,
             feature_flags: Vec::new(),
+            announcement: None,
         }
     }
 

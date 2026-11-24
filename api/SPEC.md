@@ -118,11 +118,36 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   ],
   "hash_base_url": "https://..." | null,
   "hash_token": HashServerToken,
-  "feature_flags": ["flag_key", ...]
+  "feature_flags": ["flag_key", ...],
+  "announcement": DeviceAnnouncement | null
 }
 ```
 
-`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061). `announcement` is the announcement chosen for this device (see API-068).
+
+**DeviceAnnouncement**
+
+```js
+{
+  "message": "Version 0.2.0 is out. Update by hand to keep monitoring.",
+  "url": "https://..." | null,
+  "level": "info" | "warning" | "urgent"
+}
+```
+
+**Announcement**
+
+```js
+{
+  "id": UUID,
+  "message": "...",
+  "url": "https://..." | null,
+  "level": "info" | "warning" | "urgent",
+  "platforms": ["windows", "macos", ...] | null, // null means every platform
+  "below_version": "0.2.0" | null,                // null means every version
+  "created_at": DateTime
+}
+```
 
 **FeatureFlag**
 
@@ -1228,3 +1253,43 @@ The server MUST set the override for the user with that email, or remove it when
 This previews every email template rendered with made-up data, inside a mock email client. Only used in dev. The server MUST serve it only when `EMAIL_DELIVERY_MODE` is `log`, which only a local dev environment sets. Otherwise it MUST respond **HTTP 404**.
 
 The query `t` selects a template by ID, defaulting to the first. With `raw=html` or `raw=text`, the server MUST respond with that template's HTML or plain text body alone. Otherwise it MUST respond with a page that lists the templates and shows the selected one, with its subject, sender and recipient, as HTML or plain text, at desktop or mobile width.
+
+## API-068 Announcements
+
+Announcements tell people using the client apps something they need to know, such as that they must update by hand. The server MUST choose a device's announcement and send it as `announcement` in `DeviceSettings`; clients only display it (CLIENT-033). It therefore reaches a device whenever the device next fetches its settings (CORE-005).
+
+A client SHOULD send its app version, such as `0.1.9`, in an `X-Virtue-Version` header on every request. Versions MUST compare as dot-separated whole numbers, with a missing part counting as 0, ignoring anything from the first character that is neither a digit nor a dot (so `0.2.0-dev` compares as `0.2.0`). A request with no version, or one with no leading number, MUST count as lower than every version, since only clients older than this header send none.
+
+An announcement applies to a device when its `platforms` is `null` or contains the device's platform, and its `below_version` is `null` or the device's version is lower than it. When several apply, the server MUST send the newest. When none applies, `announcement` MUST be `null`.
+
+Choosing an announcement MUST NOT write to the database. The server MAY cache the announcement table in memory for up to 60 seconds, and a server instance that changes an announcement SHOULD drop its own cache.
+
+Every route in this section is an admin route: API-051's authentication and **HTTP 403** rules apply.
+
+### API-069 `GET /admin/announcements`
+
+The server MUST return every announcement, newest first:
+
+```js
+// array of Announcement
+```
+
+### API-070 `POST /admin/announcements`
+
+The client MUST send:
+
+```js
+{
+  "message": "...",
+  "url": "https://..." | null | undefined,
+  "level": "info" | "warning" | "urgent",
+  "platforms": ["windows", ...] | null | undefined,
+  "below_version": "0.2.0" | null | undefined
+}
+```
+
+`message` MUST be 1 to 280 characters after trimming. `url` MUST be an `https` URL. `platforms` MUST NOT be empty, and each MUST be one of `linux`, `macos`, `windows`, `android` or `ios`. `below_version` MUST be one or more whole numbers separated by dots. The server MUST respond **HTTP 400** otherwise, and **HTTP 200** with the created `Announcement`.
+
+### API-071 `DELETE /admin/announcements/:id`
+
+The server MUST delete the announcement, so that no device is sent it from then on. It MUST respond **HTTP 404** for an unknown id and otherwise **HTTP 204**.

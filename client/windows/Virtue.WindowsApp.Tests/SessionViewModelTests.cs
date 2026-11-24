@@ -302,6 +302,19 @@ public sealed class SessionViewModelTests
         Assert.Equal("build-42", result.BuildLabel);
     }
 
+    // CLIENT-033: monitor status JSON carries the announcement as the Rust side writes it.
+    [Fact]
+    public void RustInteropJson_DeserializesTheAnnouncement()
+    {
+        const string json = """{"state":"running","loggedIn":true,"pendingRequestCount":0,"lastScreenshotAtMs":null,"lastError":null,"announcement":{"message":"Update by hand","url":"https://virtueinitiative.org/download","level":"urgent"}}""";
+
+        var result = RustInteropJson.DeserializePayload<MonitorStatusPayload>(json);
+
+        Assert.Equal(
+            new AnnouncementPayload("Update by hand", "https://virtueinitiative.org/download", "urgent"),
+            result.Announcement);
+    }
+
     // CLIENT-004: sign-in without an email is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingEmail()
