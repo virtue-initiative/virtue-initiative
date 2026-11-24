@@ -371,7 +371,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Instead of the partners link text in CLIENT-004, iOS Home MUST offer the partners button above only while active.
 - After a successful Report an Issue (CLIENT-016), iOS MUST show "Thanks, your report was sent to the Virtue Initiative team." with a comma in place of the dash. The setup wizard MUST keep following the first unfinished step as it changes and MUST NOT go back to step 1 (signing in). Changing step MUST scroll Home back to the top.
 
-## CLIENT-033 Capitalization
+## CLIENT-035 Capitalization
 
 Labels MUST follow the platform's own convention, and sentence case where it has none.
 

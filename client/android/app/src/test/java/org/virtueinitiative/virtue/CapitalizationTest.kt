@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
 
-// CLIENT-033: Android buttons, menu items, dialog titles and screen titles use sentence case.
+// CLIENT-035: Android buttons, menu items, dialog titles and screen titles use sentence case.
 class CapitalizationTest {
     /** Words that keep their capital letter mid-label: the app and OS setting names. */
     private val properNouns = setOf("Virtue", "Accessibility", "Android", "OK")
