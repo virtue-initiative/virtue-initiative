@@ -477,11 +477,27 @@ export async function changeUserPassword(
 
 export async function createDevice(
   db: D1Database,
-  input: { id: string; owner: string; name: string; platform: string },
+  input: {
+    id: string;
+    owner: string;
+    name: string;
+    platform: string;
+    app_version: string | null;
+  },
 ) {
   return db
-    .prepare('INSERT INTO devices (id, owner, name, platform, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(uuidToBytes(input.id), uuidToBytes(input.owner), input.name, input.platform, Date.now())
+    .prepare(
+      `INSERT INTO devices (id, owner, name, platform, app_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      uuidToBytes(input.owner),
+      input.name,
+      input.platform,
+      input.app_version,
+      Date.now(),
+    )
     .run();
 }
 
@@ -491,13 +507,25 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
     owner: string;
     name: string;
     platform: string;
+    app_version: string | null;
     created_at: number;
   }>(
     db
-      .prepare('SELECT id, owner, name, platform, created_at FROM devices WHERE id = ?')
+      .prepare(
+        'SELECT id, owner, name, platform, app_version, created_at FROM devices WHERE id = ?',
+      )
       .bind(uuidToBytes(deviceId)),
     ['id', 'owner'],
   );
+}
+
+// API-036: callers write only when the version changed, so a settings fetch
+// or batch upload usually costs no write.
+export async function setDeviceAppVersion(db: D1Database, deviceId: string, appVersion: string) {
+  await db
+    .prepare('UPDATE devices SET app_version = ? WHERE id = ?')
+    .bind(appVersion, uuidToBytes(deviceId))
+    .run();
 }
 
 export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId: string) {

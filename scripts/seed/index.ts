@@ -113,12 +113,19 @@ try {
     for (const device of DEVICES) {
       statements.push(
         DB.prepare(
-          `INSERT INTO devices (id, owner, name, platform, enabled, created_at, deleted_at)
-           VALUES (?, ?, ?, ?, 1, ?, NULL)
+          `INSERT INTO devices (id, owner, name, platform, app_version, enabled, created_at, deleted_at)
+           VALUES (?, ?, ?, ?, ?, 1, ?, NULL)
            ON CONFLICT(id) DO UPDATE SET
              owner = excluded.owner, name = excluded.name, platform = excluded.platform,
-             enabled = 1, deleted_at = NULL`,
-        ).bind(blob(device.idHex), blob(device.owner.idHex), device.name, device.platform, now),
+             app_version = excluded.app_version, enabled = 1, deleted_at = NULL`,
+        ).bind(
+          blob(device.idHex),
+          blob(device.owner.idHex),
+          device.name,
+          device.platform,
+          device.appVersion,
+          now,
+        ),
       );
     }
 

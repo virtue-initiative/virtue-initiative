@@ -18,6 +18,15 @@ export function parseVersion(version: string | null | undefined): number[] | nul
   return parts.map((part) => Number.parseInt(part, 10));
 }
 
+// API-068: the client's version from an X-Virtue-Version header, or null when
+// it is missing or not valid. Every valid version has a leading number, so
+// parseVersion never returns null for one.
+const VALID_VERSION = /^[0-9][0-9A-Za-z.+-]{0,31}$/;
+export function validVersion(header: string | null | undefined): string | null {
+  const version = header?.trim();
+  return version && VALID_VERSION.test(version) ? version : null;
+}
+
 // True when `version` is lower than `bound`, with missing parts counting as 0.
 export function isVersionBelow(version: string | null | undefined, bound: string) {
   const parsedBound = parseVersion(bound);

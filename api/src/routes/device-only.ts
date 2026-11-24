@@ -16,6 +16,7 @@ import {
   listAcceptedNotificationTargetsForUser,
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
+  setDeviceAppVersion,
 } from '../lib/db';
 import { encodeAccessKeys } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
@@ -23,7 +24,7 @@ import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
 import { hashGet, hashReset, hashResetAt } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
-import { announcementForDevice } from '../lib/announcements';
+import { announcementForDevice, validVersion } from '../lib/announcements';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
@@ -91,6 +92,27 @@ const uploadBatchSchema = z.object({
     .refine((file) => file.size <= 100 * 1024 * 1024, { message: 'File exceeds 100MB limit' }),
 });
 
+// API-068: the client's version from X-Virtue-Version, or null when it is
+// missing or not valid. Stored on the device and used to pick its announcement.
+function clientVersion(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  return validVersion(c.req.header('X-Virtue-Version'));
+}
+
+// API-036: store a changed version on the device. Only a change is written,
+// and a failed write must never fail the settings fetch or the batch upload.
+async function recordClientVersion(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  device: { id: string; app_version: string | null },
+  version: string | null,
+) {
+  if (!version || version === device.app_version) return;
+  try {
+    await setDeviceAppVersion(c.env.DB, device.id, version);
+  } catch (err) {
+    console.error(`[device] failed to store version for device ${device.id}`, err);
+  }
+}
+
 async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   deviceId: string,
@@ -117,6 +139,7 @@ async function createDeviceSession(
 async function buildDeviceSettings(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string; name: string; platform: string },
+  version: string | null,
 ) {
   const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
   if (!hashBaseUrl) {
@@ -132,10 +155,7 @@ async function buildDeviceSettings(
     // API-061: a device gets its owner's flags, so all their devices agree.
     enabledFeatureFlags(c.env.DB, device.owner, ownerFlagOverrides),
     // API-068: the device's version comes from the request, not the database.
-    announcementForDevice(c.env.DB, {
-      platform: device.platform,
-      version: c.req.header('X-Virtue-Version'),
-    }),
+    announcementForDevice(c.env.DB, { platform: device.platform, version }),
   ]);
 
   return {
@@ -175,10 +195,11 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
 
   await fillNewsletterLocation(c.env, result.user.email, requestLocation(c.req.raw));
 
-  await createDevice(c.env.DB, { id, owner, name, platform });
+  const version = clientVersion(c);
+  await createDevice(c.env.DB, { id, owner, name, platform, app_version: version });
   const refreshToken = await createDeviceSession(c, id);
 
-  const settings = await buildDeviceSettings(c, { id, owner, name, platform });
+  const settings = await buildDeviceSettings(c, { id, owner, name, platform }, version);
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
@@ -198,7 +219,12 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const settings = await buildDeviceSettings(c, device);
+  // API-036: a client fetches its settings when it starts, so an update
+  // usually shows up here.
+  const version = clientVersion(c);
+  await recordClientVersion(c, device, version);
+
+  const settings = await buildDeviceSettings(c, device, version);
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
@@ -430,7 +456,11 @@ deviceOnly.post(
       }
     }
 
-    const settings = await buildDeviceSettings(c, device);
+    // API-036: a client that started offline reports an update here.
+    const version = clientVersion(c);
+    await recordClientVersion(c, device, version);
+
+    const settings = await buildDeviceSettings(c, device, version);
     if (!settings) {
       return c.json({ error: 'Hash server not configured' }, 500);
     }

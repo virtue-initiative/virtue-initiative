@@ -862,6 +862,8 @@ The server MUST validate the login (see `POST /login`) and create a long lived r
 
 It should also return the device settings (see `GET /d/device`)
 
+The server MUST store the client's version from the `X-Virtue-Version` header (API-068) on the new device, or none when the header is absent or not a valid version.
+
 On success, it must return **HTTP 200** with
 
 ```js
@@ -880,6 +882,8 @@ The server SHOULD create a fresh JWT hash server token (see the hash server spec
 ```js
 DeviceSettings;
 ```
+
+A client fetches its settings first thing whenever it starts (CORE-005), so this is where a version change after an update usually shows up. The server MUST store the client's version (API-068) on the device when it differs from the stored one, and MUST NOT write to the device when it is the same or the header is absent or not a valid version. `POST /d/batch` MUST store it the same way, since a client that starts offline may not fetch its settings again until it next starts. A failure to store the version MUST NOT fail either request.
 
 ### API-037 `POST /d/logout`
 
@@ -1258,7 +1262,7 @@ The query `t` selects a template by ID, defaulting to the first. With `raw=html`
 
 Announcements tell people using the client apps something they need to know, such as that they must update by hand. The server MUST choose a device's announcement and send it as `announcement` in `DeviceSettings`; clients only display it (CLIENT-033). It therefore reaches a device whenever the device next fetches its settings (CORE-005).
 
-A client SHOULD send its app version, such as `0.1.9`, in an `X-Virtue-Version` header on every request. Versions MUST compare as dot-separated whole numbers, with a missing part counting as 0, ignoring anything from the first character that is neither a digit nor a dot (so `0.2.0-dev` compares as `0.2.0`). A request with no version, or one with no leading number, MUST count as lower than every version, since only clients older than this header send none.
+A client SHOULD send its app version, such as `0.1.9`, in an `X-Virtue-Version` header on every request. A valid version is 1 to 32 letters, digits, `.`, `+` or `-`, starting with a digit. Versions MUST compare as dot-separated whole numbers, with a missing part counting as 0, ignoring anything from the first character that is neither a digit nor a dot (so `0.2.0-dev` compares as `0.2.0`). A request with no version, or one that is not valid, MUST count as lower than every version, since only clients older than this header send none.
 
 An announcement applies to a device when its `platforms` is `null` or contains the device's platform, and its `below_version` is `null` or the device's version is lower than it. When several apply, the server MUST send the newest. When none applies, `announcement` MUST be `null`.
 
