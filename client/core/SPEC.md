@@ -265,7 +265,7 @@ When the API replies with a non-2xx status, the error reported to the caller MUS
 
 ## CORE-028 Choosing a server
 
-A user MAY sign in to a server other than the build's default (CLIENT-033). Before a login uses the URL the user gave, the core MUST resolve it:
+A user MAY sign in to a server other than the build's default (CLIENT-034). Before a login uses the URL the user gave, the core MUST resolve it:
 
 - Surrounding whitespace and trailing slashes MUST be removed, and a URL with no scheme MUST be read as `https://`.
 - The URL MUST use `https`, except that `http` MAY be used with a loopback host (`localhost`, `127.0.0.1` or `[::1]`). Any other URL MUST fail with "The server address must start with https://."

@@ -220,7 +220,7 @@ private struct SignInForm: View {
                 .onSubmit { signIn() }
                 .fieldStyle()
 
-                // CLIENT-033: the server is chosen here and nowhere else, so
+                // CLIENT-034: the server is chosen here and nowhere else, so
                 // it can only change by signing out first.
                 Picker("Server", selection: $coordinator.serverChoice) {
                     ForEach(ServerChoice.allCases, id: \.self) { choice in
@@ -297,7 +297,7 @@ private struct StatusFocus: View {
     @Environment(\.openURL) private var openURL
 
     /// Partners are managed in the web app, not from this client. A
-    /// self-hosted server names its own (CLIENT-033).
+    /// self-hosted server names its own (CLIENT-034).
     private var partnersURL: URL { WebAppLink.url("/partners", status: coordinator.coreStatus) }
 
     private var paused: Bool { coordinator.monitoringState == .paused }

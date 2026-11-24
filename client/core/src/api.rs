@@ -247,7 +247,7 @@ impl HttpApiClient {
     }
 
     /// `credentials` are this device's if it is logged in, so the report is
-    /// attributed to it and goes to its server (CLIENT-033), or `None` to submit
+    /// attributed to it and goes to its server (CLIENT-034), or `None` to submit
     /// anonymously to the build's default server; `log_file` is an optional
     /// attachment, e.g. recent client logs (the server accepts both — API-042).
     pub fn report_issue(

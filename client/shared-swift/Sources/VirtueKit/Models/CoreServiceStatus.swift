@@ -98,7 +98,7 @@ public struct CoreServiceStatus: Decodable {
     }
 }
 
-/// Which server the sign-in form signs in to (CLIENT-033).
+/// Which server the sign-in form signs in to (CLIENT-034).
 public enum ServerChoice: String, Hashable, CaseIterable {
     case virtueInitiative
     case selfHosted
@@ -111,7 +111,7 @@ public enum ServerChoice: String, Hashable, CaseIterable {
     }
 }
 
-/// Links into the web app (CLIENT-033): the default server's, or the web app
+/// Links into the web app (CLIENT-034): the default server's, or the web app
 /// a self-hosted server named.
 public enum WebAppLink {
     public static let defaultBase = "https://app.virtueinitiative.org"

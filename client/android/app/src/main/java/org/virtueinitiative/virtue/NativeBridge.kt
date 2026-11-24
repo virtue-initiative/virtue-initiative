@@ -43,7 +43,7 @@ object NativeBridge {
         configDir: String,
         dataDir: String
     ): String?
-    /** [server] is a self-hosted server address, or empty for the default server (CLIENT-033). */
+    /** [server] is a self-hosted server address, or empty for the default server (CLIENT-034). */
     external fun nativeLogin(
         email: String,
         password: String,

@@ -253,7 +253,7 @@ struct LoginRequest {
     email: String,
     password: String,
     device_name: Option<String>,
-    /// A self-hosted server address, or absent for the default (CLIENT-033).
+    /// A self-hosted server address, or absent for the default (CLIENT-034).
     server: Option<String>,
 }
 
@@ -337,7 +337,7 @@ pub extern "C" fn virtue_windows_report_issue(request_json: *const c_char) -> *m
 
         let paths = ensure_paths_initialized()?;
 
-        // Read the device credentials (and so its server, CLIENT-033)
+        // Read the device credentials (and so its server, CLIENT-034)
         // straight off disk, same disk-fallback approach the Linux
         // `report-issue` command uses, so a report can be attributed to this
         // device even when the resident daemon isn't running (or hasn't

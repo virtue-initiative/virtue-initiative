@@ -24,7 +24,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = ""
-    /// The server to sign in to, and the self-hosted address (CLIENT-033).
+    /// The server to sign in to, and the self-hosted address (CLIENT-034).
     /// Both start from the last sign-in.
     @Published var serverChoice: ServerChoice = .virtueInitiative
     @Published var serverAddress: String = ""
@@ -554,7 +554,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func loginErrorMessage(_ raw: String) -> String {
-        // CLIENT-033: the server was never reached, so the email and password
+        // CLIENT-034: the server was never reached, so the email and password
         // aren't the problem. Show the core's own message (CORE-028).
         for marker in ["No Virtue server found", "The server address must", "Server address is"] {
             if let range = raw.range(of: marker) {

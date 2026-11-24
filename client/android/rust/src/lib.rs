@@ -417,7 +417,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
         let email: String = email.to_string();
         let password: String = password.to_string();
         let device_name: String = device_name.to_string();
-        // CLIENT-033: empty means the default server.
+        // CLIENT-034: empty means the default server.
         let server: String = server.to_string();
         let server = Some(server).filter(|s| !s.trim().is_empty());
         let core = core()?;

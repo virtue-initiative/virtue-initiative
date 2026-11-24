@@ -81,7 +81,7 @@ class MainActivity : AppCompatActivity() {
     // user typed lives here rather than in the views.
     private var emailDraft = ""
     private var deviceDraft = ""
-    // CLIENT-033: the server choice. Null until the form first shows, when it
+    // CLIENT-034: the server choice. Null until the form first shows, when it
     // starts from the last sign-in.
     private var selfHostedDraft: Boolean? = null
     private var serverDraft = ""
@@ -577,7 +577,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(passwordLayout)
         content.addView(deviceLayout)
 
-        // CLIENT-033: the server is chosen here and nowhere else, so it can
+        // CLIENT-034: the server is chosen here and nowhere else, so it can
         // only change by signing out first.
         val remembered = ServerAddressStore.load(this)
         if (selfHostedDraft == null) {
@@ -643,7 +643,7 @@ class MainActivity : AppCompatActivity() {
         content.addView(signUp.topMargin(8))
     }
 
-    /** A page of the web app: the self-hosted server's own when the status names one (CLIENT-033). */
+    /** A page of the web app: the self-hosted server's own when the status names one (CLIENT-034). */
     private fun webAppUrl(json: JSONObject, path: String): String {
         val base = if (json.isNull("web_app_url")) "" else json.optString("web_app_url")
         return base.ifBlank { DEFAULT_WEB_APP_URL } + path
@@ -682,7 +682,7 @@ class MainActivity : AppCompatActivity() {
             showLoginError(getString(R.string.msg_sign_in_required_fields))
             return
         }
-        // CLIENT-033: empty means the default server.
+        // CLIENT-034: empty means the default server.
         val server = if (selfHostedDraft == true) serverDraft.trim() else ""
         if (selfHostedDraft == true && server.isEmpty()) {
             showLoginError(getString(R.string.msg_server_required))
@@ -1390,7 +1390,7 @@ class MainActivity : AppCompatActivity() {
         const val KEY_DEVICE = "device"
         const val KEY_SELF_HOSTED = "self_hosted"
         const val KEY_SERVER = "server"
-        /** The default server's web app. A self-hosted server names its own (CLIENT-033). */
+        /** The default server's web app. A self-hosted server names its own (CLIENT-034). */
         const val DEFAULT_WEB_APP_URL = "https://app.virtueinitiative.org"
         const val KEY_REPORT_MESSAGE = "report_message"
         const val KEY_REPORT_EMAIL = "report_email"

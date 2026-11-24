@@ -214,7 +214,7 @@ pub fn note_login_state(logged_in: bool) {
 }
 
 /// `server` is a self-hosted server address, or `None` for the default
-/// server (CLIENT-033).
+/// server (CLIENT-034).
 pub fn app_login(
     email: &str,
     password: &str,

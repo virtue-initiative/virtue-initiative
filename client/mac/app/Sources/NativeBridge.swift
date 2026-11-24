@@ -152,7 +152,7 @@ enum NativeBridge {
     }
 
     /// `server` is a self-hosted server address, or nil for the default
-    /// server (CLIENT-033).
+    /// server (CLIENT-034).
     static func login(email: String, password: String, deviceName: String, server: String?)
         -> String?
     {
@@ -202,7 +202,7 @@ enum NativeBridge {
         consumeOptionalString(virtue_mac_native_get_account_email())
     }
 
-    /// The self-hosted server last signed in to, or nil (CLIENT-033).
+    /// The self-hosted server last signed in to, or nil (CLIENT-034).
     static func getRememberedServer() -> String? {
         consumeOptionalString(virtue_mac_native_get_remembered_server())
     }

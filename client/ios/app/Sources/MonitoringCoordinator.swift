@@ -68,7 +68,7 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = ""
-    /// The server to sign in to, and the self-hosted address (CLIENT-033).
+    /// The server to sign in to, and the self-hosted address (CLIENT-034).
     /// Both start from the last sign-in.
     @Published var serverChoice: ServerChoice =
         UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) == nil

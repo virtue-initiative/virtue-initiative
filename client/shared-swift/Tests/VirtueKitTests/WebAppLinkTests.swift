@@ -2,7 +2,7 @@ import XCTest
 
 @testable import VirtueKit
 
-// CLIENT-033: web app links use the self-hosted server's web app when the
+// CLIENT-034: web app links use the self-hosted server's web app when the
 // status names one, and the default web app otherwise.
 final class WebAppLinkTests: XCTestCase {
     func testUsesTheDefaultWebAppWithoutOne() {

@@ -247,7 +247,7 @@ pub extern "C" fn virtue_ios_native_init(
 }
 
 /// `server` is a self-hosted server address, or null for the default server
-/// (CLIENT-033).
+/// (CLIENT-034).
 #[no_mangle]
 pub extern "C" fn virtue_ios_native_login(
     email: *const c_char,

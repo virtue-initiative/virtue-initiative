@@ -150,7 +150,7 @@ enum NativeBridge {
     }
 
     /// `server` is a self-hosted server address, or nil for the default
-    /// server (CLIENT-033).
+    /// server (CLIENT-034).
     static func login(email: String, password: String, deviceName: String, server: String?)
         -> String?
     {

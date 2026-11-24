@@ -4,7 +4,7 @@ import android.content.Context
 
 /**
  * Remembers the self-hosted server address last signed in to, so the next sign-in
- * offers it again (CLIENT-033). Kept apart from [AccountEmailStore] because signing
+ * offers it again (CLIENT-034). Kept apart from [AccountEmailStore] because signing
  * out forgets the email but not the server.
  */
 object ServerAddressStore {

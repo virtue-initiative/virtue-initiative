@@ -45,7 +45,7 @@ pub extern "C" fn virtue_mac_native_init() -> *mut c_char {
 }
 
 /// `server` is a self-hosted server address, or null for the default server
-/// (CLIENT-033).
+/// (CLIENT-034).
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_login(
     email: *const c_char,
@@ -86,7 +86,7 @@ pub extern "C" fn virtue_mac_native_logout() -> *mut c_char {
             .context("failed to connect to daemon (is it running?)")?;
         client.logout().context("logout failed")?;
         // Do NOT stop the daemon — the app remains open and the user can log
-        // back in. The server stays remembered for that (CLIENT-033).
+        // back in. The server stays remembered for that (CLIENT-034).
         let remembered = remembered_state(core);
         save_state(
             &core.paths.ui_state_file,
@@ -217,7 +217,7 @@ pub extern "C" fn virtue_mac_native_get_account_email() -> *mut c_char {
 }
 
 /// The self-hosted server address last signed in to, or null for the default
-/// server, to prefill the sign-in form (CLIENT-033).
+/// server, to prefill the sign-in form (CLIENT-034).
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_get_remembered_server() -> *mut c_char {
     let server = core().ok().and_then(|c| remembered_state(c).server);

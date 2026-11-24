@@ -8,7 +8,7 @@ Each platform app MUST run the shared core daemon (CORE-001) and supply only wha
 
 All monitoring policy (capture cadence CORE-003, content detection CORE-004, uploads CORE-005, tamper detection CORE-002, status CORE-010) MUST come from the core. A platform MUST NOT reimplement it.
 
-The default API URL, capture interval and batch window are fixed at build time on every platform. No platform has a configuration file the user edits. The only server setting a user can change is the server they sign in to (CLIENT-033).
+The default API URL, capture interval and batch window are fixed at build time on every platform. No platform has a configuration file the user edits. The only server setting a user can change is the server they sign in to (CLIENT-034).
 
 ## CLIENT-002 Where monitoring runs and stores state
 
@@ -41,7 +41,7 @@ The sign-in form MUST take an email, a password and an optional device name, and
 - Email and password MUST both be present before any request is made. Messages: macOS and iOS "Email is required" / "Password is required"; Windows "Email is required." / "Password is required."; Android "Enter your email and password."
 - A blank device name MUST be replaced by the platform default: the hostname (Linux falls back to `linux-device`, macOS to `mac-device`), the Windows machine name, "Manufacturer Model" on Android (the model alone when it already starts with the manufacturer), or the iOS device name.
 - On success the app MUST clear the password field, remember the account email locally (to prefill Report an Issue, CLIENT-016) and refresh its status.
-- The form MUST offer a server choice (CLIENT-033).
+- The form MUST offer a server choice (CLIENT-034).
 - The form MUST offer a sign-up link to `https://app.virtueinitiative.org/signup` and, once signed in, a link to `https://app.virtueinitiative.org/partners` with the text: Add partners on the Virtue website. Open the Partners page and select "Invite partner".
 - Sign-in needs a running daemon loop (CORE-007). Linux and macOS MUST fail with "failed to connect to daemon (is it running?)" when the daemon is unreachable; Windows with "monitoring is not running". Android MUST show the Accessibility guide instead of attempting sign-in while the service is disconnected, and MUST restart a paused loop before signing in.
 - Linux `virtue login` MUST mask the typed password with `*`, abort on Ctrl+C or Ctrl+D, prompt `Device name [<hostname>]:` unless `--device-name` is given, and skip the email prompt when `--email` is given. On success it MUST print the capture probe result (CLIENT-020), the device id, the partners instruction and the monitoring summary, plus a warning when the probe failed.
@@ -236,7 +236,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 
 | Command                                                                      | Behavior                                                                                             |
 | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `virtue login [--email E] [--device-name N] [--server URL]`                  | CLIENT-004, CLIENT-033                                                                               |
+| `virtue login [--email E] [--device-name N] [--server URL]`                  | CLIENT-004, CLIENT-034                                                                               |
 | `virtue logout [--yes]`                                                      | CLIENT-005; prints "Logged out. Monitoring is disabled on this device until you run `virtue login`." |
 | `virtue status [--full] [--advanced] [--json]`                               | CLIENT-006, CLIENT-007                                                                               |
 | `virtue daemon`                                                              | runs the daemon and tray (used by systemd)                                                           |
@@ -372,7 +372,7 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Instead of the partners link text in CLIENT-004, iOS Home MUST offer the partners button above only while active.
 - After a successful Report an Issue (CLIENT-016), iOS MUST show "Thanks, your report was sent to the Virtue Initiative team." with a comma in place of the dash. The setup wizard MUST keep following the first unfinished step as it changes and MUST NOT go back to step 1 (signing in). Changing step MUST scroll Home back to the top.
 
-## CLIENT-033 Choosing a server
+## CLIENT-034 Choosing a server
 
 The sign-in form MUST let the user choose a server: "Virtue Initiative", the build's default, selected unless the user chose otherwise, or "Self-hosted", which shows a "Server address" field. The address MUST be passed to CORE-008 as `server`; the default passes none. An empty address MUST fail before any request with "Server address is required" (Windows and Android add a period). A failure to resolve the address (CORE-028) MUST show the core's message after the platform's usual sign-in failure prefix ("Login failed: " on macOS, "Sign in failed. " on Windows and Android), never the "check your email and password" message, because the email and password were never sent.
 

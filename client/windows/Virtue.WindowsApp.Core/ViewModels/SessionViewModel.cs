@@ -169,11 +169,11 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         set => SetProperty(ref _deviceNameInput, value);
     }
 
-    /// <summary>The default server's web app. A self-hosted server names its own (CLIENT-033).</summary>
+    /// <summary>The default server's web app. A self-hosted server names its own (CLIENT-034).</summary>
     public const string DefaultWebAppUrl = "https://app.virtueinitiative.org";
 
     /// <summary>
-    /// Whether sign-in goes to a self-hosted server (CLIENT-033). Both this and
+    /// Whether sign-in goes to a self-hosted server (CLIENT-034). Both this and
     /// <see cref="ServerAddressInput"/> start from the last sign-in.
     /// </summary>
     public bool SelfHostedServer
@@ -190,7 +190,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
 
     /// <summary>
     /// A page of the web app: the self-hosted server's own when the status
-    /// names one, otherwise the default (CLIENT-033).
+    /// names one, otherwise the default (CLIENT-034).
     /// </summary>
     public string WebAppUrl(string path)
     {
@@ -614,7 +614,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             SetEmailInput(status.Email ?? string.Empty);
         }
 
-        // CLIENT-033: offer the last sign-in's server, once, so a refresh
+        // CLIENT-034: offer the last sign-in's server, once, so a refresh
         // never undoes what the user picked.
         if (!_hasHydratedServer)
         {

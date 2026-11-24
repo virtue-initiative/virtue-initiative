@@ -26,7 +26,7 @@ use crate::config::{ClientPaths, build_core_config, default_device_name, load_se
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
 /// The default server's web app. Partners are managed there, not from this
-/// client. A self-hosted server names its own (CLIENT-033).
+/// client. A self-hosted server names its own (CLIENT-034).
 const DEFAULT_WEB_APP_URL: &str = "https://app.virtueinitiative.org";
 
 /// Short summary of what this client captures, printed after login and at the end of
@@ -237,7 +237,7 @@ fn login(
     device_name: Option<String>,
     server: Option<String>,
 ) -> Result<()> {
-    // CLIENT-033: an empty address fails before any request, rather than
+    // CLIENT-034: an empty address fails before any request, rather than
     // quietly signing in to the default server.
     if server.as_deref().is_some_and(|s| s.trim().is_empty()) {
         anyhow::bail!("Server address is required");
@@ -456,7 +456,7 @@ fn recent_logs() -> Option<Vec<u8>> {
 /// Reads this device's credentials straight off disk rather than through the
 /// daemon, so `report-issue` still works (anonymously otherwise) even when the
 /// daemon isn't running (CLIENT-016). See CORE-010's disk-fallback precedent in
-/// `load_service_status`. They also name the server to send it to (CLIENT-033).
+/// `load_service_status`. They also name the server to send it to (CLIENT-034).
 fn read_device_credentials(paths: &ClientPaths) -> Option<virtue_core::DeviceCredentials> {
     let state_path = paths.state_dir.join("event_state.json");
     let state: virtue_core::DaemonState = virtue_core::load_state(&state_path).ok()?;
@@ -464,7 +464,7 @@ fn read_device_credentials(paths: &ClientPaths) -> Option<virtue_core::DeviceCre
 }
 
 /// A page of the web app, on the signed-in server's own web app when it named
-/// one (CLIENT-033).
+/// one (CLIENT-034).
 fn web_app_link(status: &ServiceStatus, path: &str) -> String {
     let base = status.web_app_url.as_deref().unwrap_or(DEFAULT_WEB_APP_URL);
     format!("{base}{path}")
@@ -1448,7 +1448,7 @@ mod tests {
         ));
     }
 
-    // CLIENT-033: `virtue login` parses --server.
+    // CLIENT-034: `virtue login` parses --server.
     #[test]
     fn cli_accepts_login_server_flag() {
         let cli = Cli::try_parse_from(["virtue", "login", "--server", "virtue.example.org"])
@@ -1462,7 +1462,7 @@ mod tests {
         ));
     }
 
-    // CLIENT-033: an empty --server fails before any prompt or request,
+    // CLIENT-034: an empty --server fails before any prompt or request,
     // rather than signing in to the default server.
     #[test]
     fn login_with_an_empty_server_address_fails() {
@@ -1483,7 +1483,7 @@ mod tests {
         assert_eq!(err.to_string(), "Server address is required");
     }
 
-    // CLIENT-033: web app links use the server's own web app when it named one.
+    // CLIENT-034: web app links use the server's own web app when it named one.
     #[test]
     fn web_app_links_follow_the_servers_web_app() {
         let mut status = ServiceStatus {

@@ -336,7 +336,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Password is required.", viewModel.ErrorText);
     }
 
-    // CLIENT-033: a self-hosted sign-in with no address is refused before any request.
+    // CLIENT-034: a self-hosted sign-in with no address is refused before any request.
     [Fact]
     public async Task LoginAsync_FailsWithMissingServerAddress()
     {
@@ -355,7 +355,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("Server address is required.", viewModel.ErrorText);
     }
 
-    // CLIENT-033: a self-hosted sign-in passes the address; the default passes none.
+    // CLIENT-034: a self-hosted sign-in passes the address; the default passes none.
     [Fact]
     public async Task LoginAsync_PassesTheChosenServer()
     {
@@ -383,7 +383,7 @@ public sealed class SessionViewModelTests
         Assert.Null(defaultClient.LastServer);
     }
 
-    // CLIENT-033: the form starts from the last sign-in's server.
+    // CLIENT-034: the form starts from the last sign-in's server.
     [Fact]
     public async Task RefreshAsync_OffersTheRememberedServer()
     {
@@ -399,7 +399,7 @@ public sealed class SessionViewModelTests
         Assert.Equal("https://virtue.example.org", viewModel.ServerAddressInput);
     }
 
-    // CLIENT-033: web app links follow the self-hosted server's web app.
+    // CLIENT-034: web app links follow the self-hosted server's web app.
     [Fact]
     public async Task WebAppUrl_FollowsTheServersWebApp()
     {

@@ -31,7 +31,7 @@ namespace Virtue.WindowsApp;
 public sealed partial class MainWindow : Window
 {
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
-    // A self-hosted server's accounts are made on its own website (CLIENT-033),
+    // A self-hosted server's accounts are made on its own website (CLIENT-034),
     // so this only shows for the default server.
     private const string SignUpNavigateUrl = SessionViewModel.DefaultWebAppUrl + "/signup";
 
@@ -439,7 +439,7 @@ public sealed partial class MainWindow : Window
         StyleInput(_deviceNameTextBox);
         _signInPanel.Children.Add(_deviceNameTextBox);
 
-        // CLIENT-033: the server is chosen here and nowhere else, so it can
+        // CLIENT-034: the server is chosen here and nowhere else, so it can
         // only change by signing out first.
         var serverChoice = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
         _virtueServerRadio.Foreground = TextBrush;

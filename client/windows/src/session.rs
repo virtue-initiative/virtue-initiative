@@ -14,7 +14,7 @@ pub struct SessionStatus {
     pub logged_in: bool,
     pub device_id: Option<String>,
     pub email: Option<String>,
-    /// The self-hosted server last signed in to, to prefill sign-in (CLIENT-033).
+    /// The self-hosted server last signed in to, to prefill sign-in (CLIENT-034).
     pub remembered_server: Option<String>,
 }
 
@@ -66,7 +66,7 @@ impl SessionManager {
 
     pub fn logout_blocking(&self) -> Result<()> {
         resident_monitor::app_logout().context("logout failed")?;
-        // The server stays remembered for the next sign-in (CLIENT-033).
+        // The server stays remembered for the next sign-in (CLIENT-034).
         let remembered = load_state(&self.paths.ui_state_file).unwrap_or_default();
         save_state(
             &self.paths.ui_state_file,

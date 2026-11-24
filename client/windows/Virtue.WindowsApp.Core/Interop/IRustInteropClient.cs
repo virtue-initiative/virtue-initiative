@@ -8,7 +8,7 @@ public interface IRustInteropClient
     void StopMonitoringFromTrayExit();
     SessionStatusPayload GetSessionStatus();
     MonitorStatusPayload GetMonitorStatus();
-    /// <param name="server">A self-hosted server address, or null for the default server (CLIENT-033).</param>
+    /// <param name="server">A self-hosted server address, or null for the default server (CLIENT-034).</param>
     void Login(string email, string password, string? deviceName = null, string? server = null);
     void Logout();
     ForceCapturePayload ForceScreenshotAndUpload();
