@@ -100,9 +100,18 @@ An event with a risk of 90% or more, rounded to a whole percent, MUST force the 
 
 A batch MUST hold every event hashed since the last batch, in the order they were hashed (BATCH-006). Once 200 hashed events are waiting for a batch, the daemon MUST NOT upload more hashes until that batch has uploaded.
 
+The daemon MUST keep the hash server `seq` of each hashed event, and MUST send a batch's first and last as `start_seq` and `end_seq` (API-038) whenever every event in it has one. A batch upload can be stored with only its response lost, and the daemon keeps hashing while it retries, so these let the server say which events it already has:
+
+- On `batch_already_stored`, the daemon MUST drop the events whose `seq` is below the response's `first_seq` (every event, if its `seq` is 0), but only those it sent in an earlier attempt that may have been stored: one with no response, or a 5xx. A 4xx response means the batch was not stored, so it MUST NOT count. The daemon MUST retry the rest. If that drops nothing, the daemon MUST forget the `seq` of every waiting event, so the next attempt is stored without the check (and fails verification) rather than being refused forever.
+- On `hash_chain_moved`, the daemon MUST retry as after any other failure.
+
+The daemon MUST NOT hold hash uploads while it retries a batch, beyond the 200-event limit above.
+
 > Note: device settings SHOULD be refreshed on process startup and on batch upload and saved to the state object
 
 The daemon MUST save `feature_flags` from the device settings with the rest of the settings, and MUST treat every flag as off until settings have been fetched (see /api/SPEC.md API-061).
+
+The daemon MUST send its version, from `client/version.properties`, in the `X-Virtue-Version` header of every API request, and MUST save `announcement` from the device settings with the rest of the settings (API-068).
 
 The hash server token returned with the device settings is valid for 2 hours (see /api/SPEC.md API-002). The daemon SHOULD keep using it until shortly before it expires, and MUST NOT refresh it on a schedule shorter than the batch interval. If the hash server rejects the token as unauthorized, the daemon MUST fetch a new one before its next hash upload.
 
@@ -144,7 +153,8 @@ status() -> {
   last_loop_at_ms, last_screenshot_attempt_at_ms, last_screenshot_at_ms,
   last_skip_reason, last_batch_at_ms,
   recent_errors,
-  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds
+  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds,
+  announcement
 }
 ```
 
@@ -159,6 +169,7 @@ MUST return, without blocking on the loop:
 - `last_batch_at_ms` — when a batch last uploaded successfully.
 - `recent_errors` — see CORE-018.
 - `api_base_url`, `hash_base_url`, `capture_interval_seconds`, `batch_window_seconds` — the effective configuration this build is running with, for the diagnostics/advanced section of a client's status page.
+- `announcement` — the `DeviceAnnouncement` from the last device settings fetched (API-068), for the client to show (CLIENT-033). MUST be absent when those settings had none or have never been fetched.
 
 Every field except `is_running` MUST be derivable from persisted state plus the compile-time configuration, so a client whose daemon process is not running can compute the same status from `state_path` alone and report only `is_running: false`.
 

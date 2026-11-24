@@ -9,7 +9,7 @@ mod common;
 use common::*;
 use virtue_core::CoreError;
 use virtue_core::api::{DeviceState, UploadedBatchResponse};
-use virtue_core::model::{BatchRecipient, DeviceSettings};
+use virtue_core::model::{AnnouncementLevel, BatchRecipient, DeviceAnnouncement, DeviceSettings};
 use virtue_core::testing::Scenario;
 
 /// An authenticated scenario with the next screenshot far away, so the only
@@ -395,6 +395,239 @@ fn hashing_stops_at_200_waiting_events_until_their_batch_uploads() {
     assert_eq!(api.batch_uploads[2].batch.total_count, 50);
 }
 
+// ── A lost batch response (API-038) ──────────────────────────────────────────
+
+fn timed_out() -> CoreError {
+    CoreError::CommandFailed("timed out reading the response".into())
+}
+
+fn already_stored(first_seq: u32, seq: u32) -> CoreError {
+    CoreError::BatchAlreadyStored { first_seq, seq }
+}
+
+/// The `(start_seq, end_seq)` of each batch attempt so far.
+fn batch_seqs(scenario: &Scenario) -> Vec<(Option<u32>, Option<u32>)> {
+    scenario
+        .api
+        .state()
+        .batch_uploads
+        .iter()
+        .map(|call| (call.batch.start_seq, call.batch.end_seq))
+        .collect()
+}
+
+/// Ticks at each wakeup until `done` holds, at most `limit` times.
+fn tick_until(scenario: &mut Scenario, limit: usize, done: impl Fn(&Scenario) -> bool) {
+    for _ in 0..limit {
+        if done(scenario) {
+            return;
+        }
+        let next = scenario.state().next_wakeup_at_ms;
+        scenario.at_t(next).tick();
+    }
+    assert!(done(scenario), "condition not reached in {limit} ticks");
+}
+
+// CORE-005: a batch carries the hash server seqs of its first and last event.
+#[test]
+fn a_batch_sends_the_seqs_its_events_were_hashed_under() {
+    let mut scenario = quiet_scenario();
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .queue_upload(dev("three"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+
+    let hashed: Vec<u32> = scenario
+        .api
+        .state()
+        .hash_uploads
+        .iter()
+        .map(|h| h.seq)
+        .collect();
+    assert_eq!(hashed, [1, 2, 3]);
+    assert_eq!(batch_seqs(&scenario), [(Some(1), Some(3))]);
+}
+
+// CORE-005: after a lost response the daemon keeps hashing, and on
+// batch_already_stored drops the events the lost attempt stored.
+#[test]
+fn a_batch_whose_response_was_lost_is_not_sent_twice() {
+    let mut scenario = quiet_scenario();
+    scenario.api.program_batch(Err(timed_out()));
+    // The server stored seqs 1 and 2, reset, and then accepted 3 and 4.
+    scenario.api.program_batch(Err(already_stored(3, 4)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert_eq!(batch_seqs(&scenario), [(Some(1), Some(2))]);
+
+    // Hashing carries on while the batch is unconfirmed.
+    scenario
+        .queue_upload(dev("three"))
+        .queue_upload(dev("four"));
+    scenario.advance(1).tick();
+    assert_eq!(scenario.api.state().hash_uploads.len(), 4);
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 3
+    });
+    assert_eq!(
+        batch_seqs(&scenario),
+        [(Some(1), Some(2)), (Some(1), Some(4)), (Some(3), Some(4))]
+    );
+    let api = scenario.api.state();
+    assert_eq!(api.batch_uploads[2].batch.total_count, 2);
+    drop(api);
+    assert!(scenario.state().upload.pending_batch_events.is_empty());
+    assert_eq!(scenario.state().upload.unconfirmed_through_seq, None);
+}
+
+// CORE-005: if the server stored the batch and nothing has been hashed since,
+// its chain is empty and every event of the lost attempt is dropped.
+#[test]
+fn an_empty_chain_drops_every_event_the_lost_attempt_sent() {
+    let mut scenario = quiet_scenario();
+    scenario.api.program_batch(Err(timed_out()));
+    scenario.api.program_batch(Err(already_stored(0, 0)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 2
+    });
+    let state = scenario.state();
+    assert!(state.upload.pending_batch_events.is_empty());
+    assert!(state.upload.last_batch_at_ms.is_some());
+}
+
+// CORE-005: only events sent in an earlier failed attempt are dropped, and a
+// batch_already_stored that would drop none sends the batch unchecked.
+#[test]
+fn already_stored_never_drops_events_that_were_not_sent_before() {
+    let mut scenario = quiet_scenario();
+    // No attempt failed before, so nothing here can have been stored.
+    scenario.api.program_batch(Err(already_stored(0, 0)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert_eq!(scenario.state().upload.pending_batch_events.len(), 2);
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 2
+    });
+    assert_eq!(batch_seqs(&scenario), [(Some(1), Some(2)), (None, None)]);
+    assert_eq!(scenario.api.state().batch_uploads[1].batch.total_count, 2);
+    assert!(scenario.state().upload.pending_batch_events.is_empty());
+
+    // Events hashed after that carry their seqs again.
+    scenario
+        .queue_upload(dev("three"))
+        .flush_batch_now()
+        .advance(1)
+        .tick();
+    assert_eq!(batch_seqs(&scenario)[2], (Some(1), Some(1)));
+}
+
+// CORE-005: a lost attempt bounds what may be dropped even when the server's
+// chain starts later, so events it never sent are kept.
+#[test]
+fn already_stored_drops_no_further_than_the_lost_attempt() {
+    let mut scenario = quiet_scenario();
+    scenario.api.program_batch(Err(timed_out()));
+    // A chain starting at 4 would cover seq 3 as well, but the lost attempt
+    // only held 1 and 2.
+    scenario.api.program_batch(Err(already_stored(4, 4)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+    scenario.queue_upload(dev("three"));
+    scenario.advance(1).tick();
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 3
+    });
+    assert_eq!(batch_seqs(&scenario)[2], (Some(3), Some(3)));
+}
+
+// CORE-005: an attempt answered with a 4xx was not stored, so a later
+// batch_already_stored (here a hash server that lost its chain) drops nothing.
+#[test]
+fn already_stored_never_drops_events_a_4xx_rejected() {
+    let mut scenario = quiet_scenario();
+    scenario.api.program_batch(Err(CoreError::HttpStatus {
+        status: 429,
+        message: "slow down".into(),
+    }));
+    scenario.api.program_batch(Err(already_stored(0, 0)));
+    scenario
+        .queue_upload(dev("one"))
+        .queue_upload(dev("two"))
+        .flush_batch_now();
+    scenario.at_t(T0).tick();
+    assert_eq!(scenario.state().upload.unconfirmed_through_seq, None);
+
+    tick_until(&mut scenario, 10, |s| {
+        s.api.state().batch_uploads.len() == 3
+    });
+    assert_eq!(
+        batch_seqs(&scenario),
+        [(Some(1), Some(2)), (Some(1), Some(2)), (None, None)]
+    );
+    assert_eq!(scenario.api.state().batch_uploads[2].batch.total_count, 2);
+}
+
+// CORE-005: hash_chain_moved, rejections and timeouts are retried like any
+// failure, and none of them stops hashing.
+#[test]
+fn failed_batch_uploads_never_stop_hashing_below_the_cap() {
+    let mut scenario = quiet_scenario();
+    let rejections = [
+        CoreError::HttpStatus {
+            status: 409,
+            message: "hash_chain_moved".into(),
+        },
+        CoreError::HttpStatus {
+            status: 429,
+            message: "slow down".into(),
+        },
+        CoreError::HttpStatus {
+            status: 400,
+            message: "bad".into(),
+        },
+        timed_out(),
+        down(),
+    ];
+    for err in rejections {
+        scenario.api.program_batch(Err(err));
+    }
+    scenario.queue_upload(dev("first")).flush_batch_now();
+    scenario.at_t(T0).tick();
+
+    for i in 0..5 {
+        scenario.queue_upload(dev(&format!("later {i}")));
+        let next = scenario.state().next_wakeup_at_ms;
+        scenario.at_t(next).tick();
+        assert_eq!(scenario.api.state().hash_uploads.len(), i + 2);
+    }
+    tick_until(&mut scenario, 10, |s| {
+        s.state().upload.pending_batch_events.is_empty()
+    });
+    let api = scenario.api.state();
+    assert_eq!(api.batch_uploads.len(), 6);
+    assert_eq!(api.batch_uploads[5].batch.total_count, 6);
+}
+
 // ── Device settings and the hash token ───────────────────────────────────────
 
 fn settings_with(flags: &[&str], recipients: usize) -> DeviceSettings {
@@ -410,6 +643,7 @@ fn settings_with(flags: &[&str], recipients: usize) -> DeviceSettings {
             .collect(),
         hash_base_url: None,
         feature_flags: flags.iter().map(|f| f.to_string()).collect(),
+        announcement: None,
     }
 }
 
@@ -433,6 +667,31 @@ fn settings_and_feature_flags_are_fetched_on_startup_and_saved() {
         assert!(settings.has_feature_flag("beta"), "{name}");
         assert!(!settings.has_feature_flag("other"), "{name}");
     }
+}
+
+// CORE-005, CORE-010: the announcement in the device settings is saved and shown in status.
+#[test]
+fn the_announcement_is_saved_from_settings_and_shown_in_status() {
+    let announcement = DeviceAnnouncement {
+        message: "Update by hand".into(),
+        url: Some("https://virtueinitiative.org/download".into()),
+        level: AnnouncementLevel::Urgent,
+    };
+    let first = Scenario::authenticated();
+    let expected = announcement.clone();
+    let mut second = Scenario::authenticated_with_state_dir_configured(
+        first.state_dir_path().to_path_buf(),
+        T0,
+        move |_, api| api.state().default_device_settings.announcement = Some(expected.clone()),
+    );
+    assert_eq!(second.status().announcement, Some(announcement.clone()));
+    assert_eq!(
+        persisted(&second)
+            .upload
+            .settings
+            .and_then(|s| s.announcement),
+        Some(announcement)
+    );
 }
 
 // CORE-005: device settings are refreshed on batch upload and saved.

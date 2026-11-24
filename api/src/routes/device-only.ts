@@ -9,19 +9,22 @@ import {
   createBatch,
   createDevice,
   createSessionRecord,
+  deleteBatch,
   deleteDeviceSessionsByDeviceId,
   findDeviceById,
   findUserById,
   listAcceptedNotificationTargetsForUser,
   listBatchAccessRecipientsForOwner,
   markDeviceDeleted,
+  setDeviceAppVersion,
 } from '../lib/db';
 import { encodeAccessKeys } from '../lib/access-keys';
 import { batchObject } from '../lib/batch-url';
 import { sendEmail } from '../lib/email';
 import { renderDeviceLoggedOutTemplate } from '../lib/email/templates';
-import { hashGet, hashReset } from '../lib/hash-server';
+import { hashGet, hashReset, hashResetAt } from '../lib/hash-server';
 import { decodeHex, encodeBase64 } from '../lib/encoding';
+import { announcementForDevice, validVersion } from '../lib/announcements';
 import { enabledFeatureFlags } from '../lib/feature-flags';
 import { jsonField } from '../lib/form-validation';
 import { generateToken } from '../lib/jwt';
@@ -61,13 +64,25 @@ const eventCountsSchema = z.object({
   screenshot: z.number().int().nonnegative(),
 });
 
-const batchMetadataSchema = z.object({
-  start_time: z.number().int().nonnegative(),
-  end_time: z.number().int().nonnegative(),
-  access_keys: z.record(z.uuid(), z.base64()),
-  event_counts: eventCountsSchema,
-  notifications: z.array(notifyEntrySchema).optional().default([]),
-});
+// HASH-006: seq is a u32 on the hash server, and 0 is never accepted.
+const hashSeqSchema = z.number().int().positive().max(0xffff_ffff);
+
+const batchMetadataSchema = z
+  .object({
+    start_time: z.number().int().nonnegative(),
+    end_time: z.number().int().nonnegative(),
+    start_seq: hashSeqSchema.optional(),
+    end_seq: hashSeqSchema.optional(),
+    access_keys: z.record(z.uuid(), z.base64()),
+    event_counts: eventCountsSchema,
+    notifications: z.array(notifyEntrySchema).optional().default([]),
+  })
+  .refine((m) => (m.start_seq === undefined) === (m.end_seq === undefined), {
+    message: 'start_seq and end_seq must be sent together',
+  })
+  .refine((m) => m.start_seq === undefined || m.start_seq <= m.end_seq!, {
+    message: 'start_seq must not be greater than end_seq',
+  });
 
 const uploadBatchSchema = z.object({
   metadata: jsonField(batchMetadataSchema, 'metadata'),
@@ -76,6 +91,27 @@ const uploadBatchSchema = z.object({
     .refine((file) => file.size > 0, { message: 'File is empty' })
     .refine((file) => file.size <= 100 * 1024 * 1024, { message: 'File exceeds 100MB limit' }),
 });
+
+// API-068: the client's version from X-Virtue-Version, or null when it is
+// missing or not valid. Stored on the device and used to pick its announcement.
+function clientVersion(c: Context<{ Bindings: Env; Variables: Variables }>) {
+  return validVersion(c.req.header('X-Virtue-Version'));
+}
+
+// API-036: store a changed version on the device. Only a change is written,
+// and a failed write must never fail the settings fetch or the batch upload.
+async function recordClientVersion(
+  c: Context<{ Bindings: Env; Variables: Variables }>,
+  device: { id: string; app_version: string | null },
+  version: string | null,
+) {
+  if (!version || version === device.app_version) return;
+  try {
+    await setDeviceAppVersion(c.env.DB, device.id, version);
+  } catch (err) {
+    console.error(`[device] failed to store version for device ${device.id}`, err);
+  }
+}
 
 async function createDeviceSession(
   c: Context<{ Bindings: Env; Variables: Variables }>,
@@ -97,12 +133,13 @@ async function createDeviceSession(
 
 /**
  * Builds the DeviceSettings embedded in POST /d/device, GET /d/device, and POST /d/batch
- * responses — the one canonical place a device's wrapping keys and a fresh hash-server
- * token (DeviceSettings.hash_token) are assembled.
+ * responses — the one canonical place a device's wrapping keys, a fresh hash-server
+ * token (DeviceSettings.hash_token) and its announcement are assembled.
  */
 async function buildDeviceSettings(
   c: Context<{ Bindings: Env; Variables: Variables }>,
   device: { id: string; owner: string; name: string; platform: string },
+  version: string | null,
 ) {
   const hashBaseUrl = c.env.HASH_SERVER_URL?.trim();
   if (!hashBaseUrl) {
@@ -113,10 +150,12 @@ async function buildDeviceSettings(
     c.env.DB,
     device.owner,
   );
-  const [hashToken, featureFlags] = await Promise.all([
+  const [hashToken, featureFlags, announcement] = await Promise.all([
     generateToken('device', device.id, c.env.JWT_PRIVATE_KEY, HASH_TOKEN_TTL_SECONDS),
     // API-061: a device gets its owner's flags, so all their devices agree.
     enabledFeatureFlags(c.env.DB, device.owner, ownerFlagOverrides),
+    // API-068: the device's version comes from the request, not the database.
+    announcementForDevice(c.env.DB, { platform: device.platform, version }),
   ]);
 
   return {
@@ -130,6 +169,7 @@ async function buildDeviceSettings(
     hash_base_url: hashBaseUrl,
     hash_token: hashToken,
     feature_flags: featureFlags,
+    announcement,
   };
 }
 
@@ -155,10 +195,11 @@ deviceOnly.post('/device', validateZ('json', registerDeviceSchema), async (c) =>
 
   await fillNewsletterLocation(c.env, result.user.email, requestLocation(c.req.raw));
 
-  await createDevice(c.env.DB, { id, owner, name, platform });
+  const version = clientVersion(c);
+  await createDevice(c.env.DB, { id, owner, name, platform, app_version: version });
   const refreshToken = await createDeviceSession(c, id);
 
-  const settings = await buildDeviceSettings(c, { id, owner, name, platform });
+  const settings = await buildDeviceSettings(c, { id, owner, name, platform }, version);
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
@@ -178,7 +219,12 @@ deviceOnly.get('/device', authenticateDeviceSession(), rateLimitByDevice(), asyn
     return c.json({ error: 'Not found' }, 404);
   }
 
-  const settings = await buildDeviceSettings(c, device);
+  // API-036: a client fetches its settings when it starts, so an update
+  // usually shows up here.
+  const version = clientVersion(c);
+  await recordClientVersion(c, device, version);
+
+  const settings = await buildDeviceSettings(c, device, version);
   if (!settings) {
     return c.json({ error: 'Hash server not configured' }, 500);
   }
@@ -282,6 +328,11 @@ async function notifyAboutDeviceLogout(
   }
 }
 
+const hashChainMoved = {
+  error: 'The device hashed more events after this batch was built',
+  code: 'hash_chain_moved',
+} as const;
+
 /**
  * POST /d/batch - Upload an encrypted batch blob for the authenticated device.
  *
@@ -302,7 +353,8 @@ deviceOnly.post(
     }
 
     const { metadata, file } = c.req.valid('form');
-    const { start_time, end_time, access_keys, event_counts, notifications } = metadata;
+    const { start_time, end_time, start_seq, end_seq, access_keys, event_counts, notifications } =
+      metadata;
 
     const createdAt = Date.now();
     // API-038: the times come from the device clock, and a batch is uploaded after the
@@ -329,6 +381,27 @@ deviceOnly.post(
       console.error(`[batch] hash server returned a malformed hash for device ${device.id}`);
       return c.json({ error: 'Hash server returned an invalid hash' }, 502);
     }
+    // API-038: with the batch's seqs, check it against the chain the hash server holds.
+    const checkSeqs = start_seq !== undefined && end_seq !== undefined;
+    if (checkSeqs) {
+      const firstSeq = hashState.first_seq ?? 0;
+      if (hashState.seq === 0 || (firstSeq !== 0 && firstSeq > start_seq)) {
+        // An earlier attempt stored this batch's first events and reset the chain,
+        // and the device never got that response.
+        return c.json(
+          {
+            error: 'This batch begins with events that were already stored',
+            code: 'batch_already_stored',
+            first_seq: firstSeq,
+            seq: hashState.seq,
+          },
+          409,
+        );
+      }
+      if (hashState.seq > end_seq) {
+        return c.json(hashChainMoved, 409);
+      }
+    }
     const batchId = uuidv4();
     const stored = { id: batchId, user_id: device.owner, version: CURRENT_API_VERSION };
     const { key, url } = batchObject(c.env, stored);
@@ -350,7 +423,15 @@ deviceOnly.post(
       await deleteObject(c.env, key);
       return c.json({ error: 'Not found' }, 404);
     }
-    await hashReset(c.env, device.id);
+    if (!checkSeqs) {
+      await hashReset(c.env, device.id);
+    } else if (!(await hashResetAt(c.env, device.id, hashState.seq))) {
+      // API-038: the device hashed more while this was stored, so end_hash no longer
+      // ends the chain. Only a retry holding those events can be stored.
+      await deleteBatch(c.env.DB, { ...stored, created_at: createdAt });
+      await deleteObject(c.env, key);
+      return c.json(hashChainMoved, 409);
+    }
 
     for (const notification of notifications) {
       try {
@@ -375,7 +456,11 @@ deviceOnly.post(
       }
     }
 
-    const settings = await buildDeviceSettings(c, device);
+    // API-036: a client that started offline reports an update here.
+    const version = clientVersion(c);
+    await recordClientVersion(c, device, version);
+
+    const settings = await buildDeviceSettings(c, device, version);
     if (!settings) {
       return c.json({ error: 'Hash server not configured' }, 500);
     }

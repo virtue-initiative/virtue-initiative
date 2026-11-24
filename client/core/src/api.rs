@@ -12,7 +12,9 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use crate::config::Config;
 use crate::crypto::derive_password_auth;
 use crate::error::{CoreError, CoreResult};
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload};
+use crate::model::{
+    BatchUpload, DeviceAnnouncement, DeviceCredentials, DeviceSettings, HashParams, NotifyPayload,
+};
 
 /// The whole codebase shares one version, tracked in `version.properties` (this crate's
 /// grandparent directory). This is that version's `/vX`/`/vX.Y` URL-prefix form
@@ -20,6 +22,11 @@ use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, HashParams, N
 /// for both the main API and the standalone hash server. Kept in sync by
 /// `scripts/update-version.sh`, which is the only thing that should ever edit this line.
 const API_VERSION: &str = "v0.1";
+
+/// Sent as `X-Virtue-Version` on every request, so the server can choose an
+/// announcement for this version (API-068, CORE-005). The crate version is the
+/// `VERSION` in `version.properties`, kept in sync by the same script.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UploadedBatchResponse {
@@ -135,6 +142,8 @@ struct DeviceSettingsResponse {
     hash_token: String,
     #[serde(default)]
     feature_flags: Vec<String>,
+    #[serde(default)]
+    announcement: Option<DeviceAnnouncement>,
 }
 
 impl From<DeviceSettingsResponse> for DeviceSettings {
@@ -153,6 +162,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
                 .collect(),
             hash_base_url: response.hash_base_url,
             feature_flags: response.feature_flags,
+            announcement: response.announcement,
         }
     }
 }
@@ -349,6 +359,10 @@ impl ApiTransport for HttpApiClient {
         struct BatchMetadata<'a> {
             start_time: i64,
             end_time: i64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            start_seq: Option<u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            end_seq: Option<u32>,
             access_keys: std::collections::BTreeMap<&'a str, &'a str>,
             event_counts: EventCounts,
             notifications: &'a [NotifyPayload],
@@ -363,6 +377,8 @@ impl ApiTransport for HttpApiClient {
         let metadata = serde_json::to_string(&BatchMetadata {
             start_time: batch.start_time_ms,
             end_time: batch.end_time_ms,
+            start_seq: batch.start_seq,
+            end_seq: batch.end_seq,
             access_keys: batch
                 .access_keys
                 .iter()
@@ -379,11 +395,17 @@ impl ApiTransport for HttpApiClient {
 
         let boundary = multipart_boundary();
         let body = encode_multipart(&boundary, &batch.bytes, &metadata);
-        let response: UploadBatchResponse = self.expect_json(
-            self.post(None, "/d/batch", Some(device_refresh_token))
-                .content_type(format!("multipart/form-data; boundary={boundary}"))
-                .send(&body)?,
-        )?;
+        let response = self
+            .post(None, "/d/batch", Some(device_refresh_token))
+            .content_type(format!("multipart/form-data; boundary={boundary}"))
+            .send(&body)?;
+        if response.status() == StatusCode::CONFLICT {
+            self.note_server_time(&response);
+            let mut response = response;
+            let body = response.body_mut().read_to_string().ok();
+            return Err(batch_conflict_error(body.as_deref()));
+        }
+        let response: UploadBatchResponse = self.expect_json(response)?;
         let hash_token = response.settings.hash_token.clone();
         Ok(UploadedBatchResponse {
             id: response.id,
@@ -426,7 +448,10 @@ impl HttpApiClient {
         path: &str,
         bearer_token: Option<&str>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-        let builder = self.agent.get(self.url(base_override, path));
+        let builder = self
+            .agent
+            .get(self.url(base_override, path))
+            .header("X-Virtue-Version", APP_VERSION);
         match bearer_token {
             Some(token) => builder.header("Authorization", format!("Bearer {token}")),
             None => builder,
@@ -439,7 +464,10 @@ impl HttpApiClient {
         path: &str,
         bearer_token: Option<&str>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-        let builder = self.agent.post(self.url(base_override, path));
+        let builder = self
+            .agent
+            .post(self.url(base_override, path))
+            .header("X-Virtue-Version", APP_VERSION);
         match bearer_token {
             Some(token) => builder.header("Authorization", format!("Bearer {token}")),
             None => builder,
@@ -599,6 +627,27 @@ fn multipart_boundary() -> String {
 /// Derives a non-empty error message from a non-2xx response body, falling
 /// back to a status-line-bearing message (e.g. "HTTP 502 Bad Gateway error")
 /// when the body is missing, empty, or unparseable.
+/// API-038: a 409 from `POST /d/batch` is `batch_already_stored`, which says
+/// where the hash chain now starts, or else an ordinary failure to retry.
+fn batch_conflict_error(body: Option<&str>) -> CoreError {
+    #[derive(Deserialize)]
+    struct AlreadyStored {
+        code: String,
+        first_seq: u32,
+        seq: u32,
+    }
+    match body.and_then(|body| serde_json::from_str::<AlreadyStored>(body).ok()) {
+        Some(stored) if stored.code == "batch_already_stored" => CoreError::BatchAlreadyStored {
+            first_seq: stored.first_seq,
+            seq: stored.seq,
+        },
+        _ => CoreError::HttpStatus {
+            status: StatusCode::CONFLICT.as_u16(),
+            message: error_message_from_body(StatusCode::CONFLICT, body),
+        },
+    }
+}
+
 fn error_message_from_body(status: StatusCode, body: Option<&str>) -> String {
     let fallback = body
         .filter(|s| !s.trim().is_empty())
@@ -805,6 +854,38 @@ mod tests {
         );
     }
 
+    // API-038: a batch_already_stored 409 says where the hash chain now starts.
+    #[test]
+    fn batch_conflict_error_reads_batch_already_stored() {
+        let err = batch_conflict_error(Some(
+            r#"{"error":"stored","code":"batch_already_stored","first_seq":41,"seq":42}"#,
+        ));
+        assert!(matches!(
+            err,
+            CoreError::BatchAlreadyStored {
+                first_seq: 41,
+                seq: 42
+            }
+        ));
+    }
+
+    // API-038: any other 409 from the batch upload is an ordinary failure.
+    #[test]
+    fn batch_conflict_error_treats_other_conflicts_as_failures() {
+        for body in [
+            Some(r#"{"error":"moved","code":"hash_chain_moved"}"#),
+            Some(r#"{"error":"odd","code":"batch_already_stored"}"#),
+            Some("not json"),
+            None,
+        ] {
+            let err = batch_conflict_error(body);
+            assert!(
+                matches!(err, CoreError::HttpStatus { status: 409, .. }),
+                "{body:?}"
+            );
+        }
+    }
+
     // CORE-026: API error messages.
     #[test]
     fn error_message_from_body_falls_back_on_empty_body() {
@@ -857,5 +938,81 @@ mod tests {
         let settings = DeviceSettings::from(with);
         assert!(settings.has_feature_flag("beta"));
         assert!(!settings.has_feature_flag("other"));
+    }
+
+    // CORE-005, API-068: the announcement is saved with the settings, and a
+    // level this build doesn't know reads as info rather than failing them.
+    #[test]
+    fn device_settings_carry_the_announcement() {
+        use crate::model::AnnouncementLevel;
+
+        let parse = |extra: &str| {
+            let json =
+                format!(r#"{{"id":"d","name":"n","platform":"linux","hash_token":"t"{extra}}}"#);
+            DeviceSettings::from(serde_json::from_str::<DeviceSettingsResponse>(&json).unwrap())
+        };
+
+        assert_eq!(parse("").announcement, None);
+        assert_eq!(parse(r#","announcement":null"#).announcement, None);
+        assert_eq!(
+            parse(r#","announcement":{"message":"Update","url":"https://x.org","level":"urgent"}"#)
+                .announcement,
+            Some(DeviceAnnouncement {
+                message: "Update".into(),
+                url: Some("https://x.org".into()),
+                level: AnnouncementLevel::Urgent,
+            })
+        );
+        let future = parse(r#","announcement":{"message":"Hi","url":null,"level":"sparkly"}"#);
+        assert_eq!(future.announcement.unwrap().level, AnnouncementLevel::Info);
+    }
+
+    // CORE-005: every API request carries the app version.
+    #[test]
+    fn requests_send_the_app_version_header() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
+            let body = r#"{"id":"d","name":"n","platform":"linux","hash_token":"t"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            String::from_utf8_lossy(&request).to_lowercase()
+        });
+
+        let config = Config::new(
+            format!("http://127.0.0.1:{port}"),
+            "test-device",
+            "linux",
+            std::path::PathBuf::from("/tmp/virtue-api-version-test"),
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+        );
+        HttpApiClient::new(&config)
+            .unwrap()
+            .get_device_settings("dst_token")
+            .unwrap();
+
+        let request = server.join().unwrap();
+        assert!(
+            request.contains(&format!("\r\nx-virtue-version: {APP_VERSION}\r\n")),
+            "{request}"
+        );
     }
 }

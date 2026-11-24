@@ -381,3 +381,45 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* Announcements (api/SPEC.md API-068) */
+
+.admin-announcement-new {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  max-width: 48rem;
+}
+
+.admin-announcement-version {
+  width: 9rem;
+}
+
+.admin-announcement-platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.admin-announcement-platforms legend {
+  width: 100%;
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.admin-announcement-message {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-announcement-url {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

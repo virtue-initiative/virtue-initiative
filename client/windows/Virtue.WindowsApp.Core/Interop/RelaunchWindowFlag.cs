@@ -14,10 +14,7 @@ namespace Virtue.WindowsApp.Core.Interop;
 /// </summary>
 public static class RelaunchWindowFlag
 {
-    public static string FlagPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "Virtue",
-        "show-window-on-next-launch");
+    public static string FlagPath => Path.Combine(AppDataDirectory.Current, "show-window-on-next-launch");
 
     /// <summary>Best-effort: failing to set the flag only costs the window restore.</summary>
     public static void Set(string path)

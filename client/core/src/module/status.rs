@@ -37,6 +37,7 @@ pub fn build(state: &DaemonState, config: &Config, is_running: bool) -> ServiceS
         hash_base_url: settings.and_then(|s| s.hash_base_url.clone()),
         capture_interval_seconds: config.screenshot_interval.as_secs(),
         batch_window_seconds: config.batch_interval.as_secs(),
+        announcement: settings.and_then(|s| s.announcement.clone()),
     }
 }
 
@@ -75,6 +76,7 @@ mod tests {
                 .collect(),
             hash_base_url: Some("https://hash.example.org".into()),
             feature_flags: Vec::new(),
+            announcement: None,
         }
     }
 
@@ -113,6 +115,7 @@ mod tests {
                 .upload
                 .pending_batch_events
                 .push(crate::module::upload::PendingBatchEvent {
+                    seq: None,
                     ts: 0,
                     risk: 0.0,
                     encoded: vec![1],

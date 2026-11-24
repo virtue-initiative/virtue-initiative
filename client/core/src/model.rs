@@ -233,6 +233,12 @@ pub struct LogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchUpload {
+    /// The hash server `seq` of the batch's first and last event, when every
+    /// event has one (API-038). Set by `plan_batch`, not the builder.
+    #[serde(default)]
+    pub start_seq: Option<u32>,
+    #[serde(default)]
+    pub end_seq: Option<u32>,
     pub start_time_ms: i64,
     pub end_time_ms: i64,
     #[serde(with = "serde_bytes")]
@@ -294,6 +300,35 @@ pub struct DeviceSettings {
     /// not listed is off, as is every flag before settings are first fetched.
     #[serde(default)]
     pub feature_flags: Vec<String>,
+    /// The announcement the server chose for this device (API-068), shown by
+    /// every client through `ServiceStatus.announcement` (CLIENT-033).
+    #[serde(default)]
+    pub announcement: Option<DeviceAnnouncement>,
+}
+
+/// A message for the person using this device, such as a request to update by
+/// hand (API-068). The core only passes it through for the client to show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceAnnouncement {
+    pub message: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub level: AnnouncementLevel,
+}
+
+/// How prominently a client shows an announcement (CLIENT-033). A level a newer
+/// server sends that this build doesn't know reads as `Info`, so it can never
+/// make the device settings unreadable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnnouncementLevel {
+    Warning,
+    Urgent,
+    // Last, because serde only allows `other` on the last variant.
+    #[default]
+    #[serde(other)]
+    Info,
 }
 
 impl DeviceSettings {
@@ -385,6 +420,8 @@ pub struct ServiceStatus {
     pub capture_interval_seconds: u64,
     #[serde(default)]
     pub batch_window_seconds: u64,
+    #[serde(default)]
+    pub announcement: Option<DeviceAnnouncement>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

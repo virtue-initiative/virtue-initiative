@@ -62,6 +62,8 @@ impl BatchBuilder {
             .collect::<CoreResult<Vec<_>>>()?;
 
         Ok(BatchUpload {
+            start_seq: None,
+            end_seq: None,
             start_time_ms,
             end_time_ms,
             bytes: encrypted,

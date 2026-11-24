@@ -93,6 +93,9 @@ const clientEnv: Record<string, string> = {
   ...(process.env as Record<string, string>),
   PROGRAMDATA: tmpProgramData,
 };
+// The packaged app's base-dir override wins over PROGRAMDATA (CLIENT-002), so drop any value
+// inherited from the caller, or the runner would use a real install's folder.
+delete clientEnv.VIRTUE_WINDOWS_BASE_DIR;
 
 let apiProc: Subprocess | undefined;
 let hashProc: Subprocess | undefined;

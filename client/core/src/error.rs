@@ -28,6 +28,13 @@ pub enum CoreError {
     Argon2(String),
     #[error("{message}")]
     HttpStatus { status: u16, message: String },
+    /// API-038: the batch begins with events the server already stored, whose
+    /// response was lost. The hash chain now starts at `first_seq` (0 if not
+    /// known) and ends at `seq` (0 if empty).
+    #[error(
+        "the server already stored this batch's first events (its chain is at {first_seq}..={seq})"
+    )]
+    BatchAlreadyStored { first_seq: u32, seq: u32 },
     #[error("service has not been authenticated")]
     NotAuthenticated,
     #[error("service has already been shut down")]

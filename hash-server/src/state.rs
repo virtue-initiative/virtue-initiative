@@ -7,6 +7,9 @@ pub const ZERO_HASH: [u8; 32] = [0u8; 32];
 pub struct DeviceState {
     pub hash: [u8; 32],
     pub seq: u32,
+    /// HASH-006: the `seq` of the first hash since the last reset, or 0 when
+    /// there is none or the chain began before the server recorded it.
+    pub first_seq: u32,
     pub last_received: u32,
 }
 
@@ -15,6 +18,7 @@ impl Default for DeviceState {
         DeviceState {
             hash: ZERO_HASH,
             seq: 0,
+            first_seq: 0,
             last_received: 0,
         }
     }
