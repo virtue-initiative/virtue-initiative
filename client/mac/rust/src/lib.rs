@@ -44,26 +44,33 @@ pub extern "C" fn virtue_mac_native_init() -> *mut c_char {
     into_c_result(result)
 }
 
+/// `server` is a self-hosted server address, or null for the default server
+/// (CLIENT-034).
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_login(
     email: *const c_char,
     password: *const c_char,
     device_name: *const c_char,
+    server: *const c_char,
 ) -> *mut c_char {
     let result = (|| -> Result<()> {
         let core = core()?;
         let email = c_string_or_empty(email);
         let password = c_string_or_empty(password);
         let device_name = c_string_or_empty(device_name);
+        let server = Some(c_string_or_empty(server)).filter(|s| !s.trim().is_empty());
         let sock = core.paths.state_dir.join("daemon.sock");
         let mut client = ClientController::connect(&sock)
             .context("failed to connect to daemon (is it running?)")?;
         client
-            .login(&email, &password, Some(&device_name))
+            .login(&email, &password, Some(&device_name), server.as_deref())
             .context("login failed")?;
         save_state(
             &core.paths.ui_state_file,
-            &ClientState { email: Some(email) },
+            &ClientState {
+                email: Some(email),
+                server,
+            },
         )?;
         Ok(())
     })();
@@ -79,8 +86,15 @@ pub extern "C" fn virtue_mac_native_logout() -> *mut c_char {
             .context("failed to connect to daemon (is it running?)")?;
         client.logout().context("logout failed")?;
         // Do NOT stop the daemon — the app remains open and the user can log
-        // back in.
-        save_state(&core.paths.ui_state_file, &ClientState { email: None })?;
+        // back in. The server stays remembered for that (CLIENT-034).
+        let remembered = remembered_state(core);
+        save_state(
+            &core.paths.ui_state_file,
+            &ClientState {
+                email: None,
+                ..remembered
+            },
+        )?;
         Ok(())
     })();
     into_c_result(result)
@@ -109,9 +123,7 @@ pub extern "C" fn virtue_mac_native_report_issue(
         let contact_email =
             (!contact_email.trim().is_empty()).then(|| contact_email.trim().to_string());
 
-        let bearer_token = local_auth_state(core)
-            .device_credentials
-            .map(|creds| creds.refresh_token);
+        let credentials = local_auth_state(core).device_credentials;
 
         let platform_details = mac_platform_details();
         let logs = include_logs
@@ -121,7 +133,7 @@ pub extern "C" fn virtue_mac_native_report_issue(
         let config = build_core_config(&core.paths);
         let api = virtue_core::api::HttpApiClient::new(&config)?;
         api.report_issue(
-            bearer_token.as_deref(),
+            credentials.as_ref(),
             &virtue_core::api::BugReportRequest {
                 message: &message,
                 contact_email: contact_email.as_deref(),
@@ -200,11 +212,20 @@ pub extern "C" fn virtue_mac_native_get_device_id() -> *mut c_char {
 /// signed out. Used to pre-fill the "Report an Issue" contact-email field.
 #[unsafe(no_mangle)]
 pub extern "C" fn virtue_mac_native_get_account_email() -> *mut c_char {
-    let email = core()
-        .ok()
-        .and_then(|c| virtue_mac_platform::config::load_state(&c.paths.ui_state_file).ok())
-        .and_then(|state| state.email);
+    let email = core().ok().and_then(|c| remembered_state(c).email);
     optional_string_to_c(email)
+}
+
+/// The self-hosted server address last signed in to, or null for the default
+/// server, to prefill the sign-in form (CLIENT-034).
+#[unsafe(no_mangle)]
+pub extern "C" fn virtue_mac_native_get_remembered_server() -> *mut c_char {
+    let server = core().ok().and_then(|c| remembered_state(c).server);
+    optional_string_to_c(server)
+}
+
+fn remembered_state(core: &MacCore) -> ClientState {
+    virtue_mac_platform::config::load_state(&core.paths.ui_state_file).unwrap_or_default()
 }
 
 /// Returns a JSON-serialized `ServiceStatus` (caller frees with

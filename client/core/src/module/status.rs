@@ -10,6 +10,12 @@ use crate::model::ServiceStatus;
 /// fabricating a status that's blind to real auth/pending-request state.
 pub fn build(state: &DaemonState, config: &Config, is_running: bool) -> ServiceStatus {
     let settings = state.upload.settings.as_ref();
+    // CORE-028: the session's chosen server, if it has one.
+    let server = state
+        .auth
+        .device_credentials
+        .as_ref()
+        .and_then(|c| c.server.as_ref());
     ServiceStatus {
         is_authenticated: state.auth.device_credentials.is_some(),
         is_running,
@@ -33,7 +39,10 @@ pub fn build(state: &DaemonState, config: &Config, is_running: bool) -> ServiceS
         last_skip_reason: state.screenshot.last_skip_reason.clone(),
         last_batch_at_ms: state.upload.last_batch_at_ms,
         recent_errors: state.errors.recent.iter().cloned().collect(),
-        api_base_url: config.api_base_url.clone(),
+        api_base_url: server
+            .map(|s| s.api_base_url.clone())
+            .unwrap_or_else(|| config.api_base_url.clone()),
+        web_app_url: server.and_then(|s| s.web_app_url.clone()),
         hash_base_url: settings.and_then(|s| s.hash_base_url.clone()),
         capture_interval_seconds: config.screenshot_interval.as_secs(),
         batch_window_seconds: config.batch_interval.as_secs(),
@@ -85,6 +94,7 @@ mod tests {
         state.auth.device_credentials = Some(DeviceCredentials {
             device_id: "dev-1".into(),
             refresh_token: "r".into(),
+            server: None,
         });
         state.auth.account_email = Some("alice@example.org".into());
         state

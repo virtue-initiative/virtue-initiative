@@ -283,6 +283,27 @@ pub struct BatchAccessKey {
 pub struct DeviceCredentials {
     pub device_id: String,
     pub refresh_token: String,
+    /// The server the user chose at login (CORE-028). `None` is the build's
+    /// default, which is also what every session from before this field reads as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<ChosenServer>,
+}
+
+impl DeviceCredentials {
+    /// The API base URL this session's requests go to, or `None` for the
+    /// build's default.
+    pub fn api_base_url(&self) -> Option<&str> {
+        self.server.as_ref().map(|s| s.api_base_url.as_str())
+    }
+}
+
+/// A server other than the build's default, as resolved at login (CORE-028).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChosenServer {
+    pub api_base_url: String,
+    /// The web app the server's emails link to (API-007), when it said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_app_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -414,6 +435,9 @@ pub struct ServiceStatus {
     pub recent_errors: Vec<StatusError>,
     #[serde(default)]
     pub api_base_url: String,
+    /// The chosen server's web app, absent for the build's default (CORE-010).
+    #[serde(default)]
+    pub web_app_url: Option<String>,
     #[serde(default)]
     pub hash_base_url: Option<String>,
     #[serde(default)]
@@ -434,6 +458,20 @@ pub struct LoopOutcome {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // CORE-028: credentials saved before a server could be chosen use the default.
+    #[test]
+    fn credentials_without_a_server_use_the_default() {
+        let creds: DeviceCredentials =
+            serde_json::from_value(json!({ "device_id": "d", "refresh_token": "r" })).unwrap();
+        assert_eq!(creds.server, None);
+        assert_eq!(creds.api_base_url(), None);
+        assert_eq!(
+            serde_json::to_value(&creds).unwrap(),
+            json!({ "device_id": "d", "refresh_token": "r" }),
+            "the default server adds nothing to the state file"
+        );
+    }
 
     // BATCH-003: event type and data encoding.
     #[test]

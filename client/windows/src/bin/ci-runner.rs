@@ -69,7 +69,7 @@ fn main() -> ExitCode {
     }
 
     let manager = SessionManager { paths };
-    match manager.login_blocking(&args.email, &args.password, &args.device_name) {
+    match manager.login_blocking(&args.email, &args.password, &args.device_name, None) {
         Ok(device_id) => println!("ci-runner: logged in, device_id={device_id}"),
         Err(err) => {
             eprintln!("ci-runner: login failed: {err:#}");

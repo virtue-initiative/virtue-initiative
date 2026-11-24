@@ -21,6 +21,7 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +34,7 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.radiobutton.MaterialRadioButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.CoroutineScope
@@ -82,6 +84,10 @@ class MainActivity : AppCompatActivity() {
     // user typed lives here rather than in the views.
     private var emailDraft = ""
     private var deviceDraft = ""
+    // CLIENT-034: the server choice. Null until the form first shows, when it
+    // starts from the last sign-in.
+    private var selfHostedDraft: Boolean? = null
+    private var serverDraft = ""
     private var loginErrorView: TextView? = null
     private var loginButton: com.google.android.material.button.MaterialButton? = null
     private var installButton: com.google.android.material.button.MaterialButton? = null
@@ -137,6 +143,8 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean(KEY_ADVANCED_OPEN, advancedOpen)
         outState.putString(KEY_EMAIL, emailDraft)
         outState.putString(KEY_DEVICE, deviceDraft)
+        selfHostedDraft?.let { outState.putBoolean(KEY_SELF_HOSTED, it) }
+        outState.putString(KEY_SERVER, serverDraft)
         outState.putString(KEY_REPORT_MESSAGE, reportMessageDraft)
         outState.putString(KEY_REPORT_EMAIL, reportEmailDraft)
         outState.putBoolean(KEY_REPORT_LOGS, reportLogsDraft)
@@ -147,6 +155,8 @@ class MainActivity : AppCompatActivity() {
         advancedOpen = saved.getBoolean(KEY_ADVANCED_OPEN)
         emailDraft = saved.getString(KEY_EMAIL).orEmpty()
         deviceDraft = saved.getString(KEY_DEVICE).orEmpty()
+        selfHostedDraft = if (saved.containsKey(KEY_SELF_HOSTED)) saved.getBoolean(KEY_SELF_HOSTED) else null
+        serverDraft = saved.getString(KEY_SERVER).orEmpty()
         reportMessageDraft = saved.getString(KEY_REPORT_MESSAGE).orEmpty()
         reportEmailDraft = saved.getString(KEY_REPORT_EMAIL)
         reportLogsDraft = saved.getBoolean(KEY_REPORT_LOGS, true)
@@ -484,7 +494,7 @@ class MainActivity : AppCompatActivity() {
                     getString(if (partners > 0) R.string.btn_add_more_partners else R.string.btn_add_partners)
                 ) {
                     // Partners are managed in the web app, not from this client.
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/partners")))
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(webAppUrl(json, "/partners"))))
                 }.topMargin(28)
             )
             content.addView(tonalButton(getString(R.string.btn_pause_monitoring)) { toggleMonitoring() }.topMargin(12))
@@ -615,6 +625,58 @@ class MainActivity : AppCompatActivity() {
         content.addView(passwordLayout)
         content.addView(deviceLayout)
 
+        // CLIENT-034: the server is chosen here and nowhere else, so it can
+        // only change by signing out first.
+        val remembered = ServerAddressStore.load(this)
+        if (selfHostedDraft == null) {
+            selfHostedDraft = remembered != null
+            if (serverDraft.isEmpty()) serverDraft = remembered.orEmpty()
+        }
+        val (serverLayout, server) = outlinedField(
+            getString(R.string.server_address_hint),
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
+            EditorInfo.IME_ACTION_DONE,
+            null,
+        )
+        server.setText(serverDraft)
+        server.doAfterTextChanged { serverDraft = it?.toString().orEmpty(); showLoginError(null) }
+        server.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) { login(); true } else false
+        }
+        val signUp = linkText(getString(R.string.btn_sign_up)) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("$DEFAULT_WEB_APP_URL/signup")))
+        }
+        fun showServerChoice(selfHosted: Boolean) {
+            serverLayout.visibility = if (selfHosted) View.VISIBLE else View.GONE
+            // A self-hosted server's accounts are made on its own website.
+            signUp.visibility = if (selfHosted) View.GONE else View.VISIBLE
+            device.imeOptions = if (selfHosted) EditorInfo.IME_ACTION_NEXT else EditorInfo.IME_ACTION_DONE
+        }
+        val serverGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            val virtue = MaterialRadioButton(context).apply {
+                id = View.generateViewId()
+                text = getString(R.string.server_virtue_initiative)
+            }
+            val selfHosted = MaterialRadioButton(context).apply {
+                id = View.generateViewId()
+                text = getString(R.string.server_self_hosted)
+            }
+            addView(virtue)
+            addView(selfHosted)
+            check(if (selfHostedDraft == true) selfHosted.id else virtue.id)
+            setOnCheckedChangeListener { _, checkedId ->
+                selfHostedDraft = checkedId == selfHosted.id
+                showLoginError(null)
+                showServerChoice(checkedId == selfHosted.id)
+            }
+            contentDescription = getString(R.string.server_label)
+        }
+        content.addView(text(getString(R.string.server_label), 14f, R.color.ink_3).topMargin(12))
+        content.addView(serverGroup)
+        content.addView(serverLayout)
+        showServerChoice(selfHostedDraft == true)
+
         val error = text("", 14f, R.color.bad).apply {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }.topMargin(12) as TextView
@@ -626,9 +688,13 @@ class MainActivity : AppCompatActivity() {
         button.isEnabled = !Session.signingIn
         loginButton = button
         content.addView(button.topMargin(16))
-        content.addView(linkText(getString(R.string.btn_sign_up)) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://app.virtueinitiative.org/signup")))
-        }.topMargin(8))
+        content.addView(signUp.topMargin(8))
+    }
+
+    /** A page of the web app: the self-hosted server's own when the status names one (CLIENT-034). */
+    private fun webAppUrl(json: JSONObject, path: String): String {
+        val base = if (json.isNull("web_app_url")) "" else json.optString("web_app_url")
+        return base.ifBlank { DEFAULT_WEB_APP_URL } + path
     }
 
     private fun showLoginError(message: String?) {
@@ -664,6 +730,12 @@ class MainActivity : AppCompatActivity() {
             showLoginError(getString(R.string.msg_sign_in_required_fields))
             return
         }
+        // CLIENT-034: empty means the default server.
+        val server = if (selfHostedDraft == true) serverDraft.trim() else ""
+        if (selfHostedDraft == true && server.isEmpty()) {
+            showLoginError(getString(R.string.msg_server_required))
+            return
+        }
 
         showLoginError(null)
         Session.signingIn = true
@@ -672,12 +744,12 @@ class MainActivity : AppCompatActivity() {
         val app = applicationContext
         Session.scope.launch {
             val error = withContext(Dispatchers.IO) {
-                var result = NativeBridge.nativeLogin(email, password, deviceName)
+                var result = NativeBridge.nativeLogin(email, password, deviceName, server)
                 if (result != null && result.contains("serialization error")) {
                     // Corrupted state files — wipe core-data and retry
                     android.util.Log.w("MainActivity", "Login serialization error, wiping core-data and retrying")
                     app.filesDir.resolve("core-data").deleteRecursively()
-                    result = NativeBridge.nativeLogin(email, password, deviceName)
+                    result = NativeBridge.nativeLogin(email, password, deviceName, server)
                 }
                 result
             }
@@ -686,6 +758,7 @@ class MainActivity : AppCompatActivity() {
                 // Show the notification now, not at the next keep-alive run (CLIENT-030).
                 ScreenshotService.start(app)
                 AccountEmailStore.save(app, email)
+                ServerAddressStore.save(app, server.ifEmpty { null })
                 Session.passwordDraft = ""
                 Session.loginError = null
             } else {
@@ -1363,6 +1436,10 @@ class MainActivity : AppCompatActivity() {
         const val KEY_ADVANCED_OPEN = "advanced_open"
         const val KEY_EMAIL = "email"
         const val KEY_DEVICE = "device"
+        const val KEY_SELF_HOSTED = "self_hosted"
+        const val KEY_SERVER = "server"
+        /** The default server's web app. A self-hosted server names its own (CLIENT-034). */
+        const val DEFAULT_WEB_APP_URL = "https://app.virtueinitiative.org"
         const val KEY_REPORT_MESSAGE = "report_message"
         const val KEY_REPORT_EMAIL = "report_email"
         const val KEY_REPORT_LOGS = "report_logs"

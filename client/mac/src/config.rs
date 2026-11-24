@@ -84,6 +84,9 @@ pub fn build_core_config(paths: &ClientPaths) -> Config {
 #[serde(default)]
 pub struct ClientState {
     pub email: Option<String>,
+    /// The self-hosted server address last signed in to, kept across sign-out
+    /// to prefill the next sign-in. `None` is the default server (CLIENT-034).
+    pub server: Option<String>,
 }
 
 pub fn load_state(path: &Path) -> Result<ClientState> {

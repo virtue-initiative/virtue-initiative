@@ -19,6 +19,7 @@ pub fn login<A: ApiTransport>(
     email: &str,
     password: &str,
     device_name_override: Option<&str>,
+    server: Option<&str>,
     now_ms: i64,
 ) -> CoreResult<String> {
     let resolved_name = device_name_override
@@ -26,7 +27,14 @@ pub fn login<A: ApiTransport>(
         .filter(|name| !name.is_empty())
         .unwrap_or(device_name);
 
-    let registered = api.register_device(email, password, resolved_name, platform_name)?;
+    // CORE-028: a chosen server is checked before anything is sent to it.
+    let server = server
+        .map(|address| api.resolve_server(address))
+        .transpose()?;
+    let api_base_url = server.as_ref().map(|s| s.api_base_url.as_str());
+    let mut registered =
+        api.register_device(api_base_url, email, password, resolved_name, platform_name)?;
+    registered.credentials.server = server;
 
     flush_pending_batch(&mut state.upload, api, now_ms);
     logout(state, api);
@@ -58,7 +66,7 @@ fn flush_pending_batch<A: ApiTransport>(upload: &mut UploadState, api: &A, now_m
 /// also disables screenshot capture (CORE-009).
 pub fn logout<A: ApiTransport>(state: &mut DaemonState, api: &A) {
     if let Some(creds) = &state.auth.device_credentials {
-        let _ = api.logout(&creds.refresh_token);
+        let _ = api.logout(creds.api_base_url(), &creds.refresh_token);
     }
     *state = DaemonState::initial();
 }
@@ -69,7 +77,7 @@ mod tests {
     use crate::testing::MockApiClient;
 
     fn login_as(state: &mut DaemonState, api: &MockApiClient, email: &str) -> CoreResult<String> {
-        login(state, api, "d", "p", email, "secret", None, 1_000)
+        login(state, api, "d", "p", email, "secret", None, None, 1_000)
     }
 
     // CORE-008: login.
@@ -119,6 +127,7 @@ mod tests {
             "alice@example.org",
             "secret",
             Some("  My Laptop  "),
+            None,
             1_000,
         );
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
@@ -156,5 +165,107 @@ mod tests {
         assert!(!state.screenshot.enabled);
         assert!(state.upload.device_credentials.is_none());
         assert!(state.auth.account_email.is_none());
+    }
+
+    // CORE-008, CORE-028: a chosen server is resolved, used to register and
+    // kept with the session.
+    #[test]
+    fn login_to_a_chosen_server_registers_there_and_keeps_it() {
+        let mut state = DaemonState::default();
+        let api = MockApiClient::new();
+        let server = crate::model::ChosenServer {
+            api_base_url: "https://virtue.example.org/api".into(),
+            web_app_url: Some("https://virtue.example.org".into()),
+        };
+        api.program_resolve_server(Ok(server.clone()));
+        login(
+            &mut state,
+            &api,
+            "d",
+            "p",
+            "alice@example.org",
+            "secret",
+            None,
+            Some("virtue.example.org"),
+            1_000,
+        )
+        .unwrap();
+        assert_eq!(api.state().resolve_server_calls, vec!["virtue.example.org"]);
+        assert_eq!(
+            api.state().api_base_urls,
+            vec![("register_device", Some(server.api_base_url.clone()))]
+        );
+        let creds = state.upload.device_credentials.as_ref().unwrap();
+        assert_eq!(creds.server.as_ref(), Some(&server));
+        assert_eq!(
+            state
+                .auth
+                .device_credentials
+                .as_ref()
+                .unwrap()
+                .server
+                .as_ref(),
+            Some(&server)
+        );
+    }
+
+    // CORE-008, CORE-028: a server that does not resolve fails the login and
+    // nothing is sent anywhere.
+    #[test]
+    fn login_to_a_server_that_does_not_resolve_changes_nothing() {
+        let mut state = DaemonState::default();
+        let api = MockApiClient::new();
+        let _ = login_as(&mut state, &api, "alice@example.org");
+        api.program_resolve_server(Err(crate::error::CoreError::Remote(
+            "No Virtue server found at https://nowhere.example.org.".into(),
+        )));
+        let result = login(
+            &mut state,
+            &api,
+            "d",
+            "p",
+            "bob@example.org",
+            "secret",
+            None,
+            Some("nowhere.example.org"),
+            2_000,
+        );
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "No Virtue server found at https://nowhere.example.org."
+        );
+        assert_eq!(api.state().register_device_calls.len(), 1);
+        assert!(api.state().logout_calls.is_empty());
+        assert_eq!(
+            state.auth.account_email.as_deref(),
+            Some("alice@example.org")
+        );
+    }
+
+    // CORE-009, CORE-028: logout revokes on the session's own server and
+    // returns the device to the default server.
+    #[test]
+    fn logout_revokes_on_the_chosen_server_and_forgets_it() {
+        let mut state = DaemonState::default();
+        let api = MockApiClient::new();
+        login(
+            &mut state,
+            &api,
+            "d",
+            "p",
+            "alice@example.org",
+            "secret",
+            None,
+            Some("https://virtue.example.org"),
+            1_000,
+        )
+        .unwrap();
+        logout(&mut state, &api);
+        assert_eq!(
+            api.state().api_base_urls.last(),
+            Some(&("logout", Some("https://virtue.example.org".to_string())))
+        );
+        assert!(state.auth.device_credentials.is_none());
+        assert!(state.upload.device_credentials.is_none());
     }
 }

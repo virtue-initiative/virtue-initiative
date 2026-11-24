@@ -23,6 +23,13 @@ describe('API base path routing (API-007)', () => {
     });
     expect(rootBody).toHaveProperty('commit');
   });
+
+  it('names the web app its emails link to (API-007)', async () => {
+    const res = await SELF.fetch(`${BASE}/`);
+    const body = await res.json<{ app_url?: string }>();
+    expect(body.app_url).toMatch(/^https:\/\//);
+    expect(body.app_url).toBe(env.APP_URL);
+  });
 });
 
 describe('API version prefix (API-005)', () => {

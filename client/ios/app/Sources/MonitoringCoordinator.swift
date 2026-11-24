@@ -68,6 +68,13 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = ""
+    /// The server to sign in to, and the self-hosted address (CLIENT-034).
+    /// Both start from the last sign-in.
+    @Published var serverChoice: ServerChoice =
+        UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) == nil
+        ? .virtueInitiative : .selfHosted
+    @Published var serverAddress: String =
+        UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) ?? ""
 
     /// The latest progress or failure message, shown under Advanced in
     /// Status Details.
@@ -163,6 +170,19 @@ final class MonitoringCoordinator: ObservableObject {
             loginError = "Password is required"
             return
         }
+        let server: String?
+        switch serverChoice {
+        case .virtueInitiative:
+            server = nil
+        case .selfHosted:
+            let address = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !address.isEmpty else {
+                statusMessage = "Server address is required"
+                loginError = "Server address is required"
+                return
+            }
+            server = address
+        }
 
         statusMessage = "Signing in..."
         loginError = nil
@@ -184,7 +204,8 @@ final class MonitoringCoordinator: ObservableObject {
                     return initError
                 }
                 return NativeBridge.login(
-                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName,
+                    server: server)
             }.value
             isSigningIn = false
             if let error {
@@ -198,6 +219,11 @@ final class MonitoringCoordinator: ObservableObject {
             // is app-layer state persisted here purely to prefill the bug-report form's
             // contact-email field — mirrors the Android client's AccountEmailStore.
             UserDefaults.standard.set(trimmedEmail, forKey: VirtueShared.accountEmailKey)
+            if let server {
+                UserDefaults.standard.set(server, forKey: VirtueShared.serverAddressKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: VirtueShared.serverAddressKey)
+            }
             refreshSessionState()
             refreshCoreStatus()
             refreshSafariStatus()

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::api::{ApiTransport, DeviceState, RegisteredDevice, UploadedBatchResponse};
 use crate::error::CoreResult;
-use crate::model::{BatchUpload, DeviceCredentials, DeviceSettings, NotifyPayload};
+use crate::model::{BatchUpload, ChosenServer, DeviceCredentials, DeviceSettings, NotifyPayload};
 use crate::testing::clock::MockClock;
 
 /// Mock `ApiTransport` impl that records every call and serves either a
@@ -36,8 +36,14 @@ pub struct MockApiState {
     /// batch carried rather than a separate API call.
     pub notify_calls: Vec<NotifyCall>,
     pub hash_uploads: Vec<HashCall>,
+    /// Every address `resolve_server` was asked about.
+    pub resolve_server_calls: Vec<String>,
+    /// The `api_base_url` each main-API call was sent to, with the method's
+    /// name, in call order (`None` is the build's default).
+    pub api_base_urls: Vec<(&'static str, Option<String>)>,
 
     // --- canned responses (FIFO per method) ---
+    pub resolve_server_responses: VecDeque<CoreResult<ChosenServer>>,
     pub logout_responses: VecDeque<CoreResult<()>>,
     pub register_device_responses: VecDeque<CoreResult<RegisteredDevice>>,
     pub get_device_settings_responses: VecDeque<CoreResult<DeviceState>>,
@@ -103,7 +109,10 @@ impl Default for MockApiState {
             batch_uploads: Vec::new(),
             notify_calls: Vec::new(),
             hash_uploads: Vec::new(),
+            resolve_server_calls: Vec::new(),
+            api_base_urls: Vec::new(),
 
+            resolve_server_responses: VecDeque::new(),
             logout_responses: VecDeque::new(),
             register_device_responses: VecDeque::new(),
             get_device_settings_responses: VecDeque::new(),
@@ -148,6 +157,10 @@ impl MockApiClient {
 
     // --- convenience programming helpers (each pushes one canned response) ---
 
+    pub fn program_resolve_server(&self, response: CoreResult<ChosenServer>) {
+        self.state().resolve_server_responses.push_back(response);
+    }
+
     pub fn program_register_device(&self, response: CoreResult<RegisteredDevice>) {
         self.state().register_device_responses.push_back(response);
     }
@@ -189,8 +202,26 @@ impl Default for MockApiClient {
 }
 
 impl ApiTransport for MockApiClient {
-    fn logout(&self, device_refresh_token: &str) -> CoreResult<()> {
+    /// Accepts any address as-is, with no web app, unless programmed.
+    fn resolve_server(&self, address: &str) -> CoreResult<ChosenServer> {
         let mut state = self.state();
+        state.resolve_server_calls.push(address.to_string());
+        state
+            .resolve_server_responses
+            .pop_front()
+            .unwrap_or_else(|| {
+                Ok(ChosenServer {
+                    api_base_url: address.to_string(),
+                    web_app_url: None,
+                })
+            })
+    }
+
+    fn logout(&self, api_base_url: Option<&str>, device_refresh_token: &str) -> CoreResult<()> {
+        let mut state = self.state();
+        state
+            .api_base_urls
+            .push(("logout", api_base_url.map(String::from)));
         state.logout_calls.push(device_refresh_token.to_string());
         if let Some(canned) = state.logout_responses.pop_front() {
             canned
@@ -201,12 +232,16 @@ impl ApiTransport for MockApiClient {
 
     fn register_device(
         &self,
+        api_base_url: Option<&str>,
         email: &str,
         password: &str,
         name: &str,
         platform: &str,
     ) -> CoreResult<RegisteredDevice> {
         let mut state = self.state();
+        state
+            .api_base_urls
+            .push(("register_device", api_base_url.map(String::from)));
         state.register_device_calls.push(RegisterDeviceCall {
             email: email.to_string(),
             password: password.to_string(),
@@ -220,6 +255,7 @@ impl ApiTransport for MockApiClient {
                 credentials: DeviceCredentials {
                     device_id: state.default_device_id.clone(),
                     refresh_token: state.default_refresh_token.clone(),
+                    server: None,
                 },
                 settings: state.default_device_settings.clone(),
                 hash_token: state.default_hash_token.clone(),
@@ -231,8 +267,15 @@ impl ApiTransport for MockApiClient {
         response
     }
 
-    fn get_device_settings(&self, device_refresh_token: &str) -> CoreResult<DeviceState> {
+    fn get_device_settings(
+        &self,
+        api_base_url: Option<&str>,
+        device_refresh_token: &str,
+    ) -> CoreResult<DeviceState> {
         let mut state = self.state();
+        state
+            .api_base_urls
+            .push(("get_device_settings", api_base_url.map(String::from)));
         state
             .get_device_settings_calls
             .push(device_refresh_token.to_string());
@@ -252,10 +295,14 @@ impl ApiTransport for MockApiClient {
 
     fn upload_batch(
         &self,
+        api_base_url: Option<&str>,
         device_refresh_token: &str,
         batch: &BatchUpload,
     ) -> CoreResult<UploadedBatchResponse> {
         let mut state = self.state();
+        state
+            .api_base_urls
+            .push(("upload_batch", api_base_url.map(String::from)));
         state.batch_uploads.push(BatchCall {
             device_refresh_token: device_refresh_token.to_string(),
             batch: batch.clone(),

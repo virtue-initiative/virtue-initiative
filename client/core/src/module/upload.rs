@@ -285,6 +285,8 @@ fn batch_room(state: &UploadState) -> usize {
 pub struct HashRetryPlan {
     device_id: String,
     refresh_token: String,
+    /// The session's chosen server, `None` for the default (CORE-028).
+    api_base_url: Option<String>,
     hash_base_url: Option<String>,
     cached_token: Option<(String, i64)>,
     events: Vec<LogEntry>,
@@ -317,6 +319,7 @@ pub fn plan_hash_retries(
     let creds = state.device_credentials.clone()?;
     Some(HashRetryPlan {
         room,
+        api_base_url: creds.api_base_url().map(String::from),
         device_id: creds.device_id,
         refresh_token: creds.refresh_token,
         hash_base_url: state
@@ -354,6 +357,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     let HashRetryPlan {
         device_id,
         refresh_token,
+        api_base_url,
         hash_base_url,
         cached_token,
         events,
@@ -369,7 +373,7 @@ pub fn execute_hash_retries<A: ApiTransport>(plan: HashRetryPlan, api: &A) -> Ha
     };
     let mut hash_jwt = cached_token.map(|(token, _)| token).unwrap_or_default();
     if needs_refresh || hash_jwt.is_empty() {
-        match api.get_device_settings(&refresh_token) {
+        match api.get_device_settings(api_base_url.as_deref(), &refresh_token) {
             Ok(result) => {
                 hash_jwt = result.hash_token.clone();
                 refreshed = Some((result.hash_token, result.settings));
@@ -565,6 +569,8 @@ pub fn commit_hash_retries(state: &mut UploadState, outcome: HashRetryOutcome, n
 pub struct BatchPlan {
     device_id: String,
     refresh_token: String,
+    /// The session's chosen server, `None` for the default (CORE-028).
+    api_base_url: Option<String>,
     /// An `Err` here (e.g. a recipient key that won't parse) is reported as
     /// a deferred upload so it backs off like any other failure, rather than
     /// leaving the batch due and spinning the loop (CORE-020).
@@ -639,6 +645,7 @@ pub fn plan_batch(
     Some(BatchPlan {
         device_id: creds.device_id.clone(),
         refresh_token: creds.refresh_token.clone(),
+        api_base_url: creds.api_base_url().map(String::from),
         batch,
         count,
     })
@@ -699,7 +706,7 @@ pub fn execute_batch<A: ApiTransport>(plan: BatchPlan, api: &A) -> BatchOutcome 
         }
     };
     let end_seq = batch.end_seq;
-    match api.upload_batch(&plan.refresh_token, &batch) {
+    match api.upload_batch(plan.api_base_url.as_deref(), &plan.refresh_token, &batch) {
         Ok(response) => {
             tracing::info!(count = plan.count, "batch upload ok");
             BATCH_UPLOAD_SUCCESS_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -867,6 +874,7 @@ mod tests {
         DeviceCredentials {
             device_id: "test-device".into(),
             refresh_token: "test-refresh".into(),
+            server: None,
         }
     }
 

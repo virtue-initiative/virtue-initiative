@@ -27,8 +27,9 @@ use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_b
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
 
 const BUILD_LABEL: &str = virtue_core::BUILD_LABEL;
-/// Partners are managed in the web app, not from this client.
-const PARTNERS_URL: &str = "https://app.virtueinitiative.org/partners";
+/// The default server's web app. Partners are managed there, not from this
+/// client. A self-hosted server names its own (CLIENT-034).
+const DEFAULT_WEB_APP_URL: &str = "https://app.virtueinitiative.org";
 
 /// Short summary of what this client captures, printed after login and at the end of
 /// `virtue status`. The full list lives on the linked help page; keep both in step with what
@@ -69,6 +70,9 @@ enum Commands {
         email: Option<String>,
         #[arg(long)]
         device_name: Option<String>,
+        /// Sign in to a self-hosted Virtue server at this address instead of the default
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
     },
     #[command(about = "Log out and disable monitoring on this device")]
     Logout {
@@ -188,9 +192,11 @@ async fn run() -> Result<()> {
     paths.ensure_dirs()?;
 
     match cli.command {
-        Commands::Login { email, device_name } => {
-            tokio::task::block_in_place(|| login(paths, email, device_name))
-        }
+        Commands::Login {
+            email,
+            device_name,
+            server,
+        } => tokio::task::block_in_place(|| login(paths, email, device_name, server)),
         Commands::Logout { yes } => tokio::task::block_in_place(|| logout(paths, yes)),
         Commands::Daemon { command } => daemon_command(paths, command).await,
         Commands::Status {
@@ -227,11 +233,24 @@ async fn daemon_command(paths: ClientPaths, command: Option<DaemonCommands>) -> 
     }
 }
 
-fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>) -> Result<()> {
-    println!(
-        "Don't have an account? Sign up at {}",
-        style::link("https://app.virtueinitiative.org/signup")
-    );
+fn login(
+    paths: ClientPaths,
+    email: Option<String>,
+    device_name: Option<String>,
+    server: Option<String>,
+) -> Result<()> {
+    // CLIENT-034: an empty address fails before any request, rather than
+    // quietly signing in to the default server.
+    if server.as_deref().is_some_and(|s| s.trim().is_empty()) {
+        anyhow::bail!("Server address is required");
+    }
+    // A self-hosted server's accounts are made on its own website.
+    if server.is_none() {
+        println!(
+            "Don't have an account? Sign up at {}",
+            style::link(&format!("{DEFAULT_WEB_APP_URL}/signup"))
+        );
+    }
     let email = match email {
         Some(email) => email,
         None => {
@@ -262,8 +281,12 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
     let mut client =
         ClientController::connect(&sock).context("failed to connect to daemon (is it running?)")?;
     let device_id = client
-        .login(&email, &password, Some(&device_name))
+        .login(&email, &password, Some(&device_name), server.as_deref())
         .context("login failed")?;
+    let partners_url = client
+        .get_status()
+        .map(|status| web_app_link(&status, "/partners"))
+        .unwrap_or_else(|_| format!("{DEFAULT_WEB_APP_URL}/partners"));
 
     let probe = probe_backend();
     println!();
@@ -275,7 +298,7 @@ fn login(paths: ClientPaths, email: Option<String>, device_name: Option<String>)
     println!("{} Device id: {device_id}", style::good("Logged in."));
     println!(
         "Add partners on the Virtue website. Open {} and select \"Invite partner\".",
-        style::link(PARTNERS_URL)
+        style::link(&partners_url)
     );
     if !probe.captured_ok {
         print_warning(
@@ -331,11 +354,11 @@ fn report_issue(
         return Ok(());
     }
 
-    let device_refresh_token = read_device_refresh_token(&paths);
+    let device_credentials = read_device_credentials(&paths);
 
     let contact_email = match contact_email {
         Some(email) => Some(email),
-        None if device_refresh_token.is_some() => None,
+        None if device_credentials.is_some() => None,
         None => {
             let mut rl = rustyline::DefaultEditor::new()?;
             let entered = rl.readline("Contact email (optional, press Enter to skip): ")?;
@@ -356,7 +379,7 @@ fn report_issue(
         println!("  - Your contact email: {email}");
     }
     println!("  - Platform details: {platform_details}");
-    if device_refresh_token.is_some() {
+    if device_credentials.is_some() {
         println!("  - This device's identity and your account email (you're logged in)");
     }
     match &logs {
@@ -378,7 +401,7 @@ fn report_issue(
     let config = build_core_config(&paths);
     let api = virtue_core::api::HttpApiClient::new(&config)?;
     api.report_issue(
-        device_refresh_token.as_deref(),
+        device_credentials.as_ref(),
         &virtue_core::api::BugReportRequest {
             message: &message,
             contact_email: contact_email.as_deref(),
@@ -432,17 +455,21 @@ fn recent_logs() -> Option<Vec<u8>> {
     Some(logs)
 }
 
-/// Reads this device's refresh token straight off disk rather than through
-/// the daemon, so `report-issue` still works (anonymously otherwise) even
-/// when the daemon isn't running. See CORE-010's disk-fallback precedent in
-/// `load_service_status`.
-fn read_device_refresh_token(paths: &ClientPaths) -> Option<String> {
+/// Reads this device's credentials straight off disk rather than through the
+/// daemon, so `report-issue` still works (anonymously otherwise) even when the
+/// daemon isn't running (CLIENT-016). See CORE-010's disk-fallback precedent in
+/// `load_service_status`. They also name the server to send it to (CLIENT-034).
+fn read_device_credentials(paths: &ClientPaths) -> Option<virtue_core::DeviceCredentials> {
     let state_path = paths.state_dir.join("event_state.json");
     let state: virtue_core::DaemonState = virtue_core::load_state(&state_path).ok()?;
-    state
-        .auth
-        .device_credentials
-        .map(|creds| creds.refresh_token)
+    state.auth.device_credentials
+}
+
+/// A page of the web app, on the signed-in server's own web app when it named
+/// one (CLIENT-034).
+fn web_app_link(status: &ServiceStatus, path: &str) -> String {
+    let base = status.web_app_url.as_deref().unwrap_or(DEFAULT_WEB_APP_URL);
+    format!("{base}{path}")
 }
 
 /// Best-effort OS description for `platform_details`: kernel release plus
@@ -700,7 +727,10 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
             .map(|count| count.to_string())
             .unwrap_or_else(|| unknown.clone()),
     );
-    row("add partners at", &style::link(PARTNERS_URL));
+    row(
+        "add partners at",
+        &style::link(&web_app_link(&status, "/partners")),
+    );
 
     section("Queues");
     row("waiting for hash", &status.pending_hash_count.to_string());
@@ -1282,7 +1312,9 @@ fn format_risk(risk: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands, DaemonCommands, Tone, parse_os_release, status_headline};
+    use super::{
+        Cli, Commands, DaemonCommands, Tone, parse_os_release, status_headline, web_app_link,
+    };
     use clap::Parser;
     use virtue_core::ServiceStatus;
 
@@ -1424,9 +1456,63 @@ mod tests {
             cli.command,
             Commands::Login {
                 email: None,
-                device_name: None
+                device_name: None,
+                server: None,
             }
         ));
+    }
+
+    // CLIENT-034: `virtue login` parses --server.
+    #[test]
+    fn cli_accepts_login_server_flag() {
+        let cli = Cli::try_parse_from(["virtue", "login", "--server", "virtue.example.org"])
+            .expect("login --server should parse");
+        assert!(matches!(
+            cli.command,
+            Commands::Login {
+                server: Some(server),
+                ..
+            } if server == "virtue.example.org"
+        ));
+    }
+
+    // CLIENT-034: an empty --server fails before any prompt or request,
+    // rather than signing in to the default server.
+    #[test]
+    fn login_with_an_empty_server_address_fails() {
+        let dir =
+            std::env::temp_dir().join(format!("virtue-linux-empty-server-{}", std::process::id()));
+        let paths = crate::config::ClientPaths {
+            config_dir: dir.clone(),
+            data_dir: dir.clone(),
+            state_dir: dir,
+        };
+        let err = super::login(
+            paths,
+            Some("me@example.org".into()),
+            Some("box".into()),
+            Some("   ".into()),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Server address is required");
+    }
+
+    // CLIENT-034: web app links use the server's own web app when it named one.
+    #[test]
+    fn web_app_links_follow_the_servers_web_app() {
+        let mut status = ServiceStatus {
+            is_authenticated: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            web_app_link(&status, "/partners"),
+            "https://app.virtueinitiative.org/partners"
+        );
+        status.web_app_url = Some("https://virtue.example.org".into());
+        assert_eq!(
+            web_app_link(&status, "/partners"),
+            "https://virtue.example.org/partners"
+        );
     }
 
     // CLIENT-020: `virtue login` parses --device-name.
@@ -1438,7 +1524,8 @@ mod tests {
             cli.command,
             Commands::Login {
                 email: None,
-                device_name: Some(name)
+                device_name: Some(name),
+                server: None,
             } if name == "My Box"
         ));
     }

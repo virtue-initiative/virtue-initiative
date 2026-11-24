@@ -284,8 +284,12 @@ check is disabled.
 - `screenshot_interval` — mean of the random exponential draw (CORE-003); builds default to 300 s
 - `batch_interval` — how long events wait for a batch upload; builds default to 3600 s
 
-The API URL, capture interval and batch window are baked in at **compile
-time** via `env!()`. `client/core/build.rs` reads
+The default API URL, capture interval and batch window are baked in at **compile
+time** via `env!()`. The one runtime choice is the server a user signs in
+to (CORE-028). `login` resolves it through `ApiTransport::resolve_server` and
+stores it as `DeviceCredentials.server`, so it lives and dies with the session:
+every `ApiTransport` call takes the session's `api_base_url` (`None` for the
+default), and `logout`'s state reset returns the device to the default. `client/core/build.rs` reads
 `VIRTUE_DEFAULT_API_URL`, `VIRTUE_DEFAULT_CAPTURE_INTERVAL_SECONDS`, and
 `VIRTUE_DEFAULT_BATCH_WINDOW_SECONDS` from the process environment — falling
 back to the repo-root `.env` (gitignored; see `.env.example`) and then to

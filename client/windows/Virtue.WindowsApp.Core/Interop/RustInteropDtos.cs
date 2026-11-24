@@ -4,7 +4,8 @@ public sealed record SessionStatusPayload(
     bool LoggedIn,
     string? DeviceId,
     string? Email,
-    string BuildLabel);
+    string BuildLabel,
+    string? RememberedServer = null);
 
 public sealed record StatusErrorPayload(
     long AtMs,
@@ -49,6 +50,7 @@ public sealed record MonitorStatusPayload(
     long? CaptureIntervalSeconds = null,
     long? BatchWindowSeconds = null,
     string? LogDirectory = null,
+    string? WebAppUrl = null,
     AnnouncementPayload? Announcement = null);
 
 /// <summary>
@@ -64,7 +66,8 @@ public sealed record ForceCapturePayload(
 internal sealed record LoginRequest(
     string Email,
     string Password,
-    string? DeviceName);
+    string? DeviceName,
+    string? Server);
 
 internal sealed record ReportIssueRequest(
     string Message,

@@ -392,6 +392,7 @@ mod tests {
         upload.device_credentials = Some(crate::model::DeviceCredentials {
             device_id: "d".into(),
             refresh_token: "r".into(),
+            server: None,
         });
         upload
     }

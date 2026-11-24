@@ -31,7 +31,8 @@ pub use model::{
     ScreenshotSkipReason, StatusError, StatusSkipReason, UploadKind,
 };
 pub use model::{
-    AuthState, BatchUpload, EventData, LogEntry, LoopOutcome, Screenshot, ServiceStatus,
+    AuthState, BatchUpload, ChosenServer, EventData, LogEntry, LoopOutcome, Screenshot,
+    ServiceStatus,
 };
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
