@@ -860,7 +860,7 @@ The client MUST send
 }
 ```
 
-`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-068).
+`app_transaction_id` is the App Store app transaction ID of the app that registers the device. Only an App Store client sends it. The server MUST store it with the device so `RESCIND_CONSENT` can find the device (see API-072).
 
 The server MUST validate the login (see `POST /login`) and create a long lived refresh token. For an unverified account it MUST behave as `POST /login` does, including the verification email and the `email_bounced` response, and MUST NOT register a device. Like `POST /login`, it SHOULD fill in a missing newsletter location.
 
@@ -1029,7 +1029,7 @@ The server MUST NOT send any email to an address that has a permanent bounce. If
 
 The server SHOULD delete an email's bounces when a `signup`, `email_change` or `email_verification` token for that email is consumed, since that proves the address receives mail.
 
-### API-068 `POST /app-store/notifications`
+### API-072 `POST /app-store/notifications`
 
 The server MUST accept App Store Server Notifications V2, which Apple sends as
 
@@ -1043,7 +1043,7 @@ The server MUST reject a request with **HTTP 400** if the body is not this shape
 - the SHA-256 of the last certificate is the fingerprint of Apple Root CA - G3 (`63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179`)
 - the first certificate is signed by the second and the second by the third
 - the first certificate carries the extension OID `1.2.840.113635.100.6.11.1` and the second `1.2.840.113635.100.6.2.1`
-- every certificate is valid at the payload's `signedDate`
+- every certificate is valid at the payload's `signedDate` (an app transaction, which may have none, uses its `receiptCreationDate`, or the current time when it has neither)
 - the JWS signature verifies against the first certificate's key
 
 Tests MAY pin a different root through the `APP_STORE_ROOT_SHA256` binding. Production MUST NOT set it.

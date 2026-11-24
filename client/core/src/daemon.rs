@@ -635,8 +635,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     ) -> CoreResult<String> {
         let now_ms = self.now_ms();
         let mut guard = self.state.lock().expect("daemon state lock poisoned");
-        let result =
-            self.apply_login(&mut guard, email, password, device_name, server, None, now_ms);
+        let result = self.apply_login(
+            &mut guard,
+            email,
+            password,
+            device_name,
+            server,
+            None,
+            now_ms,
+        );
         self.persist(&guard);
         result
     }

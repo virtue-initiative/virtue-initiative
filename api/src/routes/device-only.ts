@@ -258,7 +258,7 @@ deviceOnly.post('/logout', authenticateDeviceSession(), async (c) => {
 
 /**
  * API-037's logout, also run for every device a RESCIND_CONSENT notification
- * names (API-068).
+ * names (API-072).
  */
 export async function logOutDevice(env: Env, deviceId: string) {
   const now = Date.now();

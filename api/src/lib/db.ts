@@ -503,7 +503,7 @@ export async function createDevice(
     .run();
 }
 
-/** API-068: the devices still signed in from one App Store download. */
+/** API-072: the devices still signed in from one App Store download. */
 export async function listLiveDeviceIdsByAppTransactionId(
   db: D1Database,
   appTransactionId: string,

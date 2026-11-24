@@ -452,10 +452,11 @@ private struct MenuView: View {
                 if coordinator.loggedIn {
                     // App Review 5.1.1(v) requires account deletion in any app that
                     // offers sign-up. It lives on the web Settings page (API-021),
-                    // and Apple accepts a direct link to it.
+                    // and Apple accepts a direct link to it. A self-hosted server's
+                    // web app has its own (CLIENT-034).
                     Link(
                         "Delete Account",
-                        destination: URL(string: "https://app.virtueinitiative.org/settings")!
+                        destination: WebAppLink.url("/settings", status: coordinator.coreStatus)
                     )
                     .foregroundStyle(VirtueBrand.bad)
                     Button(

@@ -84,7 +84,9 @@ mod tests {
     use crate::testing::MockApiClient;
 
     fn login_as(state: &mut DaemonState, api: &MockApiClient, email: &str) -> CoreResult<String> {
-        login(state, api, "d", "p", email, "secret", None, None, 1_000)
+        login(
+            state, api, "d", "p", email, "secret", None, None, None, 1_000,
+        )
     }
 
     // CORE-008: login.
@@ -135,6 +137,7 @@ mod tests {
             "secret",
             Some("  My Laptop  "),
             None,
+            None,
             1_000,
         );
         assert_eq!(api.state().register_device_calls[0].name, "My Laptop");
@@ -152,6 +155,7 @@ mod tests {
             "p",
             "alice@example.org",
             "secret",
+            None,
             None,
             Some("2000000123456789"),
             1_000,
@@ -218,6 +222,7 @@ mod tests {
             "secret",
             None,
             Some("virtue.example.org"),
+            None,
             1_000,
         )
         .unwrap();
@@ -259,6 +264,7 @@ mod tests {
             "secret",
             None,
             Some("nowhere.example.org"),
+            None,
             2_000,
         );
         assert_eq!(
@@ -288,6 +294,7 @@ mod tests {
             "secret",
             None,
             Some("https://virtue.example.org"),
+            None,
             1_000,
         )
         .unwrap();

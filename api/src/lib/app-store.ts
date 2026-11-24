@@ -3,7 +3,7 @@ import { z } from 'zod';
 /** The iOS app's bundle ID. Staging and production builds share it. */
 export const IOS_BUNDLE_ID = 'org.virtueinitiative.virtueios';
 
-/** SHA-256 of Apple Root CA - G3 (API-068). */
+/** SHA-256 of Apple Root CA - G3 (API-072). */
 export const APPLE_ROOT_CA_G3_SHA256 =
   '63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179';
 
@@ -50,7 +50,7 @@ function readDer(bytes: Uint8Array, offset: number): Der {
 
 function children(bytes: Uint8Array, parent: Der) {
   const items: Der[] = [];
-  for (let offset = parent.contentStart; offset < parent.end; ) {
+  for (let offset = parent.contentStart; offset < parent.end;) {
     const item = readDer(bytes, offset);
     items.push(item);
     offset = item.end;
@@ -189,7 +189,7 @@ async function sha256Hex(bytes: Uint8Array) {
 }
 
 /**
- * API-068: the decoded payload of an App Store-signed JWS, or null unless its
+ * API-072: the decoded payload of an App Store-signed JWS, or null unless its
  * x5c chain ends at the pinned root and every check passes. `rootSha256`
  * exists so tests can pin their own root; production uses Apple's.
  */
@@ -236,12 +236,16 @@ export async function verifyAppStoreJws(
       string,
       unknown
     >;
-    const signedDate = payload.signedDate;
-    if (typeof signedDate !== 'number') {
-      return null;
-    }
+    // An app transaction may carry no signedDate; like Apple's own server
+    // library, check it at its receiptCreationDate, or now.
+    const signedAt =
+      typeof payload.signedDate === 'number'
+        ? payload.signedDate
+        : typeof payload.receiptCreationDate === 'number'
+          ? payload.receiptCreationDate
+          : Date.now();
     for (const cert of [leaf, intermediate, root]) {
-      if (signedDate < cert.notBefore || signedDate > cert.notAfter) {
+      if (signedAt < cert.notBefore || signedAt > cert.notAfter) {
         return null;
       }
     }

@@ -52,12 +52,13 @@ async function signJws(
 async function rescindConsentPayload({
   appTransactionId = APP_TRANSACTION_ID,
   bundleId = BUNDLE_ID,
+  appTransactionDate = { signedDate: Date.now() } as Record<string, number>,
 } = {}) {
   const signedAppTransactionInfo = await signJws({
     appTransactionId,
     bundleId,
     environment: 'Production',
-    signedDate: Date.now(),
+    ...appTransactionDate,
   });
   return {
     notificationType: 'RESCIND_CONSENT',
@@ -90,7 +91,7 @@ beforeAll(() => {
 
 beforeEach(clearDB);
 
-describe('POST /app-store/notifications (API-068)', () => {
+describe('POST /app-store/notifications (API-072)', () => {
   it('logs out every device from the download a RESCIND_CONSENT names', async () => {
     const { cookie } = await signupAndGetCookie('teen@example.com');
     const iphone = await createDeviceForUser(
@@ -112,6 +113,28 @@ describe('POST /app-store/notifications (API-068)', () => {
     expect(staleSession.status).toBe(401);
     expect(await deviceStatus(cookie, iphone.id)).toBe('logged_out');
     expect(await deviceStatus(cookie, laptop.id)).not.toBe('logged_out');
+  });
+
+  it('accepts an app transaction that has a receiptCreationDate instead of a signedDate', async () => {
+    const { cookie } = await signupAndGetCookie('receipt-date@example.com');
+    const iphone = await createDeviceForUser(
+      'receipt-date@example.com',
+      'password123',
+      'iPhone',
+      'ios',
+      APP_TRANSACTION_ID,
+    );
+
+    const res = await postNotification(
+      await signJws(
+        await rescindConsentPayload({
+          appTransactionDate: { receiptCreationDate: Date.now() },
+        }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, devices: 1 });
+    expect(await deviceStatus(cookie, iphone.id)).toBe('logged_out');
   });
 
   it('acknowledges notification types it does not act on', async () => {

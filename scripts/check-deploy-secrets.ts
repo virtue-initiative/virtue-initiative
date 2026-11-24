@@ -28,7 +28,7 @@ const REQUIRED: Record<string, string[]> = {
 
 // In `Env` but never deployed as a secret: api/cloudflare.config.ts adds COMMIT_SHA only when
 // the deploy sets it, and only local dev sets DEV_R2_ROUTE. Only the tests set
-// APP_STORE_ROOT_SHA256 (API-068), to pin a throwaway CA in place of Apple's.
+// APP_STORE_ROOT_SHA256 (API-072), to pin a throwaway CA in place of Apple's.
 const NOT_SECRETS = ['COMMIT_SHA', 'DEV_R2_ROUTE', 'APP_STORE_ROOT_SHA256'];
 
 type Target = { project: string; mode: string };

@@ -197,7 +197,12 @@ final class MonitoringCoordinator: ObservableObject {
         let dataDirPath = dataDir.path
 
         Task { @MainActor in
-            let appTransactionID = await Self.appTransactionID() ?? ""
+            // Only the Virtue Initiative server gets Apple's RESCIND_CONSENT
+            // notifications, so a self-hosted server has no use for the ID.
+            var appTransactionID = ""
+            if server == nil {
+                appTransactionID = await Self.appTransactionID() ?? ""
+            }
             let error = await Task.detached(priority: .userInitiated) { () -> String? in
                 if let initError = NativeBridge.ensureInitialized(
                     configDir: configDirPath,
@@ -238,7 +243,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     /// The App Store download this install came from, registered with the
-    /// device so a parent withdrawing consent signs it out (API-068). Sent for
+    /// device so a parent withdrawing consent signs it out (API-072). Sent for
     /// every account, so it says nothing about the person's age.
     private static func appTransactionID() async -> String? {
         guard let result = try? await AppTransaction.shared,

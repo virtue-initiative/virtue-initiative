@@ -14,7 +14,7 @@ import VirtueKit
 /// age range Apple shares, turn away anyone under the Terms of Use minimum,
 /// and get fresh consent when a significant change ships. Apple stops the app
 /// from launching when a parent withdraws consent, and the API signs out the
-/// device (API-068).
+/// device (API-072).
 ///
 /// The age range is never stored or sent anywhere, since the law only allows
 /// it to be used for this check.
@@ -84,8 +84,10 @@ final class AgeAssurance: ObservableObject {
     }
 
     /// Runs on launch, and again on foreground while the gate is closed so a
-    /// change in Settings or a parent's answer takes effect.
-    func check() async {
+    /// change in Settings or a parent's answer takes effect. A parent is asked
+    /// again only when `askParentAgain` is set ("Ask Again"), so returning to
+    /// the app doesn't send them another request.
+    func check(askParentAgain: Bool = false) async {
         #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
             guard #available(iOS 26.2, *), !isChecking else { return }
             isChecking = true
@@ -129,7 +131,8 @@ final class AgeAssurance: ObservableObject {
                     gate = .underMinimumAge
                     return
                 }
-                await handleSignificantChanges(isMinor: lowerBound < Self.adultAge)
+                await handleSignificantChanges(
+                    isMinor: lowerBound < Self.adultAge, askParentAgain: askParentAgain)
             @unknown default:
                 gate = .allowed
             }
@@ -141,7 +144,7 @@ final class AgeAssurance: ObservableObject {
     #if canImport(DeclaredAgeRange) && canImport(PermissionKit)
 
         @available(iOS 26.2, *)
-        private func handleSignificantChanges(isMinor: Bool) async {
+        private func handleSignificantChanges(isMinor: Bool, askParentAgain: Bool) async {
             let pending = await pendingChanges()
             guard !pending.isEmpty else {
                 gate = .allowed
@@ -166,8 +169,11 @@ final class AgeAssurance: ObservableObject {
             let description = pending.map(\.description).joined(separator: " ")
 
             if isMinor && needsParentalConsent {
+                let alreadyAsked = gate == .awaitingParentalApproval
                 gate = .awaitingParentalApproval
-                await askParent(description: description)
+                if !alreadyAsked || askParentAgain {
+                    await askParent(description: description)
+                }
                 return
             }
 
@@ -257,11 +263,15 @@ final class AgeAssurance: ObservableObject {
     }
 
     /// A fresh install already has every listed change, so only changes added
-    /// after this install's first launch are pending for it.
+    /// after this install's first launch are pending for it. An install that
+    /// has signed in before is an update from a release without age assurance,
+    /// so its listed changes stay pending.
     private func recordBaselineIfNeeded() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.baselineKey) else { return }
-        markHandled(Self.significantChanges)
+        if defaults.string(forKey: VirtueShared.accountEmailKey) == nil {
+            markHandled(Self.significantChanges)
+        }
         defaults.set(true, forKey: Self.baselineKey)
     }
 }
@@ -284,7 +294,7 @@ struct AgeGateView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let retryLabel {
                     Button(retryLabel) {
-                        Task { await ageAssurance.check() }
+                        Task { await ageAssurance.check(askParentAgain: true) }
                     }
                     .buttonStyle(IOSButtonStyle(prominent: true, fullWidth: true))
                 }

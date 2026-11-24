@@ -8,7 +8,7 @@ import { logOutDevice } from './device-only';
 const appStore = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 /**
- * POST /app-store/notifications - App Store Server Notifications V2 (API-068).
+ * POST /app-store/notifications - App Store Server Notifications V2 (API-072).
  *
  * Only RESCIND_CONSENT is acted on: a parent or guardian withdrew consent for
  * a minor, so every device signed in from that download is logged out. Apple
@@ -31,8 +31,7 @@ appStore.post('/app-store/notifications', async (c) => {
   }
 
   const appData = payload.appData as
-    | { bundleId?: unknown; signedAppTransactionInfo?: unknown }
-    | undefined;
+    { bundleId?: unknown; signedAppTransactionInfo?: unknown } | undefined;
   if (appData?.bundleId !== IOS_BUNDLE_ID) {
     return c.json({ ok: true });
   }
