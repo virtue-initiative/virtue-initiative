@@ -16,15 +16,17 @@ The API URL, capture interval and batch window are fixed at build time on every 
 | -------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Linux    | `virtue daemon`, a systemd user service, separate from CLI and tray    | `$XDG_STATE_HOME/virtue` (default `~/.local/state/virtue`) |
 | macOS    | `virtue-daemon daemon`, a LaunchAgent, separate from the menu bar app  | `~/Library/Application Support/virtue/state`               |
-| Windows  | inside the resident app process                                        | `%PROGRAMDATA%\Virtue\data`                                |
+| Windows  | inside the resident app process                                        | `<base>\data` (see below)                                  |
 | Android  | inside the app process, run by the Accessibility service               | app-private `core-data`                                    |
 | iOS      | inside the Safari extension, one tick per extension message (CORE-015) | App Group `group.org.virtueinitiative.virtueios`           |
 
 - The core state file MUST be `event_state.json` in the state directory (CORE-016).
 - Linux MUST also use `$XDG_CONFIG_HOME/virtue` (default `~/.config/virtue`) as its config directory. A build made with `VIRTUE_INSTANCE=<name>` MUST use `virtue-<name>` for both directory names, its service name and its tray id. An empty instance name MUST behave as no instance.
-- Windows MUST remember the signed-in email in `%PROGRAMDATA%\Virtue\config\ui_state.json`, and macOS in `~/Library/Application Support/virtue/ui_state.json`. Android and iOS keep it in app preferences.
+- Windows MUST keep all of its files under one base directory, written `<base>` here. A packaged install MUST use `Virtue` in the package's local app data folder (`%LOCALAPPDATA%\Packages\<package family name>\LocalState\Virtue`), so its state is per Windows user and the OS deletes it at uninstall (CLIENT-014). An unpackaged or dev run uses `%PROGRAMDATA%\Virtue`.
+- Before the native layer starts, a packaged launch that finds no `<base>` but a `%PROGRAMDATA%\Virtue` left by an older version MUST move it there: copy it to a temporary folder beside `<base>`, rename that folder to `<base>`, then delete the old folder. If the copy fails, the launch MUST use `%PROGRAMDATA%\Virtue` and try again next launch, so nothing recorded is lost. If another launch moved it first, the launch MUST use that copy. Only the launch that becomes the running instance MAY move it; a launch that hands off to a running instance MUST NOT, since that instance may still be using `%PROGRAMDATA%\Virtue`.
+- Windows MUST remember the signed-in email in `<base>\config\ui_state.json`, and macOS in `~/Library/Application Support/virtue/ui_state.json`. Android and iOS keep it in app preferences.
 
-> OPEN: Windows keeps all state in machine-wide `%PROGRAMDATA%\Virtue`, so every Windows account on one PC shares one sign-in and one device — is per-user monitoring on shared PCs intended?
+> OPEN: on Windows another account on the same PC is not monitored unless Virtue is installed and signed in there, and switching to it or signing out to use it looks like an ordinary lock or sign-out (CORE-002). Should the app report when another Windows account is used?
 
 ## CLIENT-003 Installing and first run
 
@@ -129,13 +131,13 @@ Monitoring MUST start without user action after a reboot or sign-in to the OS, a
 
 A signed-in user stopping monitoring MUST be asked to confirm, and a confirmed stop MUST be recorded with CORE-011 before monitoring stops, so partners see Monitoring Stopped by User and the gap is excused (CORE-002). The next start records Monitoring Resumed by User (CORE-022).
 
-| Platform | Control                                                              | Source tag             | After stopping                                                                          |
-| -------- | -------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
-| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in                          |
-| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                                                   |
-| Windows  | "Stop Monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog stops relaunching (CLIENT-014 cleanup stays), relaunch task removed, app exits |
-| Android  | "Pause Monitoring" / "Resume Monitoring"                             | `android_pause_button` | loop stopped, app stays open                                                            |
-| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                                                     |
+| Platform | Control                                                              | Source tag             | After stopping                                                 |
+| -------- | -------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------- |
+| Linux    | `virtue daemon stop [--yes]`                                         | `cli_daemon_stop`      | service stopped until `virtue daemon start` or next OS sign-in |
+| macOS    | "Stop Monitoring & Quit" (window), "Stop Monitoring and Quit" (menu) | `mac_app_stop`         | agent unloaded and removed, app quits                          |
+| Windows  | "Stop Monitoring" (window), Exit (tray)                              | `tray_stop_monitoring` | watchdog and relaunch task removed, app exits                  |
+| Android  | "Pause Monitoring" / "Resume Monitoring"                             | `android_pause_button` | loop stopped, app stays open                                   |
+| iOS      | "Pause Monitoring" / resume                                          | `ios_pause_button`     | monitoring switch off until resumed                            |
 
 - Confirmation text: Linux "warning: stopping the daemon will alert people monitoring you." with the prompt defaulting to No; macOS "Stop monitoring and quit?" / "This will stop monitoring on this device and quit Virtue. People monitoring you may be alerted."; Windows "Stop monitoring and close Virtue?" / "This will stop monitoring on this device and close the main window and tray app." / "People monitoring you may be alerted."; Android and iOS "This will stop monitoring on this device. People monitoring you may be alerted."
 - Linux MUST say "<service> is already stopped." and do nothing when the service is inactive, and MUST NOT stop the service if the stop could not be recorded.
@@ -167,7 +169,7 @@ Shared rules for every platform that updates itself:
 
 - Linux: removing the package MUST remove the global enablement, disable the update timer, and stop and disable the service for every logged-in user, running each user's commands as CLIENT-003 does. Upgrades run the same stop, then CLIENT-003's start.
 - macOS, Android and iOS: uninstalling is left to the OS; the apps do nothing at uninstall.
-- Windows: an MSIX uninstall runs no app code, so cleanup MUST be done by the `VirtueResidentWatchdog` task, which runs every minute. When the package is no longer installed (checked again after a short delay, so an update swap is not mistaken for an uninstall), the task MUST delete the device state under `%ProgramData%\Virtue` and then unregister itself, so no task keeps failing and a reinstall starts signed out. While the package is installed, the task MUST relaunch the app from the package's current install location, so the launch survives an update and does not depend on the app execution alias. After a deliberate Exit (CLIENT-011) the task MUST keep running only this cleanup and MUST NOT relaunch the app.
+- Windows: an MSIX uninstall runs no app code, so the app MUST keep nothing outside the package that needs cleaning up. The device state lives in the package's own folder (CLIENT-002), which the OS deletes, so a reinstall starts signed out. The `VirtueResidentWatchdog` task (CLIENT-028) is the one thing the package does not own, and it MUST expire and be deleted by Task Scheduler on its own once the app stops renewing it. A task, script or helper MUST NOT run at or after uninstall to delete files.
 
 > OPEN: no platform records anything at uninstall, so partners only notice through missing activity and check-ins — should uninstall send Monitoring Stopped by User where possible?
 
@@ -198,9 +200,9 @@ Every app MUST let the user send a report to the Virtue Initiative team (API-042
 ## CLIENT-017 Diagnostic logs
 
 - Linux: logs MUST go to the journal, readable with `journalctl --user -u virtue.service`.
-- macOS, Windows, Android and iOS: logs MUST be written to daily files `virtue.<date>.log`, keeping the 14 newest: `~/Library/Logs` (plus launchd fallback files `virtue-daemon-launchd.log` and `virtue-daemon-launchd.error.log`), `%PROGRAMDATA%\Virtue\data\logs`, `core-data/logs` and the App Group `logs` directory.
+- macOS, Windows, Android and iOS: logs MUST be written to daily files `virtue.<date>.log`, keeping the 14 newest: `~/Library/Logs` (plus launchd fallback files `virtue-daemon-launchd.log` and `virtue-daemon-launchd.error.log`), `<base>\data\logs` (CLIENT-002), `core-data/logs` and the App Group `logs` directory.
 - Setting up logging MUST be safe to repeat in one process: a second call MUST NOT fail or panic.
-- Windows MUST also append app lifecycle and update events to `%PROGRAMDATA%\Virtue\ui-startup.log`, including a line for a check that found no update.
+- Windows MUST also append app lifecycle and update events to `<base>\ui-startup.log`, including a line for a check that found no update.
 - The log level MUST follow the build type; Linux and macOS also honor `RUST_LOG`.
 
 ## CLIENT-018 Platform signals
@@ -315,8 +317,10 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 ## CLIENT-028 Windows: watchdog
 
 - At every launch the app MUST register the per-user task `VirtueResidentWatchdog`, running every minute with least privilege, that starts the app with `--restarted-by-watchdog`. A launch while the app runs is a no-op through the single-instance hand-off.
+- The task's action MUST run the app's executable directly, never a script or shell, so security software does not mistake it for malware. The started app is then the task's own process, so the task MUST have no run time limit, or Task Scheduler would stop the app when it is reached.
+- The task's trigger MUST end 1 day after registration, and the task MUST ask Task Scheduler to delete it once expired. While running, the app MUST register the task again once 6 hours of wall-clock time have passed since it last did, counting time the PC was asleep, so it never expires while Virtue is installed and in use, and is gone within about a day of an uninstall (CLIENT-014).
 - The task MUST launch the execution alias `%LOCALAPPDATA%\Microsoft\WindowsApps\virtue-initiative.exe` when it exists, falling back to the running executable, and MUST be skipped when neither is known.
-- Exit MUST delete the task first. Updates MUST NOT delete it.
+- Exit MUST delete the task first. Updates MUST NOT delete it. Re-registering MUST replace the task in place, so a task from an older version is replaced by this form.
 
 ## CLIENT-029 Windows: Store updates
 
@@ -326,8 +330,8 @@ Each platform MUST supply an OCR engine for CORE-004 that returns every detected
 - Once an update is staged: with the window hidden and no action running (CLIENT-027), the app MUST install at once. With the window visible it MUST show "Virtue will restart to update in <countdown>" with "Restart now to update", and MUST hide the window to force the install 6 hours after staging, never while an action is running. Countdown: "<h>h <m>m" from one hour up, "<m>m" (at least 1) below, "any moment" at or past the deadline. Only one install MUST proceed at a time.
 - The app MUST exit only after a successful install. Any other outcome MUST clear the staged update, notice, countdown, tooltip suffix and installing state, and leave the retry to the check loop.
 - Before each install attempt the app MUST schedule the one-shot task `VirtueUpdateRelaunch` 15 s ahead: a time trigger with seconds precision and a 1-minute window, no user id, deleted 30 s after it expires, launching the CLIENT-028 path with `--restarted-by-watchdog`, with paths XML-escaped. It MUST be cancelled at launch, on Exit and after a failed install.
-- "Restart now to update" MUST set `%PROGRAMDATA%\Virtue\show-window-on-next-launch` (creating its folder) and show "Installing the update. Virtue will close and restart itself within a minute." The next launch MUST consume the flag exactly once and open the window. A failed install MUST also consume it.
-- Developer shortcut: a file at `%PROGRAMDATA%\Virtue\debug-stage-update` MUST be consumed (read, then deleted) within about 5 s and stage a simulated update that installs without the Store. Its content MAY set the deferral cap as `<n>s`, `<n>m`, `<n>h` or a bare number of minutes, case-insensitive and trimmed. Empty, non-positive or unknown content stages with the normal cap.
+- "Restart now to update" MUST set `<base>\show-window-on-next-launch` (CLIENT-002, creating its folder) and show "Installing the update. Virtue will close and restart itself within a minute." The next launch MUST consume the flag exactly once and open the window. A failed install MUST also consume it.
+- Developer shortcut: a file at `<base>\debug-stage-update` MUST be consumed (read, then deleted) within about 5 s and stage a simulated update that installs without the Store. Its content MAY set the deferral cap as `<n>s`, `<n>m`, `<n>h` or a bare number of minutes, case-insensitive and trimmed. Empty, non-positive or unknown content stages with the normal cap.
 
 ## CLIENT-030 Android: Accessibility and background services
 

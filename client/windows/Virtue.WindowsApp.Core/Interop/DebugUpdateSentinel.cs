@@ -20,13 +20,10 @@ namespace Virtue.WindowsApp.Core.Interop;
 public static class DebugUpdateSentinel
 {
     /// <summary>
-    /// <c>%PROGRAMDATA%\Virtue\debug-stage-update</c> — the same directory as the app's
-    /// <c>ui-startup.log</c>, which is where a developer is already looking.
+    /// <c>debug-stage-update</c> in <see cref="AppDataDirectory.Current"/> — the same directory
+    /// as the app's <c>ui-startup.log</c>, which is where a developer is already looking.
     /// </summary>
-    public static string SentinelPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "Virtue",
-        "debug-stage-update");
+    public static string SentinelPath => Path.Combine(AppDataDirectory.Current, "debug-stage-update");
 
     /// <summary>
     /// Deletes the sentinel file if it exists, reporting whether it did.

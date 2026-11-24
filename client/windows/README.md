@@ -77,8 +77,10 @@ reach the database. [DESIGN.md](DESIGN.md#integration-test) explains how it driv
 
 ## Files on a running machine
 
-Everything lives under `%PROGRAMDATA%\Virtue`, shared by every Windows account on the PC
-(CLIENT-002):
+Everything lives in the package's own folder for each Windows user,
+`%LOCALAPPDATA%\Packages\<package family name>\LocalState\Virtue`, which Windows deletes when
+Virtue is uninstalled (CLIENT-002). An unpackaged or dev run uses `%PROGRAMDATA%\Virtue`, which
+is also where earlier versions kept it; the first launch of a newer version moves it.
 
 | File                          | What                                         |
 | ----------------------------- | -------------------------------------------- |
