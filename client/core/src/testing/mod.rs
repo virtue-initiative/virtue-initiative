@@ -60,6 +60,7 @@ mod tests {
             "secret",
             "test-device",
             "test-platform",
+            None,
         )
         .unwrap();
         assert_eq!(inspector.state().register_device_calls.len(), 1);

@@ -13,7 +13,8 @@ private func virtue_ios_native_login(
     _ email: UnsafePointer<CChar>?,
     _ password: UnsafePointer<CChar>?,
     _ deviceName: UnsafePointer<CChar>?,
-    _ server: UnsafePointer<CChar>?
+    _ server: UnsafePointer<CChar>?,
+    _ appTransactionID: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -150,8 +151,13 @@ enum NativeBridge {
     }
 
     /// `server` is a self-hosted server address, or nil for the default
-    /// server (CLIENT-034).
-    static func login(email: String, password: String, deviceName: String, server: String?)
+    /// server (CLIENT-034). `appTransactionID` lets the API sign this device
+    /// out when a parent withdraws App Store consent (API-072). Empty when
+    /// there isn't one.
+    static func login(
+        email: String, password: String, deviceName: String, server: String?,
+        appTransactionID: String
+    )
         -> String?
     {
         withDaemonLoop {
@@ -161,9 +167,11 @@ enum NativeBridge {
                         deviceName.withCString { deviceNameCString in
                             // An empty address means the default server.
                             (server ?? "").withCString { serverCString in
-                                virtue_ios_native_login(
-                                    emailCString, passwordCString, deviceNameCString,
-                                    serverCString)
+                                appTransactionID.withCString { appTransactionIDCString in
+                                    virtue_ios_native_login(
+                                        emailCString, passwordCString, deviceNameCString,
+                                        serverCString, appTransactionIDCString)
+                                }
                             }
                         }
                     }

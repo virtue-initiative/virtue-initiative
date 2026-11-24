@@ -133,9 +133,9 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 ### CORE-008 login
 
-`login(email, password, device_name?, server?) -> device_id`
+`login(email, password, device_name?, server?, app_transaction_id?) -> device_id`
 
-When `server` is present, MUST resolve it (CORE-028) before anything else, and MUST use the API it resolves to for the registration and for every later request of the new session. When it is absent, the build's default API URL (CORE-024) MUST be used. MUST register a new device with the API before anything else is changed. On failure MUST leave the persisted state unchanged, including any existing session, its queued events and screenshot capture. On success, it SHOULD try once to upload the pending batch with any existing session, and a failure of that upload MUST NOT fail the login. It MUST then log out (CORE-009), so that queued events still unsent are discarded and the new session shares no state with the old one. It MUST then store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+When `server` is present, MUST resolve it (CORE-028) before anything else, and MUST use the API it resolves to for the registration and for every later request of the new session. When it is absent, the build's default API URL (CORE-024) MUST be used. MUST register a new device with the API before anything else is changed. On failure MUST leave the persisted state unchanged, including any existing session, its queued events and screenshot capture. On success, it SHOULD try once to upload the pending batch with any existing session, and a failure of that upload MUST NOT fail the login. It MUST then log out (CORE-009), so that queued events still unsent are discarded and the new session shares no state with the old one. It MUST then store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used. `app_transaction_id` is optional and only an App Store client has one; when present it MUST be sent with the registration (see `api/SPEC.md` API-035).
 
 ### CORE-009 logout
 
