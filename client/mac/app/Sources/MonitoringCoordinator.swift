@@ -28,6 +28,17 @@ final class MonitoringCoordinator: ObservableObject {
     /// Both start from the last sign-in.
     @Published var serverChoice: ServerChoice = .virtueInitiative
     @Published var serverAddress: String = ""
+    /// Whether the sign-in form's Advanced section, which holds the server
+    /// choice, is open. It starts open only for a self-hosted server, and
+    /// closing it goes back to the default, so a hidden choice never applies
+    /// (CLIENT-034).
+    @Published var advancedExpanded: Bool = false {
+        didSet {
+            if !advancedExpanded {
+                serverChoice = .virtueInitiative
+            }
+        }
+    }
 
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var isSigningIn: Bool = false
@@ -92,6 +103,7 @@ final class MonitoringCoordinator: ObservableObject {
         if let server = NativeBridge.getRememberedServer() {
             serverChoice = .selfHosted
             serverAddress = server
+            advancedExpanded = true
         }
         // Ask for Screen Recording right away, before sign-in, so the first
         // screenshot after sign-in is never a failed one (issue #632).

@@ -75,6 +75,19 @@ final class MonitoringCoordinator: ObservableObject {
         ? .virtueInitiative : .selfHosted
     @Published var serverAddress: String =
         UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) ?? ""
+    /// Whether the sign-in form's Advanced section, which holds the server
+    /// choice, is open. It starts open only for a self-hosted server, and
+    /// closing it goes back to the default, so a hidden choice never applies
+    /// (CLIENT-034).
+    @Published var advancedExpanded: Bool =
+        UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) != nil
+    {
+        didSet {
+            if !advancedExpanded {
+                serverChoice = .virtueInitiative
+            }
+        }
+    }
 
     /// The latest progress or failure message, shown under Advanced in
     /// Status Details.

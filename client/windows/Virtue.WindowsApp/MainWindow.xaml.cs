@@ -140,6 +140,9 @@ public sealed partial class MainWindow : Window
     private readonly RadioButton _virtueServerRadio = new() { Content = "Virtue Initiative", GroupName = "server" };
     private readonly RadioButton _selfHostedServerRadio = new() { Content = "Self-hosted", GroupName = "server" };
     private readonly TextBox _serverAddressTextBox = new();
+    private readonly Button _signInAdvancedToggle = new();
+    private readonly FontIcon _signInAdvancedChevron = new() { FontSize = 11, Foreground = TextMutedBrush };
+    private readonly StackPanel _signInAdvancedPanel = new() { Spacing = 12 };
     private HyperlinkButton? _signUpLink;
     private readonly Button _signInButton = CreatePrimaryButton("Sign in");
     private string? _ringKey;
@@ -445,7 +448,19 @@ public sealed partial class MainWindow : Window
         _signInPanel.Children.Add(_deviceNameTextBox);
 
         // CLIENT-034: the server is chosen here and nowhere else, so it can
-        // only change by signing out first.
+        // only change by signing out first. It sits under Advanced, closed
+        // unless the user picked a self-hosted server, so most never see it.
+        // Styled like the Advanced toggle in Status Details.
+        var advancedLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        advancedLabel.Children.Add(new TextBlock { Text = "Advanced", FontSize = 14, Foreground = TextMutedBrush });
+        advancedLabel.Children.Add(_signInAdvancedChevron);
+        _signInAdvancedToggle.Content = advancedLabel;
+        _signInAdvancedToggle.Padding = new Thickness(4, 6, 6, 6);
+        StyleQuietButton(_signInAdvancedToggle);
+        _signInAdvancedToggle.Click += (_, _) => ViewModel.AdvancedExpanded = !ViewModel.AdvancedExpanded;
+        _signInPanel.Children.Add(_signInAdvancedToggle);
+        _signInPanel.Children.Add(_signInAdvancedPanel);
+
         var serverChoice = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
         _virtueServerRadio.Foreground = TextBrush;
         _selfHostedServerRadio.Foreground = TextBrush;
@@ -454,8 +469,8 @@ public sealed partial class MainWindow : Window
         serverChoice.Children.Add(_virtueServerRadio);
         serverChoice.Children.Add(_selfHostedServerRadio);
         AutomationProperties.SetName(serverChoice, "Server");
-        _signInPanel.Children.Add(new TextBlock { Text = "Server", FontSize = 14, Foreground = TextMutedBrush });
-        _signInPanel.Children.Add(serverChoice);
+        _signInAdvancedPanel.Children.Add(new TextBlock { Text = "Server", FontSize = 14, Foreground = TextMutedBrush });
+        _signInAdvancedPanel.Children.Add(serverChoice);
 
         _serverAddressTextBox.PlaceholderText = "Server address";
         _serverAddressTextBox.InputScope = new InputScope { Names = { new InputScopeName(InputScopeNameValue.Url) } };
@@ -466,7 +481,7 @@ public sealed partial class MainWindow : Window
         };
         AutomationProperties.SetName(_serverAddressTextBox, "Server address");
         StyleInput(_serverAddressTextBox);
-        _signInPanel.Children.Add(_serverAddressTextBox);
+        _signInAdvancedPanel.Children.Add(_serverAddressTextBox);
 
         foreach (var input in new Control[] { _emailTextBox, _passwordBox, _deviceNameTextBox, _serverAddressTextBox })
         {
@@ -1057,6 +1072,12 @@ public sealed partial class MainWindow : Window
         {
             _emailTextBox.Text = ViewModel.EmailInput;
         }
+
+        var advanced = ViewModel.AdvancedExpanded;
+        _signInAdvancedPanel.Visibility = VisibleIf(advanced);
+        // Segoe Fluent Icons ChevronUp and ChevronDown, as in Status Details.
+        _signInAdvancedChevron.Glyph = advanced ? "\uE70E" : "\uE70D";
+        AutomationProperties.SetName(_signInAdvancedToggle, advanced ? "Hide advanced" : "Show advanced");
 
         var selfHosted = ViewModel.SelfHostedServer;
         _virtueServerRadio.IsChecked = !selfHosted;

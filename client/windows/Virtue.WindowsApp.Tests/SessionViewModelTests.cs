@@ -412,6 +412,53 @@ public sealed class SessionViewModelTests
         Assert.Equal("https://virtue.example.org", viewModel.ServerAddressInput);
     }
 
+    // CLIENT-034: the Advanced section opens for a remembered self-hosted server.
+    [Fact]
+    public async Task RefreshAsync_OpensAdvancedForARememberedSelfHostedServer()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-1", "https://virtue.example.org"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.AdvancedExpanded);
+    }
+
+    // CLIENT-034: the Advanced section starts collapsed for the default server.
+    [Fact]
+    public async Task RefreshAsync_CollapsesAdvancedForTheDefaultServer()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-1", null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.InitializeAsync();
+
+        Assert.False(viewModel.AdvancedExpanded);
+        Assert.False(viewModel.SelfHostedServer);
+    }
+
+    // CLIENT-034: collapsing the Advanced section goes back to the default server.
+    [Fact]
+    public void CollapsingAdvanced_SelectsTheDefaultServer()
+    {
+        var viewModel = new SessionViewModel(new FakeRustInteropClient(), "0.0.5.1234")
+        {
+            AdvancedExpanded = true,
+            SelfHostedServer = true,
+            ServerAddressInput = "https://virtue.example.org",
+        };
+
+        viewModel.AdvancedExpanded = false;
+
+        Assert.False(viewModel.SelfHostedServer);
+    }
+
     // CLIENT-034: web app links follow the self-hosted server's web app.
     [Fact]
     public async Task WebAppUrl_FollowsTheServersWebApp()

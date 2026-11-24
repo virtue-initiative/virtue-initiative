@@ -626,7 +626,8 @@ class MainActivity : AppCompatActivity() {
         content.addView(deviceLayout)
 
         // CLIENT-034: the server is chosen here and nowhere else, so it can
-        // only change by signing out first.
+        // only change by signing out first. It sits under Advanced, closed
+        // unless the user picked a self-hosted server, so most never see it.
         val remembered = ServerAddressStore.load(this)
         if (selfHostedDraft == null) {
             selfHostedDraft = remembered != null
@@ -672,9 +673,15 @@ class MainActivity : AppCompatActivity() {
             }
             contentDescription = getString(R.string.server_label)
         }
-        content.addView(text(getString(R.string.server_label), 14f, R.color.ink_3).topMargin(12))
-        content.addView(serverGroup)
-        content.addView(serverLayout)
+        val (advancedHeader, advancedBody) = advancedSection(selfHostedDraft == true) { open ->
+            // A hidden choice never applies: closing goes back to the default.
+            if (!open) serverGroup.check(serverGroup.getChildAt(0).id)
+        }
+        advancedBody.addView(text(getString(R.string.server_label), 14f, R.color.ink_3))
+        advancedBody.addView(serverGroup)
+        advancedBody.addView(serverLayout)
+        content.addView(advancedHeader)
+        content.addView(advancedBody)
         showServerChoice(selfHostedDraft == true)
 
         val error = text("", 14f, R.color.bad).apply {
@@ -1157,13 +1164,7 @@ class MainActivity : AppCompatActivity() {
         val hashBaseUrl = optText("hash_base_url", "<default>")
         val logFile = java.io.File(filesDir, "core-data/logs").listFiles()?.maxByOrNull { it.lastModified() }
 
-        val advancedBody = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            visibility = if (advancedOpen) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        }
+        val (header, advancedBody) = advancedSection(advancedOpen) { advancedOpen = it }
         advancedBody.addView(detailGroup(listOf(
             DetailRow(null, "Device ID", optText("device_id", StatusTimestamp.NONE)),
             DetailRow(null, "API URL", optText("api_base_url", "<unknown>")),
@@ -1199,10 +1200,27 @@ class MainActivity : AppCompatActivity() {
         detailsMessageView = message
         advancedBody.addView(message)
 
+        content.addView(header)
+        content.addView(advancedBody)
+    }
+
+    /**
+     * A collapsible "Advanced" section: a header that toggles the returned
+     * body, telling [onToggle] the new state.
+     */
+    private fun advancedSection(open: Boolean, onToggle: (Boolean) -> Unit): Pair<View, LinearLayout> {
+        var isOpen = open
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (isOpen) View.VISIBLE else View.GONE
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        }
         val chevron = ImageView(this).apply {
             setImageResource(R.drawable.ic_expand_more)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            rotation = if (advancedOpen) 180f else 0f
+            rotation = if (isOpen) 180f else 0f
         }
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1216,16 +1234,16 @@ class MainActivity : AppCompatActivity() {
             })
             addView(chevron)
             setOnClickListener {
-                advancedOpen = !advancedOpen
-                advancedBody.visibility = if (advancedOpen) View.VISIBLE else View.GONE
-                chevron.rotation = if (advancedOpen) 180f else 0f
+                isOpen = !isOpen
+                body.visibility = if (isOpen) View.VISIBLE else View.GONE
+                chevron.rotation = if (isOpen) 180f else 0f
+                onToggle(isOpen)
             }
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(12) }
         }
-        content.addView(header)
-        content.addView(advancedBody)
+        return header to body
     }
 
     /** Shows [message] under the Advanced buttons, clearing it after 2.5 s when [clear] is set. */

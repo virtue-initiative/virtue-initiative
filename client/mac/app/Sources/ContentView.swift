@@ -407,19 +407,30 @@ private struct SignInForm: View {
             .modifier(InputStyle(isFocused: focused == .deviceName))
 
             // CLIENT-034: the server is chosen here and nowhere else, so it
-            // can only change by signing out first.
-            Picker("Server", selection: $coordinator.serverChoice) {
-                ForEach(ServerChoice.allCases, id: \.self) { choice in
-                    Text(choice.label).tag(choice)
+            // can only change by signing out first. It sits under Advanced,
+            // closed unless the user picked a self-hosted server, so most
+            // never see it.
+            DisclosureGroup(isExpanded: $coordinator.advancedExpanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Server", selection: $coordinator.serverChoice) {
+                        ForEach(ServerChoice.allCases, id: \.self) { choice in
+                            Text(choice.label).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .font(.system(size: 13))
+                    .foregroundStyle(VirtueBrand.textMuted)
+                    if coordinator.serverChoice == .selfHosted {
+                        TextField("Server address", text: $coordinator.serverAddress)
+                            .focused($focused, equals: .server)
+                            .modifier(InputStyle(isFocused: focused == .server))
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .font(.system(size: 13))
-            .foregroundStyle(VirtueBrand.textMuted)
-            if coordinator.serverChoice == .selfHosted {
-                TextField("Server address", text: $coordinator.serverAddress)
-                    .focused($focused, equals: .server)
-                    .modifier(InputStyle(isFocused: focused == .server))
+                .padding(.top, 8)
+            } label: {
+                Text("Advanced")
+                    .font(.system(size: 13))
+                    .foregroundStyle(VirtueBrand.textMuted)
             }
 
             Button(coordinator.isSigningIn ? "Logging In…" : "Log In", action: coordinator.login)
