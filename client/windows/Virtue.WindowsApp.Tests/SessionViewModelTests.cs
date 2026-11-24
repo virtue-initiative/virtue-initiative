@@ -349,6 +349,87 @@ public sealed class SessionViewModelTests
         Assert.Equal("Password is required.", viewModel.ErrorText);
     }
 
+    // CLIENT-034: a self-hosted sign-in with no address is refused before any request.
+    [Fact]
+    public async Task LoginAsync_FailsWithMissingServerAddress()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "user@example.com",
+            PasswordInput = "secret",
+            SelfHostedServer = true,
+            ServerAddressInput = "   ",
+        };
+
+        await viewModel.LoginAsync();
+
+        Assert.Null(fakeClient.LastLogin);
+        Assert.Equal("Server address is required.", viewModel.ErrorText);
+    }
+
+    // CLIENT-034: a self-hosted sign-in passes the address; the default passes none.
+    [Fact]
+    public async Task LoginAsync_PassesTheChosenServer()
+    {
+        var fakeClient = new FakeRustInteropClient();
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234")
+        {
+            EmailInput = "user@example.com",
+            PasswordInput = "secret",
+            SelfHostedServer = true,
+            ServerAddressInput = " virtue.example.org ",
+        };
+
+        await viewModel.LoginAsync();
+        Assert.Equal("virtue.example.org", fakeClient.LastServer);
+
+        var defaultClient = new FakeRustInteropClient();
+        var defaultViewModel = new SessionViewModel(defaultClient, "0.0.5.1234")
+        {
+            EmailInput = "user@example.com",
+            PasswordInput = "secret",
+            ServerAddressInput = "virtue.example.org",
+        };
+        await defaultViewModel.LoginAsync();
+        Assert.NotNull(defaultClient.LastLogin);
+        Assert.Null(defaultClient.LastServer);
+    }
+
+    // CLIENT-034: the form starts from the last sign-in's server.
+    [Fact]
+    public async Task RefreshAsync_OffersTheRememberedServer()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(false, null, null, "build-1", "https://virtue.example.org"),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+
+        await viewModel.InitializeAsync();
+
+        Assert.True(viewModel.SelfHostedServer);
+        Assert.Equal("https://virtue.example.org", viewModel.ServerAddressInput);
+    }
+
+    // CLIENT-034: web app links follow the self-hosted server's web app.
+    [Fact]
+    public async Task WebAppUrl_FollowsTheServersWebApp()
+    {
+        var fakeClient = new FakeRustInteropClient
+        {
+            SessionStatus = new SessionStatusPayload(true, "device-1", "user@example.com", "build-1"),
+            MonitorStatus = new MonitorStatusPayload("running", true, 0, 123, null),
+        };
+        var viewModel = new SessionViewModel(fakeClient, "0.0.5.1234");
+        await viewModel.InitializeAsync();
+        Assert.Equal("https://app.virtueinitiative.org/partners", viewModel.WebAppUrl("/partners"));
+
+        fakeClient.MonitorStatus = fakeClient.MonitorStatus with { WebAppUrl = "https://virtue.example.org" };
+        await viewModel.RefreshAsync();
+        Assert.Equal("https://virtue.example.org/partners", viewModel.WebAppUrl("/partners"));
+    }
+
     // CLIENT-005: signing out reads as signed out.
     [Fact]
     public async Task LogoutAsync_SignsOutAndUpdatesHeadline()
@@ -907,6 +988,8 @@ public sealed class SessionViewModelTests
 
         public (string Email, string Password, string? DeviceName)? LastLogin { get; private set; }
 
+        public string? LastServer { get; private set; }
+
         public bool StartMonitoringCalled { get; private set; }
 
         public bool StopMonitoringCalled { get; private set; }
@@ -938,9 +1021,10 @@ public sealed class SessionViewModelTests
 
         public MonitorStatusPayload GetMonitorStatus() => MonitorStatus;
 
-        public void Login(string email, string password, string? deviceName = null)
+        public void Login(string email, string password, string? deviceName = null, string? server = null)
         {
             LastLogin = (email, password, deviceName);
+            LastServer = server;
             SessionStatus = SessionStatus with { LoggedIn = true, Email = email };
             MonitorStatus = MonitorStatus with { State = "running", LoggedIn = true, LastError = null };
         }

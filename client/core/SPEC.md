@@ -133,15 +133,15 @@ The core MUST expose the following methods to clients. Each blocks until the loo
 
 ### CORE-008 login
 
-`login(email, password, device_name?) -> device_id`
+`login(email, password, device_name?, server?) -> device_id`
 
-MUST register a new device with the API before anything else. On failure MUST leave the persisted state unchanged, including any existing session, its queued events and screenshot capture. On success, it SHOULD try once to upload the pending batch with any existing session, and a failure of that upload MUST NOT fail the login. It MUST then log out (CORE-009), so that queued events still unsent are discarded and the new session shares no state with the old one. It MUST then store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
+When `server` is present, MUST resolve it (CORE-028) before anything else, and MUST use the API it resolves to for the registration and for every later request of the new session. When it is absent, the build's default API URL (CORE-024) MUST be used. MUST register a new device with the API before anything else is changed. On failure MUST leave the persisted state unchanged, including any existing session, its queued events and screenshot capture. On success, it SHOULD try once to upload the pending batch with any existing session, and a failure of that upload MUST NOT fail the login. It MUST then log out (CORE-009), so that queued events still unsent are discarded and the new session shares no state with the old one. It MUST then store the returned device credentials, settings, and hash token, and MUST enable screenshot capture. `device_name` is optional; if absent or blank, the platform's configured default name MUST be used.
 
 ### CORE-009 logout
 
 `logout()`
 
-MUST best-effort revoke the device session with the API, and MUST reset all persisted state to its initial value, which clears stored device credentials and queued events and disables screenshot capture. A logout the daemon performs because the server rejected the device MUST keep `recent_errors` (CORE-018), so that the reason stays visible. A batch upload that was in flight when the device logged out MUST have its result discarded, so that it cannot restore queued events.
+MUST best-effort revoke the device session with the API, and MUST reset all persisted state to its initial value, which clears stored device credentials and queued events, returns the device to the build's default server (CORE-028) and disables screenshot capture. A logout the daemon performs because the server rejected the device MUST keep `recent_errors` (CORE-018), so that the reason stays visible. A batch upload that was in flight when the device logged out MUST have its result discarded, so that it cannot restore queued events.
 
 ### CORE-010 status
 
@@ -153,7 +153,7 @@ status() -> {
   last_loop_at_ms, last_screenshot_attempt_at_ms, last_screenshot_at_ms,
   last_skip_reason, last_batch_at_ms,
   recent_errors,
-  api_base_url, hash_base_url, capture_interval_seconds, batch_window_seconds,
+  api_base_url, web_app_url, hash_base_url, capture_interval_seconds, batch_window_seconds,
   announcement
 }
 ```
@@ -168,7 +168,9 @@ MUST return, without blocking on the loop:
 - `last_screenshot_attempt_at_ms`, `last_screenshot_at_ms`, `last_skip_reason` — see CORE-018.
 - `last_batch_at_ms` — when a batch last uploaded successfully.
 - `recent_errors` — see CORE-018.
-- `api_base_url`, `hash_base_url`, `capture_interval_seconds`, `batch_window_seconds` — the effective configuration this build is running with, for the diagnostics/advanced section of a client's status page.
+- `api_base_url` — the API the current session uses (CORE-028), or the build's default when there is no session or it uses the default.
+- `web_app_url` — the web app URL the chosen server reported (CORE-028). MUST be absent when the session uses the build's default server or there is no session.
+- `hash_base_url`, `capture_interval_seconds`, `batch_window_seconds` — the effective configuration this build is running with, for the diagnostics/advanced section of a client's status page.
 - `announcement` — the `DeviceAnnouncement` from the last device settings fetched (API-068), for the client to show (CLIENT-033). MUST be absent when those settings had none or have never been fetched.
 
 Every field except `is_running` MUST be derivable from persisted state plus the compile-time configuration, so a client whose daemon process is not running can compute the same status from `state_path` alone and report only `is_running: false`.
@@ -262,7 +264,7 @@ The log excerpt attached to a bug report (API-042) MUST be built from file modif
 
 ## CORE-024 Configuration
 
-The API base URL MUST be stored with surrounding whitespace and any trailing slashes removed.
+The default API base URL is fixed at build time. It and any server chosen at login (CORE-028) MUST be stored with surrounding whitespace and any trailing slashes removed.
 
 ## CORE-025 Cross-process IPC
 
@@ -271,3 +273,13 @@ On Linux and macOS, the CLI and tray run as a separate process from the daemon. 
 ## CORE-026 API error messages
 
 When the API replies with a non-2xx status, the error reported to the caller MUST be, in order of preference: the validation messages in the body's `details`, the body's non-empty `error` field, the body text, or, when the body is missing or empty, a non-empty message naming the HTTP status code and its reason phrase (e.g. `HTTP 502 Bad Gateway error`).
+
+## CORE-028 Choosing a server
+
+A user MAY sign in to a server other than the build's default (CLIENT-034). Before a login uses the URL the user gave, the core MUST resolve it:
+
+- Surrounding whitespace and trailing slashes MUST be removed, and a URL with no scheme MUST be read as `https://`.
+- The URL MUST use `https`, except that `http` MAY be used with a loopback host (`localhost`, `127.0.0.1` or `[::1]`). Any other URL MUST fail with "The server address must start with https://."
+- The core MUST ask for the health payload (API-007) at the URL and, if that does not reply with the name `Virtue Initiative API`, at the URL with `/api` added. It MUST accept the first that does. If neither does, it MUST fail with "No Virtue server found at <url>." naming the URL as resolved so far.
+- The accepted API URL, and the `app_url` from its health payload when present and an `http` or `https` URL, MUST be stored with the device credentials, so they last as long as the session and logout clears them (CORE-009).
+- A session with no stored server, including one from a build before this rule, MUST use the build's default API URL.

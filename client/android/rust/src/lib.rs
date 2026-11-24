@@ -411,14 +411,18 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeLogin
     email: JString<'l>,
     password: JString<'l>,
     device_name: JString<'l>,
+    server: JString<'l>,
 ) -> jstring {
     native_result(&mut unowned_env, |_env| -> Result<()> {
         let email: String = email.to_string();
         let password: String = password.to_string();
         let device_name: String = device_name.to_string();
+        // CLIENT-034: empty means the default server.
+        let server: String = server.to_string();
+        let server = Some(server).filter(|s| !s.trim().is_empty());
         let core = core()?;
         core.daemon
-            .login(&email, &password, Some(&device_name))
+            .login(&email, &password, Some(&device_name), server.as_deref())
             .map_err(|err| anyhow!(err.to_string()))?;
         Ok(())
     })
@@ -610,9 +614,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRepor
         let platform_details: String = platform_details.to_string();
 
         let core = core()?;
-        let bearer_token = read_auth_state(&core.state_dir)
-            .and_then(|auth| auth.device_credentials)
-            .map(|creds| creds.refresh_token);
+        let credentials = read_auth_state(&core.state_dir).and_then(|auth| auth.device_credentials);
 
         let logs = include_logs
             .then(|| virtue_core::logging::recent_logs(&core.state_dir.join("logs")))
@@ -621,7 +623,7 @@ pub extern "system" fn Java_org_virtueinitiative_virtue_NativeBridge_nativeRepor
         let config = build_core_config(&core.state_dir);
         let api = HttpApiClient::new(&config)?;
         api.report_issue(
-            bearer_token.as_deref(),
+            credentials.as_ref(),
             &BugReportRequest {
                 message: &message,
                 contact_email: contact_email.as_deref(),

@@ -31,9 +31,9 @@ namespace Virtue.WindowsApp;
 public sealed partial class MainWindow : Window
 {
     private const string WebsiteNavigateUrl = "https://virtueinitiative.org";
-    private const string SignUpNavigateUrl = "https://app.virtueinitiative.org/signup";
-    // Partners are managed in the web app, not from this client.
-    private const string PartnersNavigateUrl = "https://app.virtueinitiative.org/partners";
+    // A self-hosted server's accounts are made on its own website (CLIENT-034),
+    // so this only shows for the default server.
+    private const string SignUpNavigateUrl = SessionViewModel.DefaultWebAppUrl + "/signup";
 
     // Short summary; the full list is on the linked help page. Keep both in step
     // with what the monitor actually does (core SPEC CORE-003, CORE-004).
@@ -137,6 +137,10 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _emailTextBox = new();
     private readonly PasswordBox _passwordBox = new();
     private readonly TextBox _deviceNameTextBox = new();
+    private readonly RadioButton _virtueServerRadio = new() { Content = "Virtue Initiative", GroupName = "server" };
+    private readonly RadioButton _selfHostedServerRadio = new() { Content = "Self-hosted", GroupName = "server" };
+    private readonly TextBox _serverAddressTextBox = new();
+    private HyperlinkButton? _signUpLink;
     private readonly Button _signInButton = CreatePrimaryButton("Sign In");
     private string? _ringKey;
 
@@ -440,7 +444,31 @@ public sealed partial class MainWindow : Window
         StyleInput(_deviceNameTextBox);
         _signInPanel.Children.Add(_deviceNameTextBox);
 
-        foreach (var input in new Control[] { _emailTextBox, _passwordBox, _deviceNameTextBox })
+        // CLIENT-034: the server is chosen here and nowhere else, so it can
+        // only change by signing out first.
+        var serverChoice = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+        _virtueServerRadio.Foreground = TextBrush;
+        _selfHostedServerRadio.Foreground = TextBrush;
+        _virtueServerRadio.Checked += (_, _) => ViewModel.SelfHostedServer = false;
+        _selfHostedServerRadio.Checked += (_, _) => ViewModel.SelfHostedServer = true;
+        serverChoice.Children.Add(_virtueServerRadio);
+        serverChoice.Children.Add(_selfHostedServerRadio);
+        AutomationProperties.SetName(serverChoice, "Server");
+        _signInPanel.Children.Add(new TextBlock { Text = "Server", FontSize = 14, Foreground = TextMutedBrush });
+        _signInPanel.Children.Add(serverChoice);
+
+        _serverAddressTextBox.PlaceholderText = "Server address";
+        _serverAddressTextBox.InputScope = new InputScope { Names = { new InputScopeName(InputScopeNameValue.Url) } };
+        _serverAddressTextBox.TextChanged += (_, _) =>
+        {
+            ViewModel.ServerAddressInput = _serverAddressTextBox.Text;
+            ClearStaleError();
+        };
+        AutomationProperties.SetName(_serverAddressTextBox, "Server address");
+        StyleInput(_serverAddressTextBox);
+        _signInPanel.Children.Add(_serverAddressTextBox);
+
+        foreach (var input in new Control[] { _emailTextBox, _passwordBox, _deviceNameTextBox, _serverAddressTextBox })
         {
             input.KeyDown += async (_, e) =>
             {
@@ -459,6 +487,7 @@ public sealed partial class MainWindow : Window
 
         var signUpLink = CreateLink("Don't have an account? Sign up", SignUpNavigateUrl);
         signUpLink.HorizontalAlignment = HorizontalAlignment.Center;
+        _signUpLink = signUpLink;
         _signInPanel.Children.Add(signUpLink);
         _signInPanel.Children.Add(_signInError);
         return _signInPanel;
@@ -539,7 +568,8 @@ public sealed partial class MainWindow : Window
         _sentence.HorizontalAlignment = HorizontalAlignment.Center;
         _statusPanel.Children.Add(_sentence);
 
-        _partnersButton.Click += (_, _) => OpenInBrowser(PartnersNavigateUrl);
+        // Partners are managed in the web app, not from this client.
+        _partnersButton.Click += (_, _) => OpenInBrowser(ViewModel.WebAppUrl("/partners"));
         _reportFromHomeButton.Click += (_, _) => Navigate(Screen.Report);
         _stopButton.Click += async (_, _) =>
         {
@@ -1026,6 +1056,20 @@ public sealed partial class MainWindow : Window
         if (_emailTextBox.Text != ViewModel.EmailInput)
         {
             _emailTextBox.Text = ViewModel.EmailInput;
+        }
+
+        var selfHosted = ViewModel.SelfHostedServer;
+        _virtueServerRadio.IsChecked = !selfHosted;
+        _selfHostedServerRadio.IsChecked = selfHosted;
+        _serverAddressTextBox.Visibility = VisibleIf(selfHosted);
+        if (_signUpLink is not null)
+        {
+            _signUpLink.Visibility = VisibleIf(!selfHosted);
+        }
+
+        if (_serverAddressTextBox.Text != ViewModel.ServerAddressInput)
+        {
+            _serverAddressTextBox.Text = ViewModel.ServerAddressInput;
         }
 
         if (_passwordBox.Password != ViewModel.PasswordInput)

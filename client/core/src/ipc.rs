@@ -48,6 +48,9 @@ enum WireRequest {
         email: String,
         password: Redacted<String>,
         device_name: Option<String>,
+        /// CORE-028. Defaulted so a CLI from before it still logs in.
+        #[serde(default)]
+        server: Option<String>,
     },
     Logout,
     Status,
@@ -98,7 +101,13 @@ where
             email,
             password,
             device_name,
-        } => match daemon.login(&email, &password.0, device_name.as_deref()) {
+            server,
+        } => match daemon.login(
+            &email,
+            &password.0,
+            device_name.as_deref(),
+            server.as_deref(),
+        ) {
             Ok(device_id) => WireReply::LoginResult {
                 success: true,
                 error: None,
@@ -268,16 +277,20 @@ impl ClientController {
 
     /// Send a login request and block until the reply is received. Returns
     /// the device ID on success.
+    /// `server` is a server address the user chose (CORE-028), or `None`
+    /// for the build's default.
     pub fn login(
         &mut self,
         email: &str,
         password: &str,
         device_name: Option<&str>,
+        server: Option<&str>,
     ) -> CoreResult<String> {
         match self.call(WireRequest::Login {
             email: email.into(),
             password: Redacted(password.into()),
             device_name: device_name.map(String::from),
+            server: server.map(String::from),
         })? {
             WireReply::LoginResult {
                 success: true,
@@ -488,7 +501,7 @@ mod tests {
 
         let mut controller = ClientController::connect(&sock).expect("connect");
         let err = controller
-            .login("user@example.com", "password", None)
+            .login("user@example.com", "password", None, None)
             .expect_err("login should fail");
 
         match err {

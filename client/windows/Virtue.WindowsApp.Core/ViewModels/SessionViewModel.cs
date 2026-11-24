@@ -28,6 +28,9 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _emailInput = string.Empty;
     private string _passwordInput = string.Empty;
     private string _deviceNameInput = string.Empty;
+    private bool _selfHostedServer;
+    private string _serverAddressInput = string.Empty;
+    private bool _hasHydratedServer;
     private string _monitorState = "loading";
     private string? _monitorError;
     private string? _deviceId;
@@ -164,6 +167,37 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         get => _deviceNameInput;
         set => SetProperty(ref _deviceNameInput, value);
+    }
+
+    /// <summary>The default server's web app. A self-hosted server names its own (CLIENT-034).</summary>
+    public const string DefaultWebAppUrl = "https://app.virtueinitiative.org";
+
+    /// <summary>
+    /// Whether sign-in goes to a self-hosted server (CLIENT-034). Both this and
+    /// <see cref="ServerAddressInput"/> start from the last sign-in.
+    /// </summary>
+    public bool SelfHostedServer
+    {
+        get => _selfHostedServer;
+        set => SetProperty(ref _selfHostedServer, value);
+    }
+
+    public string ServerAddressInput
+    {
+        get => _serverAddressInput;
+        set => SetProperty(ref _serverAddressInput, value);
+    }
+
+    /// <summary>
+    /// A page of the web app: the self-hosted server's own when the status
+    /// names one, otherwise the default (CLIENT-034).
+    /// </summary>
+    public string WebAppUrl(string path)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(MonitorStatus?.WebAppUrl)
+            ? DefaultWebAppUrl
+            : MonitorStatus!.WebAppUrl!;
+        return baseUrl + path;
     }
 
     /// <summary>
@@ -447,6 +481,17 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             return;
         }
 
+        string? server = null;
+        if (SelfHostedServer)
+        {
+            server = ServerAddressInput.Trim();
+            if (server.Length == 0)
+            {
+                ErrorText = "Server address is required.";
+                return;
+            }
+        }
+
         var deviceName = string.IsNullOrWhiteSpace(DeviceNameInput)
             ? Environment.MachineName
             : DeviceNameInput.Trim();
@@ -455,7 +500,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         {
             var email = EmailInput.Trim();
             var password = PasswordInput;
-            await Task.Run(() => _interopClient.Login(email, password, deviceName));
+            await Task.Run(() => _interopClient.Login(email, password, deviceName, server));
             PasswordInput = string.Empty;
             await RefreshInternalAsync();
         }, "Signing in...");
@@ -567,6 +612,15 @@ public sealed class SessionViewModel : INotifyPropertyChanged
         else if (!_hasUserEditedEmailInput)
         {
             SetEmailInput(status.Email ?? string.Empty);
+        }
+
+        // CLIENT-034: offer the last sign-in's server, once, so a refresh
+        // never undoes what the user picked.
+        if (!_hasHydratedServer)
+        {
+            _hasHydratedServer = true;
+            SelfHostedServer = status.RememberedServer is not null;
+            ServerAddressInput = status.RememberedServer ?? string.Empty;
         }
 
         return Task.CompletedTask;

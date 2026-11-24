@@ -24,6 +24,10 @@ final class MonitoringCoordinator: ObservableObject {
     @Published var email: String = ""
     @Published var password: String = ""
     @Published var deviceName: String = ""
+    /// The server to sign in to, and the self-hosted address (CLIENT-034).
+    /// Both start from the last sign-in.
+    @Published var serverChoice: ServerChoice = .virtueInitiative
+    @Published var serverAddress: String = ""
 
     @Published private(set) var loggedIn: Bool = false
     @Published private(set) var isSigningIn: Bool = false
@@ -85,6 +89,10 @@ final class MonitoringCoordinator: ObservableObject {
             unexpectedStopMessage = "Core initialization failed: \(initError)"
         }
         refreshSessionState()
+        if let server = NativeBridge.getRememberedServer() {
+            serverChoice = .selfHosted
+            serverAddress = server
+        }
         // Ask for Screen Recording right away, before sign-in, so the first
         // screenshot after sign-in is never a failed one (issue #632).
         requestPermissionIfNeeded()
@@ -136,6 +144,18 @@ final class MonitoringCoordinator: ObservableObject {
             loginError = "Password is required"
             return
         }
+        let server: String?
+        switch serverChoice {
+        case .virtueInitiative:
+            server = nil
+        case .selfHosted:
+            let address = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !address.isEmpty else {
+                loginError = "Server address is required"
+                return
+            }
+            server = address
+        }
 
         loginError = nil
         isSigningIn = true
@@ -150,7 +170,8 @@ final class MonitoringCoordinator: ObservableObject {
         Task {
             let error = await Task.detached(priority: .userInitiated) {
                 NativeBridge.login(
-                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName)
+                    email: trimmedEmail, password: pw, deviceName: resolvedDeviceName,
+                    server: server)
             }.value
             isSigningIn = false
             if let error {
@@ -533,6 +554,13 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func loginErrorMessage(_ raw: String) -> String {
+        // CLIENT-034: the server was never reached, so the email and password
+        // aren't the problem. Show the core's own message (CORE-028).
+        for marker in ["No Virtue server found", "The server address must", "Server address is"] {
+            if let range = raw.range(of: marker) {
+                return "Login failed: \(raw[range.lowerBound...])"
+            }
+        }
         let lower = raw.lowercased()
         if lower.contains("unauthorized") || lower.contains("bad request")
             || lower.contains("login failed")

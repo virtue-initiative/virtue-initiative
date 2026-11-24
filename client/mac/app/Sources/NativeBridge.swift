@@ -9,7 +9,8 @@ private func virtue_mac_native_init() -> UnsafeMutablePointer<CChar>?
 private func virtue_mac_native_login(
     _ email: UnsafePointer<CChar>?,
     _ password: UnsafePointer<CChar>?,
-    _ deviceName: UnsafePointer<CChar>?
+    _ deviceName: UnsafePointer<CChar>?,
+    _ server: UnsafePointer<CChar>?
 ) -> UnsafeMutablePointer<CChar>?
 
 // swift-format-ignore: AlwaysUseLowerCamelCase
@@ -35,6 +36,10 @@ private func virtue_mac_native_get_device_id() -> UnsafeMutablePointer<CChar>?
 // swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_account_email")
 private func virtue_mac_native_get_account_email() -> UnsafeMutablePointer<CChar>?
+
+// swift-format-ignore: AlwaysUseLowerCamelCase
+@_silgen_name("virtue_mac_native_get_remembered_server")
+private func virtue_mac_native_get_remembered_server() -> UnsafeMutablePointer<CChar>?
 
 // swift-format-ignore: AlwaysUseLowerCamelCase
 @_silgen_name("virtue_mac_native_get_status_json")
@@ -146,12 +151,19 @@ enum NativeBridge {
         }
     }
 
-    static func login(email: String, password: String, deviceName: String) -> String? {
+    /// `server` is a self-hosted server address, or nil for the default
+    /// server (CLIENT-034).
+    static func login(email: String, password: String, deviceName: String, server: String?)
+        -> String?
+    {
         callReturningError {
             email.withCString { emailCString in
                 password.withCString { passwordCString in
                     deviceName.withCString { deviceNameCString in
-                        virtue_mac_native_login(emailCString, passwordCString, deviceNameCString)
+                        withOptionalCString(server) { serverCString in
+                            virtue_mac_native_login(
+                                emailCString, passwordCString, deviceNameCString, serverCString)
+                        }
                     }
                 }
             }
@@ -188,6 +200,11 @@ enum NativeBridge {
 
     static func getAccountEmail() -> String? {
         consumeOptionalString(virtue_mac_native_get_account_email())
+    }
+
+    /// The self-hosted server last signed in to, or nil (CLIENT-034).
+    static func getRememberedServer() -> String? {
+        consumeOptionalString(virtue_mac_native_get_remembered_server())
     }
 
     static func pollDaemonStatus() -> DaemonStatus {
