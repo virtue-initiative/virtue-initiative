@@ -67,6 +67,31 @@ export const ADMIN_QUERY_PRESETS: Record<string, AdminQueryPreset> = {
           GROUP BY bucket
           ORDER BY users DESC`,
   },
+  devices_by_version: {
+    label: 'Devices by version',
+    description:
+      'Live devices per platform and the client version each last reported (API-036), newest version first and unknown last.',
+    // Versions sort by their first three numbers (API-068), so 0.10.0 comes
+    // before 0.9.0; a plain string sort would put it after.
+    sql: `WITH counts AS (
+            SELECT platform, app_version AS v, COUNT(*) AS devices
+            FROM devices
+            WHERE deleted_at IS NULL
+            GROUP BY platform, app_version
+          ), parts AS (
+            SELECT *, CASE WHEN instr(v, '.') > 0 THEN substr(v, instr(v, '.') + 1) END AS rest
+            FROM counts
+          )
+          SELECT platform, COALESCE(v, 'unknown') AS app_version, devices
+          FROM parts
+          ORDER BY platform,
+                   v IS NULL,
+                   CAST(v AS INTEGER) DESC,
+                   CAST(rest AS INTEGER) DESC,
+                   CAST(CASE WHEN instr(rest, '.') > 0
+                             THEN substr(rest, instr(rest, '.') + 1) END AS INTEGER) DESC,
+                   v DESC`,
+  },
   devices_by_platform: {
     label: 'Devices by platform',
     description: 'Live devices per platform, with how many uploaded in the last 7 days.',

@@ -532,6 +532,13 @@ private struct StatusFocus: View {
             }
             .frame(maxWidth: 300)
             .padding(.top, 10)
+
+            // CLIENT-033: below the main actions, while signed in.
+            if let announcement = coordinator.coreStatus?.announcement {
+                AnnouncementBanner(announcement)
+                    .frame(maxWidth: 300)
+                    .padding(.top, 6)
+            }
         }
         .frame(maxWidth: .infinity)
     }

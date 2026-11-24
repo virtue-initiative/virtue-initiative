@@ -19,7 +19,9 @@ enum WriteCommand {
     },
     Reset {
         device_id: String,
-        respond: oneshot::Sender<DeviceState>,
+        /// HASH-008: reset only if the device's `seq` is still this.
+        expected_seq: Option<u32>,
+        respond: oneshot::Sender<Result<DeviceState, ApiError>>,
     },
 }
 
@@ -50,13 +52,21 @@ impl WriteHandle {
             .map_err(|_| ApiError::Internal(Some("writer thread stopped".into())))?
     }
 
-    pub async fn reset(&self, device_id: String) -> Result<DeviceState, ApiError> {
+    pub async fn reset(
+        &self,
+        device_id: String,
+        expected_seq: Option<u32>,
+    ) -> Result<DeviceState, ApiError> {
         let (respond, rx) = oneshot::channel();
         self.tx
-            .send(WriteCommand::Reset { device_id, respond })
+            .send(WriteCommand::Reset {
+                device_id,
+                expected_seq,
+                respond,
+            })
             .map_err(|_| ApiError::Internal(Some("writer thread stopped".into())))?;
         rx.await
-            .map_err(|_| ApiError::Internal(Some("writer thread stopped".into())))
+            .map_err(|_| ApiError::Internal(Some("writer thread stopped".into())))?
     }
 }
 
@@ -93,15 +103,29 @@ fn init_schema(conn: &Connection) {
             device_id TEXT PRIMARY KEY,
             hash BLOB NOT NULL,
             seq INTEGER NOT NULL,
-            last_received INTEGER NOT NULL
+            last_received INTEGER NOT NULL,
+            first_seq INTEGER NOT NULL DEFAULT 0
         ) STRICT;",
     )
     .expect("failed to create device_hashes table");
+
+    // HASH-007: a database created before `first_seq` existed gets the column
+    // with 0, meaning its chains' first seq is not known.
+    let has_first_seq = conn
+        .prepare("SELECT 1 FROM pragma_table_info('device_hashes') WHERE name = 'first_seq'")
+        .and_then(|mut stmt| stmt.exists([]))
+        .expect("failed to read device_hashes columns");
+    if !has_first_seq {
+        conn.execute_batch(
+            "ALTER TABLE device_hashes ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 0;",
+        )
+        .expect("failed to add device_hashes.first_seq");
+    }
 }
 
 fn load_into_memory(conn: &Connection, devices: &SharedDevices) {
     let mut stmt = conn
-        .prepare("SELECT device_id, hash, seq, last_received FROM device_hashes")
+        .prepare("SELECT device_id, hash, seq, last_received, first_seq FROM device_hashes")
         .expect("failed to prepare load query");
 
     let rows = stmt
@@ -110,6 +134,7 @@ fn load_into_memory(conn: &Connection, devices: &SharedDevices) {
             let hash_vec: Vec<u8> = row.get(1)?;
             let seq: u32 = row.get(2)?;
             let last_received: u32 = row.get(3)?;
+            let first_seq: u32 = row.get(4)?;
 
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&hash_vec);
@@ -119,6 +144,7 @@ fn load_into_memory(conn: &Connection, devices: &SharedDevices) {
                 DeviceState {
                     hash,
                     seq,
+                    first_seq,
                     last_received,
                 },
             ))
@@ -168,7 +194,8 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
 
     // (responder, prior-state-for-resets, whether this is a reset)
     let mut ingest_ok: Vec<oneshot::Sender<Result<(), ApiError>>> = Vec::new();
-    let mut reset_ok: Vec<(oneshot::Sender<DeviceState>, DeviceState)> = Vec::new();
+    let mut reset_ok: Vec<(oneshot::Sender<Result<DeviceState, ApiError>>, DeviceState)> =
+        Vec::new();
 
     for cmd in batch {
         match cmd {
@@ -197,6 +224,12 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
                 let new_state = DeviceState {
                     hash: new_hash,
                     seq,
+                    // HASH-006: the first hash after a reset starts the chain.
+                    first_seq: if current.seq == 0 {
+                        seq
+                    } else {
+                        current.first_seq
+                    },
                     last_received: unix_time,
                 };
 
@@ -208,24 +241,30 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
                 scratch.insert(device_id, new_state);
                 ingest_ok.push(respond);
             }
-            WriteCommand::Reset { device_id, respond } => {
+            WriteCommand::Reset {
+                device_id,
+                expected_seq,
+                respond,
+            } => {
                 let prior = scratch
                     .get(&device_id)
                     .copied()
                     .unwrap_or_else(|| snapshot.get(&device_id).copied().unwrap_or_default());
+                // HASH-008: a conditional reset changes nothing if the chain moved.
+                if expected_seq.is_some_and(|expected| expected != prior.seq) {
+                    let _ = respond.send(Err(ApiError::SequenceConflict));
+                    continue;
+                }
                 // HASH-008: the reset MUST NOT touch last_received.
                 let new_state = DeviceState {
                     hash: ZERO_HASH,
                     seq: 0,
+                    first_seq: 0,
                     last_received: prior.last_received,
                 };
 
                 if let Err(e) = upsert(&tx, &device_id, &new_state) {
-                    tracing::error!("failed to stage reset for {device_id}: {e}");
-                    // The response channel expects a DeviceState, not a Result, so a
-                    // staging failure here just drops the responder; the client's
-                    // request will time out / disconnect rather than see a wrong value.
-                    drop(respond);
+                    let _ = respond.send(Err(ApiError::Internal(Some(e.to_string()))));
                     continue;
                 }
 
@@ -242,7 +281,7 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
                 let _ = respond.send(Ok(()));
             }
             for (respond, prior) in reset_ok {
-                let _ = respond.send(prior);
+                let _ = respond.send(Ok(prior));
             }
         }
         Err(e) => {
@@ -250,9 +289,9 @@ fn process_batch(conn: &mut Connection, batch: Vec<WriteCommand>, devices: &Shar
             for respond in ingest_ok {
                 let _ = respond.send(Err(ApiError::Internal(Some(message.clone()))));
             }
-            // Resets can't report a commit failure through their DeviceState-only
-            // channel; dropping the sender surfaces as a client-visible disconnect.
-            drop(reset_ok);
+            for (respond, _) in reset_ok {
+                let _ = respond.send(Err(ApiError::Internal(Some(message.clone()))));
+            }
         }
     }
 }
@@ -263,17 +302,19 @@ fn upsert(
     state: &DeviceState,
 ) -> rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO device_hashes (device_id, hash, seq, last_received)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO device_hashes (device_id, hash, seq, last_received, first_seq)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(device_id) DO UPDATE SET
             hash = excluded.hash,
             seq = excluded.seq,
-            last_received = excluded.last_received",
+            last_received = excluded.last_received,
+            first_seq = excluded.first_seq",
         rusqlite::params![
             device_id,
             state.hash.as_slice(),
             state.seq,
-            state.last_received
+            state.last_received,
+            state.first_seq
         ],
     )?;
     Ok(())
@@ -285,7 +326,9 @@ fn respond_internal(batch: Vec<WriteCommand>, message: String) {
             WriteCommand::Ingest { respond, .. } => {
                 let _ = respond.send(Err(ApiError::Internal(Some(message.clone()))));
             }
-            WriteCommand::Reset { respond, .. } => drop(respond),
+            WriteCommand::Reset { respond, .. } => {
+                let _ = respond.send(Err(ApiError::Internal(Some(message.clone()))));
+            }
         }
     }
 }

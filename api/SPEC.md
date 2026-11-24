@@ -118,11 +118,36 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
   ],
   "hash_base_url": "https://..." | null,
   "hash_token": HashServerToken,
-  "feature_flags": ["flag_key", ...]
+  "feature_flags": ["flag_key", ...],
+  "announcement": DeviceAnnouncement | null
 }
 ```
 
-`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061).
+`feature_flags` lists the keys of the flags enabled for the device's owner (see API-061). `announcement` is the announcement chosen for this device (see API-068).
+
+**DeviceAnnouncement**
+
+```js
+{
+  "message": "Version 0.2.0 is out. Update by hand to keep monitoring.",
+  "url": "https://..." | null,
+  "level": "info" | "warning" | "urgent"
+}
+```
+
+**Announcement**
+
+```js
+{
+  "id": UUID,
+  "message": "...",
+  "url": "https://..." | null,
+  "level": "info" | "warning" | "urgent",
+  "platforms": ["windows", "macos", ...] | null, // null means every platform
+  "below_version": "0.2.0" | null,                // null means every version
+  "created_at": DateTime
+}
+```
 
 **FeatureFlag**
 
@@ -838,6 +863,8 @@ The server MUST validate the login (see `POST /login`) and create a long lived r
 
 It should also return the device settings (see `GET /d/device`)
 
+The server MUST store the client's version from the `X-Virtue-Version` header (API-068) on the new device, or none when the header is absent or not a valid version.
+
 On success, it must return **HTTP 200** with
 
 ```js
@@ -856,6 +883,8 @@ The server SHOULD create a fresh JWT hash server token (see the hash server spec
 ```js
 DeviceSettings;
 ```
+
+A client fetches its settings first thing whenever it starts (CORE-005), so this is where a version change after an update usually shows up. The server MUST store the client's version (API-068) on the device when it differs from the stored one, and MUST NOT write to the device when it is the same or the header is absent or not a valid version. `POST /d/batch` MUST store it the same way, since a client that starts offline may not fetch its settings again until it next starts. A failure to store the version MUST NOT fail either request.
 
 ### API-037 `POST /d/logout`
 
@@ -876,6 +905,8 @@ The client MUST send a multipart form request:
     {
       "start_time": DateTime,
       "end_time": DateTime,
+      "start_seq": positive int | undefined,
+      "end_seq": positive int | undefined,
       "access_keys`: {
         "<user_id UUID>": Base64 // hpke_key
       },
@@ -901,6 +932,19 @@ The client MUST send a multipart form request:
 The server MUST upload the file to object storage and store the metadata in the database.
 
 The server MUST take `end_hash` from the hash server's current hash for the device (see `hash-server/SPEC.md`). If that is not 64 hexadecimal characters, the server MUST respond **HTTP 502** and MUST NOT store the batch. After storing the batch the server MUST reset the device's hash state. If the device no longer exists when the batch is stored, the server MUST NOT keep the batch or its object, and MUST respond **HTTP 404**.
+
+The client SHOULD send `start_seq` and `end_seq`, the hash server `seq` (HASH-006) of the batch's first and last event, and MUST send both or neither, with `start_seq` no greater than `end_seq`. They let the server tell a batch it already stored, whose response the device did not get, from a new one. When they are sent, the server MUST check them against the device's hash state before storing the batch, treating a `first_seq` the hash server does not report as 0:
+
+- If the hash state's `seq` is 0, or its `first_seq` is not 0 and is greater than `start_seq`, the batch begins with events the server already stored and reset. The server MUST NOT store it and MUST respond **HTTP 409** with `code` `batch_already_stored` and the hash state's `first_seq` and `seq`.
+- If the hash state's `seq` is greater than `end_seq`, the device hashed events after it built this batch, which happens only while an earlier attempt is still in flight. The server MUST NOT store it and MUST respond **HTTP 409** with `code` `hash_chain_moved`.
+- Otherwise the server MUST store the batch, and MUST then reset the hash state only if its `seq` is still the one it read (HASH-008). If it is not, the server MUST delete the batch and its object and respond **HTTP 409** with `code` `hash_chain_moved`, because the stored `end_hash` no longer ends the chain.
+
+```js
+// HTTP 409
+{ "error": string, "code": "batch_already_stored", "first_seq": int, "seq": int }
+```
+
+Without `start_seq` and `end_seq`, the server MUST store the batch and reset the hash state unconditionally, as for clients that predate them.
 
 For each entry in `notifications`, the server MUST immediately email a tamper alert to every accepted watcher of the device's owner, whatever the entry's `risk`. The alert names the device and uses the entry's `title` and `details`; `title` defaults to `Device reported <type>.` with underscores in the type replaced by spaces. The server MUST NOT send the alert to a watcher whose `email_frequency` is `none` or whose email is unverified. `risk` is required on every entry. A failure to send an alert MUST NOT fail the upload.
 
@@ -1214,3 +1258,43 @@ The server MUST set the override for the user with that email, or remove it when
 This previews every email template rendered with made-up data, inside a mock email client. Only used in dev. The server MUST serve it only when `EMAIL_DELIVERY_MODE` is `log`, which only a local dev environment sets. Otherwise it MUST respond **HTTP 404**.
 
 The query `t` selects a template by ID, defaulting to the first. With `raw=html` or `raw=text`, the server MUST respond with that template's HTML or plain text body alone. Otherwise it MUST respond with a page that lists the templates and shows the selected one, with its subject, sender and recipient, as HTML or plain text, at desktop or mobile width.
+
+## API-068 Announcements
+
+Announcements tell people using the client apps something they need to know, such as that they must update by hand. The server MUST choose a device's announcement and send it as `announcement` in `DeviceSettings`; clients only display it (CLIENT-033). It therefore reaches a device whenever the device next fetches its settings (CORE-005).
+
+A client SHOULD send its app version, such as `0.1.9`, in an `X-Virtue-Version` header on every request. A valid version is 1 to 32 letters, digits, `.`, `+` or `-`, starting with a digit. Versions MUST compare as dot-separated whole numbers, with a missing part counting as 0, ignoring anything from the first character that is neither a digit nor a dot (so `0.2.0-dev` compares as `0.2.0`). A request with no version, or one that is not valid, MUST count as lower than every version, since only clients older than this header send none.
+
+An announcement applies to a device when its `platforms` is `null` or contains the device's platform, and its `below_version` is `null` or the device's version is lower than it. When several apply, the server MUST send the newest. When none applies, `announcement` MUST be `null`.
+
+Choosing an announcement MUST NOT write to the database. The server MAY cache the announcement table in memory for up to 60 seconds, and a server instance that changes an announcement SHOULD drop its own cache.
+
+Every route in this section is an admin route: API-051's authentication and **HTTP 403** rules apply.
+
+### API-069 `GET /admin/announcements`
+
+The server MUST return every announcement, newest first:
+
+```js
+// array of Announcement
+```
+
+### API-070 `POST /admin/announcements`
+
+The client MUST send:
+
+```js
+{
+  "message": "...",
+  "url": "https://..." | null | undefined,
+  "level": "info" | "warning" | "urgent",
+  "platforms": ["windows", ...] | null | undefined,
+  "below_version": "0.2.0" | null | undefined
+}
+```
+
+`message` MUST be 1 to 280 characters after trimming. `url` MUST be an `https` URL. `platforms` MUST NOT be empty, and each MUST be one of `linux`, `macos`, `windows`, `android` or `ios`. `below_version` MUST be one or more whole numbers separated by dots. The server MUST respond **HTTP 400** otherwise, and **HTTP 200** with the created `Announcement`.
+
+### API-071 `DELETE /admin/announcements/:id`
+
+The server MUST delete the announcement, so that no device is sent it from then on. It MUST respond **HTTP 404** for an unknown id and otherwise **HTTP 204**.

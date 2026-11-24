@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Security;
-using System.Text;
 
 namespace Virtue.WindowsApp.Core.Interop;
 
@@ -77,34 +76,10 @@ public static class UpdateRelaunchTask
     {
         var startAt = DateTime.Now + (delay ?? DefaultDelay);
         var xml = BuildTaskXml(exePath, arguments, startAt, TriggerWindow);
-
-        // schtasks /XML reads the definition from a file; there is no way to pipe it in.
-        var xmlPath = Path.Combine(Path.GetTempPath(), $"virtue-update-relaunch-{Guid.NewGuid():N}.xml");
-        try
-        {
-            // UTF-16 with a BOM, matching the encoding the document declares. schtasks rejects
-            // the file outright otherwise.
-            File.WriteAllText(xmlPath, xml, Encoding.Unicode);
-            var result = Schtasks.Run("/Create", "/F", "/TN", TaskName, "/XML", xmlPath);
-            return result.Succeeded
-                ? $"Update relaunch task scheduled for {startAt:HH:mm:ss} ({exePath})."
-                : $"Update relaunch task could not be scheduled ({result}); falling back to the watchdog.";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return $"Update relaunch task could not be scheduled ({ex.Message}); falling back to the watchdog.";
-        }
-        finally
-        {
-            try
-            {
-                File.Delete(xmlPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // A leftover temp file is harmless.
-            }
-        }
+        var result = Schtasks.CreateFromXml(TaskName, xml);
+        return result.Succeeded
+            ? $"Update relaunch task scheduled for {startAt:HH:mm:ss} ({exePath})."
+            : $"Update relaunch task could not be scheduled ({result}); falling back to the watchdog.";
     }
 
     /// <summary>
@@ -127,6 +102,12 @@ public static class UpdateRelaunchTask
     ///
     /// <c>StartBoundary</c> is written as a local time with no UTC offset, which is how Task
     /// Scheduler interprets a bare <c>xs:dateTime</c> and how the measured probe ran.
+    ///
+    /// <c>ExecutionTimeLimit</c> is <c>PT0S</c> (none), as for <see cref="RestartWatchdog"/>: the
+    /// process this task starts is the relaunched app itself, and Task Scheduler stops a task's
+    /// process at its limit. The <c>PT5M</c> this had before only spared the app because the task
+    /// is deleted (cancelled at launch, or expired) before the limit is reached, and a deleted
+    /// task's instance is no longer timed; <c>PT0S</c> stops that from depending on the delete.
     /// </summary>
     public static string BuildTaskXml(string exePath, string arguments, DateTime startAt, TimeSpan triggerWindow)
     {
@@ -162,7 +143,7 @@ public static class UpdateRelaunchTask
                 <Enabled>true</Enabled>
                 <Hidden>true</Hidden>
                 <AllowHardTerminate>true</AllowHardTerminate>
-                <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
                 <DeleteExpiredTaskAfter>PT30S</DeleteExpiredTaskAfter>
                 <Priority>7</Priority>
               </Settings>

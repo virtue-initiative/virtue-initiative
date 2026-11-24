@@ -19,7 +19,9 @@ use clap::{Args, Parser, Subcommand};
 #[cfg(debug_assertions)]
 use virtue_core::ScreenshotSkipReason;
 use virtue_core::ipc::ClientController;
-use virtue_core::{ScreenshotHooks, ServiceStatus, StatusSkipReason, Upload, UploadKind};
+use virtue_core::{
+    AnnouncementLevel, ScreenshotHooks, ServiceStatus, StatusSkipReason, Upload, UploadKind,
+};
 
 use crate::capture::{CaptureBackend, LinuxPlatformHooks, detect_backend, probe_backend};
 use crate::config::{ClientPaths, build_core_config, default_device_name, load_service_status};
@@ -631,6 +633,18 @@ fn status(paths: ClientPaths, detail: StatusDetail, json: bool) -> Result<()> {
         Tone::Bad => style::bad(headline.text),
     };
     println!("{}", style::heading(&painted));
+    // CLIENT-033. Signing out clears it with the rest of the state.
+    if let Some(announcement) = &status.announcement {
+        let label = match announcement.level {
+            AnnouncementLevel::Info => style::dim("Note:"),
+            AnnouncementLevel::Warning => style::warn("Important:"),
+            AnnouncementLevel::Urgent => style::bad("Important:"),
+        };
+        println!("{label} {}", announcement.message);
+        if let Some(url) = &announcement.url {
+            println!("{}", style::link(url));
+        }
+    }
     let print_fix = || {
         if !headline.fix_commands.is_empty() {
             let commands: Vec<String> = headline

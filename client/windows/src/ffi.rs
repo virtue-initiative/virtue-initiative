@@ -178,6 +178,9 @@ struct MonitorStatusPayload {
     batch_window_seconds: Option<u64>,
     last_error: Option<String>,
     log_directory: Option<String>,
+    /// CLIENT-033. Its own fields (`message`, `url`, `level`) are already the
+    /// same in camelCase.
+    announcement: Option<virtue_core::DeviceAnnouncement>,
 }
 
 /// What a "Test Screenshot" run did, mirrored by the C# `ForceCapturePayload`
@@ -243,6 +246,7 @@ impl From<MonitorStatusSnapshot> for MonitorStatusPayload {
             log_directory: ClientPaths::discover()
                 .ok()
                 .map(|paths| paths.log_dir.display().to_string()),
+            announcement: core.as_ref().and_then(|s| s.announcement.clone()),
         }
     }
 }
@@ -669,7 +673,7 @@ mod tests {
         assert_eq!(error, "email is required");
     }
 
-    // CLIENT-015: monitor status JSON carries state, loggedIn, pendingRequestCount, lastError, the CORE-010 fields and logDirectory.
+    // CLIENT-015, CLIENT-033: monitor status JSON carries state, loggedIn, pendingRequestCount, lastError, the CORE-010 fields (announcement among them) and logDirectory.
     #[test]
     fn monitor_status_json_contract_is_stable() {
         let _guard = test_lock().lock().expect("test lock");
@@ -700,6 +704,7 @@ mod tests {
             "captureIntervalSeconds",
             "batchWindowSeconds",
             "logDirectory",
+            "announcement",
         ] {
             assert!(json.get(key).is_some(), "missing key: {key}");
         }

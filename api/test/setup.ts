@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS devices (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
+  app_version TEXT,
   FOREIGN KEY (owner) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner);
@@ -125,6 +126,16 @@ CREATE TABLE IF NOT EXISTS admins (
 CREATE TABLE IF NOT EXISTS analytics_snapshots (
   day TEXT PRIMARY KEY,
   metrics TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id BLOB PRIMARY KEY,
+  message TEXT NOT NULL,
+  url TEXT,
+  level TEXT NOT NULL CHECK (level IN ('info', 'warning', 'urgent')),
+  platforms TEXT,
+  below_version TEXT,
   created_at INTEGER NOT NULL
 );
 

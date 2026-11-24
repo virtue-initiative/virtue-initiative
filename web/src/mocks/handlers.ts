@@ -3,6 +3,7 @@ import { CURRENT_API_VERSION } from '@virtueinitiative/shared-web/api-version';
 import {
   TEST_ANALYTICS_SNAPSHOT,
   TEST_FEATURE_FLAG,
+  TEST_ANNOUNCEMENT,
   TEST_DEVICES,
   TEST_LOCKED_PASSWORD,
   TEST_USER,
@@ -119,6 +120,16 @@ export const handlers = [
   }),
   http.delete(`${BASE}/admin/flags/:key`, () => new HttpResponse(null, { status: 204 })),
   http.put(`${BASE}/admin/flags/:key/users`, () => HttpResponse.json(TEST_FEATURE_FLAG)),
+  http.get(`${BASE}/admin/announcements`, () => HttpResponse.json([TEST_ANNOUNCEMENT])),
+  http.post(`${BASE}/admin/announcements`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      ...TEST_ANNOUNCEMENT,
+      ...body,
+      id: '00000000-0000-4000-8000-00000000a002',
+    });
+  }),
+  http.delete(`${BASE}/admin/announcements/:id`, () => new HttpResponse(null, { status: 204 })),
 
   http.get(`${BASE}/locked-password`, () => HttpResponse.json([TEST_LOCKED_PASSWORD])),
   http.post(`${BASE}/locked-password`, () => HttpResponse.json({ id: 'new-password-1' })),

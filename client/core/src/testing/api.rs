@@ -133,6 +133,7 @@ impl Default for MockApiState {
                 }],
                 hash_base_url: None,
                 feature_flags: Vec::new(),
+                announcement: None,
             },
             batch_id_counter: 0,
             server_clock: None,

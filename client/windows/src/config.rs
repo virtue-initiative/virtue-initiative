@@ -18,13 +18,29 @@ pub struct ClientPaths {
     pub log_dir: PathBuf,
 }
 
+/// Set by the WinUI app before it calls into this library, to the base directory it chose
+/// (CLIENT-002): the package's own `LocalState\Virtue` for a packaged install, so the OS deletes
+/// the state at uninstall. When unset (an unpackaged or dev run, the CI runner, tests) the base
+/// directory is `%PROGRAMDATA%\Virtue`.
+pub const BASE_DIR_ENV: &str = "VIRTUE_WINDOWS_BASE_DIR";
+
 impl ClientPaths {
     pub fn discover() -> Result<Self> {
-        let program_data = std::env::var_os("PROGRAMDATA")
-            .context("PROGRAMDATA environment variable is not set")?;
-        Ok(Self::from_base_dir(
-            PathBuf::from(program_data).join("Virtue"),
-        ))
+        Ok(Self::from_base_dir(Self::discover_base_dir(
+            std::env::var_os(BASE_DIR_ENV),
+            std::env::var_os("PROGRAMDATA"),
+        )?))
+    }
+
+    fn discover_base_dir(
+        base_dir: Option<std::ffi::OsString>,
+        program_data: Option<std::ffi::OsString>,
+    ) -> Result<PathBuf> {
+        if let Some(base_dir) = base_dir.filter(|value| !value.is_empty()) {
+            return Ok(PathBuf::from(base_dir));
+        }
+        let program_data = program_data.context("PROGRAMDATA environment variable is not set")?;
+        Ok(PathBuf::from(program_data).join("Virtue"))
     }
 
     pub fn from_base_dir(base_dir: PathBuf) -> Self {
@@ -135,4 +151,36 @@ fn replace_file(tmp: &Path, destination: &Path) -> Result<()> {
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    // CLIENT-002: the base directory the app hands over wins over the ProgramData default.
+    #[test]
+    fn base_dir_from_the_app_wins_over_program_data() {
+        let base = ClientPaths::discover_base_dir(
+            Some(OsString::from(
+                r"C:\Users\u\AppData\Local\Packages\pkg\LocalState\Virtue",
+            )),
+            Some(OsString::from(r"C:\ProgramData")),
+        )
+        .expect("base dir");
+        assert_eq!(
+            base,
+            PathBuf::from(r"C:\Users\u\AppData\Local\Packages\pkg\LocalState\Virtue")
+        );
+    }
+
+    // CLIENT-002: an unpackaged run, with no base directory handed over, uses ProgramData.
+    #[test]
+    fn without_a_base_dir_falls_back_to_program_data() {
+        for unset in [None, Some(OsString::new())] {
+            let base = ClientPaths::discover_base_dir(unset, Some(OsString::from("pd")))
+                .expect("base dir");
+            assert_eq!(base, PathBuf::from("pd").join("Virtue"));
+        }
+    }
 }

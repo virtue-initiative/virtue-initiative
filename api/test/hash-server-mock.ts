@@ -18,15 +18,25 @@ export const HASH_SERVER_ORIGIN = 'https://example.com';
 export interface MockHashState {
   hash: string;
   seq: number;
+  /** HASH-007; left out to act like a hash server that predates it. */
+  first_seq?: number;
   last_received: number;
 }
 
-const ZERO_STATE: MockHashState = { hash: '0'.repeat(64), seq: 0, last_received: 0 };
+const ZERO_STATE: MockHashState = { hash: '0'.repeat(64), seq: 0, first_seq: 0, last_received: 0 };
 
 const states = new Map<string, MockHashState>();
 
+let beforeReset: ((deviceId: string) => void) | null = null;
+
 export function resetHashServerMock(): void {
   states.clear();
+  beforeReset = null;
+}
+
+/** Runs `hook` when a DELETE arrives, before the mock checks `seq` or resets anything. */
+export function onHashReset(hook: ((deviceId: string) => void) | null): void {
+  beforeReset = hook;
 }
 
 export function seedHashState(deviceId: string, state: MockHashState): void {
@@ -79,7 +89,16 @@ export function installHashServerMock(): void {
 
       if (opts.method === 'DELETE') {
         const id = url.searchParams.get('device') ?? '';
+        beforeReset?.(id);
         const prior = states.get(id) ?? ZERO_STATE;
+        // HASH-008: with `seq`, reset only if the device is still at it.
+        const expected = url.searchParams.get('seq');
+        if (expected !== null && Number(expected) !== prior.seq) {
+          return {
+            statusCode: 409,
+            data: JSON.stringify({ code: 'sequence_conflict', message: 'seq moved' }),
+          };
+        }
         states.set(id, { ...ZERO_STATE });
         return { statusCode: 200, data: JSON.stringify(prior) };
       }

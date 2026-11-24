@@ -1,4 +1,5 @@
 import { DAY_MS } from './digest-schedule';
+import type { Announcement } from '../../../shared-web/types';
 
 type SqlValue = string | number | ArrayBuffer | Uint8Array | null;
 
@@ -476,11 +477,27 @@ export async function changeUserPassword(
 
 export async function createDevice(
   db: D1Database,
-  input: { id: string; owner: string; name: string; platform: string },
+  input: {
+    id: string;
+    owner: string;
+    name: string;
+    platform: string;
+    app_version: string | null;
+  },
 ) {
   return db
-    .prepare('INSERT INTO devices (id, owner, name, platform, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(uuidToBytes(input.id), uuidToBytes(input.owner), input.name, input.platform, Date.now())
+    .prepare(
+      `INSERT INTO devices (id, owner, name, platform, app_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      uuidToBytes(input.owner),
+      input.name,
+      input.platform,
+      input.app_version,
+      Date.now(),
+    )
     .run();
 }
 
@@ -490,13 +507,25 @@ export async function findDeviceById(db: D1Database, deviceId: string) {
     owner: string;
     name: string;
     platform: string;
+    app_version: string | null;
     created_at: number;
   }>(
     db
-      .prepare('SELECT id, owner, name, platform, created_at FROM devices WHERE id = ?')
+      .prepare(
+        'SELECT id, owner, name, platform, app_version, created_at FROM devices WHERE id = ?',
+      )
       .bind(uuidToBytes(deviceId)),
     ['id', 'owner'],
   );
+}
+
+// API-036: callers write only when the version changed, so a settings fetch
+// or batch upload usually costs no write.
+export async function setDeviceAppVersion(db: D1Database, deviceId: string, appVersion: string) {
+  await db
+    .prepare('UPDATE devices SET app_version = ? WHERE id = ?')
+    .bind(appVersion, uuidToBytes(deviceId))
+    .run();
 }
 
 export async function findOwnedDevice(db: D1Database, deviceId: string, ownerId: string) {
@@ -659,6 +688,17 @@ export async function createBatch(
       input.created_at,
       deviceIdBytes,
     )
+    .run();
+}
+
+/** Deletes one batch row by its full primary key. */
+export async function deleteBatch(
+  db: D1Database,
+  input: { id: string; user_id: string; created_at: number },
+) {
+  return db
+    .prepare('DELETE FROM batches WHERE user_id = ? AND created_at = ? AND id = ?')
+    .bind(uuidToBytes(input.user_id), input.created_at, uuidToBytes(input.id))
     .run();
 }
 
@@ -1574,5 +1614,60 @@ export async function setUserFlagOverride(
           )
           .bind(path, enabled ? 'true' : 'false', email);
   const result = await statement.run();
+  return result.meta.changes > 0;
+}
+
+// ── Announcements (API-068) ──────────────────────────────────────────────────
+
+type AnnouncementRow = Omit<Announcement, 'platforms'> & { platforms: string | null };
+
+// Platforms are stored as a JSON array. Anything else counts as every platform
+// rather than failing a device's settings request.
+function parseAnnouncementPlatforms(json: string | null): string[] | null {
+  if (json === null) return null;
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+// Newest first, which is the order API-069 returns and API-068 picks from.
+export async function listAnnouncements(db: D1Database): Promise<Announcement[]> {
+  const rows = await allWithUuidFields<AnnouncementRow>(
+    db.prepare(
+      `SELECT id, message, url, level, platforms, below_version, created_at
+       FROM announcements
+       ORDER BY created_at DESC, id DESC`,
+    ),
+    ['id'],
+  );
+  return rows.map((row) => ({ ...row, platforms: parseAnnouncementPlatforms(row.platforms) }));
+}
+
+export async function createAnnouncement(db: D1Database, input: Announcement) {
+  await db
+    .prepare(
+      `INSERT INTO announcements (id, message, url, level, platforms, below_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      uuidToBytes(input.id),
+      input.message,
+      input.url,
+      input.level,
+      input.platforms === null ? null : JSON.stringify(input.platforms),
+      input.below_version,
+      input.created_at,
+    )
+    .run();
+}
+
+export async function deleteAnnouncement(db: D1Database, id: string) {
+  const result = await db
+    .prepare('DELETE FROM announcements WHERE id = ?')
+    .bind(uuidToBytes(id))
+    .run();
   return result.meta.changes > 0;
 }

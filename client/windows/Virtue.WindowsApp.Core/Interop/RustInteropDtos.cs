@@ -13,6 +13,16 @@ public sealed record StatusErrorPayload(
     string Message);
 
 /// <summary>
+/// A message for the person using this device (client/SPEC.md CLIENT-033).
+/// <c>Level</c> is <c>info</c>, <c>warning</c> or <c>urgent</c>; anything else
+/// is shown as <c>info</c>.
+/// </summary>
+public sealed record AnnouncementPayload(
+    string Message,
+    string? Url,
+    string Level);
+
+/// <summary>
 /// The shared status-page payload (client/core/SPEC.md CORE-010) plus the
 /// Windows-only monitor state, last error, and log directory. The new members
 /// are optional so the existing positional constructions (tests, defaults)
@@ -40,7 +50,8 @@ public sealed record MonitorStatusPayload(
     long? CaptureIntervalSeconds = null,
     long? BatchWindowSeconds = null,
     string? LogDirectory = null,
-    string? WebAppUrl = null);
+    string? WebAppUrl = null,
+    AnnouncementPayload? Announcement = null);
 
 /// <summary>
 /// What a "Test Screenshot" run actually did, once its batch has had a chance

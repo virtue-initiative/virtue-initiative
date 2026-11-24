@@ -24,8 +24,8 @@
 //   virtue-windows-ci-runner --email <email> --password <password>
 //     --device-name <name> --run-duration-seconds N
 //
-// Respects the PROGRAMDATA environment variable for isolation, same as the
-// product code (`ClientPaths::discover`).
+// Respects the PROGRAMDATA environment variable for isolation, as an unpackaged
+// run of the product code does (`ClientPaths::discover`).
 
 use std::process::ExitCode;
 use std::thread;

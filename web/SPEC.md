@@ -496,6 +496,14 @@ The section MUST list every flag (API-062) with its key, rollout ("Overrides onl
 - The admin MUST be able to set an override on or off by user email, and remove one (API-065).
 - **Delete flag** MUST confirm that it turns off for everyone and loses its overrides (API-064).
 
+### WEB-072 Announcements
+
+The section MUST list every announcement (API-069), newest first, with its message, link, level ("Info", "Warning" or "Urgent"), platforms ("All platforms" when unset), version rule ("Versions below N", or "All versions" when unset) and when it was created. With none it MUST say "No announcements. Devices show nothing."
+
+- A new announcement MUST take a message of 1 to 280 characters, an optional https link, a level (default Info), a choice of platforms (default all) and an optional "show only below version" (API-070).
+- The form MUST say that devices pick it up when they next fetch their settings, about once an hour.
+- **Delete** MUST confirm before it removes the announcement from every device (API-071).
+
 ## WEB-070 Page not found
 
 An unknown path MUST show "Page not found" with an explanation and buttons to the dashboard and Settings.

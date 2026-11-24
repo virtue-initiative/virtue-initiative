@@ -83,6 +83,9 @@ export interface SeedDevice {
   riskiness: number;
   // Days ago (0 = today) the device uploaded nothing, e.g. left at home.
   quietDays: number[];
+  // The client version it last reported (API-036), or null for an old client.
+  // Mixes 0.9.x and 0.10.x so the "Devices by version" preset's sort shows.
+  appVersion: string | null;
 }
 
 export const DEVICES: SeedDevice[] = [
@@ -94,6 +97,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'desktop',
     riskiness: 0.15,
     quietDays: [],
+    appVersion: '0.10.0',
   },
   {
     idHex: 'd0000000000040008000000000000002',
@@ -103,6 +107,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'phone',
     riskiness: 0.15,
     quietDays: [3],
+    appVersion: '0.9.2',
   },
   {
     idHex: 'd0000000000040008000000000000003',
@@ -112,6 +117,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'desktop',
     riskiness: 1,
     quietDays: [],
+    appVersion: '0.9.2',
   },
   {
     idHex: 'd0000000000040008000000000000004',
@@ -121,6 +127,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'desktop',
     riskiness: 1,
     quietDays: [2, 5],
+    appVersion: '0.9.2',
   },
   {
     idHex: 'd0000000000040008000000000000005',
@@ -130,6 +137,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'phone',
     riskiness: 1,
     quietDays: [],
+    appVersion: '0.10.1-dev',
   },
   {
     idHex: 'd0000000000040008000000000000006',
@@ -140,6 +148,7 @@ export const DEVICES: SeedDevice[] = [
     riskiness: 1,
     // Not seen for the last couple of days, so it shows as offline.
     quietDays: [0, 1],
+    appVersion: null,
   },
   {
     idHex: 'd0000000000040008000000000000007',
@@ -149,6 +158,7 @@ export const DEVICES: SeedDevice[] = [
     form: 'desktop',
     riskiness: 0,
     quietDays: [],
+    appVersion: '0.9.0',
   },
 ];
 
