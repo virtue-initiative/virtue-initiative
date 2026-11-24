@@ -379,7 +379,7 @@ export function Logs({ userId: routeUserId }: { userId?: string }) {
                   type="button"
                   onClick={() => filterDialogRef.current?.showModal()}
                 >
-                  Edit Search
+                  Edit search
                 </Button>
               </div>
               <div class="logs-header-view-controls">

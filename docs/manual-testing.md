@@ -67,8 +67,8 @@ Install the MSIX and launch from Start.
 4. Reboot the machine; confirm zero-risk login and logout entries, no Screenshot Missed entry, and that monitoring restarts via the startup task without re-login.
 5. Sign out of the Windows user session and back in; confirm a zero-risk logout entry and no Screenshot Missed entry.
 6. Use tray → Exit; confirm the confirmation prompt, a Monitoring Stopped by User entry and email, and a Monitoring Resumed by User entry with no Screenshot Missed entry when you start Virtue again.
-7. Select **Stop Monitoring** in the window; confirm the same prompt and entries as tray → Exit.
-8. Open the window menu (**☰**) and choose **Sign Out**; confirm the confirmation prompt, that the device shows Deactivated, and that partners are emailed.
+7. Select **Stop monitoring** in the window; confirm the same prompt and entries as tray → Exit.
+8. Open the window menu (**☰**) and choose **Sign out**; confirm the confirmation prompt, that the device shows Deactivated, and that partners are emailed.
 9. Force-kill `Virtue.WindowsApp.exe` from Task Manager (End Task); confirm the watchdog relaunches it within a minute and no entry is logged.
 10. Disable the `VirtueTrayStartup` task and reboot, then start Virtue by hand more than 2 minutes after signing in; confirm a Screenshot Missed entry.
 

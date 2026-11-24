@@ -128,8 +128,8 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock _headline = new();
     private readonly TextBlock _sentence = new();
     private readonly Button _partnersButton = CreatePrimaryButton(string.Empty);
-    private readonly Button _reportFromHomeButton = CreatePrimaryButton("Report an Issue");
-    private readonly Button _stopButton = CreateSecondaryButton("Stop Monitoring");
+    private readonly Button _reportFromHomeButton = CreatePrimaryButton("Report an issue");
+    private readonly Button _stopButton = CreateSecondaryButton("Stop monitoring");
     private readonly InfoBar _homeError = CreateErrorBar();
     private readonly Border _announcementHost = new();
     private AnnouncementPayload? _shownAnnouncement;
@@ -141,7 +141,7 @@ public sealed partial class MainWindow : Window
     private readonly RadioButton _selfHostedServerRadio = new() { Content = "Self-hosted", GroupName = "server" };
     private readonly TextBox _serverAddressTextBox = new();
     private HyperlinkButton? _signUpLink;
-    private readonly Button _signInButton = CreatePrimaryButton("Sign In");
+    private readonly Button _signInButton = CreatePrimaryButton("Sign in");
     private string? _ringKey;
 
     // Sub-screens. Status Details is built once and updated in place, so the
@@ -167,7 +167,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBox _reportEmailBox = new();
     private readonly CheckBox _reportLogsCheckBox = new();
     private readonly InfoBar _reportError = CreateErrorBar();
-    private readonly Button _sendReportButton = CreatePrimaryButton("Send Report");
+    private readonly Button _sendReportButton = CreatePrimaryButton("Send report");
 
     public MainWindow(SessionViewModel viewModel)
     {
@@ -604,26 +604,26 @@ public sealed partial class MainWindow : Window
         menu.Items.Clear();
         if (ViewModel.LoggedIn)
         {
-            var test = CreateMenuItem("Test Screenshot", "");
+            var test = CreateMenuItem("Test screenshot", "");
             test.IsEnabled = !ViewModel.IsBusy;
             test.Click += async (_, _) => await ForceCaptureAsync();
             menu.Items.Add(test);
             menu.Items.Add(new MenuFlyoutSeparator());
         }
 
-        var details = CreateMenuItem("Status Details", "");
+        var details = CreateMenuItem("Status details", "");
         details.Click += (_, _) => Navigate(Screen.Details);
         menu.Items.Add(details);
 
-        var monitors = CreateMenuItem("What Virtue Monitors", "");
+        var monitors = CreateMenuItem("What Virtue monitors", "");
         monitors.Click += (_, _) => Navigate(Screen.Monitors);
         menu.Items.Add(monitors);
 
-        var report = CreateMenuItem("Report an Issue", "");
+        var report = CreateMenuItem("Report an issue", "");
         report.Click += (_, _) => Navigate(Screen.Report);
         menu.Items.Add(report);
 
-        var updates = CreateMenuItem("Check for Updates", "");
+        var updates = CreateMenuItem("Check for updates", "");
         updates.Click += (_, _) =>
         {
             _watchingUpdateCheck = true;
@@ -634,7 +634,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel.LoggedIn)
         {
             menu.Items.Add(new MenuFlyoutSeparator());
-            var signOut = CreateMenuItem("Sign Out", "");
+            var signOut = CreateMenuItem("Sign out", "");
             signOut.Foreground = BadBrush;
             signOut.Resources["MenuFlyoutItemForeground"] = BadBrush;
             signOut.Resources["MenuFlyoutItemForegroundPointerOver"] = BadBrush;
@@ -834,9 +834,9 @@ public sealed partial class MainWindow : Window
         _backTitle.Visibility = VisibleIf(screen != Screen.Home);
         _screenTitle.Text = screen switch
         {
-            Screen.Details => "Status Details",
-            Screen.Monitors => "What Virtue Monitors",
-            Screen.Report => "Report an Issue",
+            Screen.Details => "Status details",
+            Screen.Monitors => "What Virtue monitors",
+            Screen.Report => "Report an issue",
             _ => string.Empty,
         };
 
@@ -1035,9 +1035,9 @@ public sealed partial class MainWindow : Window
         _passwordBox.IsEnabled = !busy;
         _deviceNameTextBox.IsEnabled = !busy;
         _signInButton.IsEnabled = !busy;
-        _signInButton.Content = busy && ViewModel.TransitionMessage == "Signing in..." ? "Signing in..." : "Sign In";
+        _signInButton.Content = busy && ViewModel.TransitionMessage == "Signing in..." ? "Signing in..." : "Sign in";
         _sendReportButton.IsEnabled = !busy;
-        _sendReportButton.Content = busy && ViewModel.TransitionMessage == "Sending report..." ? "Sending..." : "Send Report";
+        _sendReportButton.Content = busy && ViewModel.TransitionMessage == "Sending report..." ? "Sending..." : "Send report";
 
         var error = _errorScreen == _screen ? ViewModel.ErrorText : null;
         SetError(_signInError, _screen == Screen.Home && signedOut ? error : null);
@@ -1186,7 +1186,7 @@ public sealed partial class MainWindow : Window
     {
         _showAdvanced = open;
         _advancedChevron.Glyph = open ? "" : "";
-        AutomationProperties.SetName(_advancedToggle, open ? "Hide Advanced" : "Show Advanced");
+        AutomationProperties.SetName(_advancedToggle, open ? "Hide advanced" : "Show advanced");
         _advancedGroup.Root.Visibility = VisibleIf(open);
     }
 
@@ -1334,7 +1334,7 @@ public sealed partial class MainWindow : Window
         {
             // The interop call waited for the batch, so `result.Message` says
             // what really happened: uploaded, gated, or still in flight.
-            await ShowMessageAsync(result.Outcome == "uploaded" ? "Screenshot Uploaded" : "Test Screenshot", result.Message);
+            await ShowMessageAsync(result.Outcome == "uploaded" ? "Screenshot uploaded" : "Test screenshot", result.Message);
         }
     }
 
@@ -1363,7 +1363,7 @@ public sealed partial class MainWindow : Window
         }
 
         _reportDraftOpen = false;
-        await ShowMessageAsync("Report Sent", "Thanks, your report was sent to the Virtue Initiative team.");
+        await ShowMessageAsync("Report sent", "Thanks, your report was sent to the Virtue Initiative team.");
         // Only leave the form; the user may have moved on while it sent.
         if (_screen == Screen.Report)
         {
@@ -1377,7 +1377,7 @@ public sealed partial class MainWindow : Window
             "Stop monitoring and close Virtue?",
             "This will stop monitoring on this device and close the main window and tray app.",
             "People monitoring you may be alerted.",
-            "Stop Monitoring");
+            "Stop monitoring");
     }
 
     private async Task<bool> ShowLogoutConfirmationAsync()
@@ -1386,7 +1386,7 @@ public sealed partial class MainWindow : Window
             "Sign out of Virtue?",
             "Signing out will deactivate this device and stop monitoring. Logging in again will create a new device.",
             "Anyone monitoring you may be alerted.",
-            "Sign Out");
+            "Sign out");
     }
 
     /// <summary>

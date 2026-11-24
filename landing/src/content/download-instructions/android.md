@@ -33,7 +33,7 @@ Virtue is not in the Play Store yet, so you install it from a downloaded file. T
 <p data-min="13">Android blocks Accessibility access for apps installed from a downloaded file. The first three steps unlock it.</p>
 <ol>
 <li>
-Open <strong>Settings</strong>, then <strong>Accessibility</strong>. You can also tap <strong>Open Accessibility Settings</strong> in the Virtue app. Under <strong><span data-max="10">Downloaded services</span><span data-min="12">Downloaded apps</span></strong>, tap <strong>Virtue Screen Monitor</strong>.<span data-min="13"> It is grayed out, which is expected.</span>
+Open <strong>Settings</strong>, then <strong>Accessibility</strong>. You can also tap <strong>Open Accessibility settings</strong> in the Virtue app. Under <strong><span data-max="10">Downloaded services</span><span data-min="12">Downloaded apps</span></strong>, tap <strong>Virtue Screen Monitor</strong>.<span data-min="13"> It is grayed out, which is expected.</span>
 <img data-max="10" src="/images/android-setup/a11y_list_v10.webp" alt="Accessibility settings on Android 10, with Virtue Screen Monitor highlighted under Downloaded services">
 <img data-min="12" data-max="12" src="/images/android-setup/a11y_list_v12.webp" alt="Accessibility settings on Android 12, with Virtue Screen Monitor highlighted under Downloaded apps">
 <img data-min="13" data-max="14" src="/images/android-setup/a11y_list_v13.webp" alt="Accessibility settings on Android 13, with the grayed-out Virtue Screen Monitor highlighted">
@@ -48,7 +48,7 @@ Android shows <strong><span data-max="14">Restricted setting</span><span data-mi
 <img data-min="17" src="/images/android-setup/a11y_restricted_v17.webp" alt="The App was denied access message on Android 17, with Close highlighted">
 </li>
 <li data-min="13">
-<span data-max="13">In the Virtue app, tap <strong>Open App List</strong>, then tap <strong>Virtue</strong>. You can also open <strong>Settings</strong>, tap <strong>Apps</strong>, and find Virtue in the list of all apps.</span><span data-min="14">In the Virtue app, tap <strong>Open App Info</strong>. You can also open <strong>Settings</strong>, tap <strong>Apps</strong>, and tap <strong>Virtue</strong>.</span> On the App info screen, tap <strong>⋮</strong> in the top corner, then tap <strong>Allow restricted settings</strong>. Enter your PIN if Android asks for it.
+<span data-max="13">In the Virtue app, tap <strong>Open app list</strong>, then tap <strong>Virtue</strong>. You can also open <strong>Settings</strong>, tap <strong>Apps</strong>, and find Virtue in the list of all apps.</span><span data-min="14">In the Virtue app, tap <strong>Open app info</strong>. You can also open <strong>Settings</strong>, tap <strong>Apps</strong>, and tap <strong>Virtue</strong>.</span> On the App info screen, tap <strong>⋮</strong> in the top corner, then tap <strong>Allow restricted settings</strong>. Enter your PIN if Android asks for it.
 <img data-min="13" data-max="14" src="/images/android-setup/a11y_menu_v13.webp" alt="Virtue's App info screen with the menu open and Allow restricted settings highlighted">
 <img data-min="15" data-max="16" src="/images/android-setup/a11y_menu_v15.webp" alt="Virtue's App info screen on Android 15 with Allow restricted settings highlighted">
 <img data-min="17" src="/images/android-setup/a11y_menu_v17.webp" alt="Virtue's App info screen on Android 17 with Allow restricted settings highlighted">
@@ -79,7 +79,7 @@ Tap <strong>Allow</strong> to let Virtue capture screenshots.
 
 Virtue checks for new versions on its own and downloads them over Wi-Fi.
 
-1. When an update is ready, tap the **Virtue update available** notification. You can also tap **Install Update** in the Virtue app.
+1. When an update is ready, tap the **Virtue update available** notification. You can also tap **Install update** in the Virtue app.
 2. The first time, Android says your phone is not allowed to install unknown apps from this source. Tap **Settings**, then turn on **Allow from this source**. On Android 10 and 11, go back afterward.
 3. Tap **Update**.
 

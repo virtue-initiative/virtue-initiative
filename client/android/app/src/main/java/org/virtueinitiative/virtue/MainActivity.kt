@@ -901,7 +901,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The guide's "Request Permissions" button (CLIENT-030). Notifications must be
+     * The guide's "Request permissions" button (CLIENT-030). Notifications must be
      * allowed before sign-in; the battery exemption is optional. Each tap moves on to whatever is still missing, so it never does
      * nothing while the button is enabled.
      */
@@ -914,7 +914,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Home's "Allow Notifications" button: the prompt, or the app's notification settings once Android won't show it. */
+    /** Home's "Allow notifications" button: the prompt, or the app's notification settings once Android won't show it. */
     private fun requestNotifications() {
         if (canPromptForNotifications()) {
             promptForNotifications(askBattery = false)

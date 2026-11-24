@@ -17,20 +17,20 @@ and most problems show up there.
 | **Screen Recording off** (Mac)                                           | Follow the steps in the app to turn on Screen Recording for Virtue.                      |
 | **Accessibility is off** (Android)                                       | Follow the steps in the app to turn Accessibility back on for Virtue.                    |
 | **Setup not finished** or **Safari permission needed** (iPhone and iPad) | Work through the setup steps the app shows. Virtue can only capture Safari.              |
-| **Monitoring needs attention** (Windows)                                 | Read the message under it, then use **Report an Issue** in the app if it does not clear. |
+| **Monitoring needs attention** (Windows)                                 | Read the message under it, then use **Report an issue** in the app if it does not clear. |
 
 On Linux, run `virtue status` to see the same information.
 
 ## Screenshots that are skipped on purpose
 
 Virtue skips a screenshot when the screen has not changed since the last one, and when the screen
-is locked or the screensaver is on. These are normal. **Status Details**, in the app's menu, shows
+is locked or the screensaver is on. These are normal. The status details screen, in the app's menu, shows
 the last screenshot taken and the reason the last one was skipped.
 
 ## Take a test screenshot
 
-Choose **Test Screenshot** in the app's menu. On Android, tap **Take Test Screenshot** under
-**Advanced** in **Status Details**. On Linux, run `virtue test-screenshot`. Virtue waits 10
+On Mac, choose **Test Screenshot** in the app's menu, and on Windows, **Test screenshot**. On
+Android, tap **Take test screenshot** under **Advanced** in **Status details**. On Linux, run `virtue test-screenshot`. Virtue waits 10
 seconds so you can bring up the screen you want, then tells you whether the screenshot was
 uploaded or why it was not. An uploaded test screenshot appears on your **Logs** page in the web
 app.

@@ -17,7 +17,7 @@ type ReportBugButtonProps = {
   label?: string;
 };
 
-export function ReportBugButton({ variant, label = 'Report an Issue' }: ReportBugButtonProps) {
+export function ReportBugButton({ variant, label = 'Report an issue' }: ReportBugButtonProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [message, setMessage] = useState('');
   const [contactEmail, setContactEmail] = useState('');

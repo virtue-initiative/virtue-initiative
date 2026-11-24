@@ -46,7 +46,7 @@ build never replaces itself with the stable APK.
   different key.
 - It installs through a `PackageInstaller` session. After a manual sideload, the system
   package installer is the installer of record, so the first update needs the user: a
-  notification and an **Install Update** button in the status card start the session from
+  notification and an **Install update** button in the status card start the session from
   the foreground (a background app can't open Android's confirmation dialog). If "Install
   unknown apps" is off for Virtue, Android's dialog sends the user to that switch and comes
   back on its own (Android 12+; on 10 and 11 the user presses Back). After that, Virtue is

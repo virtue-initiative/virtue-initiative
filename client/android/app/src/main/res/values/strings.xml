@@ -25,26 +25,26 @@
     <string name="device_name_hint">Device name</string>
 
     <!-- Buttons -->
-    <string name="btn_sign_in">Sign In</string>
-    <string name="btn_signing_in">Signing In…</string>
+    <string name="btn_sign_in">Sign in</string>
+    <string name="btn_signing_in">Signing in…</string>
     <string name="btn_sign_up">Don\'t have an account? Sign up</string>
     <string name="server_label">Server</string>
     <string name="server_virtue_initiative">Virtue Initiative</string>
     <string name="server_self_hosted">Self-hosted</string>
     <string name="server_address_hint">Server address</string>
     <string name="msg_server_required">Server address is required.</string>
-    <string name="btn_sign_out">Sign Out</string>
-    <string name="btn_status_details">Status Details</string>
-    <string name="btn_pause_monitoring">Pause Monitoring</string>
-    <string name="btn_resume_monitoring">Resume Monitoring</string>
+    <string name="btn_sign_out">Sign out</string>
+    <string name="btn_status_details">Status details</string>
+    <string name="btn_pause_monitoring">Pause monitoring</string>
+    <string name="btn_resume_monitoring">Resume monitoring</string>
     <string name="btn_done">Done</string>
     <string name="btn_open_log">Open log file</string>
     <string name="open_log_chooser">Open Virtue log</string>
     <string name="open_log_unavailable">No log file has been written yet.</string>
     <string name="open_log_no_viewer">No app on this device can open a text file.</string>
-    <string name="btn_report_bug">Report an Issue</string>
-    <string name="btn_send_report">Send Report</string>
-    <string name="btn_install_update">Install Update %1$s</string>
+    <string name="btn_report_bug">Report an issue</string>
+    <string name="btn_send_report">Send report</string>
+    <string name="btn_install_update">Install update %1$s</string>
 
     <!-- App updates -->
     <string name="update_channel_name">App updates</string>
@@ -54,9 +54,9 @@
     <!-- Messages -->
     <string name="msg_sign_in_required_fields">Enter your email and password.</string>
     <string name="msg_sign_in_failed">Sign in failed. %1$s</string>
-    <string name="btn_open_accessibility_settings">Open Accessibility Settings</string>
-    <string name="btn_open_app_info">Open App Info</string>
-    <string name="btn_open_app_list">Open App List</string>
+    <string name="btn_open_accessibility_settings">Open Accessibility settings</string>
+    <string name="btn_open_app_info">Open app info</string>
+    <string name="btn_open_app_list">Open app list</string>
     <string name="msg_core_init_failed">Setup failed to complete: %s. Please close and reopen the app.</string>
     <string name="msg_force_capture_started">Screenshot uploading…</string>
     <string name="msg_force_capture_needs_accessibility">Turn on Accessibility to take a test screenshot.</string>
@@ -72,17 +72,17 @@
     <string name="dialog_resume_title">Resume monitoring?</string>
     <string name="dialog_resume_message">Resume monitoring on this device?</string>
     <string name="dialog_cancel">Cancel</string>
-    <string name="dialog_report_bug_title">Report an Issue</string>
+    <string name="dialog_report_bug_title">Report an issue</string>
     <string name="report_bug_description_hint">Describe the issue</string>
     <string name="report_bug_message_required">Please describe the issue.</string>
     <string name="report_bug_send_failed">Failed to send the report.</string>
-    <string name="dialog_report_sent_title">Report Sent</string>
+    <string name="dialog_report_sent_title">Report sent</string>
     <string name="dialog_report_sent_message">Thanks, your report was sent to the Virtue Initiative team.</string>
 
     <!-- Home -->
     <string name="menu_more_options">More options</string>
-    <string name="menu_setup_steps">Setup Steps</string>
-    <string name="menu_what_virtue_monitors">What Virtue Monitors</string>
+    <string name="menu_setup_steps">Setup steps</string>
+    <string name="menu_what_virtue_monitors">What Virtue monitors</string>
     <string name="menu_build">Build %1$s</string>
     <string name="nav_back">Back</string>
     <string name="role_link">Link</string>
@@ -111,11 +111,11 @@
     <string name="setup_steps_off">Virtue only works after Accessibility is turned on.</string>
     <string name="a11y_step_permissions_title">Allow permissions</string>
     <string name="a11y_step_permissions_body">Virtue asks for two permissions. Notifications let Virtue show the \"Monitoring active\" notification while it is on, and you need to allow them before you sign in. Unrestricted battery use stops Android from closing Virtue in the background.</string>
-    <string name="btn_request_permissions">Request Permissions</string>
-    <string name="allow_notifications_title">Allow Notifications</string>
+    <string name="btn_request_permissions">Request permissions</string>
+    <string name="allow_notifications_title">Allow notifications</string>
     <string name="allow_notifications_body">Virtue shows a \"Monitoring active\" notification whenever it is monitoring this device. Allow notifications before you sign in.</string>
-    <string name="btn_allow_notifications">Allow Notifications</string>
-    <string name="btn_permissions_allowed">Permissions Allowed</string>
+    <string name="btn_allow_notifications">Allow notifications</string>
+    <string name="btn_permissions_allowed">Permissions allowed</string>
     <string name="a11y_step_expand">Show step %1$d, %2$s</string>
 
     <!-- What Virtue monitors (full screen). Keep in step with
@@ -160,7 +160,7 @@
     <string name="summary_signed_out">Sign in to start monitoring.</string>
     <string name="summary_a11y_off">Turn on Accessibility so Virtue can capture screenshots.</string>
     <string name="summary_paused">Resume monitoring to start capturing again.</string>
-    <string name="btn_take_test_screenshot">Take Test Screenshot</string>
+    <string name="btn_take_test_screenshot">Take test screenshot</string>
 
     <!-- Report an Issue -->
     <string name="report_bug_what_happened">What happened?</string>
