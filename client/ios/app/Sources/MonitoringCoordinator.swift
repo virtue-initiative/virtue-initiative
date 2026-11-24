@@ -81,7 +81,11 @@ final class MonitoringCoordinator: ObservableObject {
     /// (CLIENT-034).
     @Published var advancedExpanded: Bool =
         UserDefaults.standard.string(forKey: VirtueShared.serverAddressKey) != nil {
-        didSet { if !advancedExpanded { serverChoice = .virtueInitiative } }
+        didSet {
+            if !advancedExpanded {
+                serverChoice = .virtueInitiative
+            }
+        }
     }
 
     /// The latest progress or failure message, shown under Advanced in

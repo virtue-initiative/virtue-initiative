@@ -33,7 +33,11 @@ final class MonitoringCoordinator: ObservableObject {
     /// closing it goes back to the default, so a hidden choice never applies
     /// (CLIENT-034).
     @Published var advancedExpanded: Bool = false {
-        didSet { if !advancedExpanded { serverChoice = .virtueInitiative } }
+        didSet {
+            if !advancedExpanded {
+                serverChoice = .virtueInitiative
+            }
+        }
     }
 
     @Published private(set) var loggedIn: Bool = false
