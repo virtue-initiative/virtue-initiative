@@ -29,6 +29,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     private string _passwordInput = string.Empty;
     private string _deviceNameInput = string.Empty;
     private bool _selfHostedServer;
+    private bool _advancedExpanded;
     private string _serverAddressInput = string.Empty;
     private bool _hasHydratedServer;
     private string _monitorState = "loading";
@@ -180,6 +181,24 @@ public sealed class SessionViewModel : INotifyPropertyChanged
     {
         get => _selfHostedServer;
         set => SetProperty(ref _selfHostedServer, value);
+    }
+
+    /// <summary>
+    /// Whether the sign-in form's Advanced section, which holds the server
+    /// choice, is open. It starts open only for a self-hosted server, and
+    /// closing it goes back to the default, so a hidden choice never applies
+    /// (CLIENT-034).
+    /// </summary>
+    public bool AdvancedExpanded
+    {
+        get => _advancedExpanded;
+        set
+        {
+            if (SetProperty(ref _advancedExpanded, value) && !value)
+            {
+                SelfHostedServer = false;
+            }
+        }
     }
 
     public string ServerAddressInput
@@ -621,6 +640,7 @@ public sealed class SessionViewModel : INotifyPropertyChanged
             _hasHydratedServer = true;
             SelfHostedServer = status.RememberedServer is not null;
             ServerAddressInput = status.RememberedServer ?? string.Empty;
+            AdvancedExpanded = SelfHostedServer;
         }
 
         return Task.CompletedTask;

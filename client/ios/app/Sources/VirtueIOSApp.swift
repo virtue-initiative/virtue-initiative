@@ -221,24 +221,36 @@ private struct SignInForm: View {
                 .fieldStyle()
 
                 // CLIENT-034: the server is chosen here and nowhere else, so
-                // it can only change by signing out first.
-                Picker("Server", selection: $coordinator.serverChoice) {
-                    ForEach(ServerChoice.allCases, id: \.self) { choice in
-                        Text(choice.label).tag(choice)
+                // it can only change by signing out first. It sits under
+                // Advanced, closed unless the user picked a self-hosted
+                // server, so most never see it.
+                DisclosureGroup(isExpanded: $coordinator.advancedExpanded) {
+                    VStack(spacing: 12) {
+                        Picker("Server", selection: $coordinator.serverChoice) {
+                            ForEach(ServerChoice.allCases, id: \.self) { choice in
+                                Text(choice.label).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        if coordinator.serverChoice == .selfHosted {
+                            TextField("Server address", text: $coordinator.serverAddress)
+                                .textContentType(.URL)
+                                .keyboardType(.URL)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .submitLabel(.go)
+                                .focused($focus, equals: .server)
+                                .onSubmit { signIn() }
+                                .fieldStyle()
+                        }
                     }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Advanced")
+                        .font(.subheadline)
+                        .foregroundStyle(VirtueBrand.textMuted)
                 }
-                .pickerStyle(.segmented)
-                if coordinator.serverChoice == .selfHosted {
-                    TextField("Server address", text: $coordinator.serverAddress)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.go)
-                        .focused($focus, equals: .server)
-                        .onSubmit { signIn() }
-                        .fieldStyle()
-                }
+                .tint(VirtueBrand.textMuted)
             }
 
             Button(coordinator.isSigningIn ? "Signing In…" : "Sign In") {
