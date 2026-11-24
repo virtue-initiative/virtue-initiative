@@ -73,6 +73,8 @@ The server MUST take the hash and combine it with the stored hash in this way
 stored = sha256(stored || hash)
 ```
 
+The server MUST record `first_seq`, the `seq` of the first hash it accepts for a device after a reset (or for a device it has never seen). Later hashes MUST NOT change it.
+
 The server MUST return **HTTP 201** if the new state has been written to disk and MUST NOT return **HTTP 201** otherwise.
 
 The client SHOULD retry the request if it receives and error, but SHOULD NOT retry if it receives any of the following errors: `400`, `401`, `409`.
@@ -96,13 +98,16 @@ reject malformed IDs or a malformed list with **HTTP 400**.
 
 On a valid request, the server MUST return the following JSON shape with **HTTP 200**, with one entry per device ID.
 
-The server MUST return a ZERO hash, a 0 count and a 0 for last_received if it does not know of the device ID.
+The server MUST return a ZERO hash, a 0 count, a 0 `first_seq` and a 0 for last_received if it does not know of the device ID.
+
+`first_seq` is the `seq` of the first hash in the device's current chain (HASH-006). It MUST be 0 when no hash has been accepted since the last reset, and when the chain began before the server recorded it.
 
 ```json
 {
   "device_id": {
      "hash": "hash_hex",
      "seq": 40,
+     "first_seq": 1,
      "last_received": 1786674101
   },
   ...
@@ -123,9 +128,11 @@ The server MUST reject invalid JWTs with **HTTP 401**.
 
 The server SHOULD return **HTTP 400** on a malformed `device_id`
 
-The server MUST reset a device's hash to ZERO and also set the sequence number to zero.
+The server MUST reset a device's hash to ZERO and also set the sequence number and `first_seq` to zero.
 
 It SHOULD NOT reset the last_received time.
+
+The request MAY include `&seq=<n>`. When it does, the server MUST reset the device only if its current sequence number is `n`. Otherwise it MUST change nothing and respond **HTTP 409** with code `sequence_conflict`. This lets the main API reset exactly the chain it read, and not hashes accepted after it read it. A `seq` that is not a non-negative integer MUST get **HTTP 400**.
 
 On success, the server MUST return **HTTP 200** with the following shape. With the data, BEFORE it was reset.
 
@@ -133,6 +140,7 @@ On success, the server MUST return **HTTP 200** with the following shape. With t
 {
   "hash": "hash_hex",
   "seq": 40,
+  "first_seq": 1,
   "last_received": 1786674101
 }
 ```

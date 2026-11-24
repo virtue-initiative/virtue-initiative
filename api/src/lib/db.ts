@@ -662,6 +662,17 @@ export async function createBatch(
     .run();
 }
 
+/** Deletes one batch row by its full primary key. */
+export async function deleteBatch(
+  db: D1Database,
+  input: { id: string; user_id: string; created_at: number },
+) {
+  return db
+    .prepare('DELETE FROM batches WHERE user_id = ? AND created_at = ? AND id = ?')
+    .bind(uuidToBytes(input.user_id), input.created_at, uuidToBytes(input.id))
+    .run();
+}
+
 export async function listBatches(db: D1Database, ownerIds: string[], filters: { since?: number }) {
   if (ownerIds.length === 0) {
     return [];

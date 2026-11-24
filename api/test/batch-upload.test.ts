@@ -9,7 +9,12 @@ import {
   signupAndGetCookie,
   uploadBatch,
 } from './helpers';
-import { getHashState, installHashServerMock, seedHashState } from './hash-server-mock';
+import {
+  getHashState,
+  installHashServerMock,
+  onHashReset,
+  seedHashState,
+} from './hash-server-mock';
 
 beforeAll(() => {
   fetchMock.activate();
@@ -121,6 +126,13 @@ describe('POST /d/batch metadata validation (API-038)', () => {
     ],
     ['a notification has no type', withField('notifications', [{ ts: 1, risk: 0.5 }])],
     ['a notification has no ts', withField('notifications', [{ type: 'system_event', risk: 0.5 }])],
+    ['start_seq is sent without end_seq', withField('start_seq', 4)],
+    ['end_seq is sent without start_seq', withField('end_seq', 4)],
+    ['start_seq is greater than end_seq', (m) => ({ ...m, start_seq: 5, end_seq: 4 })],
+    ['start_seq is 0', (m) => ({ ...m, start_seq: 0, end_seq: 4 })],
+    ['end_seq is not an integer', (m) => ({ ...m, start_seq: 1, end_seq: 4.5 })],
+    ['end_seq is past a u32', (m) => ({ ...m, start_seq: 1, end_seq: 2 ** 32 })],
+    ['start_seq is a string', (m) => ({ ...m, start_seq: '1', end_seq: 4 })],
     ['metadata is an array', () => []],
     ['metadata is null', () => null],
   ];
@@ -552,5 +564,124 @@ describe('POST /d/batch response (API-038)', () => {
     expect(second.end_hash).toBe('0'.repeat(64));
     expect(second.id).not.toBe(first.id);
     expect(second.url).not.toBe(first.url);
+  });
+});
+
+describe('POST /d/batch hash chain check (API-038)', () => {
+  const CHAIN = 'ab'.repeat(32);
+
+  function seqUpload(
+    device: { refresh_token: string },
+    userId: string,
+    start: number,
+    end: number,
+  ) {
+    return uploadBatch(
+      device.refresh_token,
+      rawForm({ ...validMetadata(userId), start_seq: start, end_seq: end }),
+    );
+  }
+
+  it('stores a batch whose seqs match the chain and resets the chain (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: CHAIN, seq: 9, first_seq: 4, last_received: 1 });
+
+    const res = await seqUpload(device, userId, 4, 9);
+
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { end_hash: string }).end_hash).toBe(CHAIN);
+    expect(await storedBatchCount()).toBe(1);
+    expect(getHashState(device.id).seq).toBe(0);
+  });
+
+  it('answers batch_already_stored when the batch starts before the chain, and stores nothing (API-038)', async () => {
+    const { userId, device } = await setup();
+    // An earlier attempt stored seqs 1 to 40 and reset; the device then hashed 41 and 42.
+    seedHashState(device.id, { hash: CHAIN, seq: 42, first_seq: 41, last_received: 1 });
+
+    const res = await seqUpload(device, userId, 1, 42);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: 'batch_already_stored',
+      first_seq: 41,
+      seq: 42,
+    });
+    await expectNothingStored();
+    expect(getHashState(device.id)).toMatchObject({ hash: CHAIN, seq: 42 });
+  });
+
+  it('answers batch_already_stored with seq 0 when the chain is empty (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: '0'.repeat(64), seq: 0, first_seq: 0, last_received: 1 });
+
+    const res = await seqUpload(device, userId, 1, 40);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'batch_already_stored', seq: 0 });
+    await expectNothingStored();
+  });
+
+  it('answers hash_chain_moved when the chain holds events after the batch, and stores nothing (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: CHAIN, seq: 12, first_seq: 1, last_received: 1 });
+
+    const res = await seqUpload(device, userId, 1, 10);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'hash_chain_moved' });
+    await expectNothingStored();
+    expect(getHashState(device.id).seq).toBe(12);
+  });
+
+  it('deletes the stored batch when the chain moves before the reset (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: CHAIN, seq: 10, first_seq: 1, last_received: 1 });
+    // The device hashes seq 11 while the upload is between its read and its reset.
+    onHashReset((id) =>
+      seedHashState(id, { hash: 'cd'.repeat(32), seq: 11, first_seq: 1, last_received: 2 }),
+    );
+
+    const res = await seqUpload(device, userId, 1, 10);
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: 'hash_chain_moved' });
+    await expectNothingStored();
+    expect(getHashState(device.id)).toMatchObject({ seq: 11, hash: 'cd'.repeat(32) });
+  });
+
+  it('stores a batch whose start is after the chain start, leaving verification to fail (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: CHAIN, seq: 10, first_seq: 2, last_received: 1 });
+
+    const res = await seqUpload(device, userId, 5, 10);
+
+    expect(res.status).toBe(200);
+    expect(await storedBatchCount()).toBe(1);
+  });
+
+  it('skips the start check when the hash server reports no first_seq (API-038)', async () => {
+    const { userId, device } = await setup();
+    // A chain from before first_seq existed, or a hash server that predates it.
+    seedHashState(device.id, { hash: CHAIN, seq: 10, last_received: 1 });
+    expect((await seqUpload(device, userId, 1, 10)).status).toBe(200);
+
+    seedHashState(device.id, { hash: CHAIN, seq: 10, first_seq: 0, last_received: 1 });
+    expect((await seqUpload(device, userId, 1, 10)).status).toBe(200);
+    expect(await storedBatchCount()).toBe(2);
+  });
+
+  it('stores and resets unconditionally without seqs, whatever the chain holds (API-038)', async () => {
+    const { userId, device } = await setup();
+    seedHashState(device.id, { hash: CHAIN, seq: 12, first_seq: 11, last_received: 1 });
+    onHashReset((id) =>
+      seedHashState(id, { hash: 'cd'.repeat(32), seq: 13, first_seq: 11, last_received: 2 }),
+    );
+
+    const res = await uploadBatch(device.refresh_token, rawForm(validMetadata(userId)));
+
+    expect(res.status).toBe(200);
+    expect(await storedBatchCount()).toBe(1);
+    expect(getHashState(device.id).seq).toBe(0);
   });
 });
