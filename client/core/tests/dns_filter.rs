@@ -773,6 +773,32 @@ fn a_check_that_runs_for_2_minutes_is_given_up() {
     assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
 }
 
+// CORE-027, CORE-029: a clock correction moves the next check with it, so a clock that
+// was a day ahead does not hold the check off for a day.
+#[test]
+fn a_clock_correction_moves_the_next_check_with_it() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, BLOCKED);
+    scenario.at_t(T1).tick();
+    let delay = scenario.state().dns_filter.next_check_at_ms - T1;
+    assert!(delay <= HOUR_MS);
+
+    // The server says the daemon's clock is a day ahead.
+    scenario.api.serve_time(scenario.clock.clone(), -DAY_MS);
+    scenario.platform.set_locked_or_screensaver(false);
+    scenario.queue_upload(dev("reach the server"));
+    scenario.at_t(T1 + 1_000).tick();
+
+    let state = scenario.state();
+    let now = state.last_tick_at_ms.expect("ticked");
+    assert_eq!(now, T1 + 1_000 - DAY_MS, "the clock was corrected");
+    assert_eq!(
+        state.dns_filter.next_check_at_ms,
+        T1 + delay - DAY_MS,
+        "the next check moved with the clock"
+    );
+}
+
 // ── Authentication and persistence ────────────────────────────────────────────
 
 // CORE-029, CORE-009: nothing is checked once logged out.

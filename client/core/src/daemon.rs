@@ -416,6 +416,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
         tracing::warn!(correction_ms, "daemon clock corrected from the server");
         shift_times(state, correction_ms);
+        // The running DNS filter check's deadline moves the same way.
+        if let Some(since) = self.lock_dns_check().running_since_ms.as_mut() {
+            *since += correction_ms;
+        }
         if correction_ms.abs() > clock::CORRECTION_ALERT_MS && self.platform.lifecycle_enabled() {
             upload::enqueue(
                 &mut state.upload,
@@ -1243,6 +1247,7 @@ fn shift_times(state: &mut DaemonState, delta_ms: i64) {
         shift(fetched_at_ms);
     }
     shift(&mut state.heartbeat.last_heartbeat_ms);
+    shift(&mut state.dns_filter.next_check_at_ms);
     state
         .capture_availability
         .recent_failures_ms
