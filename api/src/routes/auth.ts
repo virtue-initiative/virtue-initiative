@@ -27,6 +27,8 @@ import {
   renderPasswordChangedTemplate,
   renderPasswordResetTemplate,
 } from '../lib/email/templates';
+import { notifyWatchersAboutDnsFilterCheck } from '../lib/dns-filter-alerts';
+import { servesHttps } from '../lib/dns-filter-domain';
 import { sendEmail } from '../lib/email';
 import { decodeBase64, encodeBase64 } from '../lib/encoding';
 import { EMAIL_VERIFICATION_TTL_MS, PASSWORD_RESET_TTL_MS } from '../lib/email-domain';
@@ -555,7 +557,7 @@ auth.get('/user', authenticateWebSession(), async (c) => {
 auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema), async (c) => {
   const userId = c.get('sub');
   // API-020: key material is deliberately not accepted here; see POST /user/password.
-  const { email, name, settings } = c.req.valid('json');
+  const { email, name, settings, dns_filter_domain } = c.req.valid('json');
   const normalizedEmail = email?.trim().toLowerCase();
   const user = await findUserById(c.env.DB, userId);
 
@@ -563,7 +565,34 @@ auth.patch('/user', authenticateWebSession(), validateZ('json', updateUserSchema
     return c.json({ error: 'User account not found' }, 404);
   }
 
-  await updateUser(c.env.DB, userId, { name, settings });
+  // API-020: a new domain must have a website, or no device check on it would ever alert.
+  if (
+    dns_filter_domain &&
+    dns_filter_domain !== user.dns_filter_domain &&
+    !(await servesHttps(dns_filter_domain))
+  ) {
+    return c.json(
+      {
+        error: `Virtue could not open https://${dns_filter_domain}. Use a domain with a working website, such as example.net.`,
+      },
+      400,
+    );
+  }
+
+  await updateUser(c.env.DB, userId, { name, settings, dns_filter_domain });
+
+  // API-020: clearing or replacing the check domain alerts partners at once.
+  const previousDomain = user.dns_filter_domain;
+  if (dns_filter_domain !== undefined && previousDomain && dns_filter_domain !== previousDomain) {
+    await notifyWatchersAboutDnsFilterCheck(
+      c.env.DB,
+      c.env,
+      userId,
+      dns_filter_domain === null
+        ? { kind: 'cleared', domain: previousDomain }
+        : { kind: 'changed', domain: previousDomain, newDomain: dns_filter_domain },
+    );
+  }
 
   const emailChanged = Boolean(normalizedEmail && normalizedEmail !== user.email);
   let emailBounced = false;

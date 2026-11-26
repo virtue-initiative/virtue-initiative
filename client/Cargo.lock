@@ -3818,6 +3818,8 @@ dependencies = [
  "proptest",
  "rand_core 0.9.5",
  "rmp-serde",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -3828,6 +3830,7 @@ dependencies = [
  "ureq",
  "virtue-text-detection",
  "webp",
+ "webpki-roots",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@
 @import './components/Textarea/Textarea.css';
 @import './components/Select/Select.css';
 @import './components/Checkbox/Checkbox.css';
+@import './components/Switch/Switch.css';
 @import './components/Radio/Radio.css';
 @import './components/Dialog/Dialog.css';
 @import './components/Alert/Alert.css';

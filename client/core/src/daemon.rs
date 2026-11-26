@@ -13,6 +13,7 @@ use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus, UploadKind};
 use crate::module::auth;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
+use crate::module::dns_filter::{self, DnsFilterState, DnsProbe, SystemDnsProbe};
 use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
@@ -103,7 +104,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The daemon's whole persisted state, serialized to `event_state.json`.
 /// Top-level field names are kept identical to the pre-rewrite per-observer
 /// keys (`auth`, `lifecycle`, `screenshot`, `upload`, `capture_availability`,
-/// `heartbeat`) so existing installs load cleanly and
+/// `heartbeat`) so existing installs load cleanly, and later keys such as
+/// `dns_filter` default when absent (CORE-016), and
 /// `client/*/src/config.rs::read_auth_state` (which reads the `auth` key
 /// directly) needs no changes.
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -116,6 +118,8 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    #[serde(default)]
+    pub dns_filter: DnsFilterState,
     #[serde(default)]
     pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
@@ -168,6 +172,7 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     classifier: Option<Arc<RiskClassifier>>,
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
+    dns: Arc<dyn DnsProbe>,
     /// Every time the daemon records, schedules or compares comes from here,
     /// not the system clock. See CORE-027.
     clock: Mutex<DaemonClock>,
@@ -200,6 +205,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             classifier: screenshot::load_classifier().map(Arc::new),
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
+            dns: Arc::new(SystemDnsProbe),
             clock: Mutex::new(clock),
         };
 
@@ -232,6 +238,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// [`Scenario`]: crate::testing::Scenario
     pub fn with_rng(mut self, rng: Arc<dyn RandomSource>) -> Self {
         self.rng = rng;
+        self
+    }
+
+    /// Swap in a different [`DnsProbe`] for the DNS filter check
+    /// (CORE-028) — used by the test [`Scenario`] harness to script answers.
+    ///
+    /// [`Scenario`]: crate::testing::Scenario
+    pub fn with_dns_probe(mut self, dns: Arc<dyn DnsProbe>) -> Self {
+        self.dns = dns;
         self
     }
 
@@ -949,10 +964,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// One full sequential pass over `working` — lifecycle check, screenshot
-    /// plan/capture/commit, capture-availability, heartbeat, hash retries,
-    /// batch upload — with no in-process locking anywhere in here (`working`
-    /// is the copy `with_locked_state` re-read under the file lock, not the
-    /// shared snapshot). Returns `(screen_active, should_logout)`;
+    /// plan/capture/commit, capture-availability, heartbeat, DNS filter check,
+    /// hash retries, batch upload — with no in-process locking anywhere in here
+    /// (`working` is the copy `with_locked_state` re-read under the file lock,
+    /// not the shared snapshot). Returns `(screen_active, should_logout)`;
     /// the caller applies the logout (never this function, to avoid
     /// recursing into the request-channel machinery).
     fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {
@@ -1025,6 +1040,17 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         );
         heartbeat::tick(&mut working.heartbeat, &mut working.upload, now_ms);
 
+        let dns_plan = dns_filter::plan(&mut working.dns_filter, &mut working.upload, now_ms);
+        if let Some(outcome) = dns_plan.map(|plan| dns_filter::execute(plan, self.dns.as_ref())) {
+            dns_filter::commit(
+                &mut working.dns_filter,
+                &mut working.upload,
+                outcome,
+                now_ms,
+                self.rng.as_ref(),
+            );
+        }
+
         // Hash results are committed before the batch is planned so an event
         // hashed this tick is eligible for the same tick's batch upload.
         let hash_plan = upload::plan_hash_retries(&mut working.upload, now_ms, screen_active);
@@ -1054,7 +1080,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// Picks the next wakeup time (CORE-020): the earliest of the next
-    /// scheduled screenshot draw, the next heartbeat, and the next time
+    /// scheduled screenshot draw, the next heartbeat, the next DNS filter
+    /// check (CORE-028), and the next time
     /// pending hash/batch uploads can make progress — never earlier than
     /// `now_ms`. Uploads held by the screen-lock gate (or missing
     /// credentials/settings) contribute nothing, since no timer clears
@@ -1069,6 +1096,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
         [
             heartbeat::next_heartbeat_at_ms(&state.heartbeat, &state.upload),
+            dns_filter::next_check_at_ms(&state.dns_filter, &state.upload),
             upload::next_hash_attempt_at_ms(&state.upload, screen_active),
             upload::next_batch_attempt_at_ms(&state.upload, batch_interval_ms, screen_active),
         ]

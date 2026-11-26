@@ -1,5 +1,6 @@
 pub mod api;
 pub mod clock;
+pub mod dns;
 pub mod fixtures;
 pub mod platform;
 pub mod rng;
@@ -7,6 +8,7 @@ pub mod scenario;
 
 pub use api::{BatchCall, HashCall, MockApiClient, MockApiState, NotifyCall, RegisterDeviceCall};
 pub use clock::MockClock;
+pub use dns::FakeDnsProbe;
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use rng::TestRandomSource;
@@ -101,5 +103,35 @@ mod tests {
         assert_eq!(rng.uniform(), 0.5);
         use crate::rng::RandomSource;
         let _ = &rng as &dyn RandomSource;
+    }
+
+    #[test]
+    fn fake_dns_probe_serves_scripted_answers_and_records_lookups() {
+        use crate::module::dns_filter::DnsProbe;
+        let dns = FakeDnsProbe::new();
+        dns.answer("a.example", &["192.0.2.1", "::1"]);
+        dns.fail("b.example");
+
+        let a = dns.resolve("a.example").unwrap();
+        assert_eq!(a.len(), 2);
+        assert!(dns.resolve("b.example").is_err());
+        assert!(dns.resolve("unscripted.example").is_err());
+        assert_eq!(
+            dns.lookups(),
+            ["a.example", "b.example", "unscripted.example"]
+        );
+
+        let addr = a[0];
+        assert!(dns.tls_handshake("a.example", addr).is_ok());
+        dns.fail_tls("a.example");
+        assert!(dns.tls_handshake("a.example", addr).is_err());
+        dns.serve_tls("a.example");
+        assert!(dns.tls_handshake("a.example", addr).is_ok());
+        assert_eq!(dns.handshakes().len(), 3);
+        assert!(
+            dns.handshakes()
+                .iter()
+                .all(|(h, a)| h == "a.example" && *a == addr)
+        );
     }
 }

@@ -34,6 +34,7 @@ pub use model::{
     AuthState, BatchUpload, ChosenServer, EventData, LogEntry, LoopOutcome, Screenshot,
     ServiceStatus,
 };
+pub use module::dns_filter::{DnsProbe, SystemDnsProbe};
 pub use module::upload::Upload;
 pub use platform::{LifecycleHooks, PlatformHooks, ScreenshotHooks};
 pub use rng::{OsRandomSource, RandomSource};

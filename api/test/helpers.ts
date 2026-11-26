@@ -267,9 +267,48 @@ export function extractTokenFromDelivery(
   return match ? decodeURIComponent(match[1] ?? '') : null;
 }
 
+/**
+ * How `https://<domain>/` answers the website check PATCH /user makes for a new DNS check
+ * domain (API-020): an HTTP status, `'unreachable'` for a failed lookup, connection or
+ * certificate, or `'hangs'` for no answer until the request is aborted. A domain not set
+ * here answers 200. test/setup.ts serves these in place of the network.
+ */
+type WebsiteAnswer = number | 'unreachable' | 'hangs';
+const websites = new Map<string, WebsiteAnswer>();
+const websiteChecks: { domain: string; redirect?: RequestRedirect }[] = [];
+
+export function setWebsite(domain: string, answer: WebsiteAnswer): void {
+  websites.set(domain, answer);
+}
+
+/** Every website check made since the last clearDB(), oldest first. */
+export function listWebsiteChecks(): { domain: string; redirect?: RequestRedirect }[] {
+  return [...websiteChecks];
+}
+
+/** Answers a website check, or returns undefined for any other request. */
+export function answerWebsiteCheck(url: string, init?: RequestInit): Promise<Response> | undefined {
+  const match = /^https:\/\/([^/]+)\/$/.exec(url);
+  if (!match || init?.method !== 'HEAD') return undefined;
+  const domain = match[1]!;
+  websiteChecks.push({ domain, redirect: init.redirect });
+  const answer = websites.get(domain) ?? 200;
+  if (answer === 'unreachable') {
+    return Promise.reject(new TypeError(`${domain}: could not connect`));
+  }
+  if (answer === 'hangs') {
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    });
+  }
+  return Promise.resolve(new Response(null, { status: answer }));
+}
+
 export async function clearDB(): Promise<void> {
   clearMockEmailDeliveries();
   resetHashServerMock();
+  websites.clear();
+  websiteChecks.length = 0;
   clearFeatureFlagCache();
   clearAnnouncementCache();
   await env.DB.prepare('DELETE FROM feature_flags').run();

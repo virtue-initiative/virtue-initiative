@@ -131,6 +131,9 @@ type LogCaseKey =
   | 'lifecycle_alert_other'
   | 'alert'
   | 'capture_failed'
+  | 'dns_filter_inactive'
+  | 'dns_filter_active'
+  | 'dns_filter_check_removed'
   | 'dev'
   | 'heartbeat'
   | 'unknown';
@@ -173,6 +176,12 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
       return 'alert';
     case 'capture_failed':
       return 'capture_failed';
+    case 'dns_filter_inactive':
+      return 'dns_filter_inactive';
+    case 'dns_filter_active':
+      return 'dns_filter_active';
+    case 'dns_filter_check_removed':
+      return 'dns_filter_check_removed';
     case 'dev':
       return 'dev';
     case 'heartbeat':
@@ -180,6 +189,10 @@ function getLogCaseKey(log: DataLog): LogCaseKey {
     default:
       return 'unknown';
   }
+}
+
+function dnsDomainLabel(data: Record<string, unknown>): string {
+  return typeof data.domain === 'string' && data.domain ? ` ${data.domain}` : '';
 }
 
 const LOG_KIND_TABLE: Record<
@@ -286,6 +299,24 @@ const LOG_KIND_TABLE: Record<
     icon: ExclamationCircleIcon,
     message: (d) => `Capture failed repeatedly on ${d}`,
   },
+  dns_filter_inactive: {
+    category: 'DNS Filter Off',
+    icon: ExclamationTriangleIcon,
+    message: (d, data) =>
+      `${d} resolved its DNS check domain${dnsDomainLabel(data)} normally, so the DNS filter is off.`,
+  },
+  dns_filter_active: {
+    category: 'DNS Filter On',
+    icon: ActivityIcon,
+    message: (d, data) =>
+      `${d} blocked its DNS check domain${dnsDomainLabel(data)} again, so the DNS filter is on.`,
+  },
+  dns_filter_check_removed: {
+    category: 'DNS Check Removed',
+    icon: ExclamationCircleIcon,
+    message: (d, data) =>
+      `The DNS check domain${dnsDomainLabel(data)} was removed from ${d}, so its DNS filter is no longer checked.`,
+  },
   dev: {
     category: 'Developer',
     icon: WrenchScrewdriverIcon,
@@ -354,6 +385,9 @@ export const LOG_TYPES = [
   'repeated_restarts',
   'alert',
   'capture_failed',
+  'dns_filter_inactive',
+  'dns_filter_active',
+  'dns_filter_check_removed',
   'dev',
   'heartbeat',
   // Pre-rewrite wire shapes, kept so already-stored logs still render.
