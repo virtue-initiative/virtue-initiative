@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn fake_dns_probe_serves_scripted_answers_and_records_lookups() {
-        use crate::module::dns_filter::DnsProbe;
+        use crate::module::dns_filter::{DnsProbe, HandshakeError};
         let dns = FakeDnsProbe::new();
         dns.answer("a.example", &["192.0.2.1", "::1"]);
         dns.fail("b.example");
@@ -124,10 +124,18 @@ mod tests {
         let addr = a[0];
         assert!(dns.tls_handshake("a.example", addr).is_ok());
         dns.fail_tls("a.example");
-        assert!(dns.tls_handshake("a.example", addr).is_err());
+        assert!(matches!(
+            dns.tls_handshake("a.example", addr),
+            Err(HandshakeError::NoValidCertificate(_))
+        ));
+        dns.refuse_tls("a.example");
+        assert!(matches!(
+            dns.tls_handshake("a.example", addr),
+            Err(HandshakeError::Unreachable(_))
+        ));
         dns.serve_tls("a.example");
         assert!(dns.tls_handshake("a.example", addr).is_ok());
-        assert_eq!(dns.handshakes().len(), 3);
+        assert_eq!(dns.handshakes().len(), 4);
         assert!(
             dns.handshakes()
                 .iter()

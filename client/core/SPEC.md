@@ -263,7 +263,8 @@ While authenticated and while the settings name a check domain, the daemon MUST 
 A check MUST first try the control domains `virtueinitiative.org`, `apple.com`, `microsoft.com`, `google.com` and `one.one.one.one`, in that order, stopping at the first reachable one, and then the check domain.
 
 - If no control domain is reachable, the network is down or behind a captive portal, and the result is unknown: the daemon MUST NOT send an event, MUST keep the last result, and MUST check again after 10 minutes.
-- Otherwise the result is unfiltered when the check domain is reachable, and filtered when it is not. A filter that answers with the address of a block page is filtered this way, since the block page cannot show a valid certificate for the check domain.
+- Otherwise the result is unfiltered when the check domain is reachable, and filtered when its answer is blocked or an address tried answers the TLS handshake without a valid certificate for it. A filter that answers with the address of a block page is filtered this way, since the block page cannot show a valid certificate for the check domain.
+- When no address tried answers at all (the connection is refused, reset, closed or times out), the check domain is unreachable, which a flaky network causes as well as a filter. The result is then unknown as above, except that the third unreachable check in a row for the same domain is filtered, since some filters answer with an address that refuses connections. The daemon MUST persist this count with the last result, and any other result for the domain MUST reset it.
 
 The daemon MUST persist the last result and MUST send an event only when it changes:
 

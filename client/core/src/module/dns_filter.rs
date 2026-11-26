@@ -3,6 +3,8 @@
 //! reports when their DNS filter stops blocking it. Report only; nothing here
 //! blocks or changes DNS traffic.
 
+use std::fmt;
+use std::io;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -37,6 +39,9 @@ const CHECK_DELAY_MEAN_MS: f64 = 20.0 * 60.0 * 1_000.0;
 pub(crate) const CHECK_DELAY_MIN_MS: i64 = 60 * 1_000;
 pub(crate) const CHECK_DELAY_MAX_MS: i64 = 60 * 60 * 1_000;
 pub(crate) const UNKNOWN_RETRY_MS: i64 = 10 * 60 * 1_000;
+/// The unreachable check in a row for one domain that counts as filtered
+/// (CORE-029): some filters answer with an address that refuses connections.
+const UNREACHABLE_CHECKS_FILTERED: u32 = 3;
 
 /// The delay until the next check for a uniform draw `u` in `[0, 1)`
 /// (CORE-029): exponentially distributed, so the chance of a check in the
@@ -57,7 +62,42 @@ pub trait DnsProbe: Send + Sync {
     /// Connects to `addr` on port 443 and completes a TLS handshake with
     /// `host` as the server name, succeeding only when the certificate is
     /// valid for `host`.
-    fn tls_handshake(&self, host: &str, addr: IpAddr) -> Result<(), String>;
+    fn tls_handshake(&self, host: &str, addr: IpAddr) -> Result<(), HandshakeError>;
+}
+
+/// Why a TLS handshake failed, which tells a block page from a bad network
+/// (CORE-029).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandshakeError {
+    /// Something answered on port 443 but showed no valid certificate for
+    /// the host, as a block page does.
+    NoValidCertificate(String),
+    /// Nothing answered: the connection was refused, reset, closed or timed
+    /// out, which a flaky network causes as well as a filter.
+    Unreachable(String),
+}
+
+impl fmt::Display for HandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoValidCertificate(err) => write!(f, "no valid certificate: {err}"),
+            Self::Unreachable(err) => write!(f, "unreachable: {err}"),
+        }
+    }
+}
+
+/// Classifies an error from the TLS handshake. rustls hands its own errors
+/// back wrapped in an [`io::Error`]; any of them means a server answered but
+/// failed TLS for the host (a bad certificate, or not TLS at all). Every
+/// other I/O error means nothing answered.
+fn handshake_error(err: io::Error) -> HandshakeError {
+    match err
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+    {
+        Some(tls) => HandshakeError::NoValidCertificate(tls.to_string()),
+        None => HandshakeError::Unreachable(err.to_string()),
+    }
 }
 
 /// Resolves through the operating system's resolver (`getaddrinfo` and its
@@ -73,25 +113,28 @@ impl DnsProbe for SystemDnsProbe {
             .map_err(|err| err.to_string())
     }
 
-    fn tls_handshake(&self, host: &str, addr: IpAddr) -> Result<(), String> {
-        let config = tls_config()?;
-        let name = ServerName::try_from(host.to_string()).map_err(|err| err.to_string())?;
+    fn tls_handshake(&self, host: &str, addr: IpAddr) -> Result<(), HandshakeError> {
+        // Failing to set up TLS here is the device's own fault, so it counts
+        // as no answer, never as a block page.
+        let local = |err: String| HandshakeError::Unreachable(err);
+        let config = tls_config().map_err(local)?;
+        let name = ServerName::try_from(host.to_string()).map_err(|err| local(err.to_string()))?;
         let deadline = Instant::now() + TLS_TIMEOUT;
         let mut tcp = TcpStream::connect_timeout(&SocketAddr::new(addr, 443), TLS_TIMEOUT)
-            .map_err(|err| format!("connect: {err}"))?;
-        let mut tls = ClientConnection::new(config, name).map_err(|err| err.to_string())?;
+            .map_err(|err| local(format!("connect: {err}")))?;
+        let mut tls = ClientConnection::new(config, name).map_err(|err| local(err.to_string()))?;
         while tls.is_handshaking() {
             let left = deadline
                 .checked_duration_since(Instant::now())
                 .filter(|left| !left.is_zero())
-                .ok_or("handshake timed out")?;
+                .ok_or_else(|| local("handshake timed out".into()))?;
             tcp.set_read_timeout(Some(left))
                 .and_then(|()| tcp.set_write_timeout(Some(left)))
-                .map_err(|err| err.to_string())?;
+                .map_err(handshake_error)?;
             match tls.complete_io(&mut tcp) {
-                Ok((0, 0)) => return Err("connection closed during the handshake".into()),
+                Ok((0, 0)) => return Err(local("connection closed during the handshake".into())),
                 Ok(_) => {}
-                Err(err) => return Err(format!("handshake: {err}")),
+                Err(err) => return Err(handshake_error(err)),
             }
         }
         Ok(())
@@ -144,6 +187,8 @@ pub struct DnsFilterState {
     pub domain: Option<String>,
     pub last_result: Option<DnsFilterResult>,
     pub next_check_at_ms: i64,
+    /// How many checks in a row found the domain unreachable (CORE-029).
+    pub unreachable_checks: u32,
 }
 
 /// A check that is due, handed to [`execute`].
@@ -151,11 +196,18 @@ pub struct DnsCheckPlan {
     domain: String,
 }
 
-/// What [`execute`] found; `result` is `None` when the answer is unknown
-/// because no control domain was reachable.
+/// What [`execute`] found.
 pub struct DnsCheckOutcome {
     domain: String,
-    result: Option<DnsFilterResult>,
+    finding: Finding,
+}
+
+enum Finding {
+    /// No control domain was reachable, so the answer says nothing.
+    NoNetwork,
+    /// No address of the check domain answered at all.
+    Unreachable,
+    Result(DnsFilterResult),
 }
 
 /// The check domain the settings name, or `None` when they name none.
@@ -190,8 +242,8 @@ pub fn plan(
         }
         *state = DnsFilterState {
             domain: configured,
-            last_result: None,
             next_check_at_ms: now_ms,
+            ..DnsFilterState::default()
         };
     }
     let domain = state.domain.clone()?;
@@ -203,25 +255,29 @@ pub fn execute(plan: DnsCheckPlan, probe: &dyn DnsProbe) -> DnsCheckOutcome {
     let network_works = CONTROL_DOMAINS
         .iter()
         .any(|control| reach(probe, control) == Reach::Reachable);
-    let result = if !network_works {
+    let finding = if !network_works {
         tracing::warn!("dns filter check: no control domain is reachable, result unknown");
-        None
+        Finding::NoNetwork
     } else {
         match reach(probe, &plan.domain) {
-            Reach::Reachable => Some(DnsFilterResult::Unfiltered),
-            Reach::Blocked => Some(DnsFilterResult::Filtered),
+            Reach::Reachable => Finding::Result(DnsFilterResult::Unfiltered),
+            Reach::Blocked => Finding::Result(DnsFilterResult::Filtered),
             Reach::NoValidCertificate => {
                 tracing::info!(
                     "dns filter check: check domain answered without a valid certificate, \
                      as a block page does; counted as filtered"
                 );
-                Some(DnsFilterResult::Filtered)
+                Finding::Result(DnsFilterResult::Filtered)
+            }
+            Reach::Unreachable => {
+                tracing::info!("dns filter check: check domain is unreachable");
+                Finding::Unreachable
             }
         }
     };
     DnsCheckOutcome {
         domain: plan.domain,
-        result,
+        finding,
     }
 }
 
@@ -230,8 +286,10 @@ enum Reach {
     /// The lookup failed, or returned only unspecified or loopback addresses,
     /// which is how DNS filters answer a blocked name.
     Blocked,
-    /// No address tried showed a valid certificate for the domain.
+    /// An address answered without a valid certificate for the domain.
     NoValidCertificate,
+    /// No address tried answered at all.
+    Unreachable,
     /// An address showed a valid certificate: the real site answered.
     Reachable,
 }
@@ -250,18 +308,19 @@ fn reach(probe: &dyn DnsProbe, host: &str) -> Reach {
     if candidates.peek().is_none() {
         return Reach::Blocked;
     }
-    let verified = candidates.any(|addr| match probe.tls_handshake(host, addr) {
-        Ok(()) => true,
-        Err(err) => {
-            tracing::debug!("dns filter check: {host} at {addr}: {err}");
-            false
+    let mut reach = Reach::Unreachable;
+    for addr in candidates {
+        match probe.tls_handshake(host, addr) {
+            Ok(()) => return Reach::Reachable,
+            Err(err) => {
+                tracing::debug!("dns filter check: {host} at {addr}: {err}");
+                if matches!(err, HandshakeError::NoValidCertificate(_)) {
+                    reach = Reach::NoValidCertificate;
+                }
+            }
         }
-    });
-    if verified {
-        Reach::Reachable
-    } else {
-        Reach::NoValidCertificate
     }
+    reach
 }
 
 /// Records the outcome, sends an event when the result changed, and schedules
@@ -276,9 +335,23 @@ pub fn commit(
     if state.domain.as_deref() != Some(outcome.domain.as_str()) {
         return;
     }
-    let Some(result) = outcome.result else {
-        state.next_check_at_ms = now_ms + UNKNOWN_RETRY_MS;
-        return;
+    let result = match outcome.finding {
+        Finding::NoNetwork => {
+            state.next_check_at_ms = now_ms + UNKNOWN_RETRY_MS;
+            return;
+        }
+        Finding::Unreachable => {
+            state.unreachable_checks = state.unreachable_checks.saturating_add(1);
+            if state.unreachable_checks < UNREACHABLE_CHECKS_FILTERED {
+                state.next_check_at_ms = now_ms + UNKNOWN_RETRY_MS;
+                return;
+            }
+            DnsFilterResult::Filtered
+        }
+        Finding::Result(result) => {
+            state.unreachable_checks = 0;
+            result
+        }
     };
     let event = match (state.last_result, result) {
         (Some(DnsFilterResult::Unfiltered), DnsFilterResult::Filtered) => Some((
@@ -319,6 +392,38 @@ pub fn next_check_at_ms(state: &DnsFilterState, upload: &UploadState) -> Option<
 mod tests {
     use super::*;
     use crate::rng::OsRandomSource;
+
+    // CORE-029: a failed handshake counts as no valid certificate only when a
+    // server answered with TLS; refused, reset and timed-out connections are
+    // unreachable.
+    #[test]
+    fn handshake_errors_tell_a_bad_certificate_from_no_answer() {
+        let tls_errors = [
+            rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
+            rustls::Error::InvalidMessage(rustls::InvalidMessage::InvalidContentType),
+        ];
+        for tls in tls_errors {
+            let err = io::Error::new(io::ErrorKind::InvalidData, tls);
+            assert!(
+                matches!(handshake_error(err), HandshakeError::NoValidCertificate(_)),
+                "a TLS error is no valid certificate"
+            );
+        }
+        for kind in [
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::WouldBlock,
+        ] {
+            assert!(
+                matches!(
+                    handshake_error(io::Error::from(kind)),
+                    HandshakeError::Unreachable(_)
+                ),
+                "{kind:?}"
+            );
+        }
+    }
 
     const MINUTE_MS: i64 = 60 * 1_000;
 

@@ -8,6 +8,7 @@
 mod common;
 
 use common::*;
+use virtue_core::module::dns_filter::DnsFilterResult;
 use virtue_core::testing::Scenario;
 
 /// The control domains, in the order a check tries them.
@@ -406,6 +407,120 @@ fn a_block_page_counts_as_filtered() {
         dns_event_kinds(&scenario),
         ["dns_filter_inactive", "dns_filter_active"]
     );
+}
+
+// CORE-029, CORE-020: a check domain whose addresses answer nothing (refused, reset or
+// timed out) is unknown: no event, the last result is kept, and the check is retried
+// after 10 minutes, so a flaky network does not flip the result back and forth.
+#[test]
+fn an_unreachable_check_domain_is_unknown_and_retried_after_10_minutes() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, RESOLVES);
+    scenario.at_t(T1).tick();
+    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+
+    scenario.dns.refuse_tls(DOMAIN);
+    let t2 = T1 + HOUR_MS;
+    scenario.at_t(t2).tick();
+    assert_eq!(lookups_of(&scenario, DOMAIN), 2, "checked");
+    assert_eq!(
+        dns_event_kinds(&scenario),
+        ["dns_filter_inactive"],
+        "unreachable sends nothing"
+    );
+    assert_eq!(
+        scenario.state().dns_filter.last_result,
+        Some(DnsFilterResult::Unfiltered),
+        "last result kept"
+    );
+    push_screenshot_out(&mut scenario);
+    scenario.at_t(t2 + 1).tick();
+    assert_eq!(wakeup(&scenario), t2 + RETRY_MS, "retry wakeup");
+
+    // The network recovers: the remembered result still holds, so no event.
+    scenario.dns.serve_tls(DOMAIN);
+    scenario.at_t(t2 + RETRY_MS).tick();
+    assert_eq!(lookups_of(&scenario, DOMAIN), 3, "retried");
+    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+}
+
+// CORE-029: the third unreachable check in a row for a domain counts as filtered, since
+// some filters answer with an address that refuses connections. Any other result in
+// between starts the count again.
+#[test]
+fn the_third_unreachable_check_in_a_row_counts_as_filtered() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, RESOLVES);
+    scenario.at_t(T1).tick();
+
+    // Two unreachable checks, then the domain answers again: the count restarts.
+    let mut at = T1 + HOUR_MS;
+    scenario.dns.refuse_tls(DOMAIN);
+    for _ in 0..2 {
+        scenario.at_t(at).tick();
+        at += RETRY_MS;
+    }
+    scenario.dns.serve_tls(DOMAIN);
+    scenario.at_t(at).tick();
+    at += HOUR_MS;
+    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+
+    scenario.dns.refuse_tls(DOMAIN);
+    for unreachable in 1..=2 {
+        scenario.at_t(at).tick();
+        at += RETRY_MS;
+        assert_eq!(
+            dns_event_kinds(&scenario),
+            ["dns_filter_inactive"],
+            "unreachable check {unreachable} sends nothing"
+        );
+    }
+    scenario.at_t(at).tick();
+    assert_eq!(lookups_of(&scenario, DOMAIN), 7, "every check ran");
+    assert_eq!(
+        dns_event_kinds(&scenario),
+        ["dns_filter_inactive", "dns_filter_active"],
+        "the third in a row is filtered"
+    );
+}
+
+// CORE-029, CORE-016: the count of unreachable checks survives a restart.
+#[test]
+fn the_unreachable_count_survives_a_restart() {
+    let mut scenario1 = checking_scenario();
+    script(&scenario1, DOMAIN, RESOLVES);
+    scenario1.at_t(T1).tick();
+    scenario1.dns.refuse_tls(DOMAIN);
+    scenario1.at_t(T1 + HOUR_MS).tick();
+    scenario1.at_t(T1 + HOUR_MS + RETRY_MS).tick();
+    assert_eq!(lookups_of(&scenario1, DOMAIN), 3);
+    let state_dir = scenario1.state_dir_path().to_path_buf();
+
+    let restart_at = T1 + HOUR_MS + 2 * RETRY_MS;
+    let mut scenario2 = Scenario::authenticated_with_state_dir_configured(
+        state_dir,
+        restart_at,
+        |platform, api| {
+            platform.set_locked_or_screensaver(true);
+            api.state().default_device_settings.dns_filter_domain = Some(DOMAIN.into());
+        },
+    );
+    script(&scenario2, CONTROL, CONTROL_RESOLVES);
+    script(&scenario2, DOMAIN, RESOLVES);
+    scenario2.dns.refuse_tls(DOMAIN);
+    scenario2.at_t(restart_at).tick();
+
+    assert_eq!(
+        lookups_of(&scenario2, DOMAIN),
+        1,
+        "checked after the restart"
+    );
+    assert_eq!(
+        dns_event_kinds(&scenario2),
+        ["dns_filter_inactive", "dns_filter_active"],
+        "the third in a row, counting the two before the restart"
+    );
+    drop(scenario1);
 }
 
 // CORE-029: unspecified and loopback addresses are never connected to, and a

@@ -88,7 +88,9 @@ plan around.
 - Your partners get an email right away when you turn the check off, change the
   domain, or turn the check off for one device.
 
-A filter that shows a block page instead, such as OpenDNS, counts as on.
+A filter that shows a block page instead, such as OpenDNS, counts as on. A
+filter that sends the domain to an address that refuses connections counts as on
+after three checks in a row, about 20 minutes.
 
 A device that is offline or waiting on a Wi-Fi login page, as in hotels and
 airports, reports nothing. It checks again 10 minutes later.
