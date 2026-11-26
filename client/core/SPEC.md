@@ -267,7 +267,7 @@ A check MUST first try the control domains `virtueinitiative.org`, `apple.com`, 
 
 The daemon MUST persist the last result and MUST send an event only when it changes:
 
-- `dns_filter_inactive` (risk 90%, so partners are emailed at once) when the first result for a domain is unfiltered, or when it changes from filtered to unfiltered. A first result of filtered MUST NOT send an event.
+- `dns_filter_inactive` (risk 80%) when the first result for a domain is unfiltered, or when it changes from filtered to unfiltered. A first result of filtered MUST NOT send an event.
 - `dns_filter_active` (risk 0%) when it changes from unfiltered to filtered.
 - `dns_filter_check_removed` (risk 80%) when fetched settings stop naming a domain. The daemon MUST then forget the last result. The server already emails partners when the check is turned off (API-020, API-030), so this event MUST NOT be extra-high-risk, which would email them again from every device.
 

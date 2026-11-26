@@ -82,7 +82,7 @@ plan around.
 ## What your partners see
 
 - **DNS Filter Off** appears in your logs when a device reaches the domain's
-  real website. Your partners get an email right away.
+  real website.
 - **DNS Filter On** appears when the domain is blocked again. No email is sent.
 - Your partners get an email right away when you turn the check off, change the
   domain, or turn the check off for one device.

@@ -13,7 +13,7 @@ use rustls::{ClientConfig, ClientConnection};
 use serde::{Deserialize, Serialize};
 
 use crate::model::UploadKind;
-use crate::module::lifecycle::{EXTRA_HIGH_RISK, HIGH_RISK_LIFECYCLE_ALERT};
+use crate::module::lifecycle::HIGH_RISK_LIFECYCLE_ALERT;
 use crate::module::upload::{self, UploadState};
 use crate::rng::RandomSource;
 
@@ -288,7 +288,7 @@ pub fn commit(
             },
         )),
         (None | Some(DnsFilterResult::Filtered), DnsFilterResult::Unfiltered) => Some((
-            EXTRA_HIGH_RISK,
+            HIGH_RISK_LIFECYCLE_ALERT,
             UploadKind::DnsFilterInactive {
                 domain: outcome.domain,
             },

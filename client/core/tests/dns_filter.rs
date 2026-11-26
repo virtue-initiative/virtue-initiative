@@ -58,9 +58,8 @@ fn script(scenario: &Scenario, host: &str, answer: Answer) {
 /// `DOMAIN` set as the check domain. No check has run yet. The other control
 /// domains do not resolve, so they matter only once the first one fails.
 ///
-/// The screen is locked, which holds uploads back (CORE-005) even for the
-/// extra-high-risk DNS filter alerts, so the events the daemon queues stay
-/// visible until [`deliver`] unlocks it.
+/// The screen is locked, which holds uploads back (CORE-005), so the events
+/// the daemon queues stay visible until [`deliver`] unlocks it.
 fn checking_scenario() -> Scenario {
     let mut scenario = held_scenario();
     scenario.platform.set_locked_or_screensaver(true);
@@ -140,7 +139,8 @@ fn push_screenshot_out(scenario: &mut Scenario) {
 // ── The first result ──────────────────────────────────────────────────────────
 
 // CORE-029, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
-// stays quiet on the first check; anything else is unfiltered and alerts partners at once.
+// stays quiet on the first check; anything else is unfiltered and sends a high-risk alert
+// that waits for the next batch rather than emailing partners at once.
 #[test]
 fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
     let cases: &[(&str, Answer, bool)] = &[
@@ -166,21 +166,20 @@ fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
             assert_eq!(events.len(), 1, "{name}: {events:?}");
             assert_eq!(events[0].kind, "dns_filter_inactive", "{name}");
             assert_eq!(events[0].domain.as_deref(), Some(DOMAIN), "{name}");
-            assert_eq!(events[0].risk, Some(0.9), "{name}: risk 90%");
+            assert_eq!(events[0].risk, Some(0.8), "{name}: risk 80%");
         } else {
             assert!(events.is_empty(), "{name}: {events:?}");
         }
 
-        // Once uploads can go out, the alert is emailed at once, without
-        // waiting for the batch interval.
+        // Unlocking the screen does not force the alert out before the batch
+        // interval, and no partner is emailed about it on its own.
         deliver(&mut scenario, T1 + 1_000);
-        assert!(dns_events(&scenario).is_empty(), "{name}: uploaded");
-        let expected = if alerts {
-            vec![("dns_filter_inactive".to_string(), 0.9)]
-        } else {
-            vec![]
-        };
-        assert_eq!(notified_dns(&scenario), expected, "{name}");
+        assert_eq!(
+            dns_events(&scenario).len(),
+            usize::from(alerts),
+            "{name}: still queued"
+        );
+        assert!(notified_dns(&scenario).is_empty(), "{name}");
     }
 }
 
@@ -520,15 +519,16 @@ fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
     assert_eq!(lookups_of(&scenario, DOMAIN), 0, "not checked yet");
     assert_eq!(wakeup(&scenario), T1, "the check is due now");
 
-    // The screen is unlocked here, so the alert goes out in the same tick,
-    // although the batch interval is held back.
     scenario.at_t(T1).tick();
     assert_eq!(lookups_of(&scenario, DOMAIN), 1);
-    assert!(dns_events(&scenario).is_empty(), "uploaded at once");
+    // The screen is unlocked here, but the alert is not extra-high-risk, so
+    // it waits for the held-back batch interval.
     assert_eq!(
-        notified_dns(&scenario),
-        [("dns_filter_inactive".to_string(), 0.9)]
+        dns_event_kinds(&scenario),
+        ["dns_filter_inactive"],
+        "queued"
     );
+    assert!(notified_dns(&scenario).is_empty());
 }
 
 // ── Authentication and persistence ────────────────────────────────────────────
