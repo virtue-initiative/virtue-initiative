@@ -1,8 +1,9 @@
 ---
-sidebar_position: 7
+title: 'DNS filter check'
+description: 'If you use a DNS filter such as NextDNS, Virtue can check that it stays on.'
+topic: protection
+order: 4
 ---
-
-# DNS filter check
 
 If you use a DNS filter such as NextDNS, Virtue can check that it stays on. You
 add a domain to your filter's block list and enter the same domain in Virtue.
