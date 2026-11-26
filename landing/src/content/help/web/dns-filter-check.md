@@ -113,5 +113,5 @@ check domain on the **Denylist** tab.
 
 ![the NextDNS Denylist with example.net switched off](./nextdns-denylist-disabled.png)
 
-Within an hour, your device logs **DNS Filter Off** and your partners get an
-email. Turn the switch back on when you are done.
+Within an hour, your device logs **DNS Filter Off** and your partners see it in
+your logs. Turn the switch back on when you are done.
