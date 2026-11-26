@@ -40,7 +40,10 @@ run_forever loop:
       lifecycle::tick, screenshot::plan                             // phase 1, 2a
       screenshot::capture_and_process                               // phase 2b
       screenshot::commit, capture_availability::tick,
-        heartbeat::tick, upload::plan_hash_retries                  // phase 2c, 3, 4a
+        heartbeat::tick                                             // phase 2c, 3
+      dns_filter::plan, start dns_filter::execute on its own thread,
+        dns_filter::commit for checks that finished                 // CORE-029
+      upload::plan_hash_retries                                     // phase 4a
       upload::execute_hash_retries (network)                        // phase 5a
       upload::commit_hash_retries, upload::plan_batch               // phase 5c, 4b
       upload::execute_batch (network)                               // phase 5b
@@ -50,6 +53,14 @@ run_forever loop:
 
 Hash results are committed _before_ the batch is planned so an event hashed
 this tick is eligible for the same tick's batch upload.
+
+The DNS filter check is the one network step that runs off the loop, because a
+lookup through the OS resolver has no timeout. `start_dns_check` hands
+`dns_filter::execute` to a `DnsCheckRunner` (a thread per check in production,
+inline in `Scenario`). The outcome comes back on a channel, tagged with the
+check's generation, and a `DaemonRequest::DnsCheckDone` wakes the loop so the
+next tick commits it. A check still running after 2 minutes is given up: the
+next one may start, and the late outcome's old generation is dropped.
 
 The file lock matters only on iOS, where the app and its Safari extension each
 hold a `Daemon` for the same state file. Everywhere else it is uncontended.
@@ -69,9 +80,9 @@ daemon.run_forever(); // blocking; call from its own thread
 One flat struct, persisted to `event_state.json`. Its top-level keys (`auth`,
 `lifecycle`, `screenshot`, `upload`, `capture_availability`, `heartbeat`) are
 what installs already have on disk, so renaming one breaks every existing
-install. Some readers also bypass the daemon and read the `auth` key directly
-(`read_auth_state` in `client/mac/src/config.rs`, and the Android and iOS
-bridges' signed-in checks):
+install. Later keys such as `dns_filter` default when absent. Some readers also
+bypass the daemon and read the `auth` key directly (`read_auth_state` in
+`client/mac/src/config.rs`, and the Android and iOS bridges' signed-in checks):
 
 ```rust
 pub struct DaemonState {
@@ -82,6 +93,7 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    pub dns_filter: DnsFilterState,
     pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
     pub last_tick_at_ms: Option<i64>,
@@ -133,16 +145,17 @@ thread) can drive the daemon synchronously.
 
 ### The modules
 
-| Module                 | Owns                                                         | Notable functions                                                                                                                      |
-| ---------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                  |
-| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                           |
-| `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                          |
-| `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()` |
-| `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                             |
-| `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                               |
-| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                   |
-| `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                   |
+| Module                 | Owns                                                         | Notable functions                                                                                                                                                               |
+| ---------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`                 | nothing (writes into the `DaemonState` passed in)            | `login()`, `logout()`                                                                                                                                                           |
+| `lifecycle`            | `LifecycleState` (`late_wakeups: VecDeque<i64>`)             | `tick()`, `note_user_stop()`                                                                                                                                                    |
+| `screenshot`           | `ScreenshotState`                                            | `plan()`, `capture_and_process()`, `commit()`                                                                                                                                   |
+| `upload`               | `UploadState`                                                | `enqueue()`, `plan_hash_retries()`/`execute_hash_retries()`/`commit_hash_retries()`, `plan_batch()`/`execute_batch()`/`commit_batch()`                                          |
+| `capture_availability` | `CaptureAvailabilityState`                                   | `note_failure()`, `tick()`                                                                                                                                                      |
+| `heartbeat`            | `HeartbeatState`                                             | `tick()` (reads `upload.device_credentials` for auth — no separate flag)                                                                                                        |
+| `dns_filter`           | `DnsFilterState`                                             | `plan()`/`execute()`/`commit()`, `next_check_at_ms()` — CORE-029; lookups and TLS handshakes go through the injectable `DnsProbe` (`SystemDnsProbe` by default, `Daemon::with_dns_probe`), run off the loop by a `DnsCheckRunner` (`Daemon::with_dns_check_runner`) |
+| `errors`               | `ErrorState` (`recent: VecDeque<StatusError>`, capped at 20) | `record()`, `record_all()` — the recent-errors ring the status page shows (CORE-018)                                                                                            |
+| `status`               | nothing                                                      | `build()` — pure `ServiceStatus` assembly from `&DaemonState` + `&Config` (CORE-010)                                                                                            |
 
 ### Screenshot dedup (two gates) + random cadence
 

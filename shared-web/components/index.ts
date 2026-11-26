@@ -6,6 +6,7 @@ export * from './Input/index';
 export * from './Textarea/index';
 export * from './Select/index';
 export * from './Checkbox/index';
+export * from './Switch/index';
 export * from './Radio/index';
 export * from './Dialog/index';
 export * from './Alert/index';

@@ -6,6 +6,17 @@
 
 /* Device dialogs */
 
+.device-dns-check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.device-dns-check .hint-text {
+  margin: 0;
+}
+
 .invite-desc {
   font-size: var(--text-sm);
   color: var(--text-muted);

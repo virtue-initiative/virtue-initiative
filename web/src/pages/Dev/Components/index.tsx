@@ -10,6 +10,7 @@ import {
   CardGrid,
   CardHeader,
   Checkbox,
+  Switch,
   Dialog,
   DialogActions,
   DialogHeader,
@@ -119,6 +120,7 @@ export function ComponentsPage() {
   const [tab, setTab] = useState('buttons');
   const [seg, setSeg] = useState('one');
   const [checkboxChecked, setCheckboxChecked] = useState(false);
+  const [switchOn, setSwitchOn] = useState(false);
   const [radioVal, setRadioVal] = useState('a');
   const [inputVal, setInputVal] = useState('');
   const [selectVal, setSelectVal] = useState('');
@@ -352,6 +354,9 @@ export function ComponentsPage() {
         </Section>
 
         <Section title="Checkbox + Radio">
+          <Row>
+            <Switch label="Check my DNS filter" checked={switchOn} onChange={setSwitchOn} />
+          </Row>
           <Row>
             <Checkbox
               label="Accept terms and conditions"

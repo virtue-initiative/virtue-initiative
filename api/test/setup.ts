@@ -1,5 +1,5 @@
 import { env, SELF } from 'cloudflare:test';
-import { TEST_TURNSTILE_TOKEN } from './helpers';
+import { TEST_TURNSTILE_TOKEN, answerWebsiteCheck } from './helpers';
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   pub_key BLOB,
   encrypted_priv_key BLOB,
   feature_flags TEXT NOT NULL DEFAULT '{}',
+  dns_filter_domain TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS devices (
   name TEXT NOT NULL,
   platform TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
+  dns_filter_disabled INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   deleted_at INTEGER,
   app_version TEXT,
@@ -190,6 +192,10 @@ globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       body.secret === 'test-turnstile-secret' && body.response === TEST_TURNSTILE_TOKEN;
     return Promise.resolve(Response.json({ success }));
   }
+
+  // The DNS check domain's website (API-020), as test/helpers.ts sets it.
+  const website = answerWebsiteCheck(url, init);
+  if (website) return website;
 
   return originalFetch(input, init);
 }) as typeof fetch;

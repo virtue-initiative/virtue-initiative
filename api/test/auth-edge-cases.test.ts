@@ -9,10 +9,12 @@ import {
   createDeviceForUser,
   extractTokenFromDelivery,
   listEmailDeliveries,
+  listWebsiteChecks,
   passwordAuthFor,
   passwordSaltFor,
   privateKeyFor,
   publicKeyFor,
+  setWebsite,
   signupAndGetCookie,
 } from './helpers';
 import {
@@ -262,6 +264,7 @@ describe('Validation (API-004)', () => {
     ['PATCH /user', 'unknown email_frequency', { settings: { email_frequency: 'hourly' } }, true],
     ['PATCH /user', 'timezone is not a zone', { settings: { timezone: 'Mars/Base' } }, true],
     ['PATCH /user', 'settings is not an object', { settings: 'weekly' }, true],
+    ['PATCH /user', 'dns_filter_domain is not a string', { dns_filter_domain: 5 }, true],
     ...Object.keys(passwordFields).map(
       (key) =>
         [
@@ -553,6 +556,7 @@ describe('GET /user (API-019)', () => {
       name: 'Una User',
       pub_key: await publicKeyFor(EMAIL),
       encrypted_priv_key: privateKeyFor(EMAIL),
+      dns_filter_domain: null,
       feature_flags: [],
     });
   });
@@ -630,6 +634,127 @@ describe('PATCH /user (API-020)', () => {
       name: 'Before',
       settings: { email_frequency: 'weekly' },
     });
+  });
+
+  it('sets, changes and clears the DNS check domain, trimmed and lowercased (API-020, API-019)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL, 'password123', 'Una');
+    const domain = async () => (await getUser(cookie)).body.dns_filter_domain;
+
+    const set = await patch(cookie, { dns_filter_domain: '  Blocked.Example.NET ' });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(await domain()).toBe('blocked.example.net');
+
+    expect((await patch(cookie, { dns_filter_domain: 'other.example.org' })).status).toBe(200);
+    expect(await domain()).toBe('other.example.org');
+
+    // Only the control domains themselves and their subdomains are refused.
+    for (const allowed of ['notgoogle.com', 'google.com.net', 'block.example.com']) {
+      expect((await patch(cookie, { dns_filter_domain: allowed })).status).toBe(200);
+      expect(await domain()).toBe(allowed);
+    }
+    expect((await patch(cookie, { dns_filter_domain: 'other.example.org' })).status).toBe(200);
+
+    expect((await patch(cookie, { name: 'Renamed' })).status).toBe(200);
+    expect((await getUser(cookie)).body).toMatchObject({
+      name: 'Renamed',
+      dns_filter_domain: 'other.example.org',
+    });
+
+    expect((await patch(cookie, { dns_filter_domain: null })).status).toBe(200);
+    expect(await domain()).toBeNull();
+  });
+
+  it.each([
+    ['a scheme', 'https://example.net'],
+    ['a port', 'example.net:8080'],
+    ['a space', 'example .net'],
+    ['a path', 'example.net/path'],
+    ['no dot', 'localhost'],
+    ['an empty string', ''],
+    ['only spaces', '   '],
+    ['the first control domain', 'virtueinitiative.org'],
+    ['a control domain in capitals', ' Apple.COM '],
+    ['the last control domain', 'one.one.one.one'],
+    ['a subdomain of a control domain', 'www.google.com'],
+    [
+      'more than 253 characters',
+      `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(63)}.net`,
+    ],
+  ])('rejects a DNS check domain with %s and changes nothing (API-020)', async (_name, value) => {
+    const { cookie } = await signupAndGetCookie(EMAIL, 'password123', 'Before');
+    await patch(cookie, { dns_filter_domain: 'kept.example.net' });
+
+    const res = await patch(cookie, { name: 'After', dns_filter_domain: value });
+
+    expect(res.status).toBe(400);
+    expect((await getUser(cookie)).body).toMatchObject({
+      name: 'Before',
+      dns_filter_domain: 'kept.example.net',
+    });
+  });
+
+  it.each([
+    ['cannot be reached', 'unreachable'],
+    ["answers with Cloudflare's invalid certificate status", 526],
+    ["answers with Cloudflare's origin DNS error status", 530],
+  ] as const)(
+    'refuses a DNS check domain whose website %s and changes nothing (API-020)',
+    async (_name, answer) => {
+      const { cookie } = await signupAndGetCookie(EMAIL, 'password123', 'Before');
+      await patch(cookie, { dns_filter_domain: 'kept.example.net' });
+      setWebsite('nosite.example.net', answer);
+
+      const res = await patch(cookie, { name: 'After', dns_filter_domain: 'nosite.example.net' });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        'Virtue could not open https://nosite.example.net. Use a domain with a working website, such as example.net.',
+      );
+      expect((await getUser(cookie)).body).toMatchObject({
+        name: 'Before',
+        dns_filter_domain: 'kept.example.net',
+      });
+    },
+  );
+
+  it('gives up on a DNS check domain whose website does not answer within 5 seconds (API-020)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    setWebsite('slow.example.net', 'hangs');
+
+    const started = Date.now();
+    const res = await patch(cookie, { dns_filter_domain: 'slow.example.net' });
+
+    expect(res.status).toBe(400);
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect((await getUser(cookie)).body.dns_filter_domain).toBeNull();
+  });
+
+  it('accepts a DNS check domain whose website answers with any status, without following redirects (API-020)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    setWebsite('missing.example.net', 404);
+    setWebsite('moved.example.net', 301);
+
+    expect((await patch(cookie, { dns_filter_domain: 'missing.example.net' })).status).toBe(200);
+    expect((await patch(cookie, { dns_filter_domain: 'moved.example.net' })).status).toBe(200);
+
+    expect(listWebsiteChecks()).toEqual([
+      { domain: 'missing.example.net', redirect: 'manual' },
+      { domain: 'moved.example.net', redirect: 'manual' },
+    ]);
+  });
+
+  it('checks the website only for a new or changed DNS check domain (API-020)', async () => {
+    const { cookie } = await signupAndGetCookie(EMAIL);
+    await patch(cookie, { dns_filter_domain: 'blocked.example.net' });
+
+    // The website went away, but the current domain is not checked again.
+    setWebsite('blocked.example.net', 'unreachable');
+    expect((await patch(cookie, { dns_filter_domain: 'Blocked.Example.NET' })).status).toBe(200);
+    expect((await patch(cookie, { name: 'Renamed' })).status).toBe(200);
+    expect((await patch(cookie, { dns_filter_domain: null })).status).toBe(200);
+
+    expect(listWebsiteChecks().map((check) => check.domain)).toEqual(['blocked.example.net']);
   });
 
   it('does not accept key material or the verified flag in the body (API-020)', async () => {

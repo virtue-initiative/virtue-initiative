@@ -80,6 +80,9 @@ fn upload_kind() -> impl Strategy<Value = UploadKind> {
         any::<i64>().prop_map(|utc_ms| UploadKind::SystemLogout { utc_ms }),
         (any::<u32>(), any::<i64>())
             .prop_map(|(count, window_ms)| UploadKind::RepeatedRestarts { count, window_ms }),
+        any::<String>().prop_map(|domain| UploadKind::DnsFilterInactive { domain }),
+        any::<String>().prop_map(|domain| UploadKind::DnsFilterActive { domain }),
+        any::<String>().prop_map(|domain| UploadKind::DnsFilterCheckRemoved { domain }),
     ]
 }
 

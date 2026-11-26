@@ -13,6 +13,10 @@ use crate::logging::log_warning;
 use crate::model::{AuthState, ServiceStatus, UploadKind};
 use crate::module::auth;
 use crate::module::capture_availability::{self, CaptureAvailabilityState};
+use crate::module::dns_filter::{
+    self, DnsCheckOutcome, DnsCheckPlan, DnsCheckRunner, DnsFilterState, DnsProbe, SystemDnsProbe,
+    ThreadDnsCheckRunner,
+};
 use crate::module::errors::{self, ErrorState};
 use crate::module::heartbeat::{self, HeartbeatState};
 use crate::module::lifecycle::{self, LifecycleState};
@@ -93,7 +97,21 @@ enum DaemonRequest {
     ForceCapture {
         reply: mpsc::Sender<()>,
     },
+    /// A DNS filter check finished off the loop (CORE-029). Carries nothing:
+    /// it only wakes the loop, whose next tick records the outcome.
+    DnsCheckDone,
     Stop,
+}
+
+/// What the loop knows about the DNS filter check running off it (CORE-029).
+/// In memory only: after a restart, a check that was due simply runs again.
+#[derive(Default)]
+struct DnsCheckSlot {
+    /// Numbers each check started, so the outcome of one given up on is
+    /// told apart from the current one's.
+    generation: u64,
+    /// When the current check started, or `None` when none is running.
+    running_since_ms: Option<i64>,
 }
 
 /// How long a public method blocks waiting for the loop thread to service
@@ -103,7 +121,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The daemon's whole persisted state, serialized to `event_state.json`.
 /// Top-level field names are kept identical to the pre-rewrite per-observer
 /// keys (`auth`, `lifecycle`, `screenshot`, `upload`, `capture_availability`,
-/// `heartbeat`) so existing installs load cleanly and
+/// `heartbeat`) so existing installs load cleanly, and later keys such as
+/// `dns_filter` default when absent (CORE-016), and
 /// `client/*/src/config.rs::read_auth_state` (which reads the `auth` key
 /// directly) needs no changes.
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -116,6 +135,8 @@ pub struct DaemonState {
     pub upload: UploadState,
     pub capture_availability: CaptureAvailabilityState,
     pub heartbeat: HeartbeatState,
+    #[serde(default)]
+    pub dns_filter: DnsFilterState,
     #[serde(default)]
     pub errors: ErrorState,
     pub next_wakeup_at_ms: i64,
@@ -168,6 +189,11 @@ pub struct Daemon<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> {
     classifier: Option<Arc<RiskClassifier>>,
     ocr: Option<Arc<ScreenshotOCR>>,
     rng: Arc<dyn RandomSource>,
+    dns: Arc<dyn DnsProbe>,
+    dns_runner: Arc<dyn DnsCheckRunner>,
+    dns_check: Mutex<DnsCheckSlot>,
+    dns_outcome_tx: mpsc::Sender<(u64, DnsCheckOutcome)>,
+    dns_outcome_rx: Mutex<mpsc::Receiver<(u64, DnsCheckOutcome)>>,
     /// Every time the daemon records, schedules or compares comes from here,
     /// not the system clock. See CORE-027.
     clock: Mutex<DaemonClock>,
@@ -183,6 +209,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         state.upgrade();
 
         let (request_tx, request_rx) = mpsc::channel();
+        let (dns_outcome_tx, dns_outcome_rx) = mpsc::channel();
         let clock = DaemonClock::start(
             platform.get_time_utc_ms().unwrap_or(0),
             boot_clock_ms(&platform),
@@ -200,6 +227,11 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             classifier: screenshot::load_classifier().map(Arc::new),
             ocr: screenshot::load_ocr().map(Arc::new),
             rng: Arc::new(OsRandomSource),
+            dns: Arc::new(SystemDnsProbe),
+            dns_runner: Arc::new(ThreadDnsCheckRunner),
+            dns_check: Mutex::new(DnsCheckSlot::default()),
+            dns_outcome_tx,
+            dns_outcome_rx: Mutex::new(dns_outcome_rx),
             clock: Mutex::new(clock),
         };
 
@@ -232,6 +264,25 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// [`Scenario`]: crate::testing::Scenario
     pub fn with_rng(mut self, rng: Arc<dyn RandomSource>) -> Self {
         self.rng = rng;
+        self
+    }
+
+    /// Swap in a different [`DnsProbe`] for the DNS filter check
+    /// (CORE-029) — used by the test [`Scenario`] harness to script answers.
+    ///
+    /// [`Scenario`]: crate::testing::Scenario
+    pub fn with_dns_probe(mut self, dns: Arc<dyn DnsProbe>) -> Self {
+        self.dns = dns;
+        self
+    }
+
+    /// Swap in a different [`DnsCheckRunner`] for the DNS filter check
+    /// (CORE-029) — used by the test [`Scenario`] harness to run checks
+    /// inline or hold them.
+    ///
+    /// [`Scenario`]: crate::testing::Scenario
+    pub fn with_dns_check_runner(mut self, runner: Arc<dyn DnsCheckRunner>) -> Self {
+        self.dns_runner = runner;
         self
     }
 
@@ -297,6 +348,58 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         self.clock.lock().expect("daemon clock lock poisoned")
     }
 
+    fn lock_dns_check(&self) -> std::sync::MutexGuard<'_, DnsCheckSlot> {
+        self.dns_check.lock().expect("dns check lock poisoned")
+    }
+
+    /// Starts `plan`'s network work off the loop (CORE-029), unless a check
+    /// is already running and has not reached its deadline. The outcome
+    /// comes back through `dns_outcome_tx`, and a `DnsCheckDone` request
+    /// wakes the loop to record it.
+    fn start_dns_check(&self, plan: DnsCheckPlan, now_ms: i64) {
+        let generation = {
+            let mut slot = self.lock_dns_check();
+            if let Some(since) = slot.running_since_ms {
+                if now_ms < since + dns_filter::CHECK_DEADLINE_MS {
+                    return;
+                }
+                tracing::warn!("dns filter check: gave up on a check that ran for 2 minutes");
+            }
+            slot.generation += 1;
+            slot.running_since_ms = Some(now_ms);
+            slot.generation
+        };
+        let probe = Arc::clone(&self.dns);
+        let outcomes = self.dns_outcome_tx.clone();
+        let wake = self.request_tx.clone();
+        self.dns_runner.run(Box::new(move || {
+            let outcome = dns_filter::execute(plan, probe.as_ref());
+            if outcomes.send((generation, outcome)).is_ok() {
+                let _ = wake.send(DaemonRequest::DnsCheckDone);
+            }
+        }));
+    }
+
+    /// The outcomes of finished checks still to be recorded: only the
+    /// running check's, since one given up on must be ignored (CORE-029).
+    fn take_dns_outcomes(&self) -> Vec<DnsCheckOutcome> {
+        let rx = self
+            .dns_outcome_rx
+            .lock()
+            .expect("dns outcome lock poisoned");
+        let mut slot = self.lock_dns_check();
+        let mut outcomes = Vec::new();
+        while let Ok((generation, outcome)) = rx.try_recv() {
+            if slot.running_since_ms.is_some() && generation == slot.generation {
+                slot.running_since_ms = None;
+                outcomes.push(outcome);
+            } else {
+                tracing::info!("dns filter check: ignored the outcome of a check given up on");
+            }
+        }
+        outcomes
+    }
+
     /// Sets the clock from the latest server response, if one came since the
     /// last call. A correction moves every persisted time later work is
     /// scheduled or measured from with it, and is reported when it's big.
@@ -313,6 +416,10 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         }
         tracing::warn!(correction_ms, "daemon clock corrected from the server");
         shift_times(state, correction_ms);
+        // The running DNS filter check's deadline moves the same way.
+        if let Some(since) = self.lock_dns_check().running_since_ms.as_mut() {
+            *since += correction_ms;
+        }
         if correction_ms.abs() > clock::CORRECTION_ALERT_MS && self.platform.lifecycle_enabled() {
             upload::enqueue(
                 &mut state.upload,
@@ -682,7 +789,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .lock()
             .expect("daemon state lock poisoned")
             .clone();
-        let (screen_active, should_logout) = self.run_phases(&mut working, now_ms);
+        let (screen_active, should_logout) = self.run_phases(&mut working, now_ms, false);
         if should_logout {
             self.apply_rejected_device_logout(&mut working);
         }
@@ -781,7 +888,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                             let _ = reply.send(());
                         }));
                     }
-                    DaemonRequest::Stop => unreachable!("filtered out by the caller"),
+                    DaemonRequest::DnsCheckDone | DaemonRequest::Stop => {
+                        unreachable!("filtered out by the caller")
+                    }
                 }
             }
             fires
@@ -796,7 +905,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// `run_forever` and `tick_once`.
     fn run_tick(&self, now_ms: i64) {
         self.with_locked_state(|working| {
-            let (screen_active, should_logout) = self.run_phases(working, now_ms);
+            let (screen_active, should_logout) = self.run_phases(working, now_ms, false);
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
@@ -814,7 +923,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     fn run_stopping_flush(&self, now_ms: i64) {
         self.with_locked_state(|working| {
             self.apply_flush_batch_now(working, now_ms);
-            let (_, should_logout) = self.run_phases(working, now_ms);
+            let (_, should_logout) = self.run_phases(working, now_ms, true);
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
@@ -866,11 +975,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             while let Ok(req) = rx.try_recv() {
                 requests.push(req);
             }
-            let stopping = {
-                let had_stop = requests.iter().any(|r| matches!(r, DaemonRequest::Stop));
-                requests.retain(|r| !matches!(r, DaemonRequest::Stop));
-                had_stop
-            };
+            let (stopping, dns_check_done) = take_signals(&mut requests);
 
             let now_ms = self.now_ms();
             let applied_request = !requests.is_empty();
@@ -888,7 +993,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
                     .lock()
                     .expect("daemon state lock poisoned")
                     .next_wakeup_at_ms;
-            if applied_request || due {
+            if applied_request || due || dns_check_done {
                 self.run_tick(now_ms);
             }
         }
@@ -931,11 +1036,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             let (reply, _) = mpsc::channel();
             requests.push(DaemonRequest::ForceCapture { reply });
         }
-        let stopping = {
-            let had_stop = requests.iter().any(|r| matches!(r, DaemonRequest::Stop));
-            requests.retain(|r| !matches!(r, DaemonRequest::Stop));
-            had_stop
-        };
+        // A finished DNS check needs no wakeup here: this tick records it.
+        let (stopping, _) = take_signals(&mut requests);
 
         self.apply_requests(requests, now_ms);
 
@@ -949,13 +1051,15 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// One full sequential pass over `working` — lifecycle check, screenshot
-    /// plan/capture/commit, capture-availability, heartbeat, hash retries,
-    /// batch upload — with no in-process locking anywhere in here (`working`
-    /// is the copy `with_locked_state` re-read under the file lock, not the
-    /// shared snapshot). Returns `(screen_active, should_logout)`;
+    /// plan/capture/commit, capture-availability, heartbeat, DNS filter check,
+    /// hash retries, batch upload — with no in-process locking anywhere in here
+    /// (`working` is the copy `with_locked_state` re-read under the file lock,
+    /// not the shared snapshot). Returns `(screen_active, should_logout)`;
     /// the caller applies the logout (never this function, to avoid
-    /// recursing into the request-channel machinery).
-    fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {
+    /// recursing into the request-channel machinery). `stopping` starts no
+    /// DNS filter check (CORE-029). A check runs off the loop: this starts
+    /// one when due and records the outcomes of those that have finished.
+    fn run_phases(&self, working: &mut DaemonState, now_ms: i64, stopping: bool) -> (bool, bool) {
         let expected_wakeup = working.next_wakeup_at_ms;
         if self.platform.lifecycle_enabled() {
             let session = lifecycle::SessionTimes::read(&self.platform);
@@ -1025,6 +1129,22 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         );
         heartbeat::tick(&mut working.heartbeat, &mut working.upload, now_ms);
 
+        if !stopping
+            && let Some(plan) =
+                dns_filter::plan(&mut working.dns_filter, &mut working.upload, now_ms)
+        {
+            self.start_dns_check(plan, now_ms);
+        }
+        for outcome in self.take_dns_outcomes() {
+            dns_filter::commit(
+                &mut working.dns_filter,
+                &mut working.upload,
+                outcome,
+                now_ms,
+                self.rng.as_ref(),
+            );
+        }
+
         // Hash results are committed before the batch is planned so an event
         // hashed this tick is eligible for the same tick's batch upload.
         let hash_plan = upload::plan_hash_retries(&mut working.upload, now_ms, screen_active);
@@ -1054,7 +1174,8 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// Picks the next wakeup time (CORE-020): the earliest of the next
-    /// scheduled screenshot draw, the next heartbeat, and the next time
+    /// scheduled screenshot draw, the next heartbeat, the next DNS filter
+    /// check (CORE-029), and the next time
     /// pending hash/batch uploads can make progress — never earlier than
     /// `now_ms`. Uploads held by the screen-lock gate (or missing
     /// credentials/settings) contribute nothing, since no timer clears
@@ -1069,6 +1190,12 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
         [
             heartbeat::next_heartbeat_at_ms(&state.heartbeat, &state.upload),
+            // While a check runs, the next one can only start at its
+            // deadline (CORE-029).
+            match self.lock_dns_check().running_since_ms {
+                Some(since) => Some(since + dns_filter::CHECK_DEADLINE_MS),
+                None => dns_filter::next_check_at_ms(&state.dns_filter, &state.upload),
+            },
             upload::next_hash_attempt_at_ms(&state.upload, screen_active),
             upload::next_batch_attempt_at_ms(&state.upload, batch_interval_ms, screen_active),
         ]
@@ -1077,6 +1204,18 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         .fold(screenshot, i64::min)
         .max(now_ms)
     }
+}
+
+/// Removes the requests that only signal the loop and returns them as
+/// `(stop, dns_check_done)`: a `Stop`, and a DNS filter check that finished
+/// off the loop (CORE-029).
+fn take_signals(requests: &mut Vec<DaemonRequest>) -> (bool, bool) {
+    let stop = requests.iter().any(|r| matches!(r, DaemonRequest::Stop));
+    let dns_check_done = requests
+        .iter()
+        .any(|r| matches!(r, DaemonRequest::DnsCheckDone));
+    requests.retain(|r| !matches!(r, DaemonRequest::Stop | DaemonRequest::DnsCheckDone));
+    (stop, dns_check_done)
 }
 
 /// The platform's boot clock, or the system clock if it can't be read.
@@ -1108,6 +1247,7 @@ fn shift_times(state: &mut DaemonState, delta_ms: i64) {
         shift(fetched_at_ms);
     }
     shift(&mut state.heartbeat.last_heartbeat_ms);
+    shift(&mut state.dns_filter.next_check_at_ms);
     state
         .capture_availability
         .recent_failures_ms
