@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF } from 'cloudflare:test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { env, fetchMock, SELF } from 'cloudflare:test';
+import { notifyWatchersAboutDnsFilterCheck } from '../src/lib/dns-filter-alerts';
 import {
   acceptPartnerInvite,
   authHeaders,
@@ -13,6 +14,9 @@ import {
 } from './helpers';
 
 beforeEach(clearDB);
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const KIND = 'dns_filter_check_changed';
 
@@ -113,6 +117,63 @@ describe('DNS filter check alerts on PATCH /user (API-020)', () => {
     await patchUser(cookie, { dns_filter_domain: null });
 
     expect(await alerts()).toHaveLength(0);
+  });
+
+  it('keeps emailing the other partners when sending to one fails (API-020)', async () => {
+    const { cookie, userId } = await signupAndGetCookie(
+      'dns-ses@example.com',
+      'password123',
+      'Sam',
+    );
+    const partners = [
+      'dns-ses-partner-a@example.com',
+      'dns-ses-partner-b@example.com',
+      'dns-ses-partner-c@example.com',
+    ];
+    for (const email of partners) {
+      const partner = await signupAndGetCookie(email);
+      await markUserEmailVerified(partner.userId);
+      const { token } = await invitePartner(cookie, email);
+      expect((await acceptPartnerInvite(partner.cookie, token)).status).toBe(200);
+    }
+
+    const rejected = partners[0];
+    const sesRecipients: string[] = [];
+    fetchMock.activate();
+    fetchMock.disableNetConnect();
+    fetchMock
+      .get('https://email.us-east-1.amazonaws.com')
+      .intercept({ path: '/v2/email/outbound-emails', method: 'POST' })
+      .reply((opts) => {
+        const body = JSON.parse(String(opts.body)) as {
+          Destination: { ToAddresses: string[] };
+        };
+        const recipient = body.Destination.ToAddresses[0];
+        sesRecipients.push(recipient);
+        if (recipient === rejected) {
+          return {
+            statusCode: 400,
+            data: JSON.stringify({ message: 'Email address is not verified.' }),
+            responseOptions: { headers: { 'x-amzn-errortype': 'MessageRejected' } },
+          };
+        }
+        return { statusCode: 200, data: JSON.stringify({ MessageId: `msg-${recipient}` }) };
+      })
+      .times(partners.length);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await notifyWatchersAboutDnsFilterCheck(
+        env.DB,
+        { ...env, EMAIL_DELIVERY_MODE: 'ses' },
+        userId,
+        { kind: 'cleared', domain: 'blocked.example.net' },
+      );
+    } finally {
+      fetchMock.deactivate();
+    }
+
+    expect(sesRecipients.sort()).toEqual(partners);
   });
 });
 
