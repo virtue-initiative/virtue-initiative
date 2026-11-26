@@ -244,7 +244,7 @@ function DeviceCard({
     deleteDialogRef.current?.close();
   }
 
-  // WEB-072: turning the check off is confirmed on save, in a second dialog over this one.
+  // WEB-074: turning the check off is confirmed on save, in a second dialog over this one.
   function handleSave(e: Event) {
     e.preventDefault();
     if (!dnsCheck && !device.dns_filter_disabled) {
@@ -271,7 +271,7 @@ function DeviceCard({
       setSaving(true);
       try {
         const patch: DevicePatch = { name };
-        // WEB-072: only send the switch when it changed.
+        // WEB-074: only send the switch when it changed.
         if (dnsCheck === !!device.dns_filter_disabled) patch.dns_filter_disabled = !dnsCheck;
         await onUpdateDevice(device.id, patch);
         dialogRef.current?.close();

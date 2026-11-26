@@ -33,7 +33,7 @@ export const userSchema = z.object({
   name: z.string().optional(),
   pub_key: z.string().optional(),
   encrypted_priv_key: z.string().optional(),
-  // CORE-028: the domain the user blocks in their DNS filter, checked by all their devices.
+  // CORE-029: the domain the user blocks in their DNS filter, checked by all their devices.
   dns_filter_domain: z.string().nullable(),
   // Keys of the flags enabled for this user (API-061). A key not listed is off.
   feature_flags: z.array(z.string()),
@@ -48,7 +48,7 @@ export const deviceSchema = z.object({
   last_hash_at: z.number().nullable(),
   pending_count: z.number(),
   status: z.enum(['online', 'offline', 'logged_out']),
-  // CORE-028: true turns the DNS filter check off for this device only.
+  // CORE-029: true turns the DNS filter check off for this device only.
   dns_filter_disabled: z.boolean(),
 });
 export type Device = z.infer<typeof deviceSchema>;
@@ -199,7 +199,7 @@ export function isValidTimezone(timezone: string | undefined): timezone is strin
   }
 }
 
-// CORE-028: the domains a DNS filter check tries first, to tell a broken network from a filter.
+// CORE-029: the domains a DNS filter check tries first, to tell a broken network from a filter.
 export const DNS_FILTER_CONTROL_DOMAINS = [
   'virtueinitiative.org',
   'apple.com',
@@ -242,7 +242,7 @@ export const updateUserSchema = z
           .optional(),
       })
       .optional(),
-    // CORE-028: null clears the account's DNS check domain.
+    // CORE-029: null clears the account's DNS check domain.
     dns_filter_domain: dnsFilterDomainSchema.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });
@@ -281,7 +281,7 @@ export type InviteTokenPayload = z.infer<typeof inviteTokenSchema>;
 export const updateDeviceSchema = z
   .object({
     name: z.string().min(1).optional(),
-    // CORE-028: true turns the DNS filter check off for this device only.
+    // CORE-029: true turns the DNS filter check off for this device only.
     dns_filter_disabled: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: 'No fields to update' });

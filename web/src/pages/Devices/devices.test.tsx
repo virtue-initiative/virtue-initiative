@@ -196,7 +196,7 @@ describe('Devices — Device delete (WEB-037, WEB-020)', () => {
   });
 });
 
-describe('Devices — DNS filter check (WEB-072, WEB-035)', () => {
+describe('Devices — DNS filter check (WEB-074, WEB-035)', () => {
   function withAccountDomain(domain: string | null) {
     server.use(
       http.get(`${BASE}/user`, () =>

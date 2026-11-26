@@ -166,7 +166,7 @@ impl From<DeviceSettingsResponse> for DeviceSettings {
             hash_base_url: response.hash_base_url,
             feature_flags: response.feature_flags,
             announcement: response.announcement,
-            // CORE-028: a blank domain means no check.
+            // CORE-029: a blank domain means no check.
             dns_filter_domain: response
                 .dns_filter_domain
                 .map(|domain| domain.trim().to_string())
@@ -1297,7 +1297,7 @@ mod tests {
         );
     }
 
-    // CORE-028: the check domain is read from the settings; a blank one means no check.
+    // CORE-029: the check domain is read from the settings; a blank one means no check.
     #[test]
     fn device_settings_dns_filter_domain_is_trimmed_and_blank_means_none() {
         let cases = [

@@ -242,7 +242,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     }
 
     /// Swap in a different [`DnsProbe`] for the DNS filter check
-    /// (CORE-028) — used by the test [`Scenario`] harness to script answers.
+    /// (CORE-029) — used by the test [`Scenario`] harness to script answers.
     ///
     /// [`Scenario`]: crate::testing::Scenario
     pub fn with_dns_probe(mut self, dns: Arc<dyn DnsProbe>) -> Self {
@@ -1081,7 +1081,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
 
     /// Picks the next wakeup time (CORE-020): the earliest of the next
     /// scheduled screenshot draw, the next heartbeat, the next DNS filter
-    /// check (CORE-028), and the next time
+    /// check (CORE-029), and the next time
     /// pending hash/batch uploads can make progress — never earlier than
     /// `now_ms`. Uploads held by the screen-lock gate (or missing
     /// credentials/settings) contribute nothing, since no timer clears

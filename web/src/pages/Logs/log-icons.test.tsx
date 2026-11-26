@@ -67,7 +67,7 @@ describe('getLogMessage (WEB-041)', () => {
   });
 });
 
-describe('DNS filter events (WEB-041, CORE-028)', () => {
+describe('DNS filter events (WEB-041, CORE-029)', () => {
   it.each([
     [
       'dns_filter_inactive',

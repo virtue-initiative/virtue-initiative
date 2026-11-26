@@ -1,4 +1,4 @@
-//! DNS filter check (CORE-028): resolves the owner's check domain through the
+//! DNS filter check (CORE-029): resolves the owner's check domain through the
 //! OS resolver, confirms a normal-looking answer with a TLS handshake, and
 //! reports when their DNS filter stops blocking it. Report only; nothing here
 //! blocks or changes DNS traffic.
@@ -18,7 +18,7 @@ use crate::module::upload::{self, UploadState};
 use crate::rng::RandomSource;
 
 /// Domains no DNS filter should block, run by different operators, tried in
-/// order (CORE-028). When none is reachable, the network is down or behind a
+/// order (CORE-029). When none is reachable, the network is down or behind a
 /// captive portal, and the check domain's answer says nothing.
 pub const CONTROL_DOMAINS: [&str; 5] = [
     "virtueinitiative.org",
@@ -32,14 +32,14 @@ const TLS_TIMEOUT: Duration = Duration::from_secs(5);
 /// How many addresses of one answer are tried, so a network that drops every
 /// connection holds a check up for at most this many timeouts per domain.
 const MAX_ADDRESSES_TRIED: usize = 2;
-/// Mean, shortest and longest delay between checks (CORE-028).
+/// Mean, shortest and longest delay between checks (CORE-029).
 const CHECK_DELAY_MEAN_MS: f64 = 20.0 * 60.0 * 1_000.0;
 pub(crate) const CHECK_DELAY_MIN_MS: i64 = 60 * 1_000;
 pub(crate) const CHECK_DELAY_MAX_MS: i64 = 60 * 60 * 1_000;
 pub(crate) const UNKNOWN_RETRY_MS: i64 = 10 * 60 * 1_000;
 
 /// The delay until the next check for a uniform draw `u` in `[0, 1)`
-/// (CORE-028): exponentially distributed, so the chance of a check in the
+/// (CORE-029): exponentially distributed, so the chance of a check in the
 /// next minute does not depend on how long ago the last one was, then
 /// clamped so checks are neither back to back nor more than an hour apart.
 pub(crate) fn check_delay_ms(u: f64) -> i64 {
@@ -237,7 +237,7 @@ enum Reach {
 }
 
 /// Looks `host` up and tries a TLS handshake with its first few addresses,
-/// never connecting to an unspecified or loopback one (CORE-028).
+/// never connecting to an unspecified or loopback one (CORE-029).
 fn reach(probe: &dyn DnsProbe, host: &str) -> Reach {
     let Ok(addrs) = probe.resolve(host) else {
         return Reach::Blocked;
@@ -322,7 +322,7 @@ mod tests {
 
     const MINUTE_MS: i64 = 60 * 1_000;
 
-    // CORE-028: the delay is exponential with a mean of 20 minutes, clamped
+    // CORE-029: the delay is exponential with a mean of 20 minutes, clamped
     // to between 1 and 60 minutes.
     #[test]
     fn the_check_delay_is_exponential_and_clamped() {
@@ -344,7 +344,7 @@ mod tests {
         }
     }
 
-    // CORE-028: each delay is drawn anew, so delays differ between checks and
+    // CORE-029: each delay is drawn anew, so delays differ between checks and
     // stay within the clamp.
     #[test]
     fn each_check_delay_is_drawn_anew() {

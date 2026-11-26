@@ -1,4 +1,4 @@
-//! DNS filter check (CORE-028), driven through the `Scenario` DSL with
+//! DNS filter check (CORE-029), driven through the `Scenario` DSL with
 //! scripted DNS answers and TLS handshakes.
 //!
 //! Run with:
@@ -139,7 +139,7 @@ fn push_screenshot_out(scenario: &mut Scenario) {
 
 // ── The first result ──────────────────────────────────────────────────────────
 
-// CORE-028, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
+// CORE-029, CORE-005: a blocked answer (failed, unspecified or loopback only) is filtered and
 // stays quiet on the first check; anything else is unfiltered and alerts partners at once.
 #[test]
 fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
@@ -186,7 +186,7 @@ fn the_first_check_alerts_only_when_the_domain_resolves_normally() {
 
 // ── Transitions ───────────────────────────────────────────────────────────────
 
-// CORE-028: events are sent only when the result changes.
+// CORE-029: events are sent only when the result changes.
 #[test]
 fn hourly_checks_report_only_changes_of_the_result() {
     let mut scenario = checking_scenario();
@@ -211,7 +211,7 @@ fn hourly_checks_report_only_changes_of_the_result() {
     assert!(events.iter().all(|e| e.domain.as_deref() == Some(DOMAIN)));
 }
 
-// CORE-028, CORE-020: each check draws a new delay, exponential with a mean
+// CORE-029, CORE-020: each check draws a new delay, exponential with a mean
 // of 20 minutes and clamped to 1 to 60 minutes, and the next check is a wakeup.
 #[test]
 fn each_check_draws_a_new_random_delay() {
@@ -257,7 +257,7 @@ fn each_check_draws_a_new_random_delay() {
 
 // ── Unknown results ───────────────────────────────────────────────────────────
 
-// CORE-028, CORE-020: when no control domain is reachable the result is unknown:
+// CORE-029, CORE-020: when no control domain is reachable the result is unknown:
 // no event, the last result is kept, and the check is retried after 10 minutes.
 // Only the first control domain resolves in these scenarios, so blocking it
 // leaves none.
@@ -310,7 +310,7 @@ fn a_blocked_control_domain_sends_nothing_and_retries_after_10_minutes() {
     }
 }
 
-// CORE-028, CORE-020: behind a captive portal every name resolves to the portal,
+// CORE-029, CORE-020: behind a captive portal every name resolves to the portal,
 // which shows no valid certificate. No control domain is reachable, so the
 // result is unknown, after trying each control domain in order, and the check
 // domain is not even looked up.
@@ -339,7 +339,7 @@ fn a_captive_portal_is_unknown_after_trying_every_control_domain() {
     assert_eq!(wakeup(&scenario), T1 + RETRY_MS, "retry wakeup");
 }
 
-// CORE-028: the control domains are tried in order, stopping at the first
+// CORE-029: the control domains are tried in order, stopping at the first
 // reachable one, so a filter that blocks some of them still gets checked.
 #[test]
 fn the_control_domains_are_tried_in_order_until_one_is_reachable() {
@@ -379,7 +379,7 @@ fn the_control_domains_are_tried_in_order_until_one_is_reachable() {
     }
 }
 
-// CORE-028: a filter that answers with the address of a block page is in use:
+// CORE-029: a filter that answers with the address of a block page is in use:
 // the block page shows no valid certificate for the check domain.
 #[test]
 fn a_block_page_counts_as_filtered() {
@@ -409,7 +409,7 @@ fn a_block_page_counts_as_filtered() {
     );
 }
 
-// CORE-028: unspecified and loopback addresses are never connected to, and a
+// CORE-029: unspecified and loopback addresses are never connected to, and a
 // blocked answer is filtered without any handshake.
 #[test]
 fn blocked_addresses_are_never_connected_to() {
@@ -432,7 +432,7 @@ fn blocked_addresses_are_never_connected_to() {
 
 // ── Changing or removing the domain ───────────────────────────────────────────
 
-// CORE-028: a changed domain is checked right away and its first result counts
+// CORE-029: a changed domain is checked right away and its first result counts
 // as a first result, with no event for the change itself.
 #[test]
 fn a_changed_domain_is_checked_promptly_and_starts_fresh() {
@@ -459,7 +459,7 @@ fn a_changed_domain_is_checked_promptly_and_starts_fresh() {
     );
 }
 
-// CORE-028: removing the domain reports the domain that was checked at risk 80%,
+// CORE-029: removing the domain reports the domain that was checked at risk 80%,
 // so partners, whom the server already emailed (API-020), get no second email
 // from the device, and stops checking.
 #[test]
@@ -494,7 +494,7 @@ fn removing_the_domain_reports_it_and_stops_checking() {
     );
 }
 
-// CORE-028, CORE-020: a domain that arrives with a settings refresh makes the next
+// CORE-029, CORE-020: a domain that arrives with a settings refresh makes the next
 // wakeup immediate, so it is checked right away rather than at the next timer.
 #[test]
 fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
@@ -533,7 +533,7 @@ fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
 
 // ── Authentication and persistence ────────────────────────────────────────────
 
-// CORE-028, CORE-009: nothing is checked once logged out.
+// CORE-029, CORE-009: nothing is checked once logged out.
 #[test]
 fn nothing_is_checked_while_logged_out() {
     let mut scenario = checking_scenario();
@@ -551,7 +551,7 @@ fn nothing_is_checked_while_logged_out() {
     assert!(dns_events(&scenario).is_empty());
 }
 
-// CORE-028, CORE-016: the last result survives a restart, so an unchanged result
+// CORE-029, CORE-016: the last result survives a restart, so an unchanged result
 // is not reported again.
 #[test]
 fn the_last_result_survives_a_restart() {
@@ -586,7 +586,7 @@ fn the_last_result_survives_a_restart() {
     drop(scenario1);
 }
 
-// CORE-016, CORE-028: a state file written before the DNS filter check existed
+// CORE-016, CORE-029: a state file written before the DNS filter check existed
 // still loads, and the check starts from no result.
 #[test]
 fn a_state_file_without_the_dns_filter_key_still_loads() {

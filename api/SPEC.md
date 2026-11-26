@@ -154,7 +154,7 @@ This spec defines the main API server for Virtue Initiative. It handles users, d
 }
 ```
 
-`dns_filter_domain` is the owner's `dns_filter_domain` (see User), which the device uses for the check in CORE-028. It MUST be `null` when the owner has none or the device has `dns_filter_disabled` set (API-030), and MUST reflect the current values of both each time settings are returned.
+`dns_filter_domain` is the owner's `dns_filter_domain` (see User), which the device uses for the check in CORE-029. It MUST be `null` when the owner has none or the device has `dns_filter_disabled` set (API-030), and MUST reflect the current values of both each time settings are returned.
 
 **FeatureFlag**
 
@@ -547,9 +547,9 @@ The client MUST provide a request in this shape.
 }
 ```
 
-`dns_filter_domain` names the domain the user blocks in their DNS filter, which all their devices resolve to check that the filter is in use (CORE-028). The server MUST trim and lowercase it, and MUST respond **HTTP 400** and change nothing unless it is a plain domain name of at most 253 characters with at least one dot and no scheme, port, path or whitespace. It MUST also respond **HTTP 400** for the check's control domains (CORE-028) and their subdomains, since no filter is meant to block them. Before saving a domain that differs from the current one, the server MUST request `https://<domain>/` without following redirects, and MUST respond **HTTP 400** and change nothing unless that gets an HTTP response, of any status, over a valid certificate within 5 seconds: a device counts a domain without such a website as blocked (CORE-028), so the check would never alert. `null` MUST clear it.
+`dns_filter_domain` names the domain the user blocks in their DNS filter, which all their devices resolve to check that the filter is in use (CORE-029). The server MUST trim and lowercase it, and MUST respond **HTTP 400** and change nothing unless it is a plain domain name of at most 253 characters with at least one dot and no scheme, port, path or whitespace. It MUST also respond **HTTP 400** for the check's control domains (CORE-029) and their subdomains, since no filter is meant to block them. Before saving a domain that differs from the current one, the server MUST request `https://<domain>/` without following redirects, and MUST respond **HTTP 400** and change nothing unless that gets an HTTP response, of any status, over a valid certificate within 5 seconds: a device counts a domain without such a website as blocked (CORE-029), so the check would never alert. `null` MUST clear it.
 
-If the request clears a set `dns_filter_domain` or replaces it with a different one, the server MUST immediately email every accepted watcher, naming the previous domain and any new one, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`). Setting a domain where none was set, or sending the current one again, MUST NOT email. A failure to send MUST NOT fail the request. The alert does not wait for a device to pick up its settings (CORE-028), so turning the check off and back on between two device checks is still reported.
+If the request clears a set `dns_filter_domain` or replaces it with a different one, the server MUST immediately email every accepted watcher, naming the previous domain and any new one, using the same immediate-alert delivery as a tamper alert (skipping watchers whose `email_frequency` is `none`). Setting a domain where none was set, or sending the current one again, MUST NOT email. A failure to send MUST NOT fail the request. The alert does not wait for a device to pick up its settings (CORE-029), so turning the check off and back on between two device checks is still reported.
 
 If `settings.timezone` is not a valid IANA time zone name, the server MUST return **HTTP 400** and change nothing.
 
@@ -818,7 +818,7 @@ The client MUST be authenticated with a **Web Token** and send
 }
 ```
 
-At least one field MUST be present. `dns_filter_disabled: true` turns the DNS filter check (CORE-028) off for this device only, for example a work laptop with its own DNS; `false` turns it back on. It MUST be `false` for a new device.
+At least one field MUST be present. `dns_filter_disabled: true` turns the DNS filter check (CORE-029) off for this device only, for example a work laptop with its own DNS; `false` turns it back on. It MUST be `false` for a new device.
 
 If the request turns `dns_filter_disabled` from `false` to `true` while the owner has a `dns_filter_domain` (API-020), the server MUST immediately email every accepted watcher, naming the device, with the same delivery as the API-020 alert. Turning it back to `false`, or sending the current value again, MUST NOT email.
 

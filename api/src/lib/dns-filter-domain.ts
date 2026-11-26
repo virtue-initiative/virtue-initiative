@@ -1,5 +1,5 @@
 // API-020: a DNS check domain must serve a website over a valid certificate.
-// A device counts a domain without one as blocked (CORE-028), so a check on
+// A device counts a domain without one as blocked (CORE-029), so a check on
 // such a domain would never alert.
 
 const TIMEOUT_MS = 5_000;

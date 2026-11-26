@@ -120,17 +120,17 @@ pub enum UploadKind {
         window_ms: i64,
     },
     /// The check domain resolved normally: the owner's DNS filter is not in
-    /// use on this device. Risk 90%, so partners are emailed at once. See CORE-028.
+    /// use on this device. Risk 90%, so partners are emailed at once. See CORE-029.
     DnsFilterInactive {
         domain: String,
     },
     /// The check domain is blocked again after a `DnsFilterInactive`.
-    /// Risk 0%. See CORE-028.
+    /// Risk 0%. See CORE-029.
     DnsFilterActive {
         domain: String,
     },
     /// The settings stopped naming a check domain; `domain` is the one that
-    /// was checked. Risk 90%. See CORE-028.
+    /// was checked. Risk 90%. See CORE-029.
     DnsFilterCheckRemoved {
         domain: String,
     },
@@ -349,7 +349,7 @@ pub struct DeviceSettings {
     /// every client through `ServiceStatus.announcement` (CLIENT-033).
     #[serde(default)]
     pub announcement: Option<DeviceAnnouncement>,
-    /// The domain the owner blocks in their DNS filter, checked by CORE-028.
+    /// The domain the owner blocks in their DNS filter, checked by CORE-029.
     /// `None` turns the check off.
     #[serde(default)]
     pub dns_filter_domain: Option<String>,
@@ -549,7 +549,7 @@ mod tests {
         );
     }
 
-    // BATCH-003, CORE-028: the DNS filter events carry the domain they are about.
+    // BATCH-003, CORE-029: the DNS filter events carry the domain they are about.
     #[test]
     fn dns_filter_events_serialize_to_tagged_shape() {
         let cases = [
