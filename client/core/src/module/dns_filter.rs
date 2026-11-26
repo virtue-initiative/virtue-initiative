@@ -39,6 +39,9 @@ const CHECK_DELAY_MEAN_MS: f64 = 20.0 * 60.0 * 1_000.0;
 pub(crate) const CHECK_DELAY_MIN_MS: i64 = 60 * 1_000;
 pub(crate) const CHECK_DELAY_MAX_MS: i64 = 60 * 60 * 1_000;
 pub(crate) const UNKNOWN_RETRY_MS: i64 = 10 * 60 * 1_000;
+/// How long a check may run before it is given up (CORE-029). A lookup
+/// through the OS resolver has no timeout of its own, so this bounds it.
+pub(crate) const CHECK_DEADLINE_MS: i64 = 2 * 60 * 1_000;
 /// The unreachable check in a row for one domain that counts as filtered
 /// (CORE-029): some filters answer with an address that refuses connections.
 const UNREACHABLE_CHECKS_FILTERED: u32 = 3;
@@ -138,6 +141,29 @@ impl DnsProbe for SystemDnsProbe {
             }
         }
         Ok(())
+    }
+}
+
+/// Runs a check's network work ([`execute`]) away from the daemon loop, so
+/// it never holds up a tick or an answer to an app (CORE-029). Injectable so
+/// tests can run it inline; production uses [`ThreadDnsCheckRunner`].
+pub trait DnsCheckRunner: Send + Sync {
+    fn run(&self, job: Box<dyn FnOnce() + Send>);
+}
+
+/// Runs each check on a thread of its own.
+pub struct ThreadDnsCheckRunner;
+
+impl DnsCheckRunner for ThreadDnsCheckRunner {
+    fn run(&self, job: Box<dyn FnOnce() + Send>) {
+        // When no thread can be started, the check counts as running until
+        // its deadline, and the next one is tried then.
+        if let Err(err) = std::thread::Builder::new()
+            .name("dns-filter-check".into())
+            .spawn(job)
+        {
+            tracing::error!(error = %err, "dns filter check: could not start a thread");
+        }
     }
 }
 

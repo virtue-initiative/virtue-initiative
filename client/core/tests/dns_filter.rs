@@ -7,6 +7,8 @@
 
 mod common;
 
+use std::time::{Duration, Instant};
+
 use common::*;
 use virtue_core::module::dns_filter::DnsFilterResult;
 use virtue_core::testing::Scenario;
@@ -673,6 +675,101 @@ fn a_due_check_does_not_run_while_the_daemon_stops() {
         2,
         "checked after the restart"
     );
+    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+}
+
+// ── Running off the loop ──────────────────────────────────────────────────────
+
+/// Waits up to 10 seconds for `done`, polling.
+fn wait_for(what: &str, done: impl Fn() -> bool) {
+    let started = Instant::now();
+    while !done() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Lets held lookups answer and stops the loop when dropped, so a failed
+/// assertion does not leave `run_forever` running and the test hanging.
+struct StopLoop<'a>(&'a Scenario);
+
+impl Drop for StopLoop<'_> {
+    fn drop(&mut self) {
+        self.0.dns.release_lookups();
+        self.0.daemon.request_stop();
+    }
+}
+
+// CORE-029: a check runs off the daemon loop, so a lookup that never answers does not
+// hold up an app's request, and the loop records the outcome once the check finishes.
+#[test]
+fn a_running_check_does_not_hold_up_the_daemon_loop() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, RESOLVES);
+    scenario.dns_checks.on_threads();
+    scenario.dns.hold_lookups();
+    scenario.at_t(T1);
+
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| scenario.daemon.run_forever());
+        let stop = StopLoop(&scenario);
+        // A request makes the loop tick, which starts the due check.
+        scenario.daemon.flush_batch_now();
+        wait_for("the check to start", || !scenario.dns.lookups().is_empty());
+
+        let started = Instant::now();
+        scenario.daemon.flush_batch_now();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "the request waited for the check"
+        );
+
+        scenario.dns.release_lookups();
+        wait_for("the outcome to be recorded", || {
+            scenario.state().dns_filter.last_result.is_some()
+        });
+        drop(stop);
+        handle.join().expect("run_forever must not panic");
+    });
+    assert_eq!(
+        scenario.state().dns_filter.last_result,
+        Some(DnsFilterResult::Unfiltered)
+    );
+}
+
+// CORE-029, CORE-020: only one check runs at a time. One still running after 2 minutes
+// is given up: the next check starts then, and the given-up check's outcome is ignored.
+#[test]
+fn a_check_that_runs_for_2_minutes_is_given_up() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, RESOLVES);
+    scenario.dns_checks.hold();
+    scenario.at_t(T1).tick();
+    assert_eq!(scenario.dns_checks.started(), 1);
+
+    push_screenshot_out(&mut scenario);
+    scenario.at_t(T1 + MINUTE_MS).tick();
+    assert_eq!(scenario.dns_checks.started(), 1, "one check at a time");
+    assert_eq!(
+        wakeup(&scenario),
+        T1 + 2 * MINUTE_MS,
+        "wakes at the deadline"
+    );
+
+    scenario.at_t(T1 + 2 * MINUTE_MS).tick();
+    assert_eq!(scenario.dns_checks.started(), 2, "the next check started");
+
+    // The given-up check finishes late, and finds the filter off.
+    assert!(scenario.dns_checks.finish_oldest());
+    scenario.at_t(T1 + 2 * MINUTE_MS + 1_000).tick();
+    assert!(dns_events(&scenario).is_empty(), "late outcome ignored");
+    assert!(scenario.state().dns_filter.last_result.is_none());
+
+    assert!(scenario.dns_checks.finish_oldest());
+    scenario.at_t(T1 + 2 * MINUTE_MS + 2_000).tick();
     assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
 }
 

@@ -8,12 +8,12 @@ use crate::config::Config;
 use crate::daemon::{Daemon, DaemonState};
 use crate::error::CoreResult;
 use crate::model::{AuthState, BatchRecipient, DeviceCredentials, DeviceSettings, ServiceStatus};
-use crate::module::dns_filter::DnsProbe;
+use crate::module::dns_filter::{DnsCheckRunner, DnsProbe};
 use crate::module::upload::Upload;
 use crate::rng::RandomSource;
 use crate::testing::api::MockApiClient;
 use crate::testing::clock::MockClock;
-use crate::testing::dns::FakeDnsProbe;
+use crate::testing::dns::{FakeDnsCheckRunner, FakeDnsProbe};
 use crate::testing::platform::TestPlatformHooks;
 use crate::testing::rng::TestRandomSource;
 
@@ -32,6 +32,8 @@ pub struct Scenario {
     /// Scripted DNS answers for the DNS filter check (CORE-029). Every host
     /// fails to resolve until a test scripts it.
     pub dns: FakeDnsProbe,
+    /// Runs DNS filter checks inline unless a test holds them (CORE-029).
+    pub dns_checks: FakeDnsCheckRunner,
 }
 
 impl Scenario {
@@ -111,13 +113,15 @@ impl Scenario {
         let api_handle = api.clone();
         let rng = TestRandomSource::new();
         let dns = FakeDnsProbe::new();
+        let dns_checks = FakeDnsCheckRunner::new();
         configure(&platform, &api_handle);
 
         let state_path = state_dir.join("event_state.json");
         let daemon = Daemon::new(config, platform.clone(), api, state_path)
             .expect("scenario daemon must construct")
             .with_rng(Arc::new(rng.clone()) as Arc<dyn RandomSource>)
-            .with_dns_probe(Arc::new(dns.clone()) as Arc<dyn DnsProbe>);
+            .with_dns_probe(Arc::new(dns.clone()) as Arc<dyn DnsProbe>)
+            .with_dns_check_runner(Arc::new(dns_checks.clone()) as Arc<dyn DnsCheckRunner>);
 
         Self {
             daemon,
@@ -127,6 +131,7 @@ impl Scenario {
             platform,
             rng,
             dns,
+            dns_checks,
         }
     }
 

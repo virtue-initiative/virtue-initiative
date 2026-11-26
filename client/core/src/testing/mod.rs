@@ -8,7 +8,7 @@ pub mod scenario;
 
 pub use api::{BatchCall, HashCall, MockApiClient, MockApiState, NotifyCall, RegisterDeviceCall};
 pub use clock::MockClock;
-pub use dns::FakeDnsProbe;
+pub use dns::{FakeDnsCheckRunner, FakeDnsProbe};
 pub use fixtures::{tiny_png_bytes, tiny_png_screenshot};
 pub use platform::TestPlatformHooks;
 pub use rng::TestRandomSource;
