@@ -531,6 +531,36 @@ fn a_domain_from_a_settings_refresh_is_checked_on_the_next_wakeup() {
     assert!(notified_dns(&scenario).is_empty());
 }
 
+// CORE-029, CORE-014: a check that is due when the daemon stops is not started
+// during the stop, and runs after the next start instead.
+#[test]
+fn a_due_check_does_not_run_while_the_daemon_stops() {
+    let mut scenario = checking_scenario();
+    script(&scenario, DOMAIN, BLOCKED);
+    scenario.at_t(T1).tick();
+    assert_eq!(lookups_of(&scenario, DOMAIN), 1, "first check");
+
+    // The next check is due when the stop arrives.
+    script(&scenario, DOMAIN, RESOLVES);
+    scenario.at_t(T1 + HOUR_MS);
+    scenario.daemon.request_stop();
+    scenario.daemon.tick_once();
+    assert_eq!(
+        lookups_of(&scenario, DOMAIN),
+        1,
+        "not checked while stopping"
+    );
+    assert!(dns_events(&scenario).is_empty());
+
+    scenario.at_t(T1 + HOUR_MS + 1_000).tick();
+    assert_eq!(
+        lookups_of(&scenario, DOMAIN),
+        2,
+        "checked after the restart"
+    );
+    assert_eq!(dns_event_kinds(&scenario), ["dns_filter_inactive"]);
+}
+
 // ── Authentication and persistence ────────────────────────────────────────────
 
 // CORE-029, CORE-009: nothing is checked once logged out.

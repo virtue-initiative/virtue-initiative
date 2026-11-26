@@ -697,7 +697,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
             .lock()
             .expect("daemon state lock poisoned")
             .clone();
-        let (screen_active, should_logout) = self.run_phases(&mut working, now_ms);
+        let (screen_active, should_logout) = self.run_phases(&mut working, now_ms, false);
         if should_logout {
             self.apply_rejected_device_logout(&mut working);
         }
@@ -811,7 +811,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// `run_forever` and `tick_once`.
     fn run_tick(&self, now_ms: i64) {
         self.with_locked_state(|working| {
-            let (screen_active, should_logout) = self.run_phases(working, now_ms);
+            let (screen_active, should_logout) = self.run_phases(working, now_ms, false);
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
@@ -829,7 +829,7 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     fn run_stopping_flush(&self, now_ms: i64) {
         self.with_locked_state(|working| {
             self.apply_flush_batch_now(working, now_ms);
-            let (_, should_logout) = self.run_phases(working, now_ms);
+            let (_, should_logout) = self.run_phases(working, now_ms, true);
             if should_logout {
                 self.apply_rejected_device_logout(working);
             }
@@ -969,8 +969,9 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
     /// (`working` is the copy `with_locked_state` re-read under the file lock,
     /// not the shared snapshot). Returns `(screen_active, should_logout)`;
     /// the caller applies the logout (never this function, to avoid
-    /// recursing into the request-channel machinery).
-    fn run_phases(&self, working: &mut DaemonState, now_ms: i64) -> (bool, bool) {
+    /// recursing into the request-channel machinery). `stopping` skips the
+    /// DNS filter check, whose network work must not hold up a stop (CORE-029).
+    fn run_phases(&self, working: &mut DaemonState, now_ms: i64, stopping: bool) -> (bool, bool) {
         let expected_wakeup = working.next_wakeup_at_ms;
         if self.platform.lifecycle_enabled() {
             let session = lifecycle::SessionTimes::read(&self.platform);
@@ -1040,7 +1041,11 @@ impl<P: PlatformHooks, A: ApiTransport + Send + Sync + 'static> Daemon<P, A> {
         );
         heartbeat::tick(&mut working.heartbeat, &mut working.upload, now_ms);
 
-        let dns_plan = dns_filter::plan(&mut working.dns_filter, &mut working.upload, now_ms);
+        let dns_plan = if stopping {
+            None
+        } else {
+            dns_filter::plan(&mut working.dns_filter, &mut working.upload, now_ms)
+        };
         if let Some(outcome) = dns_plan.map(|plan| dns_filter::execute(plan, self.dns.as_ref())) {
             dns_filter::commit(
                 &mut working.dns_filter,
